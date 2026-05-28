@@ -576,37 +576,54 @@ export class PortalJiraService {
       || this.settings.get(`portal_jira_issue_type_${params.projectKey.toLowerCase()}`)
       || this.settings.get('portal_jira_issue_type')
       || (params.projectKey === 'NTPJ' ? 'Support' : 'Service Request');
+    const issueTypeCandidates = Array.from(new Set([
+      issueTypeName,
+      params.projectKey === 'NTPJ' ? 'Support' : 'Service Request',
+      'Task',
+      'Incident',
+    ].filter(Boolean)));
 
-    const fields: Record<string, unknown> = {
-      project: { key: params.projectKey },
-      summary: params.summary,
-      description: this.textToAdf(params.description),
-      issuetype: { name: issueTypeName },
-    };
+    let issue: { key: string } | null = null;
+    let lastError: unknown = null;
+    for (const candidate of issueTypeCandidates) {
+      const fields: Record<string, unknown> = {
+        project: { key: params.projectKey },
+        summary: params.summary,
+        description: this.textToAdf(params.description),
+        issuetype: { name: candidate },
+      };
 
-    if (resolvedPriority) {
-      fields.priority = { name: resolvedPriority };
+      if (resolvedPriority) {
+        fields.priority = { name: resolvedPriority };
+      }
+
+      if (params.components && params.components.length > 0) {
+        fields.components = params.components.map(c => ({ name: c }));
+      }
+
+      if (params.labels && params.labels.length > 0) {
+        fields.labels = params.labels;
+      }
+
+      try {
+        issue = await this.jiraClient.createIssue({ fields });
+        if (candidate !== issueTypeName) {
+          console.warn(`[portal-jira] Ticket creation succeeded for ${params.projectKey} after retrying issue type "${candidate}"`);
+        }
+        break;
+      } catch (err: unknown) {
+        lastError = err;
+        const jiraErr = err as { statusCode?: number; body?: unknown; message?: string };
+        console.error('[portal-jira] Ticket creation failed:', {
+          status: jiraErr.statusCode,
+          body: typeof jiraErr.body === 'object' ? JSON.stringify(jiraErr.body).slice(0, 500) : jiraErr.body,
+          fields: { project: fields.project, priority: fields.priority, issuetype: fields.issuetype },
+          error: jiraErr.message || String(err),
+        });
+      }
     }
 
-    if (params.components && params.components.length > 0) {
-      fields.components = params.components.map(c => ({ name: c }));
-    }
-
-    if (params.labels && params.labels.length > 0) {
-      fields.labels = params.labels;
-    }
-
-    let issue: { key: string };
-    try {
-      issue = await this.jiraClient.createIssue({ fields });
-    } catch (err: unknown) {
-      const jiraErr = err as { statusCode?: number; body?: unknown; message?: string };
-      console.error('[portal-jira] Ticket creation failed:', {
-        status: jiraErr.statusCode,
-        body: typeof jiraErr.body === 'object' ? JSON.stringify(jiraErr.body).slice(0, 500) : jiraErr.body,
-        fields: { project: fields.project, priority: fields.priority, issuetype: fields.issuetype },
-        error: jiraErr.message || String(err),
-      });
+    if (!issue) {
       throw new Error("We couldn't create your ticket right now — please try again or contact us directly at support@nurtur.tech.");
     }
 

@@ -755,6 +755,21 @@ function shouldUseDataRemovalFastTrack(content: string): boolean {
   return true;
 }
 
+function inferCategoryFromKbQuestion(content: string): { category: string; subcategory?: string } | null {
+  const lower = content.toLowerCase();
+
+  if (/\b(leadpro|leapro|instant valuation|ivt|lead api|lead form|lead forms|lead routing|lead attribution|crm)\b/.test(lower)) {
+    return { category: 'leadpro', subcategory: 'leadpro_setup' };
+  }
+  if (/\b(webhook|api|zapier|reapit|alto|integration|connect.*to)\b/.test(lower)) {
+    return { category: 'data_feeds', subcategory: 'feeds_integration' };
+  }
+  if (/\b(newsletter|campaign|unsubscribe|mailing list|email template|bym|briefyourmarket)\b/.test(lower)) {
+    return { category: 'email_marketing', subcategory: 'email_campaign' };
+  }
+  return null;
+}
+
 function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
   const lower = content.toLowerCase();
 
@@ -3289,6 +3304,12 @@ Return JSON with only the fields present in the message.`,
     acknowledgment?: string,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata } | null> {
     if (!isLikelyKbHowToQuestion(content)) return null;
+
+    const inferred = inferCategoryFromKbQuestion(content);
+    if (inferred) {
+      meta.category = meta.category || inferred.category;
+      meta.subcategory = meta.subcategory || inferred.subcategory || null;
+    }
 
     try {
       const kbResult = await this.searchKb(content);
