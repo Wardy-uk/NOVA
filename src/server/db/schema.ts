@@ -1856,6 +1856,25 @@ async function runMigrations(): Promise<void> {
      );`,
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agreement_field_values_agreement_id')
      CREATE INDEX IX_agreement_field_values_agreement_id ON agreement_field_values(agreement_id);`,
+
+    // Per-template override list of fields that should be treated as
+    // "signer fills" in the New Contract wizard, regardless of what Adobe's
+    // form-fields API says the assignee is. Lets the sender mark additional
+    // fields as signer-only via a UI button. template_id is the Adobe library
+    // document id (string). Adobe-side signer fields stay signer-only
+    // independent of this table — overrides only ADD to the signer panel,
+    // they can't move signer fields back into NOVA's input list.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'template_field_signer_overrides') AND type = 'U')
+     CREATE TABLE template_field_signer_overrides (
+       id           INT IDENTITY(1,1) PRIMARY KEY,
+       template_id  NVARCHAR(200) NOT NULL,
+       field_name   NVARCHAR(300) NOT NULL,
+       created_at   DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+       created_by   INT           NULL,
+       CONSTRAINT UQ_template_field_signer_override UNIQUE (template_id, field_name)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_template_field_signer_overrides_template')
+     CREATE INDEX IX_template_field_signer_overrides_template ON template_field_signer_overrides(template_id);`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

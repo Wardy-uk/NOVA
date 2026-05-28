@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
-import type { AdobeSignAgreementQueries, AgreementFieldValueQueries, CounterQueries } from '../db/queries.js';
+import type { AdobeSignAgreementQueries, AgreementFieldValueQueries, CounterQueries, TemplateFieldOverrideQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { BcSubscriptionImportService } from '../services/bc-subscription-import-service.js';
 
@@ -56,6 +56,7 @@ export function createAdobeSignRoutes(
   agreementQueries: AdobeSignAgreementQueries,
   fieldValueQueries: AgreementFieldValueQueries,
   counterQueries: CounterQueries,
+  templateFieldOverrideQueries: TemplateFieldOverrideQueries,
   bcSubscriptionImportService: BcSubscriptionImportService,
   settingsQueries: FileSettingsQueries,
 ): Router {
@@ -372,6 +373,43 @@ export function createAdobeSignRoutes(
       const e = adobeError(err);
       res.status(e.status).json({ ok: false, error: e.error, retryAfter: e.retryAfter });
     }
+  });
+
+  // ── Per-template "signer fills" overrides ──
+  // The wizard reads these to push additional fields into the Signer panel,
+  // on top of whatever Adobe's assignee says. Scoped per Adobe library
+  // document id so an override on BYM doesn't bleed into Yomdel.
+
+  // GET /api/adobe-sign/templates/:libraryDocId/signer-overrides
+  router.get('/templates/:libraryDocId/signer-overrides', async (req, res) => {
+    const templateId = req.params.libraryDocId;
+    if (!templateId?.trim()) { res.status(400).json({ ok: false, error: 'libraryDocId required' }); return; }
+    const rows = await templateFieldOverrideQueries.getByTemplateId(templateId);
+    res.json({ ok: true, data: rows });
+  });
+
+  // POST /api/adobe-sign/templates/:libraryDocId/signer-overrides  { field_name }
+  router.post('/templates/:libraryDocId/signer-overrides', async (req, res) => {
+    const templateId = req.params.libraryDocId;
+    const fieldName = typeof req.body?.field_name === 'string' ? req.body.field_name.trim() : '';
+    if (!templateId?.trim()) { res.status(400).json({ ok: false, error: 'libraryDocId required' }); return; }
+    if (!fieldName) { res.status(400).json({ ok: false, error: 'field_name required' }); return; }
+    const userId = (req as any).user?.id ?? null;
+    await templateFieldOverrideQueries.add(templateId, fieldName, userId);
+    res.json({ ok: true });
+  });
+
+  // DELETE /api/adobe-sign/templates/:libraryDocId/signer-overrides/:fieldName
+  // Field name in URL — express decodes it. Caller must encodeURIComponent.
+  router.delete('/templates/:libraryDocId/signer-overrides/:fieldName', async (req, res) => {
+    const templateId = req.params.libraryDocId;
+    const fieldName = req.params.fieldName;
+    if (!templateId?.trim() || !fieldName?.trim()) {
+      res.status(400).json({ ok: false, error: 'libraryDocId and fieldName required' });
+      return;
+    }
+    await templateFieldOverrideQueries.remove(templateId, fieldName);
+    res.json({ ok: true });
   });
 
   return router;

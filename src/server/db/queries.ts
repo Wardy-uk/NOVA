@@ -2505,6 +2505,51 @@ export class AgreementFieldValueQueries {
   }
 }
 
+// ─── Template Field Signer Overrides ───────────────────────────────────────
+// Per-template list of field names the sender has marked as "signer fills" in
+// the wizard, on top of whatever Adobe's assignee says. The wizard reads these
+// when classifying fields. Adobe-side signer fields stay signer regardless —
+// overrides only ADD to the signer panel, never move signer fields back.
+
+export interface TemplateFieldSignerOverride {
+  id: number;
+  template_id: string;
+  field_name: string;
+  created_at: string;
+  created_by: number | null;
+}
+
+export class TemplateFieldOverrideQueries {
+  async getByTemplateId(templateId: string): Promise<TemplateFieldSignerOverride[]> {
+    return query<TemplateFieldSignerOverride>(
+      `SELECT * FROM template_field_signer_overrides WHERE template_id = ? ORDER BY field_name`,
+      [templateId]
+    );
+  }
+
+  // Idempotent: re-marking a field that's already overridden is a no-op.
+  async add(templateId: string, fieldName: string, createdBy: number | null): Promise<void> {
+    await execute(
+      `IF NOT EXISTS (
+         SELECT 1 FROM template_field_signer_overrides
+         WHERE template_id = ? AND field_name = ?
+       )
+       INSERT INTO template_field_signer_overrides (template_id, field_name, created_by)
+       VALUES (?, ?, ?)`,
+      [templateId, fieldName, templateId, fieldName, createdBy]
+    );
+  }
+
+  async remove(templateId: string, fieldName: string): Promise<boolean> {
+    await execute(
+      `DELETE FROM template_field_signer_overrides
+       WHERE template_id = ? AND field_name = ?`,
+      [templateId, fieldName]
+    );
+    return true;
+  }
+}
+
 // ─── Adobe Sign Agreements ──────────────────────────────────────────────────
 
 export interface AdobeSignAgreement {

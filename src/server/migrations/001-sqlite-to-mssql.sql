@@ -1438,6 +1438,23 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agreement_field_values
 CREATE INDEX IX_agreement_field_values_agreement_id ON agreement_field_values(agreement_id);
 GO
 
+-- template_field_signer_overrides — per-template list of field names the sender
+-- has marked as "signer fills" in the wizard. Adobe-side signer fields stay
+-- signer regardless; this only ADDS to the signer panel.
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'template_field_signer_overrides') AND type = 'U')
+CREATE TABLE template_field_signer_overrides (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    template_id  NVARCHAR(200) NOT NULL,
+    field_name   NVARCHAR(300) NOT NULL,
+    created_at   DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+    created_by   INT           NULL,
+    CONSTRAINT UQ_template_field_signer_override UNIQUE (template_id, field_name)
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_template_field_signer_overrides_template')
+CREATE INDEX IX_template_field_signer_overrides_template ON template_field_signer_overrides(template_id);
+GO
+
 PRINT '=== NOVA MSSQL migration 001 complete ==='
 PRINT 'Tables: 63 | Indexes: 70+ | Seed data: problem_ticket_config, settings, setup_templates'
 GO

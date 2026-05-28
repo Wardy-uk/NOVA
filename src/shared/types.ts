@@ -167,6 +167,17 @@ export interface ContractTerm {
   updated_at: string;
 }
 
+// Per-template override: a field that the sender has manually marked as
+// "signer fills" in the wizard, on top of whatever Adobe's assignee says.
+// template_id is the Adobe library document id.
+export interface TemplateFieldSignerOverride {
+  id: number;
+  template_id: string;
+  field_name: string;
+  created_at: string;
+  created_by: number | null;
+}
+
 export interface AdobeSignAgreement {
   id: number;
   agreement_id: string;
