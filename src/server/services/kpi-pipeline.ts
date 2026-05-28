@@ -1678,25 +1678,24 @@ export class KpiPipeline {
           AND status_category NOT IN ('Done', 'Cancelled')
       `, [novaAccountId]);
 
+      const pf = this.projectInClause();
       const solvedTodayRows = await localQuery<{ solvedToday: number }>(`
-        SELECT COUNT(DISTINCT ticket_id) AS solvedToday
-        FROM agent_decisions
-        WHERE CAST(created_at AS DATE) = CAST(GETUTCDATE() AS DATE)
-          AND (
-            (action = 'transition' AND outcome LIKE '%"success":true%')
-            OR quick_win_executed = 1
-          )
-      `);
+        SELECT COUNT(*) AS solvedToday
+        FROM jira_issue_cache
+        WHERE ${pf.sql}
+          AND status_category = 'Done'
+          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND assignee_account_id = @p${pf.params.length}
+      `, [...pf.params, novaAccountId]);
 
       const solvedWeekRows = await localQuery<{ solvedWeek: number }>(`
-        SELECT COUNT(DISTINCT ticket_id) AS solvedWeek
-        FROM agent_decisions
-        WHERE created_at >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 1, CAST(GETUTCDATE() AS DATE))
-          AND (
-            (action = 'transition' AND outcome LIKE '%"success":true%')
-            OR quick_win_executed = 1
-          )
-      `);
+        SELECT COUNT(*) AS solvedWeek
+        FROM jira_issue_cache
+        WHERE ${pf.sql}
+          AND status_category = 'Done'
+          AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
+          AND assignee_account_id = @p${pf.params.length}
+      `, [...pf.params, novaAccountId]);
 
       const open = openStats[0] ?? { openTotal: 0, over2h: 0, noUpdate: 0, oldestDays: 0 };
       const solvedToday = solvedTodayRows[0]?.solvedToday ?? 0;
@@ -1745,16 +1744,22 @@ export class KpiPipeline {
 
     let daysProcessed = 0;
 
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+    if (!novaAccountId) {
+      console.warn('[kpi-pipeline] nova_ai_jira_account_id not configured — skipping NOVA AI backfill');
+      return { daysProcessed: 0 };
+    }
+    const pf = this.projectInClause();
+
     for (const date of dates) {
       const solvedRows = await localQuery<{ solvedToday: number }>(`
-        SELECT COUNT(DISTINCT ticket_id) AS solvedToday
-        FROM agent_decisions
-        WHERE CAST(created_at AS DATE) = @p0
-          AND (
-            (action = 'transition' AND outcome LIKE '%"success":true%')
-            OR (quick_win_executed = 1 AND CAST(quick_win_executed_at AS DATE) = @p0)
-          )
-      `, [date]);
+        SELECT COUNT(*) AS solvedToday
+        FROM jira_issue_cache
+        WHERE ${pf.sql}
+          AND status_category = 'Done'
+          AND CAST(jira_updated AS DATE) = @p${pf.params.length}
+          AND assignee_account_id = @p${pf.params.length + 1}
+      `, [...pf.params, date, novaAccountId]);
 
       const weekStart = new Date(date);
       const dayOfWeek = weekStart.getDay();
@@ -1763,14 +1768,13 @@ export class KpiPipeline {
       const weekStartStr = weekStart.toISOString().slice(0, 10);
 
       const solvedWeekRows = await localQuery<{ solvedWeek: number }>(`
-        SELECT COUNT(DISTINCT ticket_id) AS solvedWeek
-        FROM agent_decisions
-        WHERE CAST(created_at AS DATE) BETWEEN @p0 AND @p1
-          AND (
-            (action = 'transition' AND outcome LIKE '%"success":true%')
-            OR quick_win_executed = 1
-          )
-      `, [weekStartStr, date]);
+        SELECT COUNT(*) AS solvedWeek
+        FROM jira_issue_cache
+        WHERE ${pf.sql}
+          AND status_category = 'Done'
+          AND CAST(jira_updated AS DATE) BETWEEN @p${pf.params.length} AND @p${pf.params.length + 1}
+          AND assignee_account_id = @p${pf.params.length + 2}
+      `, [...pf.params, weekStartStr, date, novaAccountId]);
 
       const solvedToday = solvedRows[0]?.solvedToday ?? 0;
       const solvedWeek = solvedWeekRows[0]?.solvedWeek ?? 0;
