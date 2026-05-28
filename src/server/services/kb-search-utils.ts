@@ -5,10 +5,11 @@ const SYNONYM_GROUPS: string[][] = [
   ['slow', 'performance', 'loading', 'speed', 'timeout'],
   ['broken', 'error', 'fault', 'failing', 'crash', 'bug'],
   ['portal', 'valuation'],
-  ['crm', 'leadpro', 'contacts'],
+  ['crm', 'leadpro', 'leapro', 'lead', 'leads', 'contacts'],
   ['down', 'offline', 'unavailable', 'outage', 'downtime'],
   ['update', 'change', 'edit', 'modify', 'amend'],
   ['delete', 'remove', 'cancel', 'deactivate'],
+  ['archive', 'archiving', 'archived'],
   ['setup', 'onboarding', 'configure', 'install'],
   ['image', 'photo', 'picture', 'logo', 'banner'],
   ['domain', 'dns', 'url', 'hosting'],
@@ -30,12 +31,20 @@ const STOP_WORDS = new Set([
   'want', 'need', 'help', 'please', 'thanks', 'work', 'working',
 ]);
 
+const TERM_ALIASES: Record<string, string> = {
+  leapro: 'leadpro',
+  archiving: 'archive',
+  archived: 'archive',
+  leads: 'lead',
+  contacts: 'contact',
+};
+
 export function expandSearchTerms(rawTerms: string[]): string[] {
   const expanded = new Set<string>();
   const original: string[] = [];
 
   for (const t of rawTerms) {
-    const lower = t.toLowerCase();
+    const lower = normaliseTerm(t);
     if (lower.length < 3 || STOP_WORDS.has(lower)) continue;
     original.push(lower);
     expanded.add(lower);
@@ -57,8 +66,13 @@ export function expandSearchTerms(rawTerms: string[]): string[] {
 
 export function cleanSearchTerms(rawTerms: string[]): string[] {
   return rawTerms
-    .map(t => t.toLowerCase())
+    .map(normaliseTerm)
     .filter(t => t.length >= 3 && !STOP_WORDS.has(t));
+}
+
+function normaliseTerm(term: string): string {
+  const lower = term.toLowerCase();
+  return TERM_ALIASES[lower] || lower;
 }
 
 export interface ScoredResult<T> {

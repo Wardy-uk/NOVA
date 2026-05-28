@@ -741,6 +741,20 @@ const ACTION_INVESTIGATION_PATTERNS = /\b(can\s+(?:you|we|someone)\s+(?:check|lo
 
 const COMPLIANCE_SENSITIVE_PATTERNS = /\b(unsubscribed?\s+data|email(?:ed)?\s+(?:to\s+)?unsubscribed|sent\s+to\s+(?:someone\s+who\s+)?(?:has\s+)?unsubscribed|gdpr\s+(?:breach|violation|issue|concern|complaint)|data\s+(?:breach|protection|privacy)\s+(?:issue|concern|violation)|opted?\s+out\s+but\s+(?:still|keeps?|received?|getting)|still\s+(?:receiving|getting)\s+(?:email|marketing)|shouldn'?t\s+(?:be|have\s+been)\s+(?:email|contact|sent|market)|consent|mailing\s+(?:without|no)\s+(?:consent|permission)|suppression\s+list|do\s+not\s+(?:email|contact|mail)\s+list)\b/i;
 
+const KB_HOWTO_PATTERNS = /^(?:hi|hello|hey)[\s,!.:-]*\s*(?=(?:how|what|where|can)\b)|\b(?:how\s+do\s+i|how\s+can\s+i|how\s+to|what\s+is\s+the\s+best\s+way\s+to|where\s+do\s+i|where\s+can\s+i|can\s+you\s+tell\s+me\s+how\s+to)\b/i;
+
+function isLikelyKbHowToQuestion(content: string): boolean {
+  return KB_HOWTO_PATTERNS.test(content)
+    && !ACTION_INVESTIGATION_PATTERNS.test(content)
+    && !COMPLIANCE_SENSITIVE_PATTERNS.test(content);
+}
+
+function shouldUseDataRemovalFastTrack(content: string): boolean {
+  if (!DATA_REMOVAL_PATTERNS.test(content)) return false;
+  if (isLikelyKbHowToQuestion(content)) return false;
+  return true;
+}
+
 function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
   const lower = content.toLowerCase();
 
@@ -1394,7 +1408,7 @@ export class PortalChatService {
     if (this.llm) {
       return this.handleIntentWithLlm(meta, content, context, sessionId);
     }
-    return await this.handleIntentWithoutLlm(meta, content);
+    return await this.handleIntentWithoutLlm(meta, content, sessionId);
   }
 
   private async handleIntentWithLlm(
@@ -1526,7 +1540,12 @@ export class PortalChatService {
     // H1c: Data-removal / privacy fast-track — explicit requests to remove an email address,
     // data, or record from a named account. Pre-empts LLM to avoid misrouting into
     // website-content or email-marketing paths.
-    if (DATA_REMOVAL_PATTERNS.test(content)) {
+    const directKbQuestion = await this.tryDirectKbQuestion(meta, content, sessionId);
+    if (directKbQuestion) {
+      return directKbQuestion;
+    }
+
+    if (shouldUseDataRemovalFastTrack(content)) {
       meta.category = 'account';
       meta.subcategory = 'account_remove_user';
       meta.conversational = true;
@@ -1698,6 +1717,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       if (questionIsActuallyAction) {
         // Re-classify: compliance issues are problems, investigation requests are changes
         meta.intent = isComplianceSensitive ? 'problem' : 'change';
+      }
+
+      const directKbQuestion = await this.tryDirectKbQuestion(meta, content, sessionId, d.acknowledgment);
+      if (directKbQuestion && d.intent !== 'status' && !questionIsActuallyAction) {
+        return directKbQuestion;
       }
 
       // Route question intent — try KB first (skipped if action guard fired)
@@ -2230,13 +2254,14 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: `${prefix}\n\nCould you tell me a bit more about what's going on so I can point this in the right direction?` };
     } catch (err) {
       console.warn('[portal-chat] Conversational intake LLM call failed:', err instanceof Error ? err.message : err);
-      return await this.handleIntentWithoutLlm(meta, content);
+      return await this.handleIntentWithoutLlm(meta, content, sessionId);
     }
   }
 
   private async handleIntentWithoutLlm(
     meta: IntakeSessionMetadata,
     content: string,
+    sessionId: number,
   ): Promise<{ response: string; messageMeta?: ChatMessageMetadata }> {
     // H0 (no-LLM): Billing cancellation fast-track
     const billingDetectionNoLlm = detectBillingFromKeywords(content);
@@ -2321,7 +2346,12 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     }
 
     // H1c (no-LLM): Data-removal / privacy fast-track
-    if (DATA_REMOVAL_PATTERNS.test(content)) {
+    const directKbQuestion = await this.tryDirectKbQuestion(meta, content, sessionId);
+    if (directKbQuestion) {
+      return directKbQuestion;
+    }
+
+    if (shouldUseDataRemovalFastTrack(content)) {
       meta.category = 'account';
       meta.subcategory = 'account_remove_user';
       meta.conversational = true;
@@ -3250,6 +3280,40 @@ Return JSON with only the fields present in the message.`,
 
     await this.synthesizeSummaryFields(meta);
     return await this.buildSummaryCard(meta);
+  }
+
+  private async tryDirectKbQuestion(
+    meta: IntakeSessionMetadata,
+    content: string,
+    sessionId: number,
+    acknowledgment?: string,
+  ): Promise<{ response: string; messageMeta?: ChatMessageMetadata } | null> {
+    if (!isLikelyKbHowToQuestion(content)) return null;
+
+    try {
+      const kbResult = await this.searchKb(content);
+      if (kbResult.length === 0) {
+        await this.logKbGap(content, meta.category, sessionId);
+        return null;
+      }
+
+      meta.intent = 'question';
+      meta.stage = 'kb_check';
+      meta.kbSuggested = true;
+      const kbLead = acknowledgment
+        ? `${acknowledgment}\n\nI found an article that might answer this:`
+        : 'I found an article that might answer this:';
+      return {
+        response: kbLead,
+        messageMeta: {
+          type: 'kb_suggestions' as const,
+          articles: kbResult.map(a => ({ id: 0, title: a.title, excerpt: a.excerpt })),
+        },
+      };
+    } catch (err) {
+      console.warn('[portal-chat] Direct KB question search failed:', err instanceof Error ? err.message : err);
+      return null;
+    }
   }
 
   private async handleKbCheckResponse(

@@ -12,6 +12,7 @@ export interface RosterAgent {
   display_name: string;
   email: string | null;
   pool: Pool;
+  department?: string | null;
   skills: string[] | null;
   max_capacity: number;
   max_tickets_cc: number | null;
@@ -113,7 +114,8 @@ export class AssignmentEngine {
     const project = projectKey || this.resolveProjectFromTicketKey(ticketKey);
     pool = this.validatePoolForProject(pool, project);
 
-    const available = await this.getAvailableAgents(pool);
+    const available = (await this.getAvailableAgents(pool))
+      .filter(agent => this.isAgentEligibleForProject(agent, project));
     if (available.length === 0) return null;
 
     const allBuckets = await this.getAgentLoadsBatch(available);
@@ -381,6 +383,7 @@ export class AssignmentEngine {
 
     if (rows.length === 0) return [];
 
+    const departmentMap = await this.getKpiDepartmentMap(rows.map(row => row.jira_account_id));
     const stateRows = await query<{
       agent_id: number; is_current_agent: number; last_assigned_at: string | null;
     }>(`SELECT agent_id, is_current_agent, last_assigned_at FROM agent_assignment_state`);
@@ -398,6 +401,7 @@ export class AssignmentEngine {
         display_name: row.display_name,
         email: row.email,
         pool: normalizePool(row.pool),
+        department: departmentMap.get(row.jira_account_id) ?? null,
         skills: parsedSkills,
         max_capacity: row.max_capacity ?? 15,
         max_tickets_cc: row.max_tickets_cc ?? null,
@@ -413,7 +417,7 @@ export class AssignmentEngine {
     const p = await this.getKpiPool();
     const result = await p.request().query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE Department IN ('NT', 'NTPJ')
@@ -463,7 +467,7 @@ export class AssignmentEngine {
     req.input('agentId', sql.Int, id);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AgentId = @agentId
@@ -512,7 +516,7 @@ export class AssignmentEngine {
     req.input('accountId', sql.NVarChar, jiraAccountId);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
-             IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AccountId = @accountId
@@ -816,6 +820,38 @@ export class AssignmentEngine {
     return parts.join(' | ');
   }
 
+  private async getKpiDepartmentMap(accountIds: string[]): Promise<Map<string, string>> {
+    const ids = [...new Set(accountIds.map(id => decodeURIComponent(id || '').trim()).filter(Boolean))];
+    if (ids.length === 0) return new Map<string, string>();
+    try {
+      const p = await this.getKpiPool();
+      const req = p.request();
+      const placeholders = ids.map((_, idx) => `@acc${idx}`);
+      ids.forEach((id, idx) => req.input(`acc${idx}`, sql.NVarChar, id));
+      const result = await req.query(`
+        SELECT AccountId, Department
+        FROM dbo.Agent
+        WHERE IsActive = 1 AND AccountId IN (${placeholders.join(', ')})
+      `);
+      return new Map<string, string>(
+        result.recordset.map((row: any) => [decodeURIComponent(row.AccountId ?? ''), (row.Department ?? '').trim()]),
+      );
+    } catch {
+      return new Map<string, string>();
+    }
+  }
+
+  private isAgentEligibleForProject(agent: RosterAgent, project: string): boolean {
+    const dept = (agent.department || '').trim().toUpperCase();
+    if (project === 'NTPJ') {
+      return dept === 'NTPJ';
+    }
+    if (project === 'NT') {
+      return dept !== 'NTPJ';
+    }
+    return true;
+  }
+
   private mapAgentRow(
     row: any,
     stateMap: Map<number, { is_current_agent: number; last_assigned_at: string | null }>,
@@ -828,6 +864,7 @@ export class AssignmentEngine {
       display_name: name || `Agent ${row.AgentId}`,
       email: row.AgentKey?.trim() || null,
       pool: normalizePool(row.Team),
+      department: row.Department?.trim() || null,
       skills: null,
       max_capacity: row.MaxTickets ?? 10,
       max_tickets_cc: row.MaxTicketsCustomerCare ?? null,
