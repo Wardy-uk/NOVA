@@ -1906,7 +1906,22 @@ export class AgentLoop {
     if (this.assignmentEngine) {
       try {
         const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
-        const handoffPool = this.determinePool(decision, project);
+        const ticket = await queryOne<{
+          current_tier: string | null;
+          labels: string | null;
+        }>(
+          `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
+          [decision.ticketKey],
+        );
+
+        // Keep handoff routing aligned with the main auto-assign path: prefer authoritative ticket state,
+        // and avoid silently defaulting Tier 2/Development tickets into CC when cache state is incomplete.
+        if (ticket && !ticket.current_tier) {
+          console.log(`[agent] Handoff: deferring assignment for ${decision.ticketKey} — current_tier not yet in cache, sweep will pick up`);
+          return;
+        }
+
+        const handoffPool = this.determinePool(decision, project, ticket);
         if (!handoffPool) {
           console.log(`[agent] Handoff: skipping assignment for ${decision.ticketKey} — Development tier`);
         } else {

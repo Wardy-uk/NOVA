@@ -27,6 +27,7 @@ const ConversationalIntakeSchema = z.object({
     'account_login', 'account_new_user', 'account_permissions',
     'account_details', 'account_office_change', 'account_remove_user',
   ]).optional(),
+  isEmailMarketingRelated: z.boolean().optional(),
   confidence: z.number(),
   subject: z.string().optional(),
   account: z.string().optional(),
@@ -174,11 +175,11 @@ function descriptionLacksActionableDetail(desc: string | null): boolean {
   const VAGUE_SOMETHING = /\b(something('s|\s+is)?\s+(wrong|broken|not (right|working))|things?\s+(aren'?t|isn'?t|is not|are not)\s+(right|working)|not\s+(sure\s+)?what('s|\s+is)\s+(wrong|going on|happening)|it('s|\s+is)?\s+(just\s+)?(not\s+(right|working)|playing up|broken)|stuff('s|\s+is)?\s+(not\s+working|broken))\b/i;
   if (VAGUE_ABSTRACT.test(stripped) || VAGUE_SOMETHING.test(stripped)) {
     // Check if there's also a specific noun/target — if so, it's not purely vague
-    const hasSpecificTarget = /\b(page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone\s*number|address|office|branch|template|floorplan|epc|virtual tour|media|price|website|login|password|user|account|report|data)\b/i.test(stripped);
+    const hasSpecificTarget = /\b(page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone\s*number|address|office|branch|template|floorplan|epc|virtual tour|media|price|website|login|password|user|account|report|data|newsletter|carousel|footer|click\s*track|bym|briefyourmarket|mailing\s+list|unsubscribe)\b/i.test(stripped);
     if (!hasSpecificTarget) return true;
   }
 
-  return !/\b(error|broken|not working|not loading|can'?t log\s*in|can'?t access|won'?t load|missing|incorrect|password|expired|locked out|not showing|disappeared|update|change|remove|add user|remove user|new user|wrong|page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone number|address|office|branch|display|showing|hidden|visible|template|trigger|data|report|login|sign.?in|set.?up|floorplan|epc|virtual tour|media|price|description|sync|feed)\b/i.test(stripped);
+  return !/\b(error|broken|not working|not loading|can'?t log\s*in|can'?t access|won'?t load|missing|incorrect|password|expired|locked out|not showing|disappeared|update|change|remove|add user|remove user|new user|wrong|page|photo|image|listing|property|portal|rightmove|zoopla|email|campaign|phone number|address|office|branch|display|showing|hidden|visible|template|trigger|data|report|login|sign.?in|set.?up|floorplan|epc|virtual tour|media|price|description|sync|feed|click\s*track|newsletter|carousel|footer|unsubscribe|bym|briefyourmarket|scheduled\s+report|test\s+send|mailing\s+list|opt.?out|gdpr|check|investigate|look\s+into|confirm)\b/i.test(stripped);
 }
 
 function followUpLacksConcreteProblem(text: string): boolean {
@@ -471,6 +472,16 @@ function isNegativeResponse(text: string): boolean {
 function detectWebsiteFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
 
+  // Admin-system / import-instance guard: operational platform requests are NOT website
+  if (/\b(import\s+instance|admin\s+(panel|system|portal|dashboard|tool)|data\s+import|bulk\s+import|system\s+update|platform\s+update|instance\s+(update|upgrade|migration|change))\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
+  // Email-marketing guard: if strong email marketing signals present, defer to email detection
+  if (/\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|campaign\s+(stat|report|result)|click\s+track|open\s+rate|bounce\s+rate|test\s+send|scheduled\s+report|bym|briefyourmarket|brief\s+your\s+market|mailing\s+list|subscriber)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
   // Broad website signals: explicit site words, named pages, or URLs
   const hasWebsiteSignal =
     /\b(website|web site|webpage|web page|homepage|home page|our site|the site|landing page|our page|contact page|about page|team page|staff page|services page|property page|branch page|office page|footer|header|banner|menu|navigation|nav bar)\b/.test(lower) ||
@@ -502,11 +513,62 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
   return { likely: true, subcategory: null };
 }
 
-function detectEmailTemplateFromKeywords(content: string): { likely: boolean } {
+function detectEmailMarketingFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
-  return {
-    likely: /\b(email\s+template|marketing\s+template|html\s+template|newsletter\s+template|template\s+(design|build|create|update|change|amend|new)|new\s+template|build\s+(a|me|us|our)\s+template|create\s+(a|me|us|our)\s+template)\b/.test(lower),
-  };
+
+  // Guard: if explicit website context dominates ("on our website", "homepage"), bail out
+  // unless there's a strong email signal alongside it
+  const hasStrongEmailSignal = /\b(email|campaign|newsletter|mailchimp|bym|briefyourmarket|brief your market|mailing|subscriber|unsubscribe|email\s+editor|email\s+footer|click\s+track|open\s+rate|bounce\s+rate|send\s+report|test\s+send|scheduled\s+report|email\s+carousel|carousel\s+in\s+the\s+email)\b/.test(lower);
+  if (!hasStrongEmailSignal) return { likely: false, subcategory: null };
+
+  // Admin-system / import-instance guard: "import instance" or "admin panel" style ops
+  // are not email-marketing even if "email" appears
+  if (/\b(import\s+instance|admin\s+(panel|system|portal|dashboard|tool)|data\s+import|bulk\s+import)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
+  // Template requests → email_template
+  if (/\b(email\s+template|marketing\s+template|html\s+template|newsletter\s+template|template\s+(design|build|create|update|change|amend|new)|new\s+template|build\s+(a|me|us|our)\s+template|create\s+(a|me|us|our)\s+template)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_template' };
+  }
+
+  // Click tracking, open rates, stats, reports → email_campaign
+  if (/\b(click\s+track|link\s+click|click(s|ed)?\s+(not|aren'?t|isn'?t)\s+work|open\s+rate|bounce\s+rate|delivery\s+rate|send\s+report|campaign\s+(stat|report|result|performance|metric)|scheduled\s+report|email\s+(stat|report|result|analytic)|not\s+track|track(ing)?\s+(not|isn'?t|aren'?t)\s+work)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // Carousel, email editor, design-within-email issues → email_campaign
+  if (/\b(carousel\s+in\s+the\s+email|email\s+carousel|email\s+editor|editor\s+(not|isn'?t|won'?t)\s+(work|load|open|sav)|drag\s+and\s+drop\s+editor|email\s+builder|campaign\s+editor)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // Email footer, header within emails → email_campaign
+  if (/\b(email\s+footer|footer\s+(in|on|of)\s+(the\s+)?email|email\s+header|unsubscribe\s+link|footer\s+(detail|update|change|wrong|incorrect|needs))\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // BYM campaign URLs, BYM instances, BYM platform → email_campaign
+  if (/\b(bym|briefyourmarket|brief\s+your\s+market)\b/.test(lower) && /\b(campaign|url|link|instance|email|send|report|login|access)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // Test send, sending issues → email_campaign
+  if (/\b(test\s+send|send\s+test|test\s+email|email\s+(not\s+)?send|campaign\s+(not\s+)?send|failed\s+to\s+send|send\s+fail|not\s+been\s+sent|hasn'?t\s+been\s+sent|didn'?t\s+(get\s+)?send|not\s+receiv|haven'?t\s+receiv|didn'?t\s+receiv)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // Triggers / automation
+  if (/\b(email\s+trigger|trigger\s+email|automated?\s+email|email\s+automat|drip\s+campaign|autorespond)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_triggers' };
+  }
+
+  // Newsletter / mailing list / subscriber management
+  if (/\b(newsletter|mailing\s+list|subscriber|email\s+list|contact\s+list|distribution\s+list|suppression\s+list)\b/.test(lower)) {
+    return { likely: true, subcategory: 'email_campaign' };
+  }
+
+  // Generic email marketing issue (strong signal present but no specific subcategory)
+  return { likely: true, subcategory: 'email_campaign' };
 }
 
 function detectLettersFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
@@ -674,6 +736,10 @@ const SECURITY_SENSITIVE_PATTERNS = /\b(remove.*(user|access|person|them|him|her
 const BILLING_CANCELLATION_PATTERNS = /\b(cancel\s+(?:a\s+|our\s+|my\s+|the\s+)?(?:product|service|subscription|contract|account|package|plan|module|add[- ]?on|licence|license|email\s+marketing|leadpro|crm)|(?:deactivate|disable|turn off|switch off|stop|end|terminate|close)\s+(?:a\s+|our\s+|my\s+|the\s+)?(?:product|service|subscription|contract|account|package|plan|module|add[- ]?on|licence|license|email\s+marketing|leadpro|crm)|(?:product|service|subscription|contract|package|plan|module|add[- ]?on|licence|license)\s+(?:cancellation|cancelled|canceled)|(?:we(?:'re| are)|i(?:'m| am)|we'?d like to|i'?d like to|want to|need to|wish to)\s+(?:cancel|deactivate|close|terminate)|(?:stop|end|terminate|close|cancel|deactivate)\s+(?:our|my)\s+(?:account|service|subscription|contract|email\s+marketing|leadpro|crm))\b/i;
 
 const DATA_REMOVAL_PATTERNS = /\b((?:remove|delete|erase|wipe|purge|scrub)\s+(?:the\s+)?(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details|subscriber|recipient|mailing\s+list\s+entry)|(?:remove|delete|erase)\s+\S+@\S+|(?:email(?:\s+address)?|data|record|contact(?:\s+details)?|information|details)\s+(?:\S+\s+){0,5}(?:be\s+)?(?:removed|deleted|erased|wiped|purged|scrubbed)|(?:\S+@\S+)\s+(?:removed|deleted|taken off)\b|take\s+(?:\S+\s+)?off\s+(?:the\s+)?(?:mailing\s+list|system|database|email\s+list|list)|opt(?:ed)?\s*(?:out|them out)|unsubscribe|gdpr\s+(?:request|removal|deletion|erasure)|right\s+to\s+(?:be\s+forgotten|erasure|deletion)|data\s+(?:subject\s+)?(?:removal|deletion|erasure)\s+request)\b/i;
+
+const ACTION_INVESTIGATION_PATTERNS = /\b(can\s+(?:you|we|someone)\s+(?:check|look\s+into|investigate|confirm|verify|find\s+out|sort|fix|resolve|action|look\s+at|review)|could\s+(?:you|we|someone)\s+(?:check|look\s+into|investigate|confirm|verify|find\s+out|sort|fix|resolve|action|look\s+at|review)|please\s+(?:check|look\s+into|investigate|confirm|verify|find\s+out|sort|fix|resolve|action|look\s+at|review)|need(?:s)?\s+(?:checking|investigating|looking\s+into|fixing|resolving|actioning|sorting|reviewing)|got\s+this\s+(?:email|message|request|complaint)\s+from|received\s+(?:a|an|this)\s+(?:email|message|request|complaint)\s+from|forwarding\s+(?:this|an?)\s+(?:email|message|request|complaint)|we'?ve\s+(?:had|received|got)\s+(?:a|an)\s+(?:email|message|request|complaint)|they(?:'ve| have)\s+(?:reported|raised|flagged|complained|asked|requested)|customer\s+(?:is\s+)?(?:reporting|saying|complaining|asking|requesting)|this\s+needs\s+(?:to\s+be\s+)?(?:looked\s+at|investigated|checked|fixed|resolved|sorted|actioned))\b/i;
+
+const COMPLIANCE_SENSITIVE_PATTERNS = /\b(unsubscribed?\s+data|email(?:ed)?\s+(?:to\s+)?unsubscribed|sent\s+to\s+(?:someone\s+who\s+)?(?:has\s+)?unsubscribed|gdpr\s+(?:breach|violation|issue|concern|complaint)|data\s+(?:breach|protection|privacy)\s+(?:issue|concern|violation)|opted?\s+out\s+but\s+(?:still|keeps?|received?|getting)|still\s+(?:receiving|getting)\s+(?:email|marketing)|shouldn'?t\s+(?:be|have\s+been)\s+(?:email|contact|sent|market)|consent|mailing\s+(?:without|no)\s+(?:consent|permission)|suppression\s+list|do\s+not\s+(?:email|contact|mail)\s+list)\b/i;
 
 function detectAccountFromKeywords(content: string): { likely: boolean; subcategory: string | null; securitySensitive: boolean } {
   const lower = content.toLowerCase();
@@ -1533,10 +1599,17 @@ Analyse the message and return structured JSON:
    Routing rules: "can't log in to update the website" → login (isAccountRelated=true). "Website shows wrong office address" → website display (isWebsiteRelated=true). User removal/access revocation → SECURITY-SENSITIVE (accountSubcategory=account_remove_user, urgent).
    Subcategories: account_login, account_new_user, account_permissions, account_details, account_office_change, account_remove_user.
 
-5. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
+5. EMAIL MARKETING CLASSIFICATION — is this about email campaigns, newsletters, or the email marketing platform (BYM/BriefYourMarket)?
+   Set isEmailMarketingRelated=true for: campaign sending issues, click tracking not working, email stats/reports, carousel or editor problems within the email tool, email footer updates, newsletter issues, test sends, scheduled reports, BYM platform issues, email template requests, mailing list management, unsubscribe/opt-out issues.
+   Set isEmailMarketingRelated=false for: website content (even if "email address on the website" — that's website_content), account login, property listings, billing, or unclear requests.
+   IMPORTANT: "email" in context of "email address on our website" or "change the email on the contact page" is website_content, NOT email marketing. Email marketing means the campaign/newsletter/bulk-email sending platform.
+
+6. INTENT OVERRIDE — if the customer is clearly asking for an action (check, investigate, fix, look into, confirm something is wrong) or reporting a compliance-sensitive issue (emails sent to unsubscribed data, GDPR concern), classify as intent=problem or intent=change even if the phrasing sounds like a question. "Can you check why emails went to unsubscribed contacts?" is a problem report, not a knowledge-base question.
+
+7. FIELD EXTRACTION — capture details already provided. Include subject, account, description, url, errorMessage, browser, urgency (only if explicit), propertyAddress, listingId, affectedPortals. Preserve the customer's exact words in description — do not rewrite or summarise. If they mention a phone number, include the phone number. If they mention an address, include the address verbatim.
    NAME/EMAIL PRESERVATION: When the customer provides a person's name, email address, branch, or other structured details in their message (e.g. "Name: Chris Clark, Email: chris@example.com, Branch: Washington" or "Lauren Walker, lauren.walker@example.com"), capture ALL of these in the description field verbatim. Do NOT ask for information that has already been provided in the message.
 
-6. ACKNOWLEDGMENT — write 1-2 sentences that show you understood the customer's specific problem.
+8. ACKNOWLEDGMENT — write 1-2 sentences that show you understood the customer's specific problem.
    PRIMARY RULE: Use the customer's own words to describe their problem. If they said "she can't see anything", say "she can't see anything". If they said "the number is wrong", say "the number is wrong". Do not translate their words into technical or internal vocabulary.
    MANDATORY DETAIL INCLUSION — you MUST include these in the acknowledgement when the customer provides them:
    - Phone numbers: include the EXACT phone number(s) mentioned (e.g. "0161 555 1234"). Never drop or omit phone numbers.
@@ -1562,11 +1635,11 @@ Analyse the message and return structured JSON:
    URGENCY RULE: If the customer uses words like "urgent", "urgently", "URGENT", "asap", "emergency", "critical", or "down", START the acknowledgement by recognising the urgency (e.g. "I can see this is urgent — " or "Understood, I'll treat this as a priority — ") before addressing their details. Never ignore explicit urgency signals.
    ACCOUNT/ORG RULE: If the account field is unknown or not provided, do NOT include any placeholder like "Unknown Organisation" in the acknowledgement. Simply omit the account reference.
 
-7. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
+9. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
 
-8. MULTI-ISSUE HANDLING — if the customer describes more than one issue (e.g. "I'm locked out AND the new users aren't set up"), capture ALL issues in the description field as separate items. The acknowledgement must reference every issue they raised. Do not collapse multiple issues into a single category.
+10. MULTI-ISSUE HANDLING — if the customer describes more than one issue (e.g. "I'm locked out AND the new users aren't set up"), capture ALL issues in the description field as separate items. The acknowledgement must reference every issue they raised. Do not collapse multiple issues into a single category.
 
-9. READY FOR CONFIRMATION — set readyForConfirmation=true if you have at minimum: what the problem is AND which property or account is affected. Otherwise false.
+11. READY FOR CONFIRMATION — set readyForConfirmation=true if you have at minimum: what the problem is AND which property or account is affected. Otherwise false.
 
 Set confidence 0.0-1.0 for how certain you are about the classification. If both isWebsiteRelated and isPropertyRelated could apply, set the more specific one to true and the other to false.`,
         content,
@@ -1617,8 +1690,18 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         }
       }
 
-      // Route question intent — try KB first
-      if (d.intent === 'question') {
+      // Action-intent guard: override question→KB deflection when the message
+      // clearly requests action/investigation or involves compliance-sensitive topics.
+      const isActionRequest = ACTION_INVESTIGATION_PATTERNS.test(content);
+      const isComplianceSensitive = COMPLIANCE_SENSITIVE_PATTERNS.test(content);
+      const questionIsActuallyAction = d.intent === 'question' && (isActionRequest || isComplianceSensitive);
+      if (questionIsActuallyAction) {
+        // Re-classify: compliance issues are problems, investigation requests are changes
+        meta.intent = isComplianceSensitive ? 'problem' : 'change';
+      }
+
+      // Route question intent — try KB first (skipped if action guard fired)
+      if (d.intent === 'question' && !questionIsActuallyAction) {
         try {
           const kbResult = await this.searchKb(content);
           if (kbResult.length > 0) {
@@ -1904,22 +1987,59 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         return { response: `${ack}\n\nCould you tell me a bit more about what you need?` };
       }
 
-      // Deterministic template detection — email template requests route to NTPJ
-      if (detectEmailTemplateFromKeywords(content).likely) {
+      // LLM-driven email marketing classification
+      if (d.isEmailMarketingRelated && d.confidence >= 0.5) {
         meta.category = 'email_marketing';
-        meta.subcategory = 'email_template';
         meta.conversational = true;
         meta.stage = 'detail';
-        const config = CATEGORY_FIELD_CONFIG['email_template']!;
-        const missing = this.getMissingFields(meta.collectedFields, config);
-        if (missing.length === 0) {
-          const ack = d.acknowledgment || "Thanks — I'll get your template request raised with our production team.";
-          const summaryResult = await this.buildSummaryCard(meta);
-          return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+        // Use deterministic subcategory detection for precision
+        const emailDetect = detectEmailMarketingFromKeywords(content);
+        meta.subcategory = emailDetect.subcategory || 'email_campaign';
+        const configKey = meta.subcategory as keyof typeof CATEGORY_FIELD_CONFIG;
+        const config = CATEGORY_FIELD_CONFIG[configKey];
+        if (config) {
+          const missing = this.getMissingFields(meta.collectedFields, config);
+          if (missing.length === 0) {
+            const ack = d.acknowledgment || "Thanks — I'll get this raised with our email marketing team.";
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const ack = d.acknowledgment || "Thanks — I'll get this raised with our email marketing team.";
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          return { response: `${ack}\n\n${question}` };
         }
-        const ack = d.acknowledgment || "Thanks — I'll get your template request raised with our production team.";
-        const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
-        return { response: `${ack}\n\n${question}` };
+        const ack = d.acknowledgment || "Thanks — I'll get this raised with our email marketing team.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+      }
+
+      // Deterministic email marketing detection — catches signals the LLM may miss
+      const emailDetect = detectEmailMarketingFromKeywords(content);
+      if (emailDetect.likely) {
+        meta.category = 'email_marketing';
+        meta.subcategory = emailDetect.subcategory || 'email_campaign';
+        meta.conversational = true;
+        meta.stage = 'detail';
+        const configKey = meta.subcategory as keyof typeof CATEGORY_FIELD_CONFIG;
+        const config = CATEGORY_FIELD_CONFIG[configKey];
+        if (config) {
+          const missing = this.getMissingFields(meta.collectedFields, config);
+          if (missing.length === 0) {
+            const defaultAck = meta.subcategory === 'email_template'
+              ? "Thanks — I'll get your template request raised with our production team."
+              : "Thanks — I'll get this raised with our email marketing team.";
+            const ack = d.acknowledgment || defaultAck;
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const defaultAck = meta.subcategory === 'email_template'
+            ? "Thanks — I'll get your template request raised with our production team."
+            : "Thanks — I'll get this raised with our email marketing team.";
+          const ack = d.acknowledgment || defaultAck;
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          return { response: `${ack}\n\n${question}` };
+        }
+        const ack = d.acknowledgment || "Thanks — I'll get this raised with our email marketing team.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
       }
 
       // (Letters detection moved above website check for precedence — see lettersBeforeWebsite)
@@ -2029,6 +2149,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       // route to conversational clarification instead of the category picker.
       // The picker is the last resort for genuinely unclassifiable input only.
       const vagueAccountSignal = detectAccountFromKeywords(content);
+      const vagueEmailMarketingSignal = detectEmailMarketingFromKeywords(content);
       const vagueWebsiteSignal = detectWebsiteFromKeywords(content);
       const vaguePropertySignal = detectPropertyFromKeywords(content);
 
@@ -2060,6 +2181,15 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         }
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+      }
+
+      if (vagueEmailMarketingSignal.likely) {
+        meta.category = 'email_marketing';
+        meta.conversational = true;
+        meta.subcategory = vagueEmailMarketingSignal.subcategory || 'email_campaign';
+        meta.stage = 'detail';
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the email marketing?` };
       }
 
       if (vagueWebsiteSignal.likely) {
@@ -2159,13 +2289,17 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: "I'm sorry to hear that — I want to make sure your complaint is properly recorded and dealt with.\n\nCould you tell me what happened and what outcome you're looking for?" };
     }
 
-    // Deterministic template detection (no-LLM fallback)
-    if (detectEmailTemplateFromKeywords(content).likely) {
+    // Deterministic email marketing detection (no-LLM fallback)
+    const fallbackEmailDetect = detectEmailMarketingFromKeywords(content);
+    if (fallbackEmailDetect.likely) {
       meta.category = 'email_marketing';
-      meta.subcategory = 'email_template';
+      meta.subcategory = fallbackEmailDetect.subcategory || 'email_campaign';
       meta.conversational = true;
       meta.stage = 'detail';
-      return { response: "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?" };
+      const defaultMsg = meta.subcategory === 'email_template'
+        ? "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?"
+        : "Thanks — I'll get this raised with our email marketing team.\n\nCould you tell me a bit more about what's happening?";
+      return { response: defaultMsg };
     }
 
     // Deterministic letters detection (no-LLM fallback)

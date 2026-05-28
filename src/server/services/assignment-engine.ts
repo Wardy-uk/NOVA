@@ -417,7 +417,7 @@ export class AssignmentEngine {
              IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
-      WHERE Department IN ('NT', 'TPJ')
+      WHERE Department IN ('NT', 'NTPJ')
       ORDER BY Team, AgentName
     `);
 
@@ -715,6 +715,9 @@ export class AssignmentEngine {
       const aPool = this.getPoolCount(a.buckets, pool);
       const bPool = this.getPoolCount(b.buckets, pool);
       if (aPool !== bPool) return aPool - bPool;
+      const aTime = a.agent.last_assigned_at?.getTime() ?? 0;
+      const bTime = b.agent.last_assigned_at?.getTime() ?? 0;
+      if (aTime !== bTime) return aTime - bTime;
       return (a.agent.display_name || '').localeCompare(b.agent.display_name || '');
     });
   }
