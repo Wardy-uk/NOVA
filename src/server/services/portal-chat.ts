@@ -498,7 +498,7 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
     if (!impliedWebsite) return { likely: false, subcategory: null };
   }
 
-  if (/\b(not working|isn.?t working|broken|error|down|can.?t (access|load|see)|won.?t (load|work|display)|blank|500|404|crash|displaying wrong|shows wrong|isn.?t displaying|not displaying|not loading|won.?t load)\b/.test(lower)) {
+  if (/\b(not working|isn.?t working|broken|error|down|website down|site down|isn.?t loading|not loading|isn.?t opening|not opening|timed out|timeout|can.?t (access|load|see|open)|won.?t (load|work|display|open)|blank|500|404|crash|displaying wrong|shows wrong|isn.?t displaying|not displaying)\b/.test(lower)) {
     return { likely: true, subcategory: 'website_broken' };
   }
   if (/\b(new page|add a page|add.* page|create.* page|new section|need a page)\b/.test(lower)) {
@@ -596,10 +596,11 @@ function detectPropertyFromKeywords(content: string): { likely: boolean; subcate
   const hasPropertyWordOutsideCompanyName = /\bpropert(y|ies)\b/.test(lowerWithoutCompanyNames);
 
   // Website-context guard: if "property" is used as website content (e.g. "property images on my website")
-  // rather than real-estate listing intent, defer to website routing.
+  // rather than real-estate listing visibility intent, defer to website routing.
   const hasExplicitWebsiteContext = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/.test(lower);
   const hasPortalListingSignal = /\b(rightmove|zoopla|onthemarket|on the market|primelocation|prime location|listing|listings|feed|feeds|syndication)\b/.test(lower);
-  if (hasExplicitWebsiteContext && !hasPortalListingSignal && /\bpropert(y|ies)\b/.test(lower)) {
+  const hasPropertyVisibilityLanguage = /\b(missing|not showing|not appearing|disappeared|removed|can.?t (see|find)|not (visible|there|listed)|hidden|visibility)\b/.test(lower);
+  if (hasExplicitWebsiteContext && !hasPortalListingSignal && !hasPropertyVisibilityLanguage && /\bpropert(y|ies)\b/.test(lower)) {
     return { likely: false, subcategory: null };
   }
 
