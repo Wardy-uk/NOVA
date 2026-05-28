@@ -62,12 +62,19 @@ function inputTypeFor(field: AdobeSignFormField): InputKind {
 // templates contributed this field (Adobe links fields with the same name across docs).
 type MergedField = AdobeSignFormField & { originNames: string[] };
 
-// Adobe assigns each field to a participant role. Fields assigned to 'PREFILL' (or
-// 'SENDER', or no participant) are filled by NOVA via mergeFieldInfo before sending.
-// Everything else is filled by the signer when they open the agreement in Adobe.
+// Adobe assigns each field to a participant role. Nurtur's template design
+// (BYM and friends) uses exactly two recipients — no Prefill role.
+// Adobe's API names them 0-indexed:
+//   • recipient0 (UI: "Participant 1") → NOVA fills via mergeFieldInfo
+//                                        (sender pre-fills in the wizard)
+//   • recipient1 (UI: "Participant 2") → the signer fills in Adobe's signing UI
+// Anything that isn't recipient0 is routed to the signer panel.
+// Tolerant of the common Adobe template typo 'Recipent' (missing 'i').
+// Signature/initial/date-of-signing fields never reach here — backend
+// filters them via SIGNER_ONLY_FIELD_TYPES.
 function isSenderField(f: AdobeSignFormField): boolean {
-  const a = (f.assignee ?? '').toUpperCase();
-  return a === '' || a === 'PREFILL' || a === 'SENDER';
+  const raw = (f.assignee ?? '').trim().toUpperCase().replace(/[_\s-]/g, '');
+  return raw === 'RECIPIENT0' || raw === 'RECIPENT0';
 }
 
 // Map an Adobe form-field name (e.g. "COMPANY NAME BYM", "address_line_1_yomdel")
