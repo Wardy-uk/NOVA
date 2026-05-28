@@ -9,6 +9,7 @@ import type { IntakeSessionMetadata, IntakeCollectedFields, ChatMessageMetadata 
 import { PORTAL_CATEGORY_FIELD_CONFIG } from '../../shared/portal-category-field-config.js';
 import { trackEvent } from './portal-analytics.js';
 import type { PortalPlaybookService } from './portal-playbooks.js';
+import { expandSearchTerms, cleanSearchTerms, rankAndFilter } from './kb-search-utils.js';
 
 // ── LLM Response Schemas ──
 
@@ -4028,33 +4029,46 @@ Rules:
   private async searchKb(searchQuery: string): Promise<Array<{ title: string; excerpt: string }>> {
     if (!searchQuery || searchQuery.length < 3) return [];
 
-    const terms = searchQuery.split(/\s+/).filter(t => t.length > 2).slice(0, 5);
-    if (terms.length === 0) return [];
+    const originalTerms = cleanSearchTerms(searchQuery.split(/\s+/)).slice(0, 8);
+    if (originalTerms.length === 0) return [];
 
-    const likeConditions = terms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
+    const allTerms = expandSearchTerms(originalTerms);
+
+    const likeConditions = allTerms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
     const params: unknown[] = [];
-    terms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
+    allTerms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
 
     const articles = await query<{ title: string; body_text: string }>(
-      `SELECT TOP 3 title, LEFT(body_text, 500) AS body_text
+      `SELECT TOP 15 title, LEFT(body_text, 500) AS body_text
        FROM portal_kb_articles
-       WHERE ${likeConditions}
-       ORDER BY view_count DESC`,
+       WHERE ${likeConditions}`,
       params,
     );
 
-    if (articles.length > 0) {
-      return articles.map(a => ({
+    const ranked = rankAndFilter(
+      articles,
+      a => a.title,
+      a => a.body_text,
+      originalTerms,
+      allTerms,
+      3,
+    );
+
+    if (ranked.length > 0) {
+      return ranked.map(({ item: a }) => ({
         title: a.title,
         excerpt: a.body_text.slice(0, 300),
       }));
     }
 
     // Fallback: live Confluence CQL search when local table has no match
-    return this.searchConfluenceLive(terms);
+    return this.searchConfluenceLive(originalTerms, allTerms);
   }
 
-  private async searchConfluenceLive(terms: string[]): Promise<Array<{ title: string; excerpt: string }>> {
+  private async searchConfluenceLive(
+    originalTerms: string[],
+    allTerms: string[],
+  ): Promise<Array<{ title: string; excerpt: string }>> {
     try {
       const siteUrl = (this.settings.get('confluence_base_url') || this.settings.get('confluence_site_url') || this.settings.get('jira_url'))?.trim();
       const email = (this.settings.get('confluence_user') || this.settings.get('kb_confluence_email') || this.settings.get('jira_username') || this.settings.get('jira_email') || this.settings.get('jira_ob_email'))?.trim();
@@ -4065,9 +4079,9 @@ Rules:
 
       if (!siteUrl || !email || !token) return [];
 
-      const searchText = terms.join(' ');
+      const searchText = originalTerms.join(' ');
       const cql = `text ~ "${searchText}" AND space = "${spaceKey}" AND type = "page" ORDER BY lastmodified DESC`;
-      const url = `${siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=3&expand=body.view`;
+      const url = `${siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=8&expand=body.view`;
 
       const res = await fetch(url, {
         headers: {
@@ -4084,14 +4098,25 @@ Rules:
       const json = await res.json() as { results?: Array<{ title: string; body?: { view?: { value: string } } }> };
       const results = json.results ?? [];
 
-      return results.map(r => {
+      const parsed = results.map(r => {
         const bodyHtml = r.body?.view?.value || '';
         const bodyText = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-        return {
-          title: r.title,
-          excerpt: bodyText.slice(0, 300),
-        };
+        return { title: r.title, body_text: bodyText };
       });
+
+      const ranked = rankAndFilter(
+        parsed,
+        r => r.title,
+        r => r.body_text,
+        originalTerms,
+        allTerms,
+        3,
+      );
+
+      return ranked.map(({ item }) => ({
+        title: item.title,
+        excerpt: item.body_text.slice(0, 300),
+      }));
     } catch (err) {
       console.warn('[portal-chat] Confluence live KB search error:', err instanceof Error ? err.message : err);
       return [];

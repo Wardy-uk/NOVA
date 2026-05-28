@@ -3,6 +3,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { McpClientManager } from './mcp-client.js';
 import type { PortalKbArticle } from '../../shared/portal-types.js';
 import { trackEvent } from './portal-analytics.js';
+import { expandSearchTerms, cleanSearchTerms, rankAndFilter } from './kb-search-utils.js';
 
 const kbViewCache = new Map<number, { articleIds: number[]; viewedAt: number }>();
 
@@ -213,8 +214,10 @@ export class PortalKbService {
   }>> {
     await trackEvent('kb_search', portalUserId || null, orgId || null, { search_query: searchQuery });
 
-    const terms = searchQuery.split(/\s+/).filter(t => t.length > 2).slice(0, 10);
-    if (terms.length === 0) return [];
+    const originalTerms = cleanSearchTerms(searchQuery.split(/\s+/)).slice(0, 10);
+    if (originalTerms.length === 0) return [];
+
+    const allTerms = expandSearchTerms(originalTerms);
 
     let rows: Array<{
       id: number;
@@ -227,37 +230,47 @@ export class PortalKbService {
     }>;
 
     try {
-      const ftTerms = terms.map(t => `"${t.replace(/"/g, '')}"`).join(' OR ');
+      const ftTerms = allTerms.map(t => `"${t.replace(/"/g, '')}"`).join(' OR ');
       rows = await query(
-        `SELECT TOP 20 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
+        `SELECT TOP 40 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
          FROM portal_kb_articles
-         WHERE CONTAINS((title, body_text), ?)
-         ORDER BY (helpful_yes - helpful_no) DESC, view_count DESC`,
+         WHERE CONTAINS((title, body_text), ?)`,
         [ftTerms],
       );
     } catch {
-      const conditions = terms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
+      const conditions = allTerms.map(() => `(body_text LIKE ? OR title LIKE ?)`).join(' OR ');
       const params: unknown[] = [];
-      terms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
+      allTerms.forEach((t) => { params.push(`%${t}%`, `%${t}%`); });
       rows = await query(
-        `SELECT TOP 20 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
+        `SELECT TOP 40 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
          FROM portal_kb_articles
-         WHERE ${conditions}
-         ORDER BY (helpful_yes - helpful_no) DESC, view_count DESC`,
+         WHERE ${conditions}`,
         params,
       );
     }
 
-    return rows.map(r => ({
-      id: r.id,
-      title: r.title,
-      excerpt: this.extractExcerpt(r.body_text, terms),
-      category: r.category,
-      labels: r.labels,
-      helpfulScore: r.helpful_yes + r.helpful_no > 0
+    const ranked = rankAndFilter(
+      rows,
+      r => r.title,
+      r => r.body_text,
+      originalTerms,
+      allTerms,
+      10,
+    );
+
+    return ranked.map(({ item: r, score }) => {
+      const helpfulScore = r.helpful_yes + r.helpful_no > 0
         ? Math.round((r.helpful_yes / (r.helpful_yes + r.helpful_no)) * 100)
-        : 0,
-    }));
+        : 0;
+      return {
+        id: r.id,
+        title: r.title,
+        excerpt: this.extractExcerpt(r.body_text, originalTerms.length > 0 ? originalTerms : allTerms),
+        category: r.category,
+        labels: r.labels,
+        helpfulScore,
+      };
+    });
   }
 
   private extractExcerpt(bodyText: string, terms: string[]): string {
