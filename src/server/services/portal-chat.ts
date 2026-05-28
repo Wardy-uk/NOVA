@@ -482,6 +482,11 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
     return { likely: false, subcategory: null };
   }
 
+  // Feed/integration guard: if strong feed/integration/API signals present, defer to data_feeds
+  if (/\b(feed\s+(error|issue|problem|broken|down|not\s+working|stopped|failing|failed)|api\s+(error|issue|problem|broken|down|not\s+working)|integration\s+(error|issue|problem|broken|not\s+working)|xml\s+feed|data\s+feed|property\s+feed|portal\s+feed|reapit|alto|vebra|dezrez|jupix|mri|agentbox|street\.co|crm\s+sync|sync\s+(error|issue|problem|not\s+working|stopped|failed)|webhook|zapier)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
   // Broad website signals: explicit site words, named pages, or URLs
   const hasWebsiteSignal =
     /\b(website|web site|webpage|web page|homepage|home page|our site|the site|landing page|our page|contact page|about page|team page|staff page|services page|property page|branch page|office page|footer|header|banner|menu|navigation|nav bar)\b/.test(lower) ||
@@ -516,9 +521,24 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
 function detectEmailMarketingFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
 
-  // Guard: if explicit website context dominates ("on our website", "homepage"), bail out
-  // unless there's a strong email signal alongside it
-  const hasStrongEmailSignal = /\b(email|campaign|newsletter|mailchimp|bym|briefyourmarket|brief your market|mailing|subscriber|unsubscribe|email\s+editor|email\s+footer|click\s+track|open\s+rate|bounce\s+rate|send\s+report|test\s+send|scheduled\s+report|email\s+carousel|carousel\s+in\s+the\s+email)\b/.test(lower);
+  // Guard: feed/integration/property-portal context — "email" appearing alongside
+  // feed, API, integration, Street, CRM, portal keywords is NOT email marketing.
+  if (/\b(feed|feeds|api|integration|street|reapit|alto|vebra|dezrez|jupix|mri|agentbox|property\s+feed|data\s+feed|xml\s+feed|rightmove|zoopla|onthemarket|primelocation|crm\s+sync|webhook|zapier|portal\s+feed)\b/.test(lower)) {
+    // Only bail if there's no *specific* email-marketing compound term
+    const hasCompoundEmailTerm = /\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|campaign\s+(stat|report|result)|click\s+track|open\s+rate|bounce\s+rate|test\s+send|scheduled\s+report|bym|briefyourmarket|brief\s+your\s+market|mailing\s+list|subscriber)\b/.test(lower);
+    if (!hasCompoundEmailTerm) return { likely: false, subcategory: null };
+  }
+
+  // Guard: website-context "email" — "email address on the website/page/contact page"
+  // is a website content update, not email marketing
+  if (/\b(email\s+address)\b/.test(lower) && /\b(website|web site|our site|the site|page|contact\s+page|homepage|display|showing|wrong|incorrect|outdated|update|change)\b/.test(lower)) {
+    const hasCompoundEmailTerm = /\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|campaign|click\s+track|open\s+rate|bounce\s+rate|test\s+send|bym|briefyourmarket|mailing\s+list|subscriber|unsubscribe)\b/.test(lower);
+    if (!hasCompoundEmailTerm) return { likely: false, subcategory: null };
+  }
+
+  // Require a compound email-marketing signal, not bare "email" alone.
+  // Bare "email" catches too many non-marketing contexts (email addresses, email notifications, etc.)
+  const hasStrongEmailSignal = /\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send|trigger|automat)|campaign|newsletter|mailchimp|bym|briefyourmarket|brief\s+your\s+market|mailing\s+list|subscriber|unsubscribe|click\s+track|open\s+rate|bounce\s+rate|send\s+report|test\s+send|scheduled\s+report|email\s+carousel|carousel\s+in\s+the\s+email|email\s+editor|email\s+builder|email\s+footer|drip\s+campaign)\b/.test(lower);
   if (!hasStrongEmailSignal) return { likely: false, subcategory: null };
 
   // Admin-system / import-instance guard: "import instance" or "admin panel" style ops
@@ -567,7 +587,7 @@ function detectEmailMarketingFromKeywords(content: string): { likely: boolean; s
     return { likely: true, subcategory: 'email_campaign' };
   }
 
-  // Generic email marketing issue (strong signal present but no specific subcategory)
+  // Generic email marketing issue (strong compound signal present but no specific subcategory)
   return { likely: true, subcategory: 'email_campaign' };
 }
 
@@ -582,6 +602,41 @@ function detectLettersFromKeywords(content: string): { likely: boolean; subcateg
     return { likely: true, subcategory: 'letters_mailshot' };
   }
   return { likely: true, subcategory: 'letters_general' };
+}
+
+function detectDataFeedsFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
+  const lower = content.toLowerCase();
+
+  // Negative guard: if this is clearly about email marketing platform, bail
+  if (/\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|bym|briefyourmarket|mailing\s+list|subscriber|unsubscribe|click\s+track|open\s+rate|bounce\s+rate|test\s+send)\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
+  // Property feed / portal feed signals — when paired with technical/sync language
+  // rather than "listing missing on Rightmove" (which is property_missing_listing)
+  const hasFeedSignal = /\b(feed|feeds|data\s+feed|xml\s+feed|property\s+feed|portal\s+feed|feed\s+(error|issue|problem|broken|down|not\s+working|stopped|failing|failed))\b/.test(lower);
+  const hasIntegrationSignal = /\b(integration|api|webhook|zapier|reapit|alto|vebra|dezrez|jupix|mri|agentbox|street|street\.co|acquaint|sme\s+professional|expert\s+agent|gnomen|rex|propertypal|domus|letmc|fixflo|property\s+hive|property\s+deck|briefyourmarket\s+api|crm\s+sync|third[- ]party|connector|data\s+sync|sync\s+issue|sync\s+error|sync\s+not\s+working|sync\s+stopped|sync\s+failed|not\s+syncing)\b/.test(lower);
+  const hasReportingSignal = /\b(report|reporting|analytics|dashboard|data\s+export|export\s+data|data\s+not\s+showing|data\s+missing|data\s+incorrect|data\s+wrong)\b/.test(lower) &&
+    /\b(feed|api|integration|portal|sync|third[- ]party)\b/.test(lower);
+
+  if (!hasFeedSignal && !hasIntegrationSignal && !hasReportingSignal) {
+    return { likely: false, subcategory: null };
+  }
+
+  // Subcategory assignment
+  if (hasIntegrationSignal) {
+    return { likely: true, subcategory: 'feeds_integration' };
+  }
+  if (hasFeedSignal) {
+    // If a feed issue mentions specific portals (Rightmove/Zoopla) + "feed" explicitly,
+    // this is a data feeds issue, not a listing visibility issue
+    return { likely: true, subcategory: 'feeds_property' };
+  }
+  if (hasReportingSignal) {
+    return { likely: true, subcategory: 'feeds_reporting' };
+  }
+
+  return { likely: true, subcategory: null };
 }
 
 function detectPropertyFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
@@ -1635,9 +1690,14 @@ Analyse the message and return structured JSON:
    Subcategories: account_login, account_new_user, account_permissions, account_details, account_office_change, account_remove_user.
 
 5. EMAIL MARKETING CLASSIFICATION — is this about email campaigns, newsletters, or the email marketing platform (BYM/BriefYourMarket)?
-   Set isEmailMarketingRelated=true for: campaign sending issues, click tracking not working, email stats/reports, carousel or editor problems within the email tool, email footer updates, newsletter issues, test sends, scheduled reports, BYM platform issues, email template requests, mailing list management, unsubscribe/opt-out issues.
-   Set isEmailMarketingRelated=false for: website content (even if "email address on the website" — that's website_content), account login, property listings, billing, or unclear requests.
-   IMPORTANT: "email" in context of "email address on our website" or "change the email on the contact page" is website_content, NOT email marketing. Email marketing means the campaign/newsletter/bulk-email sending platform.
+   Set isEmailMarketingRelated=true ONLY for: campaign sending issues, click tracking not working, email stats/reports, carousel or editor problems within the email tool, email footer updates, newsletter issues, test sends, scheduled reports, BYM platform issues, email template requests, mailing list management, unsubscribe/opt-out issues.
+   Set isEmailMarketingRelated=false for: website content, account login, property listings, billing, data feeds, integrations, APIs, CRM sync, or unclear requests.
+   CRITICAL NEGATIVE GUARDS — these are NOT email marketing:
+   - "email address on our website" / "change the email on the contact page" → website_content
+   - Feed issues, API issues, integration issues, Street/Reapit/Alto/Vebra/Dezrez connections → NOT email marketing even if "email" appears
+   - "email notifications not coming through" when it's about system/feed alerts → NOT email marketing
+   - Website change requests that happen to mention an email address → website_content
+   Email marketing means the campaign/newsletter/bulk-email sending platform (BYM/BriefYourMarket), not any occurrence of the word "email".
 
 6. INTENT OVERRIDE — if the customer is clearly asking for an action (check, investigate, fix, look into, confirm something is wrong) or reporting a compliance-sensitive issue (emails sent to unsubscribed data, GDPR concern), classify as intent=problem or intent=change even if the phrasing sounds like a question. "Can you check why emails went to unsubscribed contacts?" is a problem report, not a knowledge-base question.
 
@@ -1670,7 +1730,8 @@ Analyse the message and return structured JSON:
    URGENCY RULE: If the customer uses words like "urgent", "urgently", "URGENT", "asap", "emergency", "critical", or "down", START the acknowledgement by recognising the urgency (e.g. "I can see this is urgent — " or "Understood, I'll treat this as a priority — ") before addressing their details. Never ignore explicit urgency signals.
    ACCOUNT/ORG RULE: If the account field is unknown or not provided, do NOT include any placeholder like "Unknown Organisation" in the acknowledgement. Simply omit the account reference.
 
-9. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
+9. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field entirely. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
+   ANTI-GENERIC RULE: Do NOT ask "could you tell me a bit more about what's happening?" or "is something not displaying correctly, or do you need some content updated?" when the customer has already described the specific problem. If they said "the phone number on our contact page is wrong", the next question should be operationally specific (e.g. "What should the correct number be?"), not a generic clarification. Only use generic questions when the opening message is genuinely vague (e.g. "I need help with my website").
 
 10. MULTI-ISSUE HANDLING — if the customer describes more than one issue (e.g. "I'm locked out AND the new users aren't set up"), capture ALL issues in the description field as separate items. The acknowledgement must reference every issue they raised. Do not collapse multiple issues into a single category.
 
@@ -1882,24 +1943,48 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           return { response: `${ack}\n\n${question}${fileNote}` };
         }
 
-        // Website-related but no specific subcategory — conversational clarification
+        // Website-related but LLM didn't assign subcategory — try deterministic detection
         meta.stage = 'detail';
-        meta.subcategory = 'website_content'; // default, may refine later
+        const detWebFallback = detectWebsiteFromKeywords(content);
+        meta.subcategory = detWebFallback.subcategory || 'website_content';
         const urgentWeb = /\b(urgent|urgently|asap|emergency|critical|down)\b/i.test(content);
         if (urgentWeb) meta.collectedFields.urgency = meta.collectedFields.urgency || 'High';
         const ack = d.acknowledgment || (urgentWeb ? "I can see this is urgent — let me get this picked up quickly." : "Thanks for getting in touch.");
         const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        // If deterministic detection found a subcategory, ask the next missing field
+        // instead of the generic "is something broken or content update?" question
+        if (detWebFallback.subcategory) {
+          const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+          const missing = this.getMissingFields(meta.collectedFields, config);
+          if (missing.length === 0) {
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          return { response: `${ack}\n\n${question}${fileNote}` };
+        }
         return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
       }
 
-      // Moderate confidence (0.4–0.6) — possibly website, ask conversationally instead of showing category picker
+      // Moderate confidence (0.4–0.6) — possibly website, try deterministic subcategory
       if (d.isWebsiteRelated && d.confidence >= 0.4) {
         meta.conversational = true;
         meta.category = 'website';
-        meta.subcategory = 'website_content';
+        const detWebMod = detectWebsiteFromKeywords(content);
+        meta.subcategory = detWebMod.subcategory || 'website_content';
         meta.stage = 'detail';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         const fileNote2 = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        if (detWebMod.subcategory) {
+          const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+          const missing = this.getMissingFields(meta.collectedFields, config);
+          if (missing.length === 0) {
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          return { response: `${ack}\n\n${question}${fileNote2}` };
+        }
         return { response: `${ack}\n\nCould you tell me a bit more about what needs to happen?${fileNote2}` };
       }
 
@@ -1933,23 +2018,43 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           return { response: `${ack}\n\n${question}${fileNote}` };
         }
 
-        // Property-related but no specific subcategory — ask conversationally
+        // Property-related but LLM didn't assign subcategory — try deterministic
         meta.stage = 'detail';
-        meta.subcategory = 'property_visibility';
+        const detPropFallback = detectPropertyFromKeywords(content);
+        meta.subcategory = detPropFallback.subcategory || 'property_visibility';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        if (detPropFallback.subcategory) {
+          const missing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+          if (missing.length === 0) {
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const question = d.nextQuestion || this.buildPropertyFollowUp(missing[0], meta);
+          return { response: `${ack}\n\n${question}${fileNote}` };
+        }
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?${fileNote}` };
       }
 
-      // Moderate confidence (0.4–0.6) for property — ask conversationally
+      // Moderate confidence (0.4–0.6) for property — try deterministic subcategory
       if (d.isPropertyRelated && d.confidence >= 0.4) {
         meta.conversational = true;
         meta.category = 'property';
-        meta.subcategory = 'property_visibility';
+        const detPropMod = detectPropertyFromKeywords(content);
+        meta.subcategory = detPropMod.subcategory || 'property_visibility';
         meta.stage = 'detail';
         extractPropertyFieldsFromText(content, meta.collectedFields);
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
+        if (detPropMod.subcategory) {
+          const missing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+          if (missing.length === 0) {
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const question = d.nextQuestion || this.buildPropertyFollowUp(missing[0], meta);
+          return { response: `${ack}\n\n${question}${fileNote}` };
+        }
         return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the property?${fileNote}` };
       }
 
@@ -2027,14 +2132,40 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         return { response: `${ack}\n\nCould you tell me a bit more about what you need?` };
       }
 
-      // LLM-driven email marketing classification
-      if (d.isEmailMarketingRelated && d.confidence >= 0.5) {
+      // Data feeds / integration detection — must run before email marketing to prevent
+      // feed/API/integration/Street/CRM requests from being captured by email keywords
+      const dataFeedsDetect = detectDataFeedsFromKeywords(content);
+      if (dataFeedsDetect.likely) {
+        meta.category = 'data_feeds';
+        meta.conversational = true;
+        meta.subcategory = dataFeedsDetect.subcategory || 'feeds_integration';
+        meta.stage = 'detail';
+        const configKey = meta.subcategory as keyof typeof CATEGORY_FIELD_CONFIG;
+        const config = CATEGORY_FIELD_CONFIG[configKey];
+        if (config) {
+          const missing = this.getMissingFields(meta.collectedFields, config);
+          if (missing.length === 0) {
+            const ack = d.acknowledgment || "Thanks — I'll get this raised with our technical team.";
+            const summaryResult = await this.buildSummaryCard(meta);
+            return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
+          }
+          const ack = d.acknowledgment || "Thanks — I'll get this raised with our technical team.";
+          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          return { response: `${ack}\n\n${question}` };
+        }
+        const ack = d.acknowledgment || "Thanks — I'll get this raised with our technical team.";
+        const question = d.nextQuestion || 'Which account is this for?';
+        return { response: `${ack}\n\n${question}` };
+      }
+
+      // LLM-driven email marketing classification — require deterministic confirmation
+      // to prevent over-routing when the LLM sees "email" in non-marketing contexts
+      const llmEmailDetect = detectEmailMarketingFromKeywords(content);
+      if (d.isEmailMarketingRelated && d.confidence >= 0.5 && llmEmailDetect.likely) {
         meta.category = 'email_marketing';
         meta.conversational = true;
         meta.stage = 'detail';
-        // Use deterministic subcategory detection for precision
-        const emailDetect = detectEmailMarketingFromKeywords(content);
-        meta.subcategory = emailDetect.subcategory || 'email_campaign';
+        meta.subcategory = llmEmailDetect.subcategory || 'email_campaign';
         const configKey = meta.subcategory as keyof typeof CATEGORY_FIELD_CONFIG;
         const config = CATEGORY_FIELD_CONFIG[configKey];
         if (config) {
@@ -2053,8 +2184,14 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       }
 
       // Deterministic email marketing detection — catches signals the LLM may miss
+      // Guard: only fire when the LLM didn't positively classify into a non-email domain.
+      // If the LLM said isWebsiteRelated/isPropertyRelated/isAccountRelated with any
+      // confidence, defer to domain-specific detectors above rather than overriding with email.
       const emailDetect = detectEmailMarketingFromKeywords(content);
-      if (emailDetect.likely) {
+      const llmSuggestedOtherDomain = (d.isWebsiteRelated && d.confidence >= 0.3) ||
+        (d.isPropertyRelated && d.confidence >= 0.3) ||
+        (d.isAccountRelated && d.confidence >= 0.3);
+      if (emailDetect.likely && !llmSuggestedOtherDomain) {
         meta.category = 'email_marketing';
         meta.subcategory = emailDetect.subcategory || 'email_campaign';
         meta.conversational = true;
@@ -2189,6 +2326,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       // route to conversational clarification instead of the category picker.
       // The picker is the last resort for genuinely unclassifiable input only.
       const vagueAccountSignal = detectAccountFromKeywords(content);
+      const vagueDataFeedsSignal = detectDataFeedsFromKeywords(content);
       const vagueEmailMarketingSignal = detectEmailMarketingFromKeywords(content);
       const vagueWebsiteSignal = detectWebsiteFromKeywords(content);
       const vaguePropertySignal = detectPropertyFromKeywords(content);
@@ -2223,13 +2361,13 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
       }
 
-      if (vagueEmailMarketingSignal.likely) {
-        meta.category = 'email_marketing';
+      if (vagueDataFeedsSignal.likely) {
+        meta.category = 'data_feeds';
         meta.conversational = true;
-        meta.subcategory = vagueEmailMarketingSignal.subcategory || 'email_campaign';
+        meta.subcategory = vagueDataFeedsSignal.subcategory || 'feeds_integration';
         meta.stage = 'detail';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the email marketing?` };
+        return { response: `${ack}\n\nWhich account is this for?` };
       }
 
       if (vagueWebsiteSignal.likely) {
@@ -2249,6 +2387,17 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         extractPropertyFieldsFromText(content, meta.collectedFields);
         const ack = d.acknowledgment || "Thanks for getting in touch.";
         return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
+      }
+
+      // Email marketing — checked AFTER website/property so non-email issues
+      // with incidental email keywords don't get captured here
+      if (vagueEmailMarketingSignal.likely) {
+        meta.category = 'email_marketing';
+        meta.conversational = true;
+        meta.subcategory = vagueEmailMarketingSignal.subcategory || 'email_campaign';
+        meta.stage = 'detail';
+        const ack = d.acknowledgment || "Thanks for getting in touch.";
+        return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the email marketing?` };
       }
 
       // Genuinely unclassifiable — stay conversational, ask a broad clarifying question
@@ -2330,17 +2479,14 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: "I'm sorry to hear that — I want to make sure your complaint is properly recorded and dealt with.\n\nCould you tell me what happened and what outcome you're looking for?" };
     }
 
-    // Deterministic email marketing detection (no-LLM fallback)
-    const fallbackEmailDetect = detectEmailMarketingFromKeywords(content);
-    if (fallbackEmailDetect.likely) {
-      meta.category = 'email_marketing';
-      meta.subcategory = fallbackEmailDetect.subcategory || 'email_campaign';
+    // Data feeds / integration detection (no-LLM fallback) — before all other domain checks
+    const fallbackDataFeedsDetect = detectDataFeedsFromKeywords(content);
+    if (fallbackDataFeedsDetect.likely) {
+      meta.category = 'data_feeds';
+      meta.subcategory = fallbackDataFeedsDetect.subcategory || 'feeds_integration';
       meta.conversational = true;
       meta.stage = 'detail';
-      const defaultMsg = meta.subcategory === 'email_template'
-        ? "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?"
-        : "Thanks — I'll get this raised with our email marketing team.\n\nCould you tell me a bit more about what's happening?";
-      return { response: defaultMsg };
+      return { response: "Thanks — I'll get this raised with our technical team.\n\nWhich account is this for?" };
     }
 
     // Deterministic letters detection (no-LLM fallback)
@@ -2442,7 +2588,21 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       return { response: `${ack} Could you tell me a bit more — is something not displaying correctly, or do you need some content updated?${fileNote}` };
     }
 
-    // Not recognisably a website or property request — stay conversational
+    // Email marketing detection — now checked AFTER property/account/website so
+    // non-email issues can't be captured by incidental email marketing keywords
+    const fallbackEmailDetect = detectEmailMarketingFromKeywords(content);
+    if (fallbackEmailDetect.likely) {
+      meta.category = 'email_marketing';
+      meta.subcategory = fallbackEmailDetect.subcategory || 'email_campaign';
+      meta.conversational = true;
+      meta.stage = 'detail';
+      const defaultMsg = meta.subcategory === 'email_template'
+        ? "Thanks — I'll get your template request raised with our production team.\n\nWhich template is this for, and what changes do you need?"
+        : "Thanks — I'll get this raised with our email marketing team.\n\nCould you tell me a bit more about what's happening?";
+      return { response: defaultMsg };
+    }
+
+    // Not recognisably any specific domain — stay conversational
     meta.intent = 'problem';
     meta.stage = 'detail';
     meta.conversational = true;
@@ -2844,11 +3004,15 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     // use the follow-up message to refine the category without exposing taxonomy.
     if (meta.category === 'other' && meta.conversational) {
       const fullText = meta.openingMessage ? `${meta.openingMessage} ${content}` : content;
+      const feedSig = detectDataFeedsFromKeywords(fullText);
       const propSig = detectPropertyFromKeywords(fullText);
       const accSig = detectAccountFromKeywords(fullText);
       const webSig = detectWebsiteFromKeywords(fullText);
 
-      if (propSig.likely) {
+      if (feedSig.likely) {
+        meta.category = 'data_feeds';
+        meta.subcategory = feedSig.subcategory || 'feeds_integration';
+      } else if (propSig.likely) {
         meta.category = 'property';
         meta.subcategory = propSig.subcategory || 'property_visibility';
         extractPropertyFieldsFromText(content, meta.collectedFields);
@@ -2983,8 +3147,21 @@ Return the category ID (e.g. "website") and optionally a subcategory ID (e.g. "w
     // actionable detail, and generic "what specifically?" wording undermines the
     // complaint-aware path the customer is already on.
     if (meta.conversational && !meta.complaintDetected) {
+      // Context-rich bypass: if the opening message already provided enough structured
+      // context (URL, account, specific element, or substantial detail with domain keywords),
+      // skip the vague gate and proceed to field gathering.
+      const hasStructuredContext = !!(
+        meta.collectedFields.url ||
+        meta.collectedFields.errorMessage ||
+        meta.collectedFields.listingId ||
+        meta.collectedFields.propertyAddress ||
+        (meta.collectedFields.account && !isPlaceholderOrgName(meta.collectedFields.account))
+      );
+      const descLength = (meta.collectedFields.description || '').length;
+      const hasSubstantialDetail = descLength > 80 && !descriptionLacksActionableDetail(meta.collectedFields.description);
+
       if (!meta.vagueGateAsked) {
-        if (descriptionLacksActionableDetail(meta.collectedFields.description)) {
+        if (!hasStructuredContext && !hasSubstantialDetail && descriptionLacksActionableDetail(meta.collectedFields.description)) {
           meta.vagueGateAsked = true;
           return {
             response: "Could you give me a bit more detail on what's happening — is something not working as expected, or is there something you need changed?",
