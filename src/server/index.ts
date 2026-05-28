@@ -1865,8 +1865,8 @@ async function main() {
         const novaAccountId = settingsQueries.get('nova_ai_jira_account_id') ?? '';
         const projects = assignmentEngine.getConfiguredProjects();
         const placeholders = projects.map(() => '?').join(',');
-        const unassigned = await query<{ issue_key: string; project_key: string }>(
-          `SELECT issue_key, project_key FROM jira_issue_cache
+        const unassigned = await query<{ issue_key: string; project_key: string; current_tier: string | null; labels: string | null }>(
+          `SELECT issue_key, project_key, current_tier, labels FROM jira_issue_cache
            WHERE status_name IN ('Open', 'Waiting on Assignee')
              AND (assignee_account_id IS NULL OR assignee_account_id = ?)
              AND project_key IN (${placeholders})
@@ -1877,7 +1877,11 @@ async function main() {
         if (unassigned.length > 0) {
           let queued = 0;
           for (const t of unassigned) {
-            const pool = t.project_key === 'NTPJ' ? 'tpj' : 'cc';
+            const labels = (t.labels || '').toLowerCase();
+            const tier = (t.current_tier || '').trim();
+            const pool = labels.includes('int_setup')
+              ? 'tpj'
+              : (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier) ? 't2' : 'cc');
             await retryQueries.insert(t.issue_key, pool, t.project_key, 'cold-start scan');
             queued++;
           }

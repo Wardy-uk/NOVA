@@ -37,11 +37,10 @@ export class AgentAvailabilityService {
   private async getKpiPool(): Promise<sql.ConnectionPool | null> {
     if (this.kpiPool?.connected) return this.kpiPool;
     if (!this.settings) return null;
-    const all = this.settings.getAll();
-    const server = all.kpi_sql_server;
-    const database = all.kpi_sql_database;
-    const user = all.kpi_sql_user;
-    const password = all.kpi_sql_password;
+    const server = this.settings.get('kpi_sql_server');
+    const database = this.settings.get('kpi_sql_database');
+    const user = this.settings.get('kpi_sql_user');
+    const password = this.settings.get('kpi_sql_password');
     if (!server || !database || !user || !password) return null;
     try {
       this.kpiPool = await new sql.ConnectionPool({

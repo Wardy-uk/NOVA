@@ -549,16 +549,18 @@ export class AgentLoop {
         return true;
       });
 
-      // 1.1 NTPJ FAST PATH — assign immediately, skip auto-rules/triage/reasoner entirely
+      // 1.1 NTPJ FAST PATH — assign immediately from authoritative ticket state, skip auto-rules/triage/reasoner entirely
       const ntpjHandledKeys = new Set<string>();
       if (this.assignmentEngine) {
         for (const event of deduped) {
           if (!event.ticketKey.startsWith('NTPJ-')) continue;
           try {
-            const assignment = await this.assignmentEngine.assignWithFallback(event.ticketKey, 'tpj', 'NTPJ');
+            const ticket = await this.getTicketRoutingState(event.ticketKey);
+            const pool = this.determinePoolFromTicket({ issue_key: event.ticketKey, ...ticket }, 'NTPJ') ?? 'cc';
+            const assignment = await this.assignmentEngine.assignWithFallback(event.ticketKey, pool, 'NTPJ');
             if (assignment) {
               await this.assignmentEngine.postAssignmentComment(event.ticketKey, assignment);
-              console.log(`[agent] NTPJ fast-path: ${event.ticketKey} → ${assignment.agent.display_name} (TPJ)`);
+              console.log(`[agent] NTPJ fast-path: ${event.ticketKey} → ${assignment.agent.display_name} (${pool.toUpperCase()})`);
             } else {
               console.log(`[agent] NTPJ fast-path: ${event.ticketKey} — no agents available, will retry on sweep`);
             }
@@ -1247,8 +1249,6 @@ export class AgentLoop {
     project: string,
     ticket?: { current_tier?: string | null; labels?: string | null } | null,
   ): Pool | null {
-    if (project === 'NTPJ') return 'tpj';
-
     // int_setup label → TPJ (n8n parity)
     if (ticket?.labels && ticket.labels.includes('int_setup')) return 'tpj';
 
@@ -1380,8 +1380,6 @@ export class AgentLoop {
     ticket: { issue_key: string; current_tier?: string | null; labels?: string | null },
     project: string,
   ): Pool | null {
-    if (project === 'NTPJ') return 'tpj';
-
     // int_setup label → TPJ pool (matches n8n routing)
     const labels = ticket.labels || '';
     if (labels.includes('int_setup')) return 'tpj';
@@ -1395,6 +1393,17 @@ export class AgentLoop {
       console.warn(`[agent] Unknown tier "${tier}" for ${ticket.issue_key}, defaulting to CC`);
     }
     return 'cc';
+  }
+
+  private async getTicketRoutingState(ticketKey: string): Promise<{ current_tier: string | null; labels: string | null }> {
+    const ticket = await queryOne<{ current_tier: string | null; labels: string | null }>(
+      `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
+      [ticketKey],
+    );
+    return {
+      current_tier: ticket?.current_tier ?? null,
+      labels: ticket?.labels ?? null,
+    };
   }
 
   // ── D1: Pattern extraction from resolved tickets ──
@@ -1567,7 +1576,7 @@ export class AgentLoop {
       return;
     }
 
-    // ── NTPJ: Immediate round-robin assignment, no AI conversation ──
+    // ── NTPJ: Immediate round-robin assignment from ticket state, no AI conversation ──
     const project = this.assignmentEngine?.resolveProjectFromTicketKey(decision.ticketKey) ?? 'NT';
     if (project === 'NTPJ') {
       if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
@@ -1575,13 +1584,15 @@ export class AgentLoop {
       }
       if (this.assignmentEngine) {
         try {
-          const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'tpj', 'NTPJ');
+          const ticket = await this.getTicketRoutingState(decision.ticketKey);
+          const pool = this.determinePoolFromTicket({ issue_key: decision.ticketKey, ...ticket }, 'NTPJ') ?? 'cc';
+          const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, pool, 'NTPJ');
           if (assignment) {
             await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
-            console.log(`[agent] NTPJ immediate assign: ${decision.ticketKey} → ${assignment.agent.display_name} (TPJ)`);
+            console.log(`[agent] NTPJ immediate assign: ${decision.ticketKey} → ${assignment.agent.display_name} (${pool.toUpperCase()})`);
             await this.observer.logOutcome(decisionId, {
               success: true, action: 'assign', ticketKey: decision.ticketKey,
-              detail: `NTPJ immediate round-robin to ${assignment.agent.display_name} (TPJ pool).`,
+              detail: `NTPJ immediate round-robin to ${assignment.agent.display_name} (${pool.toUpperCase()} pool).`,
             });
           }
         } catch (err) {
@@ -2793,12 +2804,12 @@ export class AgentLoop {
       assignee_display: string; assignee_account_id: string | null;
       reporter_display: string; reporter_email: string;
       jira_created: string; jira_updated: string; sla_breach_time: string;
-      fields_json: string;
+      fields_json: string; current_tier: string | null; labels: string | null;
     }>(
       `SELECT TOP (${batchSize}) c.issue_key, c.jira_id, c.summary, c.description_text,
               c.status_name, c.priority_name, c.request_type,
               c.assignee_display, c.assignee_account_id, c.reporter_display, c.reporter_email,
-              c.jira_created, c.jira_updated, c.sla_breach_time, c.fields_json
+              c.jira_created, c.jira_updated, c.sla_breach_time, c.fields_json, c.current_tier, c.labels
        FROM jira_issue_cache c
        LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key
        WHERE c.project_key IN (${projectPlaceholders})
@@ -2829,10 +2840,14 @@ export class AgentLoop {
         const isUnassigned = !row.assignee_account_id || row.assignee_account_id === novaAccountId;
         if (isUnassigned && this.assignmentEngine) {
           try {
-            const assignment = await this.assignmentEngine.assignWithFallback(row.issue_key, 'tpj', 'NTPJ');
+            const pool = this.determinePoolFromTicket(
+              { issue_key: row.issue_key, current_tier: row.current_tier, labels: row.labels },
+              'NTPJ',
+            ) ?? 'cc';
+            const assignment = await this.assignmentEngine.assignWithFallback(row.issue_key, pool, 'NTPJ');
             if (assignment) {
               await this.assignmentEngine.postAssignmentComment(row.issue_key, assignment);
-              console.log(`[backfill] NTPJ round-robin: ${row.issue_key} → ${assignment.agent.display_name}`);
+              console.log(`[backfill] NTPJ round-robin: ${row.issue_key} → ${assignment.agent.display_name} (${pool.toUpperCase()})`);
               processed++;
             } else {
               skipped++;

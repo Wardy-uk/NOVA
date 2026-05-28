@@ -15,14 +15,49 @@ interface PeopleHRAbsence {
 }
 
 function getConfig(settings: SettingsQueries): PeopleHRConfig | null {
-  const all = settings.getAll();
-  if (all.people_hr_enabled === 'false') return null;
-  const apiKey = all.people_hr_api_key;
+  if (settings.get('people_hr_enabled') === 'false') return null;
+  const apiKey = settings.get('people_hr_api_key');
   if (!apiKey) return null;
   return {
     apiKey,
-    baseUrl: (all.people_hr_base_url || 'https://api.peoplehr.net').replace(/\/$/, ''),
+    baseUrl: (settings.get('people_hr_base_url') || 'https://api.peoplehr.net').replace(/\/$/, ''),
   };
+}
+
+function normalizePeopleHrDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const value = String(raw).trim();
+  if (!value) return null;
+
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const ukMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ukMatch) {
+    const day = ukMatch[1].padStart(2, '0');
+    const month = ukMatch[2].padStart(2, '0');
+    return `${ukMatch[3]}-${month}-${day}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return [
+    parsed.getUTCFullYear(),
+    String(parsed.getUTCMonth() + 1).padStart(2, '0'),
+    String(parsed.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function enumerateDates(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return dates;
+
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    dates.push(cursor.toISOString().slice(0, 10));
+  }
+  return dates;
 }
 
 async function apiCall(config: PeopleHRConfig, endpoint: string, body: Record<string, unknown>): Promise<any> {
@@ -115,11 +150,14 @@ export async function syncPeopleHR(
 
       const allLeave = [...holidays, ...absences];
       for (const leave of allLeave) {
-        if (!leave.startDate || !leave.endDate) continue;
-        const start = new Date(leave.startDate);
-        const end = new Date(leave.endDate);
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dateStr = d.toISOString().slice(0, 10);
+        const startDate = normalizePeopleHrDate(leave.startDate);
+        const endDate = normalizePeopleHrDate(leave.endDate);
+        if (!startDate || !endDate) {
+          console.warn(`[people-hr] Skipping unparseable leave date for ${agent.display_name} (${hrId}): ${leave.startDate} -> ${leave.endDate}`);
+          continue;
+        }
+
+        for (const dateStr of enumerateDates(startDate, endDate)) {
           if (dateStr < startStr || dateStr > endStr) continue;
           leaveEntries.push({
             rosterId: agent.AgentId,

@@ -88,11 +88,10 @@ export class AssignmentEngine {
 
   private async getKpiPool(): Promise<sql.ConnectionPool> {
     if (this.kpiPool?.connected) return this.kpiPool;
-    const all = this.settingsQueries.getAll();
-    const server = all.kpi_sql_server;
-    const database = all.kpi_sql_database;
-    const user = all.kpi_sql_user;
-    const password = all.kpi_sql_password;
+    const server = this.settingsQueries.get('kpi_sql_server');
+    const database = this.settingsQueries.get('kpi_sql_database');
+    const user = this.settingsQueries.get('kpi_sql_user');
+    const password = this.settingsQueries.get('kpi_sql_password');
     if (!server || !database || !user || !password) {
       throw new Error('KPI SQL not configured — set kpi_sql_server/database/user/password in Settings');
     }
@@ -604,15 +603,16 @@ export class AssignmentEngine {
       assignee_account_id: string;
       project_key: string;
       current_tier: string | null;
+      labels: string | null;
       cnt: number;
     }>(
-      `SELECT assignee_account_id, project_key, current_tier, COUNT(*) as cnt
+      `SELECT assignee_account_id, project_key, current_tier, labels, COUNT(*) as cnt
        FROM jira_issue_cache
        WHERE assignee_account_id IS NOT NULL
          AND status_category != 'done'
          AND project_key IN (${projectPlaceholders})
          AND (current_tier IS NULL OR current_tier != 'Development')
-       GROUP BY assignee_account_id, project_key, current_tier`,
+       GROUP BY assignee_account_id, project_key, current_tier, labels`,
       projects,
     );
 
@@ -626,7 +626,8 @@ export class AssignmentEngine {
       if (!b) continue;
       b.total += row.cnt;
 
-      if (row.project_key === 'NTPJ') {
+      const labels = (row.labels || '').toLowerCase();
+      if (labels.includes('int_setup')) {
         b.tpj += row.cnt;
       } else {
         const tier = (row.current_tier || '').trim().toLowerCase();
@@ -872,6 +873,15 @@ export class AssignmentEngine {
   }
 
   private validatePoolForProject(pool: Pool, project: string): Pool {
+    if (project === 'NTPJ') {
+      const allowedNtpjPools = new Set<Pool>(['cc', 't2', 'tpj']);
+      if (!allowedNtpjPools.has(pool)) {
+        console.warn(`[assignment] Pool ${pool} not allowed for ${project}, using default cc`);
+        return 'cc';
+      }
+      return pool;
+    }
+
     const config = this.getProjectPoolConfig(project);
     if (!config) return pool;
     if (!config.allowedPools.includes(pool)) {
