@@ -60,7 +60,12 @@ function inputTypeFor(field: AdobeSignFormField): InputKind {
 
 // A form field aggregated across the selected templates. originNames captures which
 // templates contributed this field (Adobe links fields with the same name across docs).
-type MergedField = AdobeSignFormField & { originNames: string[] };
+// originTemplateIds is the matching list of Adobe library document ids, used when
+// posting per-template signer overrides.
+type MergedField = AdobeSignFormField & {
+  originNames: string[];
+  originTemplateIds: string[];
+};
 
 // Adobe assigns each field to a participant role. Nurtur's template design
 // (BYM and friends) uses exactly two recipients plus optional "any" fields:
@@ -153,6 +158,15 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [selectedBcCustomer, setSelectedBcCustomer] = useState<BcCustomerLite | null>(null);
   const [autoFilledKeys, setAutoFilledKeys] = useState<Set<string>>(new Set());
 
+  // Per-template signer-field overrides. Keyed by Adobe library document id;
+  // each value is the set of field names the sender has marked as "signer
+  // fills" for that template via the wizard's UI buttons. Adobe-side signer
+  // fields stay signer-only regardless — this only ADDS to the signer panel.
+  const [signerOverrides, setSignerOverrides] = useState<Map<string, Set<string>>>(new Map());
+  // Field-name set of currently-pending mark/unmark requests so the button
+  // can show a spinner and ignore double-clicks.
+  const [overridePending, setOverridePending] = useState<Set<string>>(new Set());
+
   // Merged field list — union of all selected templates' fields, deduped by name, with origin tracking.
   const mergedFields = useMemo<MergedField[]>(() => {
     const map = new Map<string, MergedField>();
@@ -162,19 +176,39 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
         const existing = map.get(f.name);
         if (existing) {
           if (!existing.originNames.includes(t.name)) existing.originNames.push(t.name);
+          if (!existing.originTemplateIds.includes(t.id)) existing.originTemplateIds.push(t.id);
         } else {
-          map.set(f.name, { ...f, originNames: [t.name] });
+          map.set(f.name, { ...f, originNames: [t.name], originTemplateIds: [t.id] });
         }
       }
     }
     return Array.from(map.values());
   }, [selectedTemplates, templateFields]);
 
+  // A field is "in the signer panel via an override" if ANY of its origin
+  // templates has it in its signer-override set. We don't require all origin
+  // templates to override it — the safest move is to treat it as signer-only
+  // if any selected template flags it that way (avoids accidentally including
+  // an overridden field in the merge payload).
+  const isOverriddenSigner = useCallback((f: MergedField): boolean => {
+    for (const tid of f.originTemplateIds) {
+      const set = signerOverrides.get(tid);
+      if (set && set.has(f.name)) return true;
+    }
+    return false;
+  }, [signerOverrides]);
+
   // Split fields by who fills them. Sender fields appear as wizard inputs; signer
-  // fields appear as a read-only "Signer will fill" panel so the user can see the
-  // full picture but doesn't accidentally fill them.
-  const senderFields = useMemo(() => mergedFields.filter(isSenderField), [mergedFields]);
-  const signerFields = useMemo(() => mergedFields.filter(f => !isSenderField(f)), [mergedFields]);
+  // fields appear as a read-only "Signer will fill" panel. A field is sender-only
+  // when Adobe's assignee says so AND no selected template's overrides list it.
+  const senderFields = useMemo(
+    () => mergedFields.filter(f => isSenderField(f) && !isOverriddenSigner(f)),
+    [mergedFields, isOverriddenSigner]
+  );
+  const signerFields = useMemo(
+    () => mergedFields.filter(f => !isSenderField(f) || isOverriddenSigner(f)),
+    [mergedFields, isOverriddenSigner]
+  );
 
   const fetchTemplates = useCallback(async (force = false) => {
     setLoading(true);
@@ -227,6 +261,87 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     }, 250);
     return () => clearTimeout(handle);
   }, [bcSearch]);
+
+  // Fetch the per-template signer-override list whenever the set of selected
+  // templates changes. Stored under the Adobe library document id so we can
+  // look it up per-template when classifying merged fields.
+  useEffect(() => {
+    let cancelled = false;
+    const idsToFetch = selectedTemplates.map(t => t.id).filter(id => !signerOverrides.has(id));
+    if (idsToFetch.length === 0) return;
+    (async () => {
+      const next = new Map(signerOverrides);
+      for (const id of idsToFetch) {
+        try {
+          const res = await fetch(`/api/adobe-sign/templates/${encodeURIComponent(id)}/signer-overrides`);
+          const json = await res.json();
+          if (cancelled) return;
+          if (json.ok) {
+            const set = new Set<string>((json.data ?? []).map((r: { field_name: string }) => r.field_name));
+            next.set(id, set);
+          } else {
+            // Treat fetch failure as empty so the wizard still renders.
+            next.set(id, new Set());
+          }
+        } catch {
+          if (cancelled) return;
+          next.set(id, new Set());
+        }
+      }
+      if (!cancelled) setSignerOverrides(next);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedTemplates, signerOverrides]);
+
+  // Mark a field as signer-fills across all of its origin templates. Optimistic:
+  // we update local state immediately, then fire the POST per origin template.
+  // If any POST fails we still keep the local override — the next page load
+  // refetches the source of truth from the server.
+  const markFieldAsSigner = useCallback(async (f: MergedField) => {
+    if (overridePending.has(f.name)) return;
+    setOverridePending(prev => { const n = new Set(prev); n.add(f.name); return n; });
+    setSignerOverrides(prev => {
+      const next = new Map(prev);
+      for (const tid of f.originTemplateIds) {
+        const set = new Set(next.get(tid) ?? new Set<string>());
+        set.add(f.name);
+        next.set(tid, set);
+      }
+      return next;
+    });
+    await Promise.all(f.originTemplateIds.map(tid =>
+      fetch(`/api/adobe-sign/templates/${encodeURIComponent(tid)}/signer-overrides`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: f.name }),
+      }).catch(err => console.warn('[wizard] mark-signer POST failed', tid, f.name, err))
+    ));
+    setOverridePending(prev => { const n = new Set(prev); n.delete(f.name); return n; });
+  }, [overridePending]);
+
+  // Reverse of markFieldAsSigner — remove the override across all origin
+  // templates so the field returns to the wizard input list (subject to
+  // isSenderField still saying it's NOVA-fillable; Adobe-side signer fields
+  // remain signer regardless of the override).
+  const unmarkFieldAsSigner = useCallback(async (f: MergedField) => {
+    if (overridePending.has(f.name)) return;
+    setOverridePending(prev => { const n = new Set(prev); n.add(f.name); return n; });
+    setSignerOverrides(prev => {
+      const next = new Map(prev);
+      for (const tid of f.originTemplateIds) {
+        const set = new Set(next.get(tid) ?? new Set<string>());
+        set.delete(f.name);
+        next.set(tid, set);
+      }
+      return next;
+    });
+    await Promise.all(f.originTemplateIds.map(tid =>
+      fetch(`/api/adobe-sign/templates/${encodeURIComponent(tid)}/signer-overrides/${encodeURIComponent(f.name)}`, {
+        method: 'DELETE',
+      }).catch(err => console.warn('[wizard] unmark-signer DELETE failed', tid, f.name, err))
+    ));
+    setOverridePending(prev => { const n = new Set(prev); n.delete(f.name); return n; });
+  }, [overridePending]);
 
   // Auto-fill matching sender fields from a BC customer. Walks every sender-fillable
   // field, runs the field name through BC_FIELD_PATTERNS, and writes the BC value if
@@ -683,11 +798,24 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                   const showOrigins = selectedCount > 1;
                   return (
                     <div key={f.name}>
-                      <label className={labelCls}>
-                        {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
-                        {autoFilledKeys.has(f.name) && (
-                          <span className="ml-2 text-[9px] text-[#5ec1ca] normal-case">from BC</span>
-                        )}
+                      <label className={labelCls + ' flex items-center justify-between'}>
+                        <span>
+                          {f.displayLabel || f.name} {f.required && <span className="text-red-400">*</span>}
+                          {autoFilledKeys.has(f.name) && (
+                            <span className="ml-2 text-[9px] text-[#5ec1ca] normal-case">from BC</span>
+                          )}
+                        </span>
+                        {/* Mark this field as signer-fills for every template that contains it.
+                            Removes it from the wizard inputs and pushes it into the signer panel. */}
+                        <button
+                          type="button"
+                          onClick={() => markFieldAsSigner(f)}
+                          disabled={overridePending.has(f.name)}
+                          className="text-[9px] normal-case text-neutral-500 hover:text-amber-400 disabled:opacity-40"
+                          title="Move this field to the Signer will fill panel (customer fills it in Adobe instead)"
+                        >
+                          {overridePending.has(f.name) ? '…' : 'mark as signer →'}
+                        </button>
                       </label>
                       {inputType === 'select' ? (
                         <select
@@ -769,13 +897,32 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                       Signer will fill ({signerFields.length})
                     </div>
                     <ul className="space-y-1">
-                      {signerFields.map(f => (
-                        <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
-                          <span className="text-neutral-300">{f.displayLabel || f.name}</span>
-                          {f.required && <span className="text-red-400">*</span>}
-                          <span className="text-[9px] text-neutral-600 ml-auto">{f.assignee}</span>
-                        </li>
-                      ))}
+                      {signerFields.map(f => {
+                        const overridden = isOverriddenSigner(f);
+                        return (
+                          <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
+                            <span className="text-neutral-300">{f.displayLabel || f.name}</span>
+                            {f.required && <span className="text-red-400">*</span>}
+                            {overridden && (
+                              <span className="text-[9px] text-amber-500 ml-1" title="Marked as signer in NOVA — not Adobe's default">
+                                (NOVA-marked)
+                              </span>
+                            )}
+                            <span className="text-[9px] text-neutral-600 ml-auto">{f.assignee}</span>
+                            {overridden && (
+                              <button
+                                type="button"
+                                onClick={() => unmarkFieldAsSigner(f)}
+                                disabled={overridePending.has(f.name)}
+                                className="text-[9px] normal-case text-neutral-500 hover:text-[#5ec1ca] disabled:opacity-40 ml-1"
+                                title="Move this field back to the wizard's NOVA inputs"
+                              >
+                                {overridePending.has(f.name) ? '…' : '← back to NOVA'}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                     <div className="text-[10px] text-neutral-600 mt-2">
                       These fields appear in the agreement for the signer to fill when they open it in Adobe Sign.
