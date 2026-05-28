@@ -2238,7 +2238,7 @@ async function main() {
           red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
         };
         const c = colors[r];
-        return `<td class="c"><span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${v}${suffix}</span></td>`;
+        return `<td class="c"><span style="display:inline-block;padding:.4vh .8vw;border-radius:7px;font-size:1.6vh;font-weight:700;min-width:3vw;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${v}${suffix}</span></td>`;
       }
 
       const now = new Date();
@@ -2246,7 +2246,7 @@ async function main() {
       const timeStr = now.toLocaleTimeString('en-GB');
 
       function kpiCard(label: string, value: string | number, color: string) {
-        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:1.2vh 1.5vw"><div style="font-size:1.3vh;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:.5vh">${label}</div><div style="font-size:3.2vh;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
       }
 
       const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -2257,10 +2257,10 @@ async function main() {
         const isStale = snapshotAge > ONE_HOUR_MS;
         const tc = TEAM_COLORS[a.TierCode || a.Team] || '#64748b';
         const escapedName = name.replace(/'/g, "\\'");
-        const staleIcon = isStale ? ' <span title="Data stale — pipeline not reaching this agent" style="color:#f59e0b;font-size:10px">⚠</span>' : '';
+        const staleIcon = isStale ? ' <span title="Data stale — pipeline not reaching this agent" style="color:#f59e0b;font-size:1.4vh">⚠</span>' : '';
         return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',label:'${escapedName}'},'*')">
           <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}${staleIcon}</span></td>
-          <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
+          <td><span style="display:inline-block;padding:.3vh .6vw;border-radius:4px;font-size:1.3vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total ?? '—'}</td>
           ${ragHtml(a.OpenTickets_Over2Hours || 0, 0, 2)}
           ${ragHtml(a.OpenTickets_NoUpdateToday || 0, 0, 1)}
@@ -2274,7 +2274,7 @@ async function main() {
               red: { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' },
             };
             const c = colors[r];
-            const badge = `<span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${days}d</span>`;
+            const badge = `<span style="display:inline-block;padding:.4vh .8vw;border-radius:7px;font-size:1.6vh;font-weight:700;min-width:3vw;text-align:center;background:${c.bg};color:${c.fg};border:1px solid ${c.bd}">${days}d</span>`;
             if (key) {
               return `<td class="c"><a href="https://nurturtech.atlassian.net/browse/${key}" target="_blank" style="text-decoration:none">${badge}</a></td>`;
             }
@@ -2288,22 +2288,22 @@ async function main() {
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SLA Breach Board</title>
 ${wallboardRefreshScript('/wallboard/breached')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow:hidden}.wrap{height:100vh;display:flex;flex-direction:column;padding:2vh 2.5vw}table{width:100%;border-collapse:collapse}th{padding:1.2vh 1vw;text-align:left;font-size:1.4vh;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:1.1vh 1vw;border-bottom:1px solid #2f353d;font-size:1.8vh}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}.tbl-wrap{flex:1;min-height:0;overflow:hidden;border:1px solid #2f353d;border-radius:14px;background:rgba(255,255,255,.03)}</style>
 </head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Live ticket health per agent</div></div>
-  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5vh">
+  <div><h1 style="font-size:2.8vh;font-weight:800;letter-spacing:-0.5px">SLA Breach Board</h1><div style="font-size:1.4vh;color:#64748b;margin-top:2px">Live ticket health per agent</div></div>
+  <div style="font-size:1.4vh;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1.2vh;margin-bottom:1.5vh">
   ${kpiCard('Tickets Over SLA', totalOver, totalOver === 0 ? '#10b981' : '#ef4444')}
   ${kpiCard('Agents Breached', `${agentsBreached} / ${data.length}`, agentsBreached === 0 ? '#10b981' : '#f59e0b')}
   ${kpiCard('Tickets Not Updated', totalStale, totalStale === 0 ? '#10b981' : '#f59e0b')}
   ${kpiCard('Worst Oldest (days)', worstOldest, worstOldest <= 3 ? '#10b981' : worstOldest <= 7 ? '#f59e0b' : '#ef4444')}
 </div>
-<div style="border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)">
+<div class="tbl-wrap">
 <table><thead><tr><th>Agent</th><th>Team</th><th class="c">Open</th><th class="c">Over SLA</th><th class="c">Not Updated</th><th class="c">Oldest (days)</th><th class="c">Solved Today</th></tr></thead>
 <tbody>${rows}</tbody></table></div>
-<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
+<div style="text-align:center;padding-top:1vh;font-size:1.2vh;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
       logWallboard('/wallboard/breached', 'info', 200, Date.now() - wbStart, `OK — ${data.length} agents`, { sqlServer: srv });
     } catch (err) {
