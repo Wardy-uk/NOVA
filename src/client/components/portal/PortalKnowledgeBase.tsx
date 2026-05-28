@@ -20,6 +20,7 @@ interface Props {
 
 export default function PortalKnowledgeBase({ onNavigate }: Props) {
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [results, setResults] = useState<ArticleResult[]>([]);
   const [categories, setCategories] = useState<Array<{ category: string; count: number }>>([]);
   const [selectedArticle, setSelectedArticle] = useState<PortalKbArticle | null>(null);
@@ -34,11 +35,14 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
       .catch(console.error);
   }, []);
 
-  const handleSearch = useCallback(async (q: string) => {
-    if (q.length < 2) { setResults([]); return; }
+  const handleSearch = useCallback(async (q: string, category?: string | null) => {
+    if (!category && q.length < 2) { setResults([]); return; }
     setLoading(true);
     try {
-      const res = await pf(`/api/portal/kb/search?q=${encodeURIComponent(q)}`);
+      const url = category
+        ? `/api/portal/kb/search?category=${encodeURIComponent(category)}`
+        : `/api/portal/kb/search?q=${encodeURIComponent(q)}`;
+      const res = await pf(url);
       const data = await res.json();
       if (data.ok) setResults(data.data.articles || []);
     } catch (err) {
@@ -49,9 +53,9 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => handleSearch(search), 300);
+    const timer = setTimeout(() => handleSearch(search, selectedCategory), 300);
     return () => clearTimeout(timer);
-  }, [search, handleSearch]);
+  }, [search, selectedCategory, handleSearch]);
 
   const openArticle = async (id: number) => {
     try {
@@ -179,7 +183,10 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
           <input
             type="text"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              setSearch(e.target.value);
+              setSelectedCategory(null);
+            }}
             placeholder="Search articles..."
             aria-label="Search knowledge base"
             className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand text-sm"
@@ -189,7 +196,7 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
       </div>
 
       {/* Search Results */}
-      {search.length >= 2 && (
+      {(search.length >= 2 || selectedCategory) && (
         <div className="max-w-2xl mx-auto" aria-live="polite">
           {loading ? (
             <div className="space-y-3">
@@ -202,7 +209,7 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
             </div>
           ) : results.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              <p>No articles found for "{search}"</p>
+              <p>No articles found for "{selectedCategory || search}"</p>
               <p className="text-sm mt-1">Try different keywords or browse by category below.</p>
             </div>
           ) : (
@@ -233,14 +240,17 @@ export default function PortalKnowledgeBase({ onNavigate }: Props) {
       )}
 
       {/* Categories (show when not searching) */}
-      {search.length < 2 && categories.length > 0 && (
+      {search.length < 2 && !selectedCategory && categories.length > 0 && (
         <div className="max-w-2xl mx-auto">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Browse by Category</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {categories.map(c => (
               <button
                 key={c.category}
-                onClick={() => setSearch(c.category)}
+                onClick={() => {
+                  setSelectedCategory(c.category);
+                  setSearch(c.category);
+                }}
                 aria-label={`Browse ${c.category} — ${c.count} article${c.count !== 1 ? 's' : ''}`}
                 className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-brand/40 hover:shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-brand outline-none"
               >

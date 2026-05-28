@@ -6,6 +6,16 @@ export function createPortalKbRoutes(kbService: PortalKbService): Router {
 
   router.get('/search', async (req: Request, res: Response) => {
     const q = req.query.q as string;
+    const category = req.query.category as string | undefined;
+    if (category) {
+      try {
+        const results = await kbService.getArticlesByCategory(category);
+        res.json({ ok: true, data: { articles: results, total: results.length } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Category browse failed' });
+      }
+      return;
+    }
     if (!q || q.length < 2) {
       res.status(400).json({ ok: false, error: 'Search query must be at least 2 characters' });
       return;

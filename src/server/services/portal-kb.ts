@@ -218,16 +218,12 @@ export class PortalKbService {
 
     const rules: Array<{ category: string; patterns: RegExp[] }> = [
       {
-        category: 'CRM / LeadPro',
-        patterns: [/\bleadpro\b/, /\blead api\b/, /\bcrm\b/, /\blead form\b/, /\blead routing\b/, /\blead attribution\b/],
-      },
-      {
         category: 'Email Marketing',
         patterns: [/\bemail\b/, /\bautocaller\b/, /\bnotification\b/, /\bblacklist\b/, /\bcampaign\b/],
       },
       {
         category: 'Website',
-        patterns: [/\bwebsite\b/, /\bwebhook\b/, /\bpage\b/, /\bfacebook advertising\b/, /\bgoogle analytics\b/],
+        patterns: [/\bwebsite\b/, /\bfacebook advertising\b/, /\bgoogle analytics\b/, /\bseo\b/, /\btracking\b/],
       },
       {
         category: 'Portal',
@@ -235,7 +231,11 @@ export class PortalKbService {
       },
       {
         category: 'Integrations',
-        patterns: [/\bintegration\b/, /\bapi\b/, /\bwebhook\b/, /\bauthentication\b/, /\balto\b/],
+        patterns: [/\bwebhook\b/, /\bapi\b/, /\bauthentication\b/, /\balto\b/, /\bzapier\b/, /\bintegration\b/],
+      },
+      {
+        category: 'CRM / LeadPro',
+        patterns: [/\bleadpro\b/, /\blead api\b/, /\bcrm\b/, /\blead form\b/, /\blead routing\b/, /\blead attribution\b/],
       },
       {
         category: 'Onboarding',
@@ -250,27 +250,29 @@ export class PortalKbService {
     return null;
   }
 
-  private async backfillMissingCategories(): Promise<number> {
-    const uncategorised = await query<Array<{
+  private async refreshDerivedCategories(): Promise<number> {
+    const articles = await query<Array<{
       id: number;
       title: string;
       body_text: string | null;
       labels: string | null;
+      category: string | null;
     }>[0]>(
-      `SELECT id, title, body_text, labels
-       FROM portal_kb_articles
-       WHERE category IS NULL OR LTRIM(RTRIM(category)) = ''`,
+      `SELECT id, title, body_text, labels, category
+       FROM portal_kb_articles`,
     );
 
     let updated = 0;
-    for (const article of uncategorised) {
+    for (const article of articles) {
       const category = this.deriveCategory(article.title, article.labels || '', article.body_text || '');
-      if (!category) continue;
+      const normalizedCurrent = (article.category || '').trim();
+      const normalizedNext = (category || '').trim();
+      if (normalizedCurrent === normalizedNext) continue;
       await execute(`UPDATE portal_kb_articles SET category = ? WHERE id = ?`, [category, article.id]);
       updated++;
     }
     if (updated > 0) {
-      console.log(`[portal-kb] Backfilled categories for ${updated} uncategorised article(s)`);
+      console.log(`[portal-kb] Refreshed categories for ${updated} portal KB article(s)`);
     }
     return updated;
   }
@@ -344,7 +346,51 @@ export class PortalKbService {
     });
   }
 
+  async getArticlesByCategory(category: string): Promise<Array<{
+    id: number;
+    title: string;
+    excerpt: string;
+    category: string | null;
+    labels: string | null;
+    helpfulScore: number;
+  }>> {
+    await this.refreshDerivedCategories();
+
+    const rows = await query<Array<{
+      id: number;
+      title: string;
+      body_text: string;
+      category: string | null;
+      labels: string | null;
+      helpful_yes: number;
+      helpful_no: number;
+    }>[0]>(
+      `SELECT TOP 200 id, title, LEFT(body_text, 500) AS body_text, category, labels, helpful_yes, helpful_no
+       FROM portal_kb_articles
+       WHERE category = ?
+       ORDER BY title ASC`,
+      [category],
+    );
+
+    return rows.map((r) => {
+      const helpfulScore = r.helpful_yes + r.helpful_no > 0
+        ? Math.round((r.helpful_yes / (r.helpful_yes + r.helpful_no)) * 100)
+        : 0;
+      return {
+        id: r.id,
+        title: r.title,
+        excerpt: this.extractExcerpt(r.body_text, []),
+        category: r.category,
+        labels: r.labels,
+        helpfulScore,
+      };
+    });
+  }
+
   private extractExcerpt(bodyText: string, terms: string[]): string {
+    if (terms.length === 0) {
+      return bodyText.slice(0, 200).trim() + (bodyText.length > 200 ? '...' : '');
+    }
     // Find first occurrence of any term and extract surrounding text
     const lowerBody = bodyText.toLowerCase();
     for (const term of terms) {
@@ -491,7 +537,7 @@ export class PortalKbService {
   }
 
   async getCategories(): Promise<Array<{ category: string; count: number }>> {
-    await this.backfillMissingCategories();
+    await this.refreshDerivedCategories();
     return query<{ category: string; count: number }>(
       `SELECT ISNULL(category, 'Uncategorised') AS category, COUNT(*) AS count
        FROM portal_kb_articles
