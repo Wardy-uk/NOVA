@@ -2333,6 +2333,7 @@ ${wallboardRefreshScript('/wallboard/breached')}
                target AS KPITarget, direction AS KPIDirection, rag AS RAG, CreatedAt
         FROM dbo.jira_kpi_daily
         WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          AND (kpi LIKE '%over SLA%' OR kpi LIKE '%CSAT%' OR kpi LIKE '%No Reply%')
         ORDER BY kpiGroup, kpi
       `);
       const allKpis = result.recordset as Array<{ KPI: string; KPIGroup: string; Count: number; KPITarget: number | null; KPIDirection: string | null; RAG: number | null; CreatedAt: string }>;
@@ -2352,7 +2353,7 @@ ${wallboardRefreshScript('/wallboard/breached')}
       const redPct = totalKpis > 0 ? Math.round((redCount / totalKpis) * 100) : 0;
 
       function kpiCard(label: string, value: string | number, color: string) {
-        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 18px"><div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px">${label}</div><div style="font-size:26px;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:1.2vh 1.5vw"><div style="font-size:1.3vh;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:.5vh">${label}</div><div style="font-size:3.2vh;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
       }
 
       // Build rows — red first, then amber
@@ -2371,9 +2372,9 @@ ${wallboardRefreshScript('/wallboard/breached')}
         const escapedKpi = k.KPI.replace(/'/g, "\\'");
         return `<tr style="cursor:pointer;${rowBg}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escapedKpi}',label:'${escapedKpi}'},'*')">
           <td><span style="font-weight:600;color:${isRed ? '#fca5a5' : '#fde68a'}">${k.KPI}</span></td>
-          <td class="c"><span style="display:inline-block;padding:3px 10px;border-radius:7px;font-size:12px;font-weight:700;min-width:40px;text-align:center;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${k.Count}</span></td>
+          <td class="c"><span style="display:inline-block;padding:.4vh .8vw;border-radius:7px;font-size:1.6vh;font-weight:700;min-width:3vw;text-align:center;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${k.Count}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${target}</td>
-          <td class="c"><span style="display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;text-transform:uppercase;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${isRed ? 'RED' : 'AMBER'}</span></td>
+          <td class="c"><span style="display:inline-block;padding:.3vh .6vw;border-radius:5px;font-size:1.3vh;font-weight:700;text-transform:uppercase;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${isRed ? 'RED' : 'AMBER'}</span></td>
         </tr>`;
       }).join('');
 
@@ -2385,23 +2386,23 @@ ${wallboardRefreshScript('/wallboard/breached')}
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KPI Breach Board</title>
 ${wallboardRefreshScript('/wallboard/team-kpis')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:16px 24px}table{width:100%;border-collapse:collapse}th{padding:8px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:7px 12px;border-bottom:1px solid #2f353d;font-size:13px}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow:hidden}.wrap{height:100vh;display:flex;flex-direction:column;padding:2vh 2.5vw}table{width:100%;border-collapse:collapse}th{padding:1.2vh 1vw;text-align:left;font-size:1.4vh;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:1.1vh 1vw;border-bottom:1px solid #2f353d;font-size:1.8vh}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}.tbl-wrap{flex:1;min-height:0;overflow:hidden;border:1px solid #2f353d;border-radius:14px;background:rgba(255,255,255,.03)}</style>
 </head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">KPI Breach Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Breached team KPIs from Jira</div></div>
-  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5vh">
+  <div><h1 style="font-size:2.8vh;font-weight:800;letter-spacing:-0.5px">KPI Breach Board</h1><div style="font-size:1.4vh;color:#64748b;margin-top:2px">Over SLA &middot; CSAT &middot; No Reply</div></div>
+  <div style="font-size:1.4vh;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
-<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1.2vh;margin-bottom:1.5vh">
   ${kpiCard('Total KPIs', totalKpis, '#e2e8f0')}
   ${kpiCard('KPIs Green', `${greenCount} (${greenPct}%)`, '#10b981')}
   ${kpiCard('KPIs Amber', String(amberCount), amberCount === 0 ? '#10b981' : '#f59e0b')}
   ${kpiCard('KPIs Red', String(redCount), redCount === 0 ? '#10b981' : '#ef4444')}
   ${kpiCard('Red %', redPct + '%', redPct === 0 ? '#10b981' : redPct <= 20 ? '#f59e0b' : '#ef4444')}
 </div>
-<div style="border:1px solid #2f353d;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)">
+<div class="tbl-wrap">
 <table><thead><tr><th>KPI Name</th><th class="c">Value</th><th class="c">Target</th><th class="c">Status</th></tr></thead>
 <tbody>${emptyRow}${rows}</tbody></table></div>
-<div style="text-align:center;margin-top:10px;font-size:10px;color:#475569">nurtur.tech &middot; KPI Breach Board &middot; ${dateStr}</div>
+<div style="text-align:center;padding-top:1vh;font-size:1.2vh;color:#475569">nurtur.tech &middot; KPI Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
       logWallboard('/wallboard/team-kpis', 'info', 200, Date.now() - wbStart, `OK — ${allKpis.length} KPIs, ${breachedKpis.length} breached`, { sqlServer: srv });
     } catch (err) {
