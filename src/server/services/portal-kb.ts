@@ -92,7 +92,7 @@ export class PortalKbService {
       const bodyHtml = page.body?.storage?.value || '';
       const bodyText = stripHtml(bodyHtml);
       const labels = page.metadata?.labels?.results?.map(l => l.name).join(',') || '';
-      const category = this.deriveCategoryFromLabels(labels);
+      const category = this.deriveCategory(page.title, labels, bodyText);
       const publishedAt = page.version?.when || new Date().toISOString();
 
       const existing = await queryOne<{ id: number }>(
@@ -192,16 +192,87 @@ export class PortalKbService {
     return allPages;
   }
 
+  private deriveCategory(title: string, labels: string, bodyText: string): string | null {
+    const fromLabels = this.deriveCategoryFromLabels(labels);
+    if (fromLabels) return fromLabels;
+    return this.deriveCategoryFromContent(title, bodyText);
+  }
+
   private deriveCategoryFromLabels(labels: string): string | null {
     if (!labels) return null;
-    const labelList = labels.split(',').map(l => l.trim().toLowerCase());
-    // Map common label patterns to categories
-    if (labelList.some(l => l.includes('website'))) return 'Website';
-    if (labelList.some(l => l.includes('email'))) return 'Email Marketing';
-    if (labelList.some(l => l.includes('crm') || l.includes('leadpro'))) return 'CRM / LeadPro';
-    if (labelList.some(l => l.includes('portal') || l.includes('valuation'))) return 'Portal';
-    if (labelList.some(l => l.includes('onboarding'))) return 'Onboarding';
-    return labelList[0] || null;
+    const haystack = labels
+      .split(',')
+      .map(l => l.trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+    return this.matchCategory(haystack);
+  }
+
+  private deriveCategoryFromContent(title: string, bodyText: string): string | null {
+    const haystack = `${title} ${bodyText}`.toLowerCase();
+    return this.matchCategory(haystack);
+  }
+
+  private matchCategory(haystack: string): string | null {
+    if (!haystack) return null;
+
+    const rules: Array<{ category: string; patterns: RegExp[] }> = [
+      {
+        category: 'CRM / LeadPro',
+        patterns: [/\bleadpro\b/, /\blead api\b/, /\bcrm\b/, /\blead form\b/, /\blead routing\b/, /\blead attribution\b/],
+      },
+      {
+        category: 'Email Marketing',
+        patterns: [/\bemail\b/, /\bautocaller\b/, /\bnotification\b/, /\bblacklist\b/, /\bcampaign\b/],
+      },
+      {
+        category: 'Website',
+        patterns: [/\bwebsite\b/, /\bwebhook\b/, /\bpage\b/, /\bfacebook advertising\b/, /\bgoogle analytics\b/],
+      },
+      {
+        category: 'Portal',
+        patterns: [/\bportal\b/, /\binstant valuation\b/, /\bvaluation tool\b/],
+      },
+      {
+        category: 'Integrations',
+        patterns: [/\bintegration\b/, /\bapi\b/, /\bwebhook\b/, /\bauthentication\b/, /\balto\b/],
+      },
+      {
+        category: 'Onboarding',
+        patterns: [/\bonboarding\b/, /\bsetting up\b/, /\bset up\b/, /\bsetup\b/, /\badding users\b/],
+      },
+    ];
+
+    for (const rule of rules) {
+      if (rule.patterns.some(pattern => pattern.test(haystack))) return rule.category;
+    }
+
+    return null;
+  }
+
+  private async backfillMissingCategories(): Promise<number> {
+    const uncategorised = await query<Array<{
+      id: number;
+      title: string;
+      body_text: string | null;
+      labels: string | null;
+    }>[0]>(
+      `SELECT id, title, body_text, labels
+       FROM portal_kb_articles
+       WHERE category IS NULL OR LTRIM(RTRIM(category)) = ''`,
+    );
+
+    let updated = 0;
+    for (const article of uncategorised) {
+      const category = this.deriveCategory(article.title, article.labels || '', article.body_text || '');
+      if (!category) continue;
+      await execute(`UPDATE portal_kb_articles SET category = ? WHERE id = ?`, [category, article.id]);
+      updated++;
+    }
+    if (updated > 0) {
+      console.log(`[portal-kb] Backfilled categories for ${updated} uncategorised article(s)`);
+    }
+    return updated;
   }
 
   async search(searchQuery: string, portalUserId?: number, orgId?: number): Promise<Array<{
@@ -420,6 +491,7 @@ export class PortalKbService {
   }
 
   async getCategories(): Promise<Array<{ category: string; count: number }>> {
+    await this.backfillMissingCategories();
     return query<{ category: string; count: number }>(
       `SELECT ISNULL(category, 'Uncategorised') AS category, COUNT(*) AS count
        FROM portal_kb_articles
