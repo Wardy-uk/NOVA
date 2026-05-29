@@ -13,20 +13,30 @@ import { expandSearchTerms, cleanSearchTerms, rankAndFilter } from './kb-search-
 
 // ── LLM Response Schemas ──
 
+// Optional enum that tolerates the model emitting "" (or any non-matching value) for a
+// "not applicable" field. Without this, a single empty enum (e.g. websiteSubcategory: "")
+// fails strict Zod validation and the ENTIRE valid classification is discarded — forcing
+// every such message down the degraded no-LLM fallback path. Coerce junk → undefined.
+const optionalEnum = <const T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && (values as readonly string[]).includes(v) ? v : undefined),
+    z.enum(values as unknown as [T[number], ...T[number][]]).optional(),
+  );
+
 const ConversationalIntakeSchema = z.object({
   intent: z.enum(['problem', 'change', 'question', 'status']),
   isWebsiteRelated: z.boolean(),
-  websiteSubcategory: z.enum(['website_content', 'website_broken', 'website_new_page', 'website_design']).optional(),
+  websiteSubcategory: optionalEnum(['website_content', 'website_broken', 'website_new_page', 'website_design']),
   isPropertyRelated: z.boolean().optional(),
-  propertySubcategory: z.enum([
+  propertySubcategory: optionalEnum([
     'property_missing_listing', 'property_incorrect_details', 'property_media',
     'property_feed_sync', 'property_status', 'property_visibility',
-  ]).optional(),
+  ]),
   isAccountRelated: z.boolean().optional(),
-  accountSubcategory: z.enum([
+  accountSubcategory: optionalEnum([
     'account_login', 'account_new_user', 'account_permissions',
     'account_details', 'account_office_change', 'account_remove_user',
-  ]).optional(),
+  ]),
   isEmailMarketingRelated: z.boolean().optional(),
   confidence: z.number(),
   subject: z.string().optional(),
@@ -35,7 +45,7 @@ const ConversationalIntakeSchema = z.object({
   url: z.string().optional(),
   errorMessage: z.string().optional(),
   browser: z.string().optional(),
-  urgency: z.enum(['Normal', 'High', 'Critical']).optional(),
+  urgency: optionalEnum(['Normal', 'High', 'Critical']),
   propertyAddress: z.string().optional(),
   listingId: z.string().optional(),
   affectedPortals: z.string().optional(),
@@ -58,8 +68,8 @@ const FieldExtractSchema = z.object({
   errorMessage: z.string().optional(),
   browser: z.string().optional(),
   os: z.string().optional(),
-  urgency: z.enum(['Normal', 'High', 'Critical']).optional(),
-  contactPreference: z.enum(['portal', 'email', 'phone']).optional(),
+  urgency: optionalEnum(['Normal', 'High', 'Critical']),
+  contactPreference: optionalEnum(['portal', 'email', 'phone']),
 });
 
 const ConversationalFollowUpSchema = z.object({
@@ -130,6 +140,37 @@ const TONE_SANITIZATIONS: Array<[RegExp, string]> = [
   [/\.\s*You mentioned\s*[-–—]\s*/gi, '. '],
 ];
 
+function repairTruncatedDomains(text: string, fullUrl: string | undefined | null): string {
+  if (!fullUrl) return text;
+  // Detect truncated domains like "www.co.uk", "www.com" where the SLD was stripped.
+  // These are structurally invalid (no second-level domain between www. and TLD).
+  return text.replace(/\bwww\.(?:co\.uk|com|org|net|agency|io|uk|biz|tech|info)\b/gi, (match) => {
+    // Only repair if the full URL shares the same TLD suffix
+    const tld = match.replace(/^www\./i, '');
+    if (fullUrl.toLowerCase().endsWith(tld.toLowerCase())) {
+      return fullUrl.replace(/^https?:\/\//i, '');
+    }
+    return match;
+  });
+}
+
+function stripTrailingQuestion(ack: string): string {
+  if (!ack) return ack;
+  // If the acknowledgment ends with a question (sentence ending in ?), strip it
+  // to prevent duplication when we append our own follow-up question.
+  const parts = ack.split(/(?<=\?)\s+/);
+  if (parts.length <= 1) {
+    // Single sentence: if the whole thing is a question, keep it (it IS the response)
+    return ack;
+  }
+  // Multiple sentences: strip the trailing question, keep the acknowledgment portion
+  const lastPart = parts[parts.length - 1];
+  if (lastPart.endsWith('?')) {
+    return parts.slice(0, -1).join(' ').trim();
+  }
+  return ack;
+}
+
 function sanitizeCustomerResponse(text: string, userMessage?: string): string {
   let result = text;
   for (const [pattern, replacement] of VOCABULARY_REPLACEMENTS) {
@@ -144,22 +185,54 @@ function sanitizeCustomerResponse(text: string, userMessage?: string): string {
   return result.replace(/  +/g, ' ').trim();
 }
 
+// Mask emails and URLs with placeholders so the sentence splitter and verbatim
+// matcher never break apart a URL on its internal dots (e.g. splitting
+// "www.smithandjonesproperty.co.uk" into "smithandjonesproperty." and then
+// deleting that fragment from inside the real domain → "www.co.uk").
+const ECHO_EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const ECHO_URL_RE = /\b(?:https?:\/\/|www\.)[^\s]+|\b[a-z0-9][-a-z0-9]*\.(?:co\.uk|com|org|net|agency|io|uk|biz|tech|info)(?:\/[^\s]*)?/gi;
+
+function maskSensitive(text: string, map: Map<string, string>): string {
+  let out = text.replace(ECHO_EMAIL_RE, (m) => {
+    if (!map.has(m)) map.set(m, `__TOK${map.size}__`);
+    return map.get(m)!;
+  });
+  out = out.replace(ECHO_URL_RE, (m) => {
+    if (!map.has(m)) map.set(m, `__TOK${map.size}__`);
+    return map.get(m)!;
+  });
+  return out;
+}
+
 function stripVerbatimEcho(response: string, userMessage: string): string {
   const stripped = userMessage.replace(/^(hi|hello|hey|good\s+(?:morning|afternoon|evening))[\s,.!\-]*/i, '').trim();
   if (stripped.length < 12) return response;
-  const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-  const emailMap: string[] = [];
-  const safeStripped = stripped.replace(EMAIL_RE, (m) => { emailMap.push(m); return `__EMAIL${emailMap.length - 1}__`; });
+
+  // Mask emails/URLs in BOTH texts with a shared map so a verbatim URL/email match
+  // is compared placeholder-to-placeholder and never corrupted on its internal dots.
+  const map = new Map<string, string>();
+  const safeStripped = maskSensitive(stripped, map);
+  let result = maskSensitive(response, map);
+
   const sentences = safeStripped.match(/[^.!?]+[.!?]*/g) || [safeStripped];
-  let result = response;
   for (const raw of sentences) {
-    let sentence = raw.trim();
+    const sentence = raw.trim();
     if (sentence.length < 12) continue;
-    // Preserve sentences containing email addresses — the email is valuable confirmation data
-    if (/__EMAIL\d+__/.test(sentence)) continue;
+    // Preserve sentences whose content is essentially just a masked email/URL token —
+    // confirmation data we never want to delete.
+    if (/^[\s_0-9A-Z]*$/.test(sentence.replace(/__TOK\d+__/g, ''))) continue;
     const escaped = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(escaped, 'gi');
-    result = result.replace(pattern, '');
+    // Boundary-anchored: only strip a verbatim echo when it stands as its OWN sentence
+    // (start of text, or directly after a sentence terminator). This kills genuine
+    // LLM parroting while preserving the deterministic builders' intentional
+    // "I can see {context} — ..." echo, which is mid-sentence and must not be gutted.
+    const pattern = new RegExp(`(^|[.!?]\\s*)${escaped}`, 'gi');
+    result = result.replace(pattern, '$1');
+  }
+
+  // Unmask — restore the original emails/URLs intact.
+  for (const [original, token] of map) {
+    result = result.split(token).join(original);
   }
   return result;
 }
@@ -299,21 +372,17 @@ function isPhoneLikeValue(val: string): boolean {
   return false;
 }
 
-function briefContext(meta: IntakeSessionMetadata): string {
-  const desc = meta.collectedFields.description || meta.openingMessage;
-  if (!desc) return '';
-  // Split into sentences, skip pure greetings, take the first substantive sentence
-  const sentences = desc.split(/[.!?\n]/).map(s => s.trim()).filter(Boolean);
-  const GREETING_ONLY = /^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening|day)|dear\s+(sir|madam|sirs|team|all))s?$/i;
-  const firstSubstantive = sentences.find(s => !GREETING_ONLY.test(s) && s.length > 5) || sentences[0] || '';
-  return firstSubstantive.length > 80 ? firstSubstantive.slice(0, 77) + '...' : firstSubstantive;
-}
-
 const FRUSTRATION_PATTERNS = /\b(this is (completely |absolutely |totally |utterly |just )?ridiculous|speak to (someone|a (real )?person|a human)|talk to (someone|a (real )?person|a human)|real person|not a (chat)?bot|don'?t want.*(chat)?bot|this is useless|waste of time|you'?re useless|what a joke|fed up|sick of this|absolutely terrible|disgusting service|incompetent|get me a manager|escalate this|I('m| am) (absolutely |completely |totally |utterly |so )?furious|human (please|now|agent)|actual (person|human)|nobody is (fixing|helping|doing anything|listening|responding)|no one is (fixing|helping|doing anything|listening|responding)|been (broken|waiting|like this|an issue|a problem) for (days|weeks|ages|months|a while|over a week)|how (many|long|much longer) (times?|do I|more)|still (not|hasn'?t been|hasn'?t|isn'?t) (fixed|resolved|working|sorted|done)|completely (useless|unacceptable|ridiculous|furious)|utterly (useless|unacceptable|ridiculous|furious)|beyond (frustrated|annoyed|angry)|extremely (unhappy|frustrated|disappointed|annoyed)|so frustrated|so (angry|annoyed|disappointed|unhappy)|I('ve| have) (had enough|lost patience|been waiting)|unacceptable|appalling|disgraceful|atrocious|dreadful|(wow|oh),? (great|brilliant|fantastic|wonderful|amazing|excellent) service|thanks for nothing|I('m| am) starting to (wonder|lose|think)|does anyone (actually |even )?(read|check|look at|care|respond)|wonder(ing)? if anyone (reads|listens|cares|checks|responds))\b|[!?]{4,}/i;
 
 const ATTACHMENT_PATTERNS = /\b(attached|attachment|see attached|photo attached|i'?ve attached|file attached|screenshot attached|attaching|i attach)\b/i;
 
 const ESCALATION_CHASE_PATTERNS = /\b(raised this|already (raised|reported|logged|submitted|sent|told you|contacted|emailed)|following up|chasing|chase this|chasing this up|nobody has (helped|replied|responded|got back|come back|done anything)|no one has (helped|replied|responded|got back|come back|done anything)|been waiting|still (waiting|not (fixed|resolved|sorted|done|working|heard))|I ('ve|have) (already|previously) (raised|reported|logged|submitted|sent)|originally (raised|reported|logged)|weeks? ago|days? ago|months? ago|some time ago|a while (ago|back|now)|first (raised|reported|contacted|logged)|re-?raise|re-?open|follow.?up|getting? back to (you|this|me)|still (an issue|a problem|happening|broken|not right)|hasn'?t been (fixed|resolved|sorted|addressed|looked at|dealt with)|is not (fixed|resolved|sorted|done|working)|(marked|was|been) (resolved|closed|done|fixed) but|same (issue|problem|thing) (again|is back|has come back)|happen(ed|ing|s) again|it(('s| is| has) )?(come|came|coming) back|not actually (fixed|resolved|sorted|done)|problem (is back|came back|returned))\b/i;
+
+// Genuine evidence that the customer is referencing a PRIOR report/contact (not just
+// describing a current problem). Used to gate the "you've been in touch before" claim:
+// plain present-tense reports like "the site is not working" or "it keeps happening
+// again" must NOT be mistaken for a chase on a fresh session with no ticket reference.
+const EXPLICIT_PRIOR_CONTACT_PATTERNS = /\b(raised this|already (raised|reported|logged|submitted|sent|told you|contacted|emailed)|following up|chasing|chase this|chasing this up|nobody has (helped|replied|responded|got back|come back|done anything)|no one has (helped|replied|responded|got back|come back|done anything)|been waiting|still waiting|I ('ve|have) (already|previously) (raised|reported|logged|submitted|sent)|originally (raised|reported|logged)|weeks? ago|days? ago|months? ago|some time ago|a while (ago|back)|first (raised|reported|contacted|logged)|re-?raise|re-?open|follow.?up|getting? back to (you|this|me)|hasn'?t been (fixed|resolved|sorted|addressed|looked at|dealt with)|(marked|was|been) (resolved|closed|done|fixed) but|same (issue|problem|thing) (again|is back|has come back)|not actually (fixed|resolved|sorted|done)|problem (is back|came back|returned))\b/i;
 
 const COMPLAINT_INTENT_PATTERNS = /\b(I('d| would) like to (make a |raise a |lodge a |file a )?complain(t)?|I want to (complain|make a complaint|raise a complaint|lodge a complaint|file a complaint)|formal complaint|raise a complaint|make a complaint|lodge a complaint|file a complaint|I('m| am) (making|raising|lodging|filing) a complaint|complaining about|complaint about|I need to escalate|I want to escalate|I('d| would) like to escalate|please escalate|escalate my (issue|request|case|ticket|problem|concern)|this needs escalating|needs? to be escalated|need this escalated|want this escalated|I('m| am) not (happy|satisfied)|not good enough|(really|very|so|extremely|incredibly|absolutely) (unhappy|disappointed|dissatisfied|frustrated)( with)?|very unhappy with|very disappointed with|extremely unhappy|extremely disappointed|totally unacceptable|completely unacceptable|your service (is|has been) (terrible|awful|dreadful|appalling|abysmal|shocking)|I('m| am) (really |very |so |extremely |incredibly |absolutely )?(unhappy|disappointed|dissatisfied|furious|livid) (and |& )?(need|want|demand|require)(s?| this| it)( to be)? escalat)\b/i;
 
@@ -487,9 +556,20 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
     return { likely: false, subcategory: null };
   }
 
+  // Named-page references — content amendments that name a page but include no URL
+  // (e.g. "the About Us page", "our Meet the Team page") are still website content.
+  const hasNamedPage =
+    /\b(about(\s+us)?|meet\s+the\s+team|our\s+team|the\s+team|home|landing|contact|services?|news|blog|testimonials?|reviews?|fees?|valuations?|careers?|privacy|terms|faqs?|gallery|location|sales|lettings)\s+page\b/.test(lower);
+  // Generic "<x> page" combined with content-amendment language (no URL needed)
+  const hasGenericPageEdit =
+    /\bpage\b/.test(lower) &&
+    /\b(text|wording|content|copy|paragraph|heading|title|image|photo|picture|update|updated|updating|change|changed|edit|amend|amended|replace|reword|rewrite|correct|incorrect|outdated|wrong)\b/.test(lower);
+
   // Broad website signals: explicit site words, named pages, or URLs
   const hasWebsiteSignal =
-    /\b(website|web site|webpage|web page|homepage|home page|our site|the site|landing page|our page|contact page|about page|team page|staff page|services page|property page|branch page|office page|footer|header|banner|menu|navigation|nav bar)\b/.test(lower) ||
+    /\b(website|web site|webpage|web page|homepage|home page|our site|the site|landing page|our page|contact page|contact form|enquiry form|web\s*form|about page|team page|staff page|services page|property page|branch page|office page|footer|header|banner|menu|navigation|nav bar)\b/.test(lower) ||
+    hasNamedPage ||
+    hasGenericPageEdit ||
     /https?:\/\/[^\s]+/i.test(lower) ||
     /\b\w+\.(co\.uk|com|org|net|agency)\b/.test(lower);
 
@@ -521,12 +601,34 @@ function detectWebsiteFromKeywords(content: string): { likely: boolean; subcateg
 function detectEmailMarketingFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
 
+  // Guard: login/password/access/account-setup context — BYM password resets, login issues,
+  // account access problems, and new-user/account-creation requests are account issues,
+  // not email marketing, even when BYM is named.
+  if (/\b(password|reset\s+(my|our|the|a)\s|reset\s+password|log\s*in|log\s+on|sign\s*in|locked\s+out|can'?t\s+(access|log|sign|get\s+in)|access\s+denied|forgotten\s+(my\s+)?password|password\s+(expired|wrong|incorrect|not\s+working)|account\s+(locked|disabled|suspended|setup|set\s*up|creation|created?)|unlock\s+(my|our|the)\s|two[- ]?factor|2fa|mfa|verification\s+code|new\s+user|add\s+(a\s+)?user|remove\s+(a\s+)?user|set\s*up\s+(a\s+)?(new\s+)?(user|account|access)|need\s+access|grant\s+access|give\s+access|user\s+(access|account|setup|set\s*up|creation|permissions?))\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
+  // Guard: contact form / website form context — these are website issues, not email marketing
+  if (/\b(contact\s+form|web\s*form|enquiry\s+form|form\s+(on|isn'?t|not|broken|not\s+working|stopped|error))\b/.test(lower)) {
+    return { likely: false, subcategory: null };
+  }
+
   // Guard: feed/integration/property-portal context — "email" appearing alongside
   // feed, API, integration, Street, CRM, portal keywords is NOT email marketing.
   if (/\b(feed|feeds|api|integration|street|reapit|alto|vebra|dezrez|jupix|mri|agentbox|property\s+feed|data\s+feed|xml\s+feed|rightmove|zoopla|onthemarket|primelocation|crm\s+sync|webhook|zapier|portal\s+feed)\b/.test(lower)) {
     // Only bail if there's no *specific* email-marketing compound term
     const hasCompoundEmailTerm = /\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|campaign\s+(stat|report|result)|click\s+track|open\s+rate|bounce\s+rate|test\s+send|scheduled\s+report|bym|briefyourmarket|brief\s+your\s+market|mailing\s+list|subscriber)\b/.test(lower);
     if (!hasCompoundEmailTerm) return { likely: false, subcategory: null };
+  }
+
+  // Guard: integration / data-flow frame — CRM/API/sync/connector requests that move
+  // leads/contacts/records/data are integration work, not email marketing, even when BYM
+  // is named as the destination. This catches the over-capture path where "BYM" satisfies
+  // the compound-term escape above. detectDataFeedsFromKeywords owns these (runs first).
+  const hasIntegrationFrame = /\b(api|integration|integrate|webhook|connector|crm\s+sync|data\s+sync|sync(ing|ed)?\s+(our|the|my|all|data|leads?|contacts?|records?|properties|listings?)|reapit|alto|vebra|dezrez|jupix|mri|agentbox|street\.co)\b/.test(lower);
+  const hasDataFlowFrame = /\b(leads?|database|contacts?|records?|data\s+(flow|feed|sync|transfer|push|pull|import|export)|flow(ing)?\s+(in(to)?|from|through)|feed(ing)?\s+(in(to)?|through))\b/.test(lower);
+  if (hasIntegrationFrame && hasDataFlowFrame) {
+    return { likely: false, subcategory: null };
   }
 
   // Guard: website-context "email" — "email address on the website/page/contact page"
@@ -568,7 +670,8 @@ function detectEmailMarketingFromKeywords(content: string): { likely: boolean; s
   }
 
   // BYM campaign URLs, BYM instances, BYM platform → email_campaign
-  if (/\b(bym|briefyourmarket|brief\s+your\s+market)\b/.test(lower) && /\b(campaign|url|link|instance|email|send|report|login|access)\b/.test(lower)) {
+  // Note: login/access deliberately excluded — those are account issues caught by the guard above
+  if (/\b(bym|briefyourmarket|brief\s+your\s+market)\b/.test(lower) && /\b(campaign|url|link|instance|email|send|report)\b/.test(lower)) {
     return { likely: true, subcategory: 'email_campaign' };
   }
 
@@ -607,15 +710,24 @@ function detectLettersFromKeywords(content: string): { likely: boolean; subcateg
 function detectDataFeedsFromKeywords(content: string): { likely: boolean; subcategory: string | null } {
   const lower = content.toLowerCase();
 
-  // Negative guard: if this is clearly about email marketing platform, bail
-  if (/\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|bym|briefyourmarket|mailing\s+list|subscriber|unsubscribe|click\s+track|open\s+rate|bounce\s+rate|test\s+send)\b/.test(lower)) {
-    return { likely: false, subcategory: null };
-  }
-
   // Property feed / portal feed signals — when paired with technical/sync language
   // rather than "listing missing on Rightmove" (which is property_missing_listing)
   const hasFeedSignal = /\b(feed|feeds|data\s+feed|xml\s+feed|property\s+feed|portal\s+feed|feed\s+(error|issue|problem|broken|down|not\s+working|stopped|failing|failed))\b/.test(lower);
-  const hasIntegrationSignal = /\b(integration|api|webhook|zapier|reapit|alto|vebra|dezrez|jupix|mri|agentbox|street|street\.co|acquaint|sme\s+professional|expert\s+agent|gnomen|rex|propertypal|domus|letmc|fixflo|property\s+hive|property\s+deck|briefyourmarket\s+api|crm\s+sync|third[- ]party|connector|data\s+sync|sync\s+issue|sync\s+error|sync\s+not\s+working|sync\s+stopped|sync\s+failed|not\s+syncing)\b/.test(lower);
+  const hasIntegrationSignal = /\b(integration|integrate|api|webhook|zapier|reapit|alto|vebra|dezrez|jupix|mri|agentbox|street|street\.co|acquaint|sme\s+professional|expert\s+agent|gnomen|rex|propertypal|domus|letmc|fixflo|property\s+hive|property\s+deck|briefyourmarket\s+api|crm\s+sync|third[- ]party|connector|data\s+sync|sync\s+issue|sync\s+error|sync\s+not\s+working|sync\s+stopped|sync\s+failed|not\s+syncing)\b/.test(lower);
+
+  // Data-flow framing — moving leads/contacts/records/data between systems. This marks a
+  // request as integration work even when a downstream platform (e.g. BYM) is named.
+  const hasDataFlowTerms = /\b(leads?|database|contacts?|records?|data\s+(flow|feed|sync|transfer|push|pull|import|export)|flow(ing)?\s+(in(to)?|to|from|through)|push(ing)?\s+(to|into)|pull(ing)?\s+(from|in)|feed(ing)?\s+(in(to)?|through))\b/.test(lower);
+  const integrationFramed = (hasIntegrationSignal || hasFeedSignal) && (hasIntegrationSignal || hasDataFlowTerms);
+
+  // Negative guard: bail to email marketing ONLY when there's a clear campaign / editor /
+  // template signal AND the request is NOT framed as integration/data flow. A CRM/API/leads/
+  // database sync that names BYM as the destination is data flow, not a campaign send — it
+  // stays on the data-feeds path.
+  const hasCampaignSignal = /\b(email\s+(campaign|template|editor|footer|carousel|marketing|newsletter|blast|send)|campaign\s+(stat|report|result|editor|send)|mailing\s+list|subscriber|unsubscribe|click\s+track|open\s+rate|bounce\s+rate|test\s+send)\b/.test(lower);
+  if ((hasCampaignSignal || /\b(bym|briefyourmarket|brief\s+your\s+market)\b/.test(lower)) && !integrationFramed) {
+    return { likely: false, subcategory: null };
+  }
   const hasReportingSignal = /\b(report|reporting|analytics|dashboard|data\s+export|export\s+data|data\s+not\s+showing|data\s+missing|data\s+incorrect|data\s+wrong)\b/.test(lower) &&
     /\b(feed|api|integration|portal|sync|third[- ]party)\b/.test(lower);
 
@@ -654,7 +766,30 @@ function detectPropertyFromKeywords(content: string): { likely: boolean; subcate
   // rather than real-estate listing visibility intent, defer to website routing.
   const hasExplicitWebsiteContext = /\b(website|web site|our site|my site|the site|homepage|home page|web page|webpage)\b/.test(lower);
   const hasPortalListingSignal = /\b(rightmove|zoopla|onthemarket|on the market|primelocation|prime location|listing|listings|feed|feeds|syndication)\b/.test(lower);
-  const hasPropertyVisibilityLanguage = /\b(missing|not showing|not appearing|disappeared|removed|can.?t (see|find)|not (visible|there|listed)|hidden|visibility)\b/.test(lower);
+
+  // Property-count / propagation mismatch — "50 properties in the CRM but only 30 on the
+  // website", "the number of properties doesn't match". This is a property visibility /
+  // propagation issue, not a generic website-content amendment.
+  const hasCountMismatchLanguage =
+    /\b\d+\b[^.]*\bbut\s+only\b[^.]*\b\d+\b/.test(lower) ||
+    /\bonly\s+\d+\b[^.]*\b(showing|appearing|displaying|live|visible|on\s+(the\s+|our\s+)?(website|site|portal|rightmove|zoopla))\b/.test(lower) ||
+    /\b\d+\s+(propert(y|ies)|listings?)\b[^.]*\b\d+\b/.test(lower) ||
+    /\b(propert(y|ies)|listings?)\s*(count|number|total)\b/.test(lower) ||
+    /\b(count|number)\s+of\s+(propert(y|ies)|listings?)\b/.test(lower) ||
+    (/\b(don.?t|doesn.?t|do\s+not|does\s+not)\s+match\b/.test(lower) && /\b(propert(y|ies)|listings?|crm|website|portal|feed)\b/.test(lower));
+
+  // Property status wording — sold/under-offer/available mismatches. Kept distinct so
+  // "sold still showing as available" / "available still marked sold" route consistently.
+  const hasStatusLanguage =
+    /\b(sold|under offer|stc|sstc|let agreed|sale agreed|withdrawn|off\s*market|reserved)\b/.test(lower) ||
+    (/\b(available|for sale|to let|to rent|on the market)\b/.test(lower) &&
+      /\b(still|showing|shows?|marked|listed|incorrectly|wrong|incorrect|but|even though|despite|says?|should\s+be)\b/.test(lower)) ||
+    /\b(wrong|incorrect|outdated|old|not\s+(right|correct|updated))\s+status\b/.test(lower) ||
+    /\bstatus\s+(is\s+)?(wrong|incorrect|outdated|not\s+(right|correct|updated|updating))\b/.test(lower);
+
+  const hasPropertyVisibilityLanguage =
+    /\b(missing|not showing|not appearing|disappeared|removed|can.?t (see|find)|not (visible|there|listed)|hidden|visibility|wrong|incorrect|outdated|status|mismatch|count|not (right|correct|updating))\b/.test(lower) ||
+    hasCountMismatchLanguage || hasStatusLanguage;
   if (hasExplicitWebsiteContext && !hasPortalListingSignal && !hasPropertyVisibilityLanguage && /\bpropert(y|ies)\b/.test(lower)) {
     return { likely: false, subcategory: null };
   }
@@ -679,6 +814,15 @@ function detectPropertyFromKeywords(content: string): { likely: boolean; subcate
       return { likely: true, subcategory: 'property_media' };
     }
     return { likely: true, subcategory: 'property_missing_listing' };
+  }
+  // Status wording — checked before generic "incorrect details" so sold/available
+  // mismatches route consistently to property_status regardless of phrasing.
+  if (hasStatusLanguage) {
+    return { likely: true, subcategory: 'property_status' };
+  }
+  // Count / propagation mismatch — visibility issue across CRM/website/portals.
+  if (hasCountMismatchLanguage) {
+    return { likely: true, subcategory: 'property_visibility' };
   }
   if (/\b(wrong|incorrect|outdated|old|inaccurate|needs (updating|changing)|price|description|address|details)\b/.test(lower)) {
     return { likely: true, subcategory: 'property_incorrect_details' };
@@ -1732,6 +1876,12 @@ Analyse the message and return structured JSON:
 
 9. NEXT QUESTION — if you need more information to action this, write ONE natural follow-up question. Only ask for what's genuinely missing. If they've given enough detail, omit this field entirely. Never ask the customer to diagnose the technical cause or identify which system is at fault. Never ask "which system" or "which platform".
    ANTI-GENERIC RULE: Do NOT ask "could you tell me a bit more about what's happening?" or "is something not displaying correctly, or do you need some content updated?" when the customer has already described the specific problem. If they said "the phone number on our contact page is wrong", the next question should be operationally specific (e.g. "What should the correct number be?"), not a generic clarification. Only use generic questions when the opening message is genuinely vague (e.g. "I need help with my website").
+   ANTI-REDUNDANCY RULE: If the customer already named their website, account, URL, company, portal, or CRM system in their message, do NOT ask them to confirm which website/account/system this is for. Only ask for a field that is genuinely missing and materially needed to action the request.
+   DOMAIN-SPECIFIC NEXT QUESTION GUIDANCE:
+   - PROPERTY/LISTING: If they described a property issue (missing, wrong status, not showing), ask the most operationally useful next question: which property (address or ref), which portals are affected, or what the correct details should be. Do NOT ask broad website/display questions when the domain is clearly property/listing.
+   - FEED/INTEGRATION: If they described a feed, CRM, API, or integration issue, ask about the specific behaviour (what's not syncing, when it started, which properties or records are affected). Do NOT drift into generic property or website framing.
+   - WEBSITE: If they already named the page or URL, ask what specifically needs changing or what's wrong — don't ask which page.
+   - ACCOUNT: If they already named the person or described the access issue, ask for the missing operational detail (email, error message, what they see) — don't ask them to re-describe the problem.
 
 10. MULTI-ISSUE HANDLING — if the customer describes more than one issue (e.g. "I'm locked out AND the new users aren't set up"), capture ALL issues in the description field as separate items. The acknowledgement must reference every issue they raised. Do not collapse multiple issues into a single category.
 
@@ -1758,6 +1908,17 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         }
       }
       if (d.url && !meta.collectedFields.url) meta.collectedFields.url = d.url;
+      // Repair truncated domains in LLM-generated text (e.g. "www.co.uk" → full domain)
+      if (meta.collectedFields.url) {
+        if (d.acknowledgment) d.acknowledgment = repairTruncatedDomains(d.acknowledgment, meta.collectedFields.url);
+        if (d.nextQuestion) d.nextQuestion = repairTruncatedDomains(d.nextQuestion, meta.collectedFields.url);
+      }
+      // Prevent duplicated questions: if the LLM embedded a question in the acknowledgment
+      // AND also returned a separate nextQuestion, strip the trailing question from the ack
+      // so the response doesn't contain two questions.
+      if (d.acknowledgment && d.nextQuestion && d.acknowledgment.includes('?')) {
+        d.acknowledgment = stripTrailingQuestion(d.acknowledgment);
+      }
       if (d.errorMessage) meta.collectedFields.errorMessage = d.errorMessage;
       if (d.browser) meta.collectedFields.browser = d.browser;
       if (d.urgency) meta.collectedFields.urgency = d.urgency;
@@ -1916,6 +2077,21 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         }
       }
 
+      // Property precedence gate — if deterministic property detection fires, reroute
+      // to property handling even when the LLM said isWebsiteRelated. Property is more
+      // specific than website and the LLM frequently conflates "property on website" with "website".
+      if (d.isWebsiteRelated && d.confidence >= 0.4) {
+        const propertyGuard = detectPropertyFromKeywords(content);
+        if (propertyGuard.likely) {
+          d.isWebsiteRelated = false;
+          d.isPropertyRelated = true;
+          if (propertyGuard.subcategory && !d.propertySubcategory) {
+            (d as any).propertySubcategory = propertyGuard.subcategory;
+          }
+          if (d.confidence < 0.6) d.confidence = 0.6;
+        }
+      }
+
       // Website conversational intake — the core behavioural change
       if (d.isWebsiteRelated && d.confidence >= 0.6) {
         meta.category = 'website';
@@ -2033,7 +2209,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           const question = d.nextQuestion || this.buildPropertyFollowUp(missing[0], meta);
           return { response: `${ack}\n\n${question}${fileNote}` };
         }
-        return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?${fileNote}` };
+        const propFbMissing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+        const propFbQ = propFbMissing.length > 0 ? this.buildPropertyFollowUp(propFbMissing[0], meta) : 'Could you tell me which property is affected and what you\'re seeing?';
+        return { response: `${ack}\n\n${propFbQ}${fileNote}` };
       }
 
       // Moderate confidence (0.4–0.6) for property — try deterministic subcategory
@@ -2055,7 +2233,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           const question = d.nextQuestion || this.buildPropertyFollowUp(missing[0], meta);
           return { response: `${ack}\n\n${question}${fileNote}` };
         }
-        return { response: `${ack}\n\nCould you tell me a bit more about what's happening with the property?${fileNote}` };
+        const propMissing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+        const propQ = propMissing.length > 0 ? this.buildPropertyFollowUp(propMissing[0], meta) : 'Could you tell me which property is affected and what you\'re seeing?';
+        return { response: `${ack}\n\n${propQ}${fileNote}` };
       }
 
       // Account / access / office change conversational intake
@@ -2118,7 +2298,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.stage = 'detail';
         meta.subcategory = 'account_login';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+        const acctNoSubMissing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
+        const acctNoSubQ = acctNoSubMissing.length > 0
+          ? this.buildAccountFollowUp(acctNoSubMissing[0], meta)
+          : "Could you tell me a bit more about what's happening?";
+        return { response: `${ack}\n\n${acctNoSubQ}` };
       }
 
       // Moderate confidence (0.4–0.6) for account — ask conversationally
@@ -2129,7 +2313,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.stage = 'detail';
         extractAccountFieldsFromText(content, meta.collectedFields);
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me a bit more about what you need?` };
+        const modAcctMissing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
+        const modAcctQ = modAcctMissing.length > 0
+          ? this.buildAccountFollowUp(modAcctMissing[0], meta)
+          : "Could you tell me a bit more about what you need?";
+        return { response: `${ack}\n\n${modAcctQ}` };
       }
 
       // Data feeds / integration detection — must run before email marketing to prevent
@@ -2150,11 +2338,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
             return { response: `${ack}\n\n${summaryResult.response}`, messageMeta: summaryResult.messageMeta };
           }
           const ack = d.acknowledgment || "Thanks — I'll get this raised with our technical team.";
-          const question = d.nextQuestion || this.buildConversationalQuestion(missing[0], meta);
+          const question = d.nextQuestion || this.buildFeedFollowUp(missing[0], meta);
           return { response: `${ack}\n\n${question}` };
         }
         const ack = d.acknowledgment || "Thanks — I'll get this raised with our technical team.";
-        const question = d.nextQuestion || 'Which account is this for?';
+        const question = d.nextQuestion || this.buildFeedFollowUp('description', meta);
         return { response: `${ack}\n\n${question}` };
       }
 
@@ -2284,14 +2472,19 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
       // should trigger conversational follow-up, never the category picker.
       // Checked BEFORE vague domain signals so follow-up language isn't swallowed
       // by coincidental domain keywords in the complaint.
-      if (ESCALATION_CHASE_PATTERNS.test(content)) {
+      // Evidence gate: only treat as a chase when there is a ticket reference OR
+      // explicit prior-contact language. A plain present-tense report on a fresh
+      // session ("the site is not working", "it keeps happening again") must fall
+      // through to normal routing rather than falsely claim "you've been in touch before".
+      const chaseRefMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+      if (ESCALATION_CHASE_PATTERNS.test(content) && (chaseRefMatch || EXPLICIT_PRIOR_CONTACT_PATTERNS.test(content))) {
         meta.conversational = true;
         meta.stage = 'detail';
         meta.escalationDetected = true;
         meta.category = 'followup';
         meta.subcategory = 'followup_not_resolved';
 
-        const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+        const refMatch = chaseRefMatch;
         if (refMatch) {
           const refKey = refMatch[0].toUpperCase();
           meta.followUpTicketKey = refKey;
@@ -2358,7 +2551,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
           return { response: `Understood — I'll get this raised urgently. Could you confirm their name and email address so I can get this raised?` };
         }
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me a bit more about what's happening?` };
+        const vagueAcctMissing = this.getAccountMissingFields(meta.collectedFields, meta.subcategory);
+        const vagueAcctQ = vagueAcctMissing.length > 0
+          ? this.buildAccountFollowUp(vagueAcctMissing[0], meta)
+          : "Could you tell me a bit more about what's happening?";
+        return { response: `${ack}\n\n${vagueAcctQ}` };
       }
 
       if (vagueDataFeedsSignal.likely) {
@@ -2367,7 +2564,10 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.subcategory = vagueDataFeedsSignal.subcategory || 'feeds_integration';
         meta.stage = 'detail';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nWhich account is this for?` };
+        const feedQ = meta.collectedFields.account
+          ? this.buildFeedFollowUp('description', meta)
+          : this.buildFeedFollowUp(meta.collectedFields.description ? 'account' : 'description', meta);
+        return { response: `${ack}\n\n${feedQ}` };
       }
 
       if (vagueWebsiteSignal.likely) {
@@ -2376,7 +2576,19 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.subcategory = vagueWebsiteSignal.subcategory || 'website_content';
         meta.stage = 'detail';
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me a bit more — is something not displaying correctly, or do you need some content updated?` };
+        if (vagueWebsiteSignal.subcategory) {
+          const config = CATEGORY_FIELD_CONFIG[meta.subcategory] || CATEGORY_FIELD_CONFIG['other_general']!;
+          const vagueWebMissing = this.getMissingFields(meta.collectedFields, config);
+          if (vagueWebMissing.length > 0) {
+            const vagueWebQ = this.buildConversationalQuestion(vagueWebMissing[0], meta);
+            return { response: `${ack}\n\n${vagueWebQ}` };
+          }
+        }
+        const hasUrl = !!meta.collectedFields.url;
+        const webFallbackQ = hasUrl
+          ? 'Could you describe what needs to happen on this page?'
+          : 'Could you tell me a bit more — is something not displaying correctly, or do you need some content updated?';
+        return { response: `${ack}\n\n${webFallbackQ}` };
       }
 
       if (vaguePropertySignal.likely) {
@@ -2386,7 +2598,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
         meta.stage = 'detail';
         extractPropertyFieldsFromText(content, meta.collectedFields);
         const ack = d.acknowledgment || "Thanks for getting in touch.";
-        return { response: `${ack}\n\nCould you tell me which property is affected and where you're seeing the issue?` };
+        const vaguePropMissing = this.getPropertyMissingFields(meta.collectedFields, meta.subcategory);
+        const vaguePropQ = vaguePropMissing.length > 0 ? this.buildPropertyFollowUp(vaguePropMissing[0], meta) : 'Could you tell me which property is affected and what you\'re seeing?';
+        return { response: `${ack}\n\n${vaguePropQ}` };
       }
 
       // Email marketing — checked AFTER website/property so non-email issues
@@ -2441,14 +2655,18 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
     // F5: Escalation/chase detection — checked first so follow-up language
     // isn't swallowed by coincidental domain keywords.
-    if (ESCALATION_CHASE_PATTERNS.test(content)) {
+    // Evidence gate (mirrors the LLM path): only a ticket reference or explicit
+    // prior-contact language qualifies. Plain present-tense reports on a fresh
+    // session must never falsely claim "you've been in touch before".
+    const chaseRefMatchNoLlm = content.match(/\b(NT|NTPJ)-\d+\b/i);
+    if (ESCALATION_CHASE_PATTERNS.test(content) && (chaseRefMatchNoLlm || EXPLICIT_PRIOR_CONTACT_PATTERNS.test(content))) {
       meta.conversational = true;
       meta.stage = 'detail';
       meta.escalationDetected = true;
       meta.category = 'followup';
       meta.subcategory = 'followup_not_resolved';
 
-      const refMatch = content.match(/\b(NT|NTPJ)-\d+\b/i);
+      const refMatch = chaseRefMatchNoLlm;
       if (refMatch) {
         meta.followUpTicketKey = refMatch[0].toUpperCase();
         return { response: `I can see you're following up on **${meta.followUpTicketKey}** — sorry it's not been resolved yet.\n\nI'll raise a follow-up linked to that ticket. Could you let me know what still needs attention?` };
@@ -2644,7 +2862,9 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
     meta.subcategory = 'property_visibility';
     const propAck = this.buildTemplateAcknowledgement(meta);
     const fileNote = meta.attachmentMentioned ? "\n\nYou'll be able to upload files when we get to the summary step." : '';
-    return { response: `${propAck} Could you tell me which property is affected and where you're seeing the issue?${fileNote}` };
+    const visMissing = this.getPropertyMissingFields(meta.collectedFields, 'property_visibility');
+    const visQ = visMissing.length > 0 ? this.buildPropertyFollowUp(visMissing[0], meta) : 'Could you tell me which property is affected and what you\'re seeing?';
+    return { response: `${propAck} ${visQ}${fileNote}` };
   }
 
   private async handleAccountFallback(
@@ -2698,7 +2918,11 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
 
     meta.subcategory = 'account_login';
     const ack = this.buildAccountAcknowledgement(meta);
-    return { response: `${ack} Could you tell me a bit more about what's happening?` };
+    const acctFbMissing = this.getAccountMissingFields(meta.collectedFields, 'account_login');
+    const acctFbQ = acctFbMissing.length > 0
+      ? this.buildAccountFollowUp(acctFbMissing[0], meta)
+      : "Could you tell me a bit more about what's happening?";
+    return { response: `${ack} ${acctFbQ}` };
   }
 
   // ── Status Intent ──
@@ -3600,6 +3824,26 @@ Return JSON with only the fields present in the message.`,
       }
     }
 
+    // Safety net: subject must never be blank when user input exists
+    if (!meta.collectedFields.subject || meta.collectedFields.subject.replace(/\[Portal\]\s*/i, '').trim().length === 0) {
+      const fallbackSource = meta.openingMessage || meta.collectedFields.description || '';
+      const fallbackClean = stripGreeting(fallbackSource).slice(0, 100).trim();
+      const catName = CATEGORY_NAMES[meta.category || ''] || 'Support';
+      const subName = SUBCATEGORY_NAMES[meta.subcategory || ''];
+      if (fallbackClean) {
+        meta.collectedFields.subject = subName
+          ? `[Portal] ${subName} — ${fallbackClean}`.slice(0, 250)
+          : `[Portal] ${catName} — ${fallbackClean}`.slice(0, 250);
+      } else {
+        meta.collectedFields.subject = `[Portal] ${subName || catName} request`;
+      }
+    }
+
+    // Safety net: description must never be blank when opening message exists
+    if (!meta.collectedFields.description && meta.openingMessage) {
+      meta.collectedFields.description = meta.openingMessage;
+    }
+
     const f = meta.collectedFields;
     const messageMeta: ChatMessageMetadata = {
       type: 'summary_card',
@@ -3675,8 +3919,10 @@ Return JSON with only the fields present in the message.`,
       ? '\n\nYou mentioned an attachment — you\'ll be able to upload files before submitting.'
       : '';
 
+    const summaryText = `Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n${lines.join('\n')}${attachmentNote}`;
+
     return {
-      response: `Here's a summary of your request. Please review and confirm, or let me know if anything needs changing.\n\n${lines.join('\n')}${attachmentNote}`,
+      response: repairTruncatedDomains(summaryText, f.url),
       messageMeta,
     };
   }
@@ -3724,10 +3970,10 @@ ${contextParts.join('\n')}`,
       );
 
       if (result.data.subject && result.data.subject.length > 5) {
-        meta.synthesizedSubject = result.data.subject;
+        meta.synthesizedSubject = repairTruncatedDomains(result.data.subject, meta.collectedFields.url);
       }
       if (result.data.description && result.data.description.length > 10) {
-        meta.synthesizedDescription = result.data.description;
+        meta.synthesizedDescription = repairTruncatedDomains(result.data.description, meta.collectedFields.url);
       }
       meta.synthesisDone = true;
     } catch (err) {
@@ -3994,13 +4240,9 @@ ${contextParts.join('\n')}`,
   }
 
   private buildPropertyFollowUp(field: string, meta: IntakeSessionMetadata): string {
-    const ctx = briefContext(meta);
-
-    const withContext = (question: string): string => {
-      if (!ctx || ctx.length < 8 || /^(hi|hello|hey|good\s)/i.test(ctx)) return question;
-      const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
-      return `I can see ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
-    };
+    // The acknowledgement already reflects the customer's words back; the follow-up
+    // question must not re-echo them (that produced duplicated fragments). Ask cleanly.
+    const withContext = (question: string): string => question;
 
     switch (field) {
       case 'description':
@@ -4035,13 +4277,9 @@ ${contextParts.join('\n')}`,
   }
 
   private buildAccountFollowUp(field: string, meta: IntakeSessionMetadata): string {
-    const ctx = briefContext(meta);
-
-    const withContext = (question: string): string => {
-      if (!ctx || ctx.length < 8 || /^(hi|hello|hey|good\s)/i.test(ctx)) return question;
-      const lc = ctx.toLowerCase().startsWith('i ') ? ctx : ctx.charAt(0).toLowerCase() + ctx.slice(1);
-      return `I can see ${lc} — ${question.charAt(0).toLowerCase() + question.slice(1)}`;
-    };
+    // The acknowledgement already reflects the customer's words back; the follow-up
+    // question must not re-echo them (that produced duplicated fragments). Ask cleanly.
+    const withContext = (question: string): string => question;
 
     switch (field) {
       case 'description':
@@ -4078,25 +4316,23 @@ ${contextParts.join('\n')}`,
     if (f.affectedPersonName) parts.push(f.affectedPersonName);
     if (f.officeBranch) parts.push(`the ${f.officeBranch} office`);
 
-    const context = briefContext(meta);
-    const ctxUsable = context && context.length >= 8 && !/^(hi|hello|hey|good\s)/i.test(context);
-
-    if (parts.length > 0 && ctxUsable) {
-      return `Thanks for letting us know about ${parts.join(' and ')} — I can see ${context.toLowerCase().startsWith('i ') ? context : context.charAt(0).toLowerCase() + context.slice(1)}.`;
-    }
+    // Do NOT append the customer's verbatim words ("— I need to set up a new user...")
+    // here: it reads as an awkward first-person echo, duplicates the follow-up question,
+    // and the anti-echo sanitiser would otherwise gut it into a broken fragment. The
+    // acknowledgement stands on its own; the follow-up question carries the specifics.
     if (parts.length > 0) {
       return `Thanks for letting us know about ${parts.join(' and ')}.`;
     }
     if (meta.subcategory === 'account_login') {
-      return ctxUsable ? `Sorry to hear you're having trouble getting in — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Sorry to hear you're having trouble getting in.";
+      return "Sorry to hear you're having trouble getting in.";
     }
     if (meta.subcategory === 'account_new_user') {
-      return ctxUsable ? `I'll help you get that set up — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you get that new user set up.";
+      return "I'll help you get that new user set up.";
     }
     if (meta.subcategory === 'account_office_change') {
-      return ctxUsable ? `I'll help you with that — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "I'll help you with that office change.";
+      return "I'll help you with that office change.";
     }
-    return ctxUsable ? `Thanks for getting in touch — ${context.charAt(0).toLowerCase() + context.slice(1)}.` : "Thanks for getting in touch.";
+    return "Thanks for getting in touch.";
   }
 
   private async buildAccountConversationalFollowUp(
@@ -4150,8 +4386,26 @@ Rules:
     return this.buildAccountFollowUp(field, meta);
   }
 
+  private buildFeedFollowUp(field: string, meta: IntakeSessionMetadata): string {
+    // The acknowledgement already reflects the customer's words back; the follow-up
+    // question must not re-echo them (that produced duplicated fragments). Ask cleanly.
+    const withContext = (question: string): string => question;
+
+    switch (field) {
+      case 'description':
+        if (meta.subcategory === 'feeds_property') return "Could you describe what's not coming through — is it specific properties, all listings, or certain details like prices or photos?";
+        if (meta.subcategory === 'feeds_reporting') return "Which report or dashboard is affected, and what's not showing correctly?";
+        return "Could you describe what's happening — what's not syncing or updating, and when did you first notice it?";
+      case 'account':
+        return withContext('Which account or branch is this for?');
+      default:
+        return withContext('Could you share a few more details about what you\'re seeing?');
+    }
+  }
+
   private buildConversationalQuestion(field: string, meta: IntakeSessionMetadata): string {
     const isAccountOrBilling = meta.category === 'account' || meta.category === 'billing';
+    const isFeed = meta.category === 'data_feeds';
     switch (field) {
       case 'description':
         if (meta.subcategory === 'website_content') return 'Could you tell me what needs changing and where on the page?';
@@ -4159,10 +4413,12 @@ Rules:
         if (meta.subcategory === 'website_new_page') return 'Could you describe what the new page should contain and where it should sit in the navigation?';
         if (meta.subcategory === 'website_design') return 'Could you describe the design changes you have in mind?';
         if (meta.category === 'complaint') return "Could you tell me what happened and what outcome you're looking for?";
+        if (isFeed) return this.buildFeedFollowUp('description', meta);
         if (isAccountOrBilling) return 'Could you describe what you need in a bit more detail?';
         return 'Could you describe what you need in a bit more detail?';
       case 'account':
         if (isAccountOrBilling) return 'Which account or company is this for?';
+        if (isFeed) return 'Which account or branch is this for?';
         return 'Which account or website is this for?';
       case 'url':
         if (isAccountOrBilling) return 'Could you share a few more details about what needs to happen?';
