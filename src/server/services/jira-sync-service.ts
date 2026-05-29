@@ -19,7 +19,7 @@ function normalisePriorityName(raw: string | null): string | null {
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
-  'resolution', 'labels', 'issuelinks', 'attachment',
+  'resolution', 'resolutiondate', 'labels', 'issuelinks', 'attachment',
   'customfield_10010', // SLA (legacy — not returned by API)
   'customfield_10020', // JSM customer request type (legacy — not used for CC bucketing)
   'customfield_12800', // Request type fallback
@@ -41,6 +41,7 @@ const ALL_FIELDS = [
   'customfield_14527', // Problem ticket field
   'customfield_14626', // BC Account Number
   'customfield_12802', // Customer Satisfaction (CSAT rating)
+  'customfield_11706', // Story Points (NTPJ bespoke metric) — captured into fields_json; see clean-sheet KPI design
 ];
 
 export class JiraSyncService {
