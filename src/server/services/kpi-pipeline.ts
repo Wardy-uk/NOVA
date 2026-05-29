@@ -43,6 +43,35 @@ function computeRag(value: number, target: number, direction: string): number {
   return 3;
 }
 
+/** Whole business days (Mon–Fri) elapsed between two instants, ignoring weekends. */
+function businessDaysBetween(from: Date, to: Date): number {
+  if (!(from instanceof Date) || isNaN(from.getTime())) return 0;
+  const cur = new Date(from);
+  cur.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+  let days = 0;
+  while (cur < end) {
+    cur.setUTCDate(cur.getUTCDate() + 1);
+    const dow = cur.getUTCDay();
+    if (dow !== 0 && dow !== 6) days++;
+  }
+  return days;
+}
+
+/** Parse a settings value that may be a JSON array or comma-separated string into a trimmed list. */
+function parseListSetting(raw: string | undefined): string[] | null {
+  if (!raw || !raw.trim()) return null;
+  const t = raw.trim();
+  if (t.startsWith('[')) {
+    try {
+      const arr = JSON.parse(t);
+      if (Array.isArray(arr)) return arr.map(String).map((s) => s.trim()).filter(Boolean);
+    } catch { /* fall through to CSV parsing */ }
+  }
+  return t.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 // ── KPI Helper Functions ──
 
 interface CacheRow {
@@ -998,6 +1027,24 @@ export class KpiPipeline {
       const todayStr = todayDate.toISOString().slice(0, 10);
       const SLA_EXCLUDED = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
 
+      // "Not Updated" counts open tickets the agent can actually ACTION that have had no
+      // activity for >= staleBusinessDays business days. Tickets parked outside the agent's
+      // control (waiting on the customer/dev/partner, scheduled, awaiting deployment, etc.)
+      // are excluded — the agent is not neglecting them. Both the parked-status list and the
+      // staleness window are settings-overridable; the defaults below apply out of the box.
+      const PARKED_STATUSES_DEFAULT = [
+        'waiting on development', 'waiting for development', 'waiting on dev',
+        'waiting on requestor', 'waiting for requestor', 'waiting for customer',
+        'waiting on customer', 'waiting on partner', 'waiting on 3rd party',
+        'waiting on third party', 'waiting for vendor', 'awaiting deployment',
+        'scheduled', 'on hold', 'pending',
+      ];
+      const parkedStatuses = new Set(
+        (parseListSetting(this.settings.get('breach_parked_statuses')) ?? PARKED_STATUSES_DEFAULT)
+          .map((s) => s.toLowerCase()),
+      );
+      const staleBusinessDays = Number(this.settings.get('breach_stale_business_days')) || 2;
+
       for (const ticket of openTickets) {
         let agg = agentMap.get(ticket.assignee_account_id);
         if (!agg) {
@@ -1027,10 +1074,11 @@ export class KpiPipeline {
           }
         }
 
-        // No update today
-        if (ticket.jira_updated) {
-          const updatedDate = new Date(ticket.jira_updated as any).toISOString().slice(0, 10);
-          if (updatedDate < todayStr) {
+        // Not Updated: agent-actionable ticket with no activity for >= staleBusinessDays
+        // business days. Parked statuses (waiting on customer/dev/partner, scheduled,
+        // awaiting deployment, etc.) are not the agent's to action and are excluded.
+        if (ticket.jira_updated && !parkedStatuses.has(statusLower)) {
+          if (businessDaysBetween(new Date(ticket.jira_updated as any), now) >= staleBusinessDays) {
             agg.OpenTickets_NoUpdateToday++;
           }
         }
