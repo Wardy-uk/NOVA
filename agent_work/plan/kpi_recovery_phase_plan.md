@@ -116,3 +116,55 @@ This slice should not absorb:
 - `P2-WP1-ITER1` claims to have fixed trigger semantics, not the freeze logic itself.
 - Re-evaluation should verify that forced capture now drives the real freeze path and lands observable rows in the frozen tables.
 - Re-evaluation should explicitly test idempotent recapture using the forced path.
+
+## Next Delivery Slice
+
+`P2-RP1` is the next governed slice.
+
+It should protect, not expand, the now-converged Phase 2 behaviour:
+
+- forced capture writes `kpi_daily`
+- forced capture writes `kpi_agent_daily`
+- forced capture writes `kpi_eod_snapshot`
+- `daily-report/:date` reflects frozen outputs
+- repeated capture remains idempotent
+- gated scheduler does not inflate forced rows
+- legacy KPI behaviour remains untouched
+
+## Current Regression Evaluation Posture
+
+- `P2-RP1` is ready for independent regression evaluation.
+- Evaluation should validate only the protected Phase 2 invariants:
+  - forced capture frozen writes
+  - daily-report fidelity to frozen outputs
+  - idempotent repeated capture
+  - gated scheduler non-inflation
+  - legacy non-regression
+- The sentinel-date harness is an implementation choice; the evaluator should judge only the observable protected behaviour and restoration discipline.
+
+## Next Delivery Slice
+
+`P3-WP1` is the next governed slice and should cover only the clean-sheet Phase 3 outcomes already locked in by the spec:
+
+- SLT cross-space dashboard view
+- team dashboard view
+- agent scorecard view
+- rewiring wallboards to the clean-sheet KPI data source
+
+This slice should not absorb:
+
+- manual-entry/import flows
+- AI digests
+- admin UI
+- optional auth-route process cleanup
+
+## Current Evaluation Posture
+
+- `P3-WP1` is ready for independent evaluation.
+- Evaluation should validate only the observable Phase 3 outcomes:
+  - SLT dashboard on clean-sheet data
+  - team dashboard on clean-sheet data
+  - agent scorecard on clean-sheet data
+  - wallboard rewiring to clean-sheet data
+  - honest handling of sparse/manual-team data
+  - legacy non-regression

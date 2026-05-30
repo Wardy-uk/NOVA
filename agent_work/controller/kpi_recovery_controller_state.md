@@ -6,11 +6,11 @@
 | --- | --- |
 | Current date | 2026-05-30 |
 | Active programme | KPI Recovery & Evidence Integrity |
-| Active phase | Phase 2 |
-| Active work package | `P2-WP1-ITER1` |
+| Active phase | Phase 3 |
+| Active work package | `P3-WP1` |
 | Lifecycle state | Converged |
-| Next required action | Decide whether to checkpoint Phase 2 in git and then open the next governed slice or Phase 2 regression-protection work. |
-| Following action after findings | If no extra proof is needed, keep Phase 2 closed and open the next programme slice. |
+| Next required action | Decide whether to checkpoint the converged Phase 3 slice and then open Phase 4 or run Phase 3 regression protection first. |
+| Following action after findings | If no extra proof is required, keep Phase 3 closed and open the next governed slice. |
 
 ## Isolation Rules Applied
 
