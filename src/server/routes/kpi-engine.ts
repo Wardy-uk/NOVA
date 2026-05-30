@@ -9,7 +9,8 @@
  * Response shape follows the repo convention: { ok, data } / { ok, error }.
  */
 import { Router } from 'express';
-import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService } from '../services/kpi-engine/index.js';
+import XLSX from 'xlsx';
+import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService } from '../services/kpi-engine/index.js';
 import { SNAPSHOT_JOB_ID, EOD_JOB_ID } from '../services/kpi-engine/index.js';
 import type { RegisteredJob } from '../services/job-registry.js';
 
@@ -22,6 +23,8 @@ export function createKpiEngineRoutes(deps: {
   eod: KpiEodService;
   /** Clean-sheet view read models (P3-WP1) — SLT, team, agent leaderboard. */
   views: KpiViewsService;
+  /** Manual entry + spreadsheet import (P4-WP1) — non-Jira teams. */
+  manual: KpiManualService;
   /** Foundation activation status (so /health can prove the system is live). */
   getStatus: () => KpiInitStatus;
   /** Snapshot job status from the registry (proves the scheduler is registered/running). */
@@ -30,7 +33,7 @@ export function createKpiEngineRoutes(deps: {
   getEodJob: () => RegisteredJob | undefined;
 }): Router {
   const router = Router();
-  const { engine, eod, views } = deps;
+  const { engine, eod, views, manual } = deps;
 
   // List all active spaces with their resolved config.
   router.get('/spaces', async (_req, res) => {
@@ -267,6 +270,96 @@ export function createKpiEngineRoutes(deps: {
       const data = await views.getLeaderboard(req.params.spaceKey, date);
       if (!data) return res.status(404).json({ ok: false, error: 'Unknown space' });
       res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Phase 4: Manual entry + spreadsheet import (non-Jira teams) ──
+
+  /** username of the caller if an auth layer populated req.user; else null. */
+  const callerName = (req: { user?: { username?: string } }): string | null =>
+    (req.user && typeof req.user.username === 'string') ? req.user.username : null;
+
+  // Entry form for a space + date (design §7.1). Returns every enabled metric,
+  // pre-filled with the value already stored for that date (and the promoted
+  // kpi_daily value) so any date can be entered OR edited. 404 on unknown space.
+  router.get('/manual/:spaceKey/:date', async (req, res) => {
+    if (!DATE_RE.test(req.params.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+    try {
+      const form = await manual.getEntryForm(req.params.spaceKey, req.params.date);
+      if (!form) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      res.json({ ok: true, data: form });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Submit manual metric values (design §7.1, §7.3). Validates per value_type,
+  // saves to kpi_manual_entries and promotes each into kpi_daily. Accepts either
+  // a batch form or a single value:
+  //   { spaceKey, date, entries: [{ metricKey, value, notes? }] }
+  //   { spaceKey, metricKey, date, value, notes? }   (single)
+  router.post('/manual-entry', async (req, res) => {
+    const body = (req.body ?? {}) as {
+      spaceKey?: string; date?: string;
+      entries?: Array<{ metricKey: string; value: unknown; notes?: string | null }>;
+      metricKey?: string; value?: unknown; notes?: string | null;
+    };
+    if (!body.spaceKey) return res.status(400).json({ ok: false, error: 'spaceKey required' });
+    if (!body.date || !DATE_RE.test(body.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+
+    const entries = Array.isArray(body.entries)
+      ? body.entries
+      : body.metricKey !== undefined
+        ? [{ metricKey: body.metricKey, value: body.value, notes: body.notes ?? null }]
+        : null;
+    if (!entries || entries.length === 0) {
+      return res.status(400).json({ ok: false, error: 'provide entries[] or metricKey + value' });
+    }
+    try {
+      const space = await engine.getSpaceConfig(body.spaceKey);
+      if (!space) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      const result = await manual.saveEntries(body.spaceKey, body.date, entries, callerName(req as any));
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Bulk import from the Daily KPI Tracker spreadsheet (design §7.2, §8.2).
+  // Accepts ONE of:
+  //   { fileBase64, spaceKey?, dryRun? }   — server parses the workbook (all sheets)
+  //   { sheets: [{ name?, rows: any[][] }], spaceKey?, dryRun? } — pre-parsed grids
+  // Backfills kpi_manual_entries then promotes into kpi_daily. `dryRun` previews
+  // the parse (dates, mapped/unmapped labels) without writing.
+  router.post('/import', async (req, res) => {
+    const body = (req.body ?? {}) as {
+      fileBase64?: string;
+      sheets?: Array<{ name?: string; rows: unknown[][] }>;
+      spaceKey?: string;
+      dryRun?: boolean;
+    };
+    try {
+      let sheets: Array<{ name?: string; rows: unknown[][] }>;
+      if (typeof body.fileBase64 === 'string' && body.fileBase64.length > 0) {
+        const buf = Buffer.from(body.fileBase64, 'base64');
+        const wb = XLSX.read(buf, { cellDates: true });
+        sheets = wb.SheetNames.map((name) => ({
+          name,
+          rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, blankrows: false, raw: true }),
+        }));
+      } else if (Array.isArray(body.sheets)) {
+        sheets = body.sheets;
+      } else {
+        return res.status(400).json({ ok: false, error: 'provide fileBase64 (xlsx) or sheets[]' });
+      }
+      const summary = await manual.importTracker(sheets, {
+        spaceKey: body.spaceKey,
+        dryRun: body.dryRun === true,
+        enteredBy: callerName(req as any),
+      });
+      res.json({ ok: true, data: summary });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }

@@ -160,11 +160,34 @@ This slice should not absorb:
 
 ## Current Evaluation Posture
 
-- `P3-WP1` is ready for independent evaluation.
-- Evaluation should validate only the observable Phase 3 outcomes:
-  - SLT dashboard on clean-sheet data
-  - team dashboard on clean-sheet data
-  - agent scorecard on clean-sheet data
-  - wallboard rewiring to clean-sheet data
-  - honest handling of sparse/manual-team data
+- `P4-WP1` is ready for independent evaluation.
+- Evaluation should validate only the observable Phase 4 outcomes:
+  - manual entry UI behaviour for non-Jira teams
+  - any-date select/edit flow
+  - prefill of existing and promoted values
+  - value-type validation
+  - promotion into `kpi_daily`
+  - spreadsheet import dry-run and real import behaviour
+  - honest reporting of unmapped/rejected rows
   - legacy non-regression
+
+## Next Delivery Slice
+
+`P4-WP1` is the active governed slice and should cover only the clean-sheet Phase 4 outcomes already locked in by the spec:
+
+- manual entry UI for non-Jira teams
+- spreadsheet import endpoint and parser
+- historical/manual promotion into `kpi_manual_entries` and `kpi_daily`
+
+This slice should not absorb:
+
+- AI digests
+- admin UI
+- broader Phase 3 polish
+- optional auth-process cleanup
+
+## Current Iteration Posture
+
+- `P4-WP1` failed evaluation because the manual write/import capability was absent at runtime even though manual-team read surfaces existed.
+- The next slice is intentionally narrow: restore route mounting and observable write/import behaviour for the already-scoped Phase 4 capability.
+- Do not broaden into Phase 5, broader view polish, or auth-process cleanup during this iteration.

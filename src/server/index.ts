@@ -1081,6 +1081,7 @@ async function main() {
     engine: kpiFoundation.engine,
     eod: kpiFoundation.eod,
     views: kpiFoundation.views,
+    manual: kpiFoundation.manual,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
     getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),

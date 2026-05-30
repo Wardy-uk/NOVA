@@ -17,10 +17,12 @@ import { seedKpiFoundation, type SeedCounts } from './kpi-seed.js';
 import { KpiEngine } from './kpi-engine.js';
 import { KpiEodService } from './kpi-eod.js';
 import { KpiViewsService } from './kpi-views.js';
+import { KpiManualService } from './kpi-manual.js';
 
 export { KpiEngine } from './kpi-engine.js';
 export { KpiEodService } from './kpi-eod.js';
 export { KpiViewsService } from './kpi-views.js';
+export { KpiManualService } from './kpi-manual.js';
 export * from './types.js';
 
 /** Stable id of the 3-min snapshot job (design §5.2). Shared with the route layer. */
@@ -67,6 +69,7 @@ export interface KpiFoundation {
   engine: KpiEngine;
   eod: KpiEodService;
   views: KpiViewsService;
+  manual: KpiManualService;
   status: KpiInitStatus;
 }
 
@@ -82,6 +85,7 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
   const engine = new KpiEngine();
   const eod = new KpiEodService(engine);
   const views = new KpiViewsService(engine);
+  const manual = new KpiManualService(engine);
   const status: KpiInitStatus = {
     ...lastStatus,
     schemaTablesExpected: KPI_TABLE_COUNT,
@@ -147,5 +151,5 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
   }
 
   lastStatus = status;
-  return { engine, eod, views, status };
+  return { engine, eod, views, manual, status };
 }

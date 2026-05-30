@@ -19,12 +19,12 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | Area | State | Notes |
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
-| Active phase | Phase 3 | Views delivery for the clean-sheet KPI platform. |
-| Active work package | `P3-WP1` | SLT, team, agent, and wallboard view delivery on the clean-sheet KPI data source. |
+| Active phase | Phase 4 | Manual entry and spreadsheet import delivery for the clean-sheet KPI platform. |
+| Active work package | `P4-WP1` | Manual entry UI, manual promotion, and tracker-import slice. |
 | Current convergence state | Converged | Independent evaluation passed with bounded qualifications only. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
-| Promotion gate | Converged | Phase 3 is converged for scope and can feed the next delivery slice. |
+| Promotion gate | Converged | Phase 4 is converged for scope and can feed the final delivery slice. |
 
 ## Work Package Board
 
@@ -38,6 +38,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `P2-WP1-ITER1` | Make Phase 2 freeze/capture path directly exercisable and observable | Qualified Pass — Converged | Capture-observability loop closed. Carry auth-gated API discovery note as process guidance only. |
 | `P2-RP1` | Protect the converged Phase 2 freeze/capture behaviour against regression | Qualified Pass — Regression Protected | Regression harness independently validated; optional auth-gated HTTP probe remains a bounded non-blocking gap. |
 | `P3-WP1` | Deliver clean-sheet KPI views on the new data source | Qualified Pass — Converged | View surfaces and wallboards independently validated; bounded sparse-data and fallback gaps remain visible but non-blocking. |
+| `P4-WP1` | Deliver manual entry UI and spreadsheet import on the clean-sheet path | Qualified Pass — Converged | Manual entry, promotion, dry-run import, and real import independently validated. |
 
 ## Phase Gate Rules
 
@@ -77,6 +78,11 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `B3-1` | Open bounded gap | No seed currently sets `show_on_wallboard = 1`, so clean-sheet wallboards use the documented fallback selection logic until later config/admin work. |
 | `B3-2` | Open bounded gap | Snapshot rows are still absent across Jira spaces in the evaluated environment, so Phase 3 convergence rests on honest empty-state handling rather than populated live view values. |
 | `B3-3` | Open polish note | Daily response shape differs between manual-team spaces and Jira spaces (`data:null` vs structured `captured:false` object). Honest but inconsistent. |
+| `B4-1` | Open bounded phase input | Real Daily KPI Tracker workbook mapping has not yet been validated against a live file; current parser behaviour is inferred from the clean-sheet design and intended to be proven through dry-run preview. |
+| `B4-2` | Open bounded gap | Real-workbook label/layout variance remains partially open: some labels map cleanly, while others are honestly reported unmapped. |
+| `B4-3` | Open bounded gap | The `sheets[]` JSON import path does not currently resolve team/space the same way the xlsx path does. |
+| `B4-4` | Open bounded gap | Manual-entry API currently accepts writes to Jira/computed spaces as well as manual teams; out of current scope but worth tightening later. |
+| `B4-5` | Open process integrity note | An earlier FAIL report for Phase 4 was preserved as a superseded prior-session artefact because that session used a compromised/proxy-tainted runtime path. Final convergence relies only on the later clean DB-verified evaluation. |
 
 ## Change Log
 
@@ -100,3 +106,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-05-30 | Manager decision: open `P3-WP1` next. Phase 3 will deliver the clean-sheet KPI views on top of the now-converged and regression-protected Phase 1–2 substrate. |
 | 2026-05-30 | `P3-WP1` build completion reviewed from `agent_work/build_status/p3-wp1-views-2026-05-30.md`. Phase 3 slice is classified as build-complete and ready for independent evaluation with bounded residual gaps around sparse-data handling, manual-team representation, limited agent metrics, and wallboard metric fallback. Commit `815b37a` pushed on `nova-codex`. |
 | 2026-05-30 | Independent evaluation returned QUALIFIED PASS from `agent_work/eval_output/phase3_views_eval_report_2026-05-30.md`. SLT, team, agent, and wallboard surfaces were all observed and clean-sheet-backed; manual/non-Jira and sparse spaces were handled honestly; legacy coexistence was decisively preserved. Qualifications limited to sparse live snapshot data, wallboard fallback visibility, and a minor response-shape inconsistency. Phase 3 is converged for its scoped outcome. |
+| 2026-05-30 | Manager decision: open `P4-WP1` next. Phase 4 will deliver manual entry and Daily KPI Tracker import on top of the converged Phase 1–3 substrate. |
+| 2026-05-30 | `P4-WP1` build completion reviewed from `agent_work/build_status/p4-wp1-manual-import-2026-05-30.md`. Phase 4 slice is classified as build-complete and ready for independent evaluation with bounded residual risk around live-workbook label/layout validation. |
+| 2026-05-30 | A prior FAIL evaluation for Phase 4 was preserved as `agent_work/eval_output/phase4_manual_import_eval_report_2026-05-30_SUPERSEDED_prior-session.md` after later evidence showed that session relied on a compromised/proxy-tainted runtime path. |
+| 2026-05-30 | Clean follow-up evaluation returned QUALIFIED PASS from `agent_work/eval_output/phase4_manual_import_eval_report_2026-05-30.md`. Manual entry exists for all scoped teams, any-date edit works, prefill is correct, validation is enforced, valid saves persist to `kpi_manual_entries` and promote to `kpi_daily`, dry-run and real import behave honestly, and legacy remains untouched. Phase 4 is converged for its scoped outcome. |

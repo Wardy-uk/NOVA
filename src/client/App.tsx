@@ -31,6 +31,7 @@ const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').the
 const KpiCleanSltView = lazy(() => import('./components/KpiCleanSltView.js').then(m => ({ default: m.KpiCleanSltView })));
 const KpiCleanTeamView = lazy(() => import('./components/KpiCleanTeamView.js').then(m => ({ default: m.KpiCleanTeamView })));
 const KpiCleanAgentView = lazy(() => import('./components/KpiCleanAgentView.js').then(m => ({ default: m.KpiCleanAgentView })));
+const KpiCleanManualView = lazy(() => import('./components/KpiCleanManualView.js').then(m => ({ default: m.KpiCleanManualView })));
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
 const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
@@ -103,7 +104,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
-  | 'kpic-slt' | 'kpic-team' | 'kpic-agent' | 'kpic-wallboard'
+  | 'kpic-slt' | 'kpic-team' | 'kpic-agent' | 'kpic-wallboard' | 'kpic-manual'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -208,6 +209,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpic-slt', label: 'SLT Overview' },
       { view: 'kpic-team', label: 'Team Dashboard' },
       { view: 'kpic-agent', label: 'Agent Scorecard' },
+      { view: 'kpic-manual', label: 'Manual Entry' },
       { view: 'kpic-wallboard', label: 'Wallboard' },
     ],
   },
@@ -320,7 +322,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'kpic-slt', 'kpic-team', 'kpic-agent', 'kpic-wallboard']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'kpic-slt', 'kpic-team', 'kpic-agent', 'kpic-wallboard', 'kpic-manual']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1098,6 +1100,9 @@ export function App() {
           )}
           {view === 'kpic-agent' && (
             <KpiCleanAgentView />
+          )}
+          {view === 'kpic-manual' && (
+            <KpiCleanManualView />
           )}
           {view === 'kpic-wallboard' && (
             <iframe

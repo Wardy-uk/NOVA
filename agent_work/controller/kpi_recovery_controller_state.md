@@ -6,11 +6,11 @@
 | --- | --- |
 | Current date | 2026-05-30 |
 | Active programme | KPI Recovery & Evidence Integrity |
-| Active phase | Phase 3 |
-| Active work package | `P3-WP1` |
+| Active phase | Phase 4 |
+| Active work package | `P4-WP1` |
 | Lifecycle state | Converged |
-| Next required action | Decide whether to checkpoint the converged Phase 3 slice and then open Phase 4 or run Phase 3 regression protection first. |
-| Following action after findings | If no extra proof is required, keep Phase 3 closed and open the next governed slice. |
+| Next required action | Decide whether to checkpoint the converged Phase 4 slice and then open Phase 5. |
+| Following action after findings | If no extra proof is required, keep Phase 4 closed and open the final governed slice. |
 
 ## Isolation Rules Applied
 
