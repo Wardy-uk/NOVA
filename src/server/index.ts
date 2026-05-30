@@ -28,6 +28,8 @@ import { createAuthRoutes } from './routes/auth.js';
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
+import { createKpiEngineRoutes } from './routes/kpi-engine.js';
+import { initKpiFoundation, getKpiInitStatus, SNAPSHOT_JOB_ID as KPI_SNAPSHOT_JOB_ID } from './services/kpi-engine/index.js';
 import { createPipelineUatRoutes } from './routes/pipeline-uat.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createDevReviewRoutes } from './routes/dev-review.js';
@@ -1063,6 +1065,23 @@ async function main() {
   app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
+
+  // ── KPI Recovery clean-sheet foundation (P1-WP1) ──
+  // New, fully isolated parallel system: kpi_* tables in the NOVA main pool,
+  // business-hours engine, pluggable computers, 3-min snapshot job. It depends
+  // ONLY on the NOVA main pool + job registry (it reads jira_issue_cache, not a
+  // live Jira API client), so it is initialised UNCONDITIONALLY here — never
+  // gated behind agent/Jira credentials. initKpiFoundation() never throws: any
+  // activation failure is captured in its status and surfaced via GET
+  // /api/kpi/health (and logged as an error). Does not touch the legacy KPI
+  // pipeline; the read/observability surface at /api/kpi/* coexists with the
+  // legacy POST /api/kpi/derived/run (different path, registered later).
+  const kpiFoundation = await initKpiFoundation(jobRegistry);
+  app.use('/api/kpi', createKpiEngineRoutes({
+    engine: kpiFoundation.engine,
+    getStatus: getKpiInitStatus,
+    getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
+  }));
 
   // Start Jira sync (service was created earlier so routes can reference it)
   let fullSyncPromise: Promise<void> | null = null;
