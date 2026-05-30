@@ -29,7 +29,7 @@ import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createKpiEngineRoutes } from './routes/kpi-engine.js';
-import { initKpiFoundation, getKpiInitStatus, SNAPSHOT_JOB_ID as KPI_SNAPSHOT_JOB_ID } from './services/kpi-engine/index.js';
+import { initKpiFoundation, getKpiInitStatus, SNAPSHOT_JOB_ID as KPI_SNAPSHOT_JOB_ID, EOD_JOB_ID as KPI_EOD_JOB_ID } from './services/kpi-engine/index.js';
 import { createPipelineUatRoutes } from './routes/pipeline-uat.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createDevReviewRoutes } from './routes/dev-review.js';
@@ -1079,8 +1079,10 @@ async function main() {
   const kpiFoundation = await initKpiFoundation(jobRegistry);
   app.use('/api/kpi', createKpiEngineRoutes({
     engine: kpiFoundation.engine,
+    eod: kpiFoundation.eod,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
+    getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),
   }));
 
   // Start Jira sync (service was created earlier so routes can reference it)

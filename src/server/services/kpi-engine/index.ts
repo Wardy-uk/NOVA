@@ -15,13 +15,23 @@ import type { JobRegistry } from '../job-registry.js';
 import { ensureKpiSchema, countKpiTables, KPI_TABLE_COUNT } from './kpi-schema.js';
 import { seedKpiFoundation, type SeedCounts } from './kpi-seed.js';
 import { KpiEngine } from './kpi-engine.js';
+import { KpiEodService } from './kpi-eod.js';
 
 export { KpiEngine } from './kpi-engine.js';
+export { KpiEodService } from './kpi-eod.js';
 export * from './types.js';
 
 /** Stable id of the 3-min snapshot job (design §5.2). Shared with the route layer. */
 export const SNAPSHOT_JOB_ID = 'kpi-engine-snapshot';
 const SNAPSHOT_INTERVAL_MS = 3 * 60 * 1000; // design §5.2 — every 3 minutes
+
+/** Stable id of the EOD capture job (P2-WP1). Shared with the route layer. */
+export const EOD_JOB_ID = 'kpi-engine-eod';
+// EOD is self-gating per space (fires once each space reaches its configured
+// end-of-day, in its own timezone). A 5-min tick captures within minutes of
+// 17:30/18:00 and subsumes the design's late catch-up via the "already
+// captured" guard.
+const EOD_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Observable activation state, surfaced via GET /api/kpi/health. */
 export interface KpiInitStatus {
@@ -53,6 +63,7 @@ export function getKpiInitStatus(): KpiInitStatus {
 
 export interface KpiFoundation {
   engine: KpiEngine;
+  eod: KpiEodService;
   status: KpiInitStatus;
 }
 
@@ -66,6 +77,7 @@ export interface KpiFoundation {
  */
 export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFoundation> {
   const engine = new KpiEngine();
+  const eod = new KpiEodService(engine);
   const status: KpiInitStatus = {
     ...lastStatus,
     schemaTablesExpected: KPI_TABLE_COUNT,
@@ -99,8 +111,19 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
     );
     status.jobRegistered = !!jobRegistry.getJob(SNAPSHOT_JOB_ID);
 
-    // Kick an initial cycle shortly after boot (window permitting).
+    // EOD capture cycle (P2-WP1). Self-gates each space to its own end-of-day;
+    // the timer can fire continuously without capturing before EOD or twice.
+    jobRegistry.register(
+      EOD_JOB_ID,
+      'KPI Engine: EOD daily-freeze cycle (clean-sheet)',
+      async () => { await eod.runEodCycle(); },
+      EOD_INTERVAL_MS,
+    );
+
+    // Kick initial cycles shortly after boot (window/EOD permitting). The EOD
+    // kick lets a restart near 17:30/18:00 still capture without waiting a tick.
     setTimeout(() => { engine.runSnapshotCycle().catch(() => {}); }, 30_000);
+    setTimeout(() => { eod.runEodCycle().catch(() => {}); }, 60_000);
 
     status.initialised = true;
     status.initialisedAt = new Date().toISOString();
@@ -120,5 +143,5 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
   }
 
   lastStatus = status;
-  return { engine, status };
+  return { engine, eod, status };
 }
