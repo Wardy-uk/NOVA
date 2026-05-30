@@ -27,6 +27,10 @@ const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js')
 const KpiLeaderboardView = lazy(() => import('./components/KpiLeaderboardView.js').then(m => ({ default: m.KpiLeaderboardView })));
 const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.js').then(m => ({ default: m.KpiDailyHistoryView })));
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
+// Clean-sheet KPI platform (P3-WP1) — new parallel views, sourced from /api/kpi/*
+const KpiCleanSltView = lazy(() => import('./components/KpiCleanSltView.js').then(m => ({ default: m.KpiCleanSltView })));
+const KpiCleanTeamView = lazy(() => import('./components/KpiCleanTeamView.js').then(m => ({ default: m.KpiCleanTeamView })));
+const KpiCleanAgentView = lazy(() => import('./components/KpiCleanAgentView.js').then(m => ({ default: m.KpiCleanAgentView })));
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
 const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
@@ -93,12 +97,13 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-platform' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
 type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
+  | 'kpic-slt' | 'kpic-team' | 'kpic-agent' | 'kpic-wallboard'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -126,7 +131,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', 'kpi-platform': 'view', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view',
 };
 
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
@@ -194,6 +199,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-team-breached', label: 'Team Breaches' },
       { view: 'kpi-escalations', label: 'Escalations' },
       { view: 'agent-kpis', label: 'Agent KPIs' },
+    ],
+  },
+  'kpi-platform': {
+    label: 'KPI Platform',
+    defaultView: 'kpic-slt',
+    tabs: [
+      { view: 'kpic-slt', label: 'SLT Overview' },
+      { view: 'kpic-team', label: 'Team Dashboard' },
+      { view: 'kpic-agent', label: 'Agent Scorecard' },
+      { view: 'kpic-wallboard', label: 'Wallboard' },
     ],
   },
   trends: {
@@ -293,7 +308,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-platform', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -305,7 +320,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'kpic-slt', 'kpic-team', 'kpic-agent', 'kpic-wallboard']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -431,7 +446,7 @@ export function App() {
   // Resolved area access from custom roles
   const [areaAccess, setAreaAccess] = useState<AreaAccess>(
     userRole.split(',').map(r => r.trim()).some(r => r === 'admin' || r === 'super_admin')
-      ? { nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit', devreview: 'edit', 'ai-agent': 'edit' }
+      ? { nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'edit', kpis: 'edit', 'kpi-platform': 'edit', qa: 'edit', wallboards: 'edit', admin: 'edit', ai_approvals: 'edit', training: 'edit', mi: 'edit', devreview: 'edit', 'ai-agent': 'edit' }
       : DEFAULT_AREA_ACCESS,
   );
   useEffect(() => {
@@ -707,6 +722,9 @@ export function App() {
 
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
+    // Clean-sheet KPI platform (P3-WP1) — visible to all authenticated users
+    // (design §13.8: all KPI views visible for now), runs parallel to legacy KPIs.
+    if (area === 'kpi-platform') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -1069,6 +1087,24 @@ export function App() {
           )}
           {view === 'agent-kpis' && (
             <AgentKpisView />
+          )}
+
+          {/* Clean-sheet KPI platform (P3-WP1) — parallel to legacy KPIs */}
+          {view === 'kpic-slt' && (
+            <KpiCleanSltView />
+          )}
+          {view === 'kpic-team' && (
+            <KpiCleanTeamView />
+          )}
+          {view === 'kpic-agent' && (
+            <KpiCleanAgentView />
+          )}
+          {view === 'kpic-wallboard' && (
+            <iframe
+              src="/wallboard/kpi-slt"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Clean-Sheet SLT Wallboard"
+            />
           )}
 
           {/* Wallboards */}

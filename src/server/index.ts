@@ -1080,6 +1080,7 @@ async function main() {
   app.use('/api/kpi', createKpiEngineRoutes({
     engine: kpiFoundation.engine,
     eod: kpiFoundation.eod,
+    views: kpiFoundation.views,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
     getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),
@@ -2681,6 +2682,132 @@ ${panelHtml}
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/customer-success', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
+  // ── Clean-sheet KPI wallboards (P3-WP1) ──
+  // NEW, parallel wallboards sourced ENTIRELY from the clean-sheet KPI data
+  // (kpi_* tables via kpiFoundation.views) — never the legacy KPI pipeline pool.
+  // The legacy /wallboard/* routes above are untouched and keep running. These
+  // render the same TV-display concept as design §6.4 from the new data source.
+  function fmtCleanValue(valueType: string, value: number | null): string {
+    if (value === null || value === undefined) return '—';
+    switch (valueType) {
+      case 'percentage': return `${Math.round(value * 10) / 10}%`;
+      case 'currency': return `£${Math.round(value).toLocaleString('en-GB')}`;
+      case 'duration_minutes': return value >= 60 ? `${Math.round(value / 6) / 10}h` : `${Math.round(value)}m`;
+      case 'integer': return String(Math.round(value));
+      default: return String(Math.round(value * 10) / 10);
+    }
+  }
+  function cleanRagColor(rag: string | null): string {
+    if (rag === 'green') return '#10b981';
+    if (rag === 'amber') return '#eab308';
+    if (rag === 'red') return '#ef4444';
+    return '#94a3b8';
+  }
+  // Choose the wallboard headline metrics for a space: show_on_wallboard if any
+  // are flagged, else fall back to show_on_slt_view, else the first enabled
+  // metrics by display order. Documented fallback — no seed flags wallboard yet.
+  type CleanBinding = { metricKey: string; displayName: string; valueType: string; direction: string; targetValue: number | null; amberBand: number | null; showOnSlt: boolean; showOnWallboard: boolean };
+  function pickWallboardMetricKeys(bindings: CleanBinding[]): Set<string> {
+    const wb = bindings.filter(b => b.showOnWallboard);
+    if (wb.length) return new Set(wb.map(b => b.metricKey));
+    const slt = bindings.filter(b => b.showOnSlt);
+    if (slt.length) return new Set(slt.map(b => b.metricKey));
+    return new Set(bindings.slice(0, 8).map(b => b.metricKey));
+  }
+  function cleanWallboardShell(title: string, subtitle: string, route: string, bodyGrid: string, footerNote: string): string {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+${wallboardRefreshScript(route)}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${subtitle}</div></div>
+  <div style="font-size:10px;color:#64748b">Clean-sheet KPI &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+${bodyGrid}
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr} &middot; ${footerNote}</div>
+</div></body></html>`;
+  }
+
+  // Single-space clean-sheet wallboard.
+  app.get('/wallboard/kpi/:spaceKey', async (req, res) => {
+    const wbStart = Date.now();
+    const route = `/wallboard/kpi/${req.params.spaceKey}`;
+    try {
+      const team = await kpiFoundation.views.getTeamDashboard(req.params.spaceKey);
+      if (!team) { res.status(404).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Unknown space: ${req.params.spaceKey}</body></html>`); return; }
+      const bindings = await kpiFoundation.views.getSpaceMetricBindings(req.params.spaceKey);
+      const keys = pickWallboardMetricKeys(bindings as unknown as CleanBinding[]);
+      const panels = team.metrics.filter(m => keys.has(m.metricKey));
+      const subtitle = team.isJiraSpace
+        ? `${team.displayName} — live clean-sheet metrics`
+        : `${team.displayName} — manual / non-Jira team`;
+      let grid: string;
+      if (!team.isJiraSpace) {
+        grid = `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:18px;text-align:center;padding:40px">${team.note ?? 'Manual team — no computed KPIs yet.'}</div>`;
+      } else if (!panels.some(p => p.value !== null)) {
+        grid = `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:18px;text-align:center;padding:40px">${team.note ?? 'No clean-sheet data captured yet for this space.'}</div>`;
+      } else {
+        const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(panels.length))));
+        const panelHtml = panels.map(p => {
+          const color = cleanRagColor(p.rag);
+          const flashClass = p.rag === 'red' ? ' flash-red' : '';
+          const targetTxt = p.target !== null ? `Target ${fmtCleanValue(p.valueType, p.target)}` : '';
+          return `<div class="${flashClass}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+            <div style="font-size:14px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:10px;letter-spacing:.3px">${p.displayName}</div>
+            <div style="font-size:64px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${fmtCleanValue(p.valueType, p.value)}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:8px">${targetTxt}</div>
+          </div>`;
+        }).join('');
+        grid = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:14px;flex:1">${panelHtml}</div>`;
+      }
+      res.send(cleanWallboardShell(`${team.displayName} — KPIs`, subtitle, route, grid, 'Source: clean-sheet kpi_* (NOVA)'));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${panels.length} panels`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
+  // Cross-space SLT clean-sheet wallboard — one column per space.
+  app.get('/wallboard/kpi-slt', async (_req, res) => {
+    const wbStart = Date.now();
+    const route = '/wallboard/kpi-slt';
+    try {
+      const slt = await kpiFoundation.views.getSltSummary();
+      const cols = Math.min(slt.spaces.length || 1, 4);
+      const cardHtml = slt.spaces.map(space => {
+        const rows = space.metrics.map(m => {
+          const color = cleanRagColor(m.rag);
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="font-size:12px;color:#94a3b8">${m.displayName}</span>
+            <span style="font-size:16px;font-weight:700;color:${color}">${fmtCleanValue(m.valueType, m.value)}</span>
+          </div>`;
+        }).join('');
+        const body = space.isJiraSpace && space.hasData
+          ? rows
+          : `<div style="color:#64748b;font-size:12px;padding:12px 0">${space.note ?? '—'}</div>`;
+        return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column">
+          <div style="font-size:16px;font-weight:800;margin-bottom:4px">${space.displayName}</div>
+          <div style="font-size:10px;color:#64748b;margin-bottom:10px">${space.spaceKey}${space.ownerName ? ' · ' + space.ownerName : ''}</div>
+          ${body}
+        </div>`;
+      }).join('');
+      const grid = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:14px;flex:1;align-content:start">${cardHtml}</div>`;
+      res.send(cleanWallboardShell('SLT — Cross-Space KPIs', 'Senior leadership cross-space view', route, grid, 'Source: clean-sheet kpi_* (NOVA)'));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${slt.spaces.length} spaces`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });

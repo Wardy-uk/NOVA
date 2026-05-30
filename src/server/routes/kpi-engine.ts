@@ -9,7 +9,7 @@
  * Response shape follows the repo convention: { ok, data } / { ok, error }.
  */
 import { Router } from 'express';
-import type { KpiEngine, KpiInitStatus, KpiEodService } from '../services/kpi-engine/index.js';
+import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService } from '../services/kpi-engine/index.js';
 import { SNAPSHOT_JOB_ID, EOD_JOB_ID } from '../services/kpi-engine/index.js';
 import type { RegisteredJob } from '../services/job-registry.js';
 
@@ -20,6 +20,8 @@ export function createKpiEngineRoutes(deps: {
   engine: KpiEngine;
   /** EOD capture + daily-report service (P2-WP1). */
   eod: KpiEodService;
+  /** Clean-sheet view read models (P3-WP1) — SLT, team, agent leaderboard. */
+  views: KpiViewsService;
   /** Foundation activation status (so /health can prove the system is live). */
   getStatus: () => KpiInitStatus;
   /** Snapshot job status from the registry (proves the scheduler is registered/running). */
@@ -28,7 +30,7 @@ export function createKpiEngineRoutes(deps: {
   getEodJob: () => RegisteredJob | undefined;
 }): Router {
   const router = Router();
-  const { engine, eod } = deps;
+  const { engine, eod, views } = deps;
 
   // List all active spaces with their resolved config.
   router.get('/spaces', async (_req, res) => {
@@ -223,6 +225,48 @@ export function createKpiEngineRoutes(deps: {
     try {
       const result = await engine.runSnapshotCycle();
       res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Phase 3: View read models (SLT / team / agent leaderboard) ──
+
+  // SLT cross-space dashboard (design §6.1 / §9). One card per space with the
+  // SLT-flagged metrics resolved to their current value + RAG. Manual / non-Jira
+  // and empty Jira spaces are surfaced honestly (no fabricated values).
+  router.get('/slt', async (_req, res) => {
+    try {
+      const data = await views.getSltSummary();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Team dashboard for one space (design §6.2 / §9). Full enabled-metric grid
+  // with current value/target/RAG + 7-day history, per-tier breakdown (NT), and
+  // the most recent frozen EOD ticket-state snapshot.
+  router.get('/team/:spaceKey', async (req, res) => {
+    try {
+      const data = await views.getTeamDashboard(req.params.spaceKey);
+      if (!data) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Agent scorecard / leaderboard for a space (design §6.3 / §9). Optional
+  // ?date=YYYY-MM-DD selects the most recent agent data on or before that date;
+  // default is the latest captured date.
+  router.get('/leaderboard/:spaceKey', async (req, res) => {
+    const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+    if (date && !DATE_RE.test(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+    try {
+      const data = await views.getLeaderboard(req.params.spaceKey, date);
+      if (!data) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
