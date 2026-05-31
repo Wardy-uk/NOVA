@@ -6,11 +6,11 @@
 | --- | --- |
 | Current date | 2026-05-31 |
 | Active programme | KPI Recovery & Evidence Integrity |
-| Active phase | Phase 5 |
-| Active work package | `P5-WP1` |
-| Lifecycle state | Eval Running |
-| Next required action | Route the Phase 5 evaluator brief to the Evaluator Agent. |
-| Following action after findings | Review evaluator findings, update tracker, then either close the programme slice as converged or route a bounded final iteration. |
+| Active phase | Replacement Parity Closure |
+| Active work package | `KPX-WP6A` |
+| Lifecycle state | Checkpoint Ready |
+| Next required action | Route the Escalations parity checkpoint scope to the Build Agent for a tight git commit. |
+| Following action after findings | Review the checkpoint result, update tracker, then decide whether to open the next parity slice or pause for human review. |
 
 ## Isolation Rules Applied
 

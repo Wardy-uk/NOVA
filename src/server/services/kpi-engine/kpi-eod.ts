@@ -24,7 +24,7 @@ import { query, execute } from '../database.js';
 import { calculateBusinessMinutes } from './business-hours.js';
 import { metricComputers } from './metric-computers.js';
 import type { KpiEngine } from './kpi-engine.js';
-import type { SpaceConfig, EnabledMetric, TierDefinition, KpiTicket } from './types.js';
+import type { SpaceConfig, EnabledMetric, TierDefinition, KpiTicket, MetricSourceContext } from './types.js';
 
 export type RagStatus = 'green' | 'amber' | 'red';
 
@@ -177,7 +177,10 @@ export class KpiEodService {
     const agentMetrics = metrics.filter(
       (m) => m.isAgentLevel && m.source === 'computed' && m.computationKey && metricComputers[m.computationKey],
     );
-    const agentRows = this.computeAgentRows(agentMetrics, tickets, space);
+    // Source context (escalation/QA) for the agent-level source-family metrics;
+    // the same ctx is filtered per agent inside the computers via issueKey.
+    const ctx = await this.engine.buildSourceContextFor(space, agentMetrics);
+    const agentRows = this.computeAgentRows(agentMetrics, tickets, space, ctx);
 
     // ── 3. EOD ticket-state aggregation ──
     const eodGroups = this.computeEodGroups(tickets, space, tiers, now);
@@ -225,6 +228,7 @@ export class KpiEodService {
     agentMetrics: EnabledMetric[],
     tickets: KpiTicket[],
     space: SpaceConfig,
+    ctx?: MetricSourceContext,
   ): Array<{ metricKey: string; agentId: string; agentName: string | null; value: number }> {
     if (agentMetrics.length === 0) return [];
     // Group tickets by assignee (skip unassigned).
@@ -242,7 +246,9 @@ export class KpiEodService {
       for (const m of agentMetrics) {
         const computer = metricComputers[m.computationKey!];
         try {
-          rows.push({ metricKey: m.metricKey, agentId, agentName: entry.name, value: computer(entry.tickets, space, m) });
+          // Source-family computers filter ctx to this agent's tickets via issueKey.
+          const value = computer(entry.tickets, space, m, undefined, ctx);
+          if (value !== null) rows.push({ metricKey: m.metricKey, agentId, agentName: entry.name, value });
         } catch { /* per-agent/metric failure is non-fatal */ }
       }
     }

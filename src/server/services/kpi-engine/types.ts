@@ -93,10 +93,71 @@ export interface KpiTicket {
   isKeyAccount: boolean;
 }
 
-/** Signature for a pluggable metric computer. */
+/**
+ * A single escalation event for a space, sourced from the NOVA `escalation_log`
+ * table (the clean-sheet replacement for the deprecated JiraTickets escalation
+ * columns). Keyed by issueKey so a computer can intersect it with whatever ticket
+ * subset it is given (space-level = all tickets, agent-level = that agent's).
+ *
+ * Rows whose `escalationType` is `rejection` are bounce-back events (a higher
+ * tier formally returned a ticket); they are partitioned out of the escalation
+ * list and carried separately on the context so they never inflate
+ * `escalation_rate` and can source `rejection_rate` / `escalation_accuracy`.
+ */
+export interface EscalationEvent {
+  issueKey: string;
+  escalationType: string;
+}
+
+/** A QA result row (jira_qa_results), keyed by issueKey for ticket-subset join. */
+export interface QaScoreRow {
+  issueKey: string;
+  overallScore: number | null;
+}
+
+/** A Golden-Rules result row (Jira_QA_GoldenRules), keyed by issueKey. */
+export interface GoldenRuleScoreRow {
+  issueKey: string;
+  overallScore: number | null;
+}
+
+/**
+ * Pre-fetched non-ticket source data passed to source-family computers. Built
+ * once per space by the engine and shared across the space-level, per-tier and
+ * per-agent computer calls; each computer intersects the data with the ticket
+ * subset it receives. The `*Available` flags let a computer return `null` (→ no
+ * value, cell shows "—") when its source could not be read, distinct from a
+ * genuine zero (e.g. zero escalations on tickets that were read fine).
+ */
+export interface MetricSourceContext {
+  escalationAvailable: boolean;
+  escalations: EscalationEvent[];
+  /**
+   * True only when the rejection capture path has produced at least one
+   * bounce-back event in window. While false, `rejection_rate` /
+   * `escalation_accuracy` return `null` (→ "—", wired-but-awaiting-capture)
+   * rather than asserting a fabricated 0% / 100%.
+   */
+  rejectionAvailable: boolean;
+  rejections: EscalationEvent[];
+  qaAvailable: boolean;
+  qaResults: QaScoreRow[];
+  goldenRulesAvailable: boolean;
+  goldenRules: GoldenRuleScoreRow[];
+}
+
+/**
+ * Signature for a pluggable metric computer.
+ *
+ * Returns the computed value, or `null` to mean "no value to record" — used by
+ * source-family computers when their source is unavailable or there is nothing
+ * to average. A `null` is skipped by the engine/EOD (no snapshot/daily row), so
+ * the metric reads as "—" (wired, awaiting data) rather than a fabricated 0.
+ */
 export type MetricComputer = (
   tickets: KpiTicket[],
   space: SpaceConfig,
   metric: EnabledMetric,
   tier?: TierDefinition,
-) => number;
+  ctx?: MetricSourceContext,
+) => number | null;

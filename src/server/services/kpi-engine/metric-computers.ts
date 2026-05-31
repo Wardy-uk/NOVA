@@ -199,6 +199,71 @@ const first_line_resolution: MetricComputer = (tickets, space) => {
   return pct(firstLine.length, resolved.length);
 };
 
+// ── Escalation / QA source families (KPX-WP3) ──
+// These derive from non-ticket sources (escalation_log, jira_qa_results,
+// Jira_QA_GoldenRules) pre-fetched into `ctx` by the engine. Each intersects its
+// source rows with the ticket subset it is handed via issueKey, so the SAME
+// computer yields the space-level value (all tickets) and the agent-level value
+// (one agent's tickets) with no name/id mapping. They return `null` (not 0) when
+// the source is unavailable or there is nothing to measure, so an outage reads as
+// "—" and never as a fabricated metric.
+
+const escalation_rate: MetricComputer = (tickets, _space, _m, _tier, ctx) => {
+  if (!ctx?.escalationAvailable) return null;
+  const keys = new Set(tickets.map((t) => t.issueKey));
+  if (keys.size === 0) return null; // no tickets in scope → no rate to express
+  // ctx.escalations already excludes rejection-type rows (partitioned in the
+  // provider), so bounce-backs never inflate the escalation rate.
+  const escalated = ctx.escalations.filter((e) => keys.has(e.issueKey)).length;
+  return pct(escalated, keys.size);
+};
+
+// rejection / bounce-back family (KPX-WP5). Sourced from explicitly-captured
+// `rejection` events in escalation_log (never inferred from tier moves). Both
+// return null until the rejection capture path has produced at least one event
+// (ctx.rejectionAvailable), so a system with no captured rejections reads "—"
+// rather than a fabricated 0% (rejection) / 100% (accuracy).
+
+const rejection_rate: MetricComputer = (tickets, _space, _m, _tier, ctx) => {
+  if (!ctx?.rejectionAvailable) return null;
+  const keys = new Set(tickets.map((t) => t.issueKey));
+  if (keys.size === 0) return null;
+  const rejected = ctx.rejections.filter((r) => keys.has(r.issueKey)).length;
+  return pct(rejected, keys.size);
+};
+
+const escalation_accuracy: MetricComputer = (tickets, _space, _m, _tier, ctx) => {
+  // Needs both a live escalation source and a live rejection source: accuracy is
+  // the proportion of escalations that were NOT bounced back, so without rejection
+  // capture we cannot claim escalations were accurate.
+  if (!ctx?.escalationAvailable || !ctx?.rejectionAvailable) return null;
+  const keys = new Set(tickets.map((t) => t.issueKey));
+  const escalated = ctx.escalations.filter((e) => keys.has(e.issueKey)).length;
+  if (escalated === 0) return null; // no escalations → accuracy undefined, not a fabricated 100
+  const rejected = ctx.rejections.filter((r) => keys.has(r.issueKey)).length;
+  return pct(Math.max(0, escalated - rejected), escalated);
+};
+
+const qa_score_avg: MetricComputer = (tickets, _space, _m, _tier, ctx) => {
+  if (!ctx?.qaAvailable) return null;
+  const keys = new Set(tickets.map((t) => t.issueKey));
+  const scores = ctx.qaResults
+    .filter((r) => keys.has(r.issueKey) && r.overallScore != null)
+    .map((r) => r.overallScore as number);
+  if (scores.length === 0) return null; // nothing scored for these tickets
+  return avg(scores);
+};
+
+const golden_rules_avg: MetricComputer = (tickets, _space, _m, _tier, ctx) => {
+  if (!ctx?.goldenRulesAvailable) return null;
+  const keys = new Set(tickets.map((t) => t.issueKey));
+  const scores = ctx.goldenRules
+    .filter((r) => keys.has(r.issueKey) && r.overallScore != null)
+    .map((r) => r.overallScore as number);
+  if (scores.length === 0) return null;
+  return avg(scores);
+};
+
 // ── NTPJ bespoke ──
 
 const story_points_completed: MetricComputer = (tickets, space) => {
@@ -239,6 +304,11 @@ export const metricComputers: Record<string, MetricComputer> = {
   csat_score,
   csat_response_rate,
   first_line_resolution,
+  escalation_rate,
+  rejection_rate,
+  escalation_accuracy,
+  qa_score_avg,
+  golden_rules_avg,
   story_points_completed,
   story_points_remaining,
 };

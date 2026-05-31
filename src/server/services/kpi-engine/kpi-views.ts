@@ -24,6 +24,7 @@
 import { query } from '../database.js';
 import type { KpiEngine } from './kpi-engine.js';
 import { KpiEodService, type RagStatus } from './kpi-eod.js';
+import { hasComputer } from './metric-computers.js';
 
 /** A per-space metric binding joined with its definition (incl. view flags). */
 export interface SpaceMetricBinding {
@@ -33,6 +34,7 @@ export interface SpaceMetricBinding {
   valueType: string;
   direction: string;
   source: string;
+  computationKey: string | null;
   isAgentLevel: boolean;
   targetValue: number | null;
   amberBand: number | null;
@@ -56,6 +58,14 @@ export interface ResolvedMetric {
   asOf: string | null;
   /** 'snapshot' | 'daily' | null — provenance of the current value. */
   valueSource: 'snapshot' | 'daily' | null;
+  /**
+   * True when this is a computed metric whose computation_key has NO registered
+   * computer (and no live/manual source), so it can never carry a value in the
+   * current build. Lets the UI render "not yet wired" honestly instead of an
+   * ambiguous "—" that reads as missing/late data. Always false for sourced
+   * (manual/api) or implemented computed metrics.
+   */
+  unwired: boolean;
 }
 
 export interface SltSpaceCard {
@@ -130,6 +140,94 @@ export interface Leaderboard {
   agents: LeaderboardAgent[];
 }
 
+/**
+ * The clean-sheet QA metric family wired in KPX-WP3 (source-providers.ts):
+ *   qa_score_avg     ← jira_qa_results     (KPI / techservicesjsm pool)
+ *   golden_rules_avg ← Jira_QA_GoldenRules (KPI / techservicesjsm pool)
+ * The QA parity surface is scoped to exactly these — no other metric family.
+ */
+export const QA_METRIC_KEYS = ['qa_score_avg', 'golden_rules_avg'] as const;
+
+/** One agent's QA-family values for the latest report date that has agent rows. */
+export interface QaAgentRow {
+  agentId: string;
+  agentName: string | null;
+  /** metric_key -> value (only the QA family); absent key = no row for that metric. */
+  metrics: Record<string, number>;
+}
+
+/** Per-space QA parity card: the QA family resolved + per-agent breakdown. */
+export interface QaParitySpace {
+  spaceKey: string;
+  displayName: string;
+  ownerName: string | null;
+  isJiraSpace: boolean;
+  /** True once any QA-family value (space-level or agent-level) exists. */
+  hasData: boolean;
+  /** Honest note when the space carries QA metrics but has no rows yet. */
+  note: string | null;
+  /** The QA-family metrics resolved to current value/target/RAG + 7-day history. */
+  metrics: Array<ResolvedMetric & { history: Array<{ date: string; value: number }> }>;
+  /** Report date the agent rows are for (latest with QA agent data); null if none. */
+  agentReportDate: string | null;
+  /** Per-agent QA-family values for that date. */
+  agents: QaAgentRow[];
+}
+
+export interface QaParitySummary {
+  generatedAt: string;
+  qaMetricKeys: string[];
+  /** Only spaces that actually carry the QA family (enabled binding). */
+  spaces: QaParitySpace[];
+}
+
+/**
+ * The clean-sheet escalation metric family wired across KPX-WP3/WP5 (escalation
+ * source) and KPX-WP5 (rejection / bounce-back source):
+ *   escalation_rate     ← escalation_log (NOVA main pool, non-rejection rows)
+ *   escalation_accuracy ← escalation_log escalations vs captured rejections
+ *   rejection_rate      ← escalation_log rejection (bounce-back) rows
+ * The Escalations parity surface is scoped to exactly these three — no other
+ * metric family. `escalation_accuracy` / `rejection_rate` depend on the explicit
+ * rejection capture path: until at least one bounce-back has been captured they
+ * resolve to null (rendered "—", wired-but-awaiting-capture), never a fabricated
+ * 100% / 0%.
+ */
+export const ESCALATION_METRIC_KEYS = ['escalation_rate', 'escalation_accuracy', 'rejection_rate'] as const;
+
+/** One agent's escalation-family values for the latest report date that has agent rows. */
+export interface EscalationAgentRow {
+  agentId: string;
+  agentName: string | null;
+  /** metric_key -> value (only the escalation family); absent key = no row for that metric. */
+  metrics: Record<string, number>;
+}
+
+/** Per-space Escalations parity card: the family resolved + per-agent breakdown. */
+export interface EscalationParitySpace {
+  spaceKey: string;
+  displayName: string;
+  ownerName: string | null;
+  isJiraSpace: boolean;
+  /** True once any escalation-family value (space-level or agent-level) exists. */
+  hasData: boolean;
+  /** Honest note when the space carries the family but has no rows yet. */
+  note: string | null;
+  /** The escalation-family metrics resolved to current value/target/RAG + 7-day history. */
+  metrics: Array<ResolvedMetric & { history: Array<{ date: string; value: number }> }>;
+  /** Report date the agent rows are for (latest with escalation agent data); null if none. */
+  agentReportDate: string | null;
+  /** Per-agent escalation-family values for that date. */
+  agents: EscalationAgentRow[];
+}
+
+export interface EscalationParitySummary {
+  generatedAt: string;
+  escalationMetricKeys: string[];
+  /** Only spaces that actually carry the escalation family (enabled binding). */
+  spaces: EscalationParitySpace[];
+}
+
 interface SnapshotRow { metricKey: string; tierName: string | null; value: number; snapshotAt: Date | string; }
 interface DailyLatestRow { metric_key: string; tier_name: string | null; value: number; report_date: string | Date; }
 
@@ -152,12 +250,12 @@ export class KpiViewsService {
   async getSpaceMetricBindings(spaceKey: string): Promise<SpaceMetricBinding[]> {
     const rows = await query<{
       metric_key: string; display_name: string; category: string; value_type: string;
-      direction: string; source: string; is_agent_level: number | boolean;
+      direction: string; source: string; computation_key: string | null; is_agent_level: number | boolean;
       target_value: number | null; amber_band: number | null; display_order: number | null;
       show_on_slt_view: number | boolean; show_on_wallboard: number | boolean;
     }>(
       `SELECT d.metric_key, d.display_name, d.category, d.value_type, d.direction, d.source,
-              d.is_agent_level, sm.target_value, sm.amber_band, sm.display_order,
+              d.computation_key, d.is_agent_level, sm.target_value, sm.amber_band, sm.display_order,
               sm.show_on_slt_view, sm.show_on_wallboard
        FROM kpi_space_metrics sm
        JOIN kpi_metric_definitions d ON d.metric_key = sm.metric_key
@@ -172,6 +270,7 @@ export class KpiViewsService {
       valueType: r.value_type,
       direction: r.direction,
       source: r.source,
+      computationKey: r.computation_key,
       isAgentLevel: r.is_agent_level === true || r.is_agent_level === 1,
       targetValue: r.target_value,
       amberBand: r.amber_band,
@@ -222,6 +321,10 @@ export class KpiViewsService {
         if (d) { value = d.value; asOf = d.reportDate; valueSource = 'daily'; }
       }
       const rag = value === null ? null : this.eod.computeRag(value, b.targetValue, b.amberBand, b.direction);
+      // A computed metric with no registered computer can never carry a value in
+      // this build — flag it so the value is null *and* honestly labelled, rather
+      // than being mistaken for late/missing data that might still arrive.
+      const unwired = b.source === 'computed' && !hasComputer(b.computationKey ?? b.metricKey);
       return {
         metricKey: b.metricKey,
         displayName: b.displayName,
@@ -234,6 +337,7 @@ export class KpiViewsService {
         rag,
         asOf,
         valueSource,
+        unwired,
       };
     });
   }
@@ -247,25 +351,23 @@ export class KpiViewsService {
     const spaces = await this.engine.listSpaces();
     const cards: SltSpaceCard[] = [];
     for (const space of spaces) {
-      const bindings = (await this.getSpaceMetricBindings(space.spaceKey)).filter((b) => b.showOnSlt);
-      if (!space.isJiraSpace) {
-        cards.push({
-          spaceKey: space.spaceKey,
-          displayName: space.displayName,
-          ownerName: space.ownerName,
-          timezone: space.timezone,
-          isJiraSpace: false,
-          hasData: false,
-          note: 'Manual / non-Jira team — KPIs captured via manual entry (not in computed scope yet).',
-          metrics: bindings.map((b) => ({
-            metricKey: b.metricKey, displayName: b.displayName, category: b.category,
-            valueType: b.valueType, direction: b.direction, source: b.source,
-            value: null, target: b.targetValue, rag: null, asOf: null, valueSource: null,
-          })),
-        });
-        continue;
-      }
-      const snapshots = (await this.engine.getLatestSnapshot(space.spaceKey)) as unknown as SnapshotRow[];
+      const allBindings = await this.getSpaceMetricBindings(space.spaceKey);
+      // Jira spaces curate a headline SLT subset via show_on_slt_view. Manual /
+      // non-Jira teams have NO show_on_slt_view flags seeded, so filtering by it
+      // leaves them with zero bindings — which made the SLT card report "no KPIs
+      // entered yet" even when kpi_daily holds real manual values (while the Team
+      // Dashboard, which uses the full enabled set, showed them correctly). For
+      // manual spaces, fall back to the full enabled set so SLT resolves the same
+      // daily data the Team view does. Honest empty state is preserved: empty
+      // manual spaces still yield all-null values → hasData=false → empty note.
+      const bindings = space.isJiraSpace ? allBindings.filter((b) => b.showOnSlt) : allBindings;
+      // Manual / non-Jira spaces never snapshot, but their manual entries are
+      // promoted into kpi_daily — so resolve them from the latest frozen daily
+      // exactly like Jira spaces (with no live snapshot layer). This is the fix
+      // for manual data being invisible on the SLT view after entry/import.
+      const snapshots = space.isJiraSpace
+        ? ((await this.engine.getLatestSnapshot(space.spaceKey)) as unknown as SnapshotRow[])
+        : [];
       const latestDaily = await this.getLatestDailyByMetric(space.spaceKey);
       const metrics = this.resolveCurrent(bindings, snapshots, latestDaily);
       const hasData = metrics.some((m) => m.value !== null);
@@ -274,9 +376,13 @@ export class KpiViewsService {
         displayName: space.displayName,
         ownerName: space.ownerName,
         timezone: space.timezone,
-        isJiraSpace: true,
+        isJiraSpace: space.isJiraSpace,
         hasData,
-        note: hasData ? null : 'No clean-sheet data captured yet for this space (sync coverage may be sparse).',
+        note: hasData
+          ? null
+          : space.isJiraSpace
+            ? 'No clean-sheet data captured yet for this space (sync coverage may be sparse).'
+            : 'Manual / non-Jira team — no KPIs entered yet for the latest available date.',
         metrics,
       });
     }
@@ -303,22 +409,14 @@ export class KpiViewsService {
       generatedAt: new Date().toISOString(),
     };
 
-    if (!space.isJiraSpace) {
-      return {
-        ...base,
-        hasData: false,
-        note: 'Manual / non-Jira team — KPIs captured via manual entry (not in computed scope yet).',
-        metrics: bindings.map((b) => ({
-          metricKey: b.metricKey, displayName: b.displayName, category: b.category,
-          valueType: b.valueType, direction: b.direction, source: b.source,
-          value: null, target: b.targetValue, rag: null, asOf: null, valueSource: null, history: [],
-        })),
-        tiers: [],
-        eodSnapshot: null,
-      };
-    }
-
-    const snapshots = (await this.engine.getLatestSnapshot(spaceKey)) as unknown as SnapshotRow[];
+    // Manual / non-Jira spaces never snapshot, never have tiers, and never carry a
+    // computed EOD ticket-state snapshot — but their manual entries ARE promoted
+    // into kpi_daily. So resolve them through the same daily path (with no live
+    // snapshot layer); the tier/EOD sections below naturally yield empty for them.
+    // This is the fix for manual data being invisible on the Team Dashboard.
+    const snapshots = space.isJiraSpace
+      ? ((await this.engine.getLatestSnapshot(spaceKey)) as unknown as SnapshotRow[])
+      : [];
     const latestDaily = await this.getLatestDailyByMetric(spaceKey);
     const resolved = this.resolveCurrent(bindings, snapshots, latestDaily);
 
@@ -388,7 +486,11 @@ export class KpiViewsService {
     return {
       ...base,
       hasData,
-      note: hasData ? null : 'No clean-sheet data captured yet for this space (sync coverage may be sparse).',
+      note: hasData
+        ? null
+        : space.isJiraSpace
+          ? 'No clean-sheet data captured yet for this space (sync coverage may be sparse).'
+          : 'Manual / non-Jira team — no KPIs entered yet for the latest available date.',
       metrics,
       tiers,
       eodSnapshot,
@@ -478,5 +580,204 @@ export class KpiViewsService {
     agents.forEach((a, i) => { a.rank = a.compositeScore === null ? null : i + 1; });
 
     return { ...base, hasData: agents.length > 0, note: agents.length ? null : 'No agent-level data captured for this date.', reportDate, agents };
+  }
+
+  /**
+   * QA parity surface (KPX-WP4). A focused cross-space view of the now-wired QA
+   * metric family (`qa_score_avg`, `golden_rules_avg`) — and ONLY that family.
+   *
+   * Reads the SAME clean-sheet path as every other Phase 3 view: current value
+   * resolves live-snapshot-first then latest frozen daily (kpi_snapshots /
+   * kpi_daily), 7-day daily history for sparklines, and per-agent values from the
+   * frozen kpi_agent_daily rows. It never touches the legacy KPI pipeline, the
+   * QA source tables directly, or any forbidden table — the QA values arrive
+   * pre-computed through the engine's source-context wiring.
+   *
+   * Honesty: only spaces with an enabled QA binding appear at all. Where a QA
+   * metric has no upstream rows it resolves to value=null (rendered "—"), never a
+   * fabricated 0 — exactly the null-not-zero behaviour the rest of the platform
+   * uses. A space carrying the family but holding no QA value yet is surfaced
+   * with hasData=false and an honest note.
+   */
+  async getQaParity(): Promise<QaParitySummary> {
+    const qaKeys = [...QA_METRIC_KEYS] as string[];
+    const inList = qaKeys.map(() => '?').join(', ');
+    const spaces = await this.engine.listSpaces();
+    const cards: QaParitySpace[] = [];
+
+    for (const space of spaces) {
+      const bindings = await this.getSpaceMetricBindings(space.spaceKey);
+      const qaBindings = bindings.filter((b) => qaKeys.includes(b.metricKey));
+      if (qaBindings.length === 0) continue; // space does not carry the QA family — skip entirely
+
+      // Current value: same live-snapshot-then-daily resolution as Team/SLT views.
+      const snapshots = space.isJiraSpace
+        ? ((await this.engine.getLatestSnapshot(space.spaceKey)) as unknown as SnapshotRow[])
+        : [];
+      const latestDaily = await this.getLatestDailyByMetric(space.spaceKey);
+      const resolved = this.resolveCurrent(qaBindings, snapshots, latestDaily);
+
+      // 7-day space-level daily history for the QA family only.
+      const historyRows = await query<{ metric_key: string; report_date: string | Date; value: number }>(
+        `SELECT metric_key, report_date, value
+         FROM kpi_daily
+         WHERE space_key = ? AND tier_name IS NULL AND metric_key IN (${inList})
+           AND report_date >= DATEADD(day, -7, CAST(GETUTCDATE() AS DATE))
+         ORDER BY report_date`,
+        [space.spaceKey, ...qaKeys],
+      );
+      const histByMetric = new Map<string, Array<{ date: string; value: number }>>();
+      for (const r of historyRows) {
+        const arr = histByMetric.get(r.metric_key) ?? [];
+        arr.push({ date: dateKey(r.report_date), value: r.value });
+        histByMetric.set(r.metric_key, arr);
+      }
+      const metrics = resolved.map((m) => ({ ...m, history: histByMetric.get(m.metricKey) ?? [] }));
+
+      // Per-agent QA values for the latest frozen date that actually has QA agent rows.
+      let agentReportDate: string | null = null;
+      let agents: QaAgentRow[] = [];
+      if (space.isJiraSpace) {
+        const dateRow = await query<{ d: string | Date }>(
+          `SELECT TOP 1 report_date AS d FROM kpi_agent_daily
+           WHERE space_key = ? AND metric_key IN (${inList}) ORDER BY report_date DESC`,
+          [space.spaceKey, ...qaKeys],
+        );
+        if (dateRow[0]) {
+          agentReportDate = dateKey(dateRow[0].d);
+          const agentRows = await query<{ agent_id: string; agent_name: string | null; metric_key: string; value: number }>(
+            `SELECT agent_id, agent_name, metric_key, value FROM kpi_agent_daily
+             WHERE space_key = ? AND report_date = ? AND metric_key IN (${inList})`,
+            [space.spaceKey, agentReportDate, ...qaKeys],
+          );
+          const byAgent = new Map<string, QaAgentRow>();
+          for (const r of agentRows) {
+            let a = byAgent.get(r.agent_id);
+            if (!a) { a = { agentId: r.agent_id, agentName: r.agent_name, metrics: {} }; byAgent.set(r.agent_id, a); }
+            a.metrics[r.metric_key] = r.value;
+          }
+          agents = [...byAgent.values()].sort((x, y) => (x.agentName ?? '').localeCompare(y.agentName ?? ''));
+        }
+      }
+
+      const hasData = metrics.some((m) => m.value !== null) || agents.length > 0;
+      cards.push({
+        spaceKey: space.spaceKey,
+        displayName: space.displayName,
+        ownerName: space.ownerName,
+        isJiraSpace: space.isJiraSpace,
+        hasData,
+        note: hasData
+          ? null
+          : 'QA metrics are wired for this space but no QA scores have been captured yet (awaiting upstream QA / golden-rules rows).',
+        metrics,
+        agentReportDate,
+        agents,
+      });
+    }
+
+    return { generatedAt: new Date().toISOString(), qaMetricKeys: qaKeys, spaces: cards };
+  }
+
+  /**
+   * Escalations parity surface (KPX-WP6). A focused cross-space view of the
+   * now-wired escalation metric family (`escalation_rate`, `escalation_accuracy`,
+   * `rejection_rate`) — and ONLY that family — now that the escalation-family
+   * source (escalation_log) and capture paths are runtime-proven.
+   *
+   * Reads the SAME clean-sheet path as every other Phase 3 view: current value
+   * resolves live-snapshot-first then latest frozen daily (kpi_snapshots /
+   * kpi_daily), 7-day daily history for sparklines, and per-agent values from the
+   * frozen kpi_agent_daily rows. It never touches the legacy KPI pipeline, the
+   * escalation_log table directly, or any forbidden table — the escalation values
+   * arrive pre-computed through the engine's source-context wiring.
+   *
+   * Honesty: only spaces with an enabled escalation binding appear at all. Where a
+   * metric has no captured value it resolves to value=null (rendered "—"), never a
+   * fabricated 0% / 100%. This is load-bearing for `escalation_accuracy` and
+   * `rejection_rate`: until the rejection (bounce-back) capture path has produced
+   * at least one event their computers return null, so the EOD freeze writes no
+   * row and they read "—" (wired, awaiting capture) rather than asserting an
+   * unfounded 100% accurate / 0% rejected. A space carrying the family but holding
+   * no value yet is surfaced with hasData=false and an honest note.
+   */
+  async getEscalationsParity(): Promise<EscalationParitySummary> {
+    const escKeys = [...ESCALATION_METRIC_KEYS] as string[];
+    const inList = escKeys.map(() => '?').join(', ');
+    const spaces = await this.engine.listSpaces();
+    const cards: EscalationParitySpace[] = [];
+
+    for (const space of spaces) {
+      const bindings = await this.getSpaceMetricBindings(space.spaceKey);
+      const escBindings = bindings.filter((b) => escKeys.includes(b.metricKey));
+      if (escBindings.length === 0) continue; // space does not carry the escalation family — skip entirely
+
+      // Current value: same live-snapshot-then-daily resolution as Team/SLT views.
+      const snapshots = space.isJiraSpace
+        ? ((await this.engine.getLatestSnapshot(space.spaceKey)) as unknown as SnapshotRow[])
+        : [];
+      const latestDaily = await this.getLatestDailyByMetric(space.spaceKey);
+      const resolved = this.resolveCurrent(escBindings, snapshots, latestDaily);
+
+      // 7-day space-level daily history for the escalation family only.
+      const historyRows = await query<{ metric_key: string; report_date: string | Date; value: number }>(
+        `SELECT metric_key, report_date, value
+         FROM kpi_daily
+         WHERE space_key = ? AND tier_name IS NULL AND metric_key IN (${inList})
+           AND report_date >= DATEADD(day, -7, CAST(GETUTCDATE() AS DATE))
+         ORDER BY report_date`,
+        [space.spaceKey, ...escKeys],
+      );
+      const histByMetric = new Map<string, Array<{ date: string; value: number }>>();
+      for (const r of historyRows) {
+        const arr = histByMetric.get(r.metric_key) ?? [];
+        arr.push({ date: dateKey(r.report_date), value: r.value });
+        histByMetric.set(r.metric_key, arr);
+      }
+      const metrics = resolved.map((m) => ({ ...m, history: histByMetric.get(m.metricKey) ?? [] }));
+
+      // Per-agent escalation values for the latest frozen date that actually has rows.
+      let agentReportDate: string | null = null;
+      let agents: EscalationAgentRow[] = [];
+      if (space.isJiraSpace) {
+        const dateRow = await query<{ d: string | Date }>(
+          `SELECT TOP 1 report_date AS d FROM kpi_agent_daily
+           WHERE space_key = ? AND metric_key IN (${inList}) ORDER BY report_date DESC`,
+          [space.spaceKey, ...escKeys],
+        );
+        if (dateRow[0]) {
+          agentReportDate = dateKey(dateRow[0].d);
+          const agentRows = await query<{ agent_id: string; agent_name: string | null; metric_key: string; value: number }>(
+            `SELECT agent_id, agent_name, metric_key, value FROM kpi_agent_daily
+             WHERE space_key = ? AND report_date = ? AND metric_key IN (${inList})`,
+            [space.spaceKey, agentReportDate, ...escKeys],
+          );
+          const byAgent = new Map<string, EscalationAgentRow>();
+          for (const r of agentRows) {
+            let a = byAgent.get(r.agent_id);
+            if (!a) { a = { agentId: r.agent_id, agentName: r.agent_name, metrics: {} }; byAgent.set(r.agent_id, a); }
+            a.metrics[r.metric_key] = r.value;
+          }
+          agents = [...byAgent.values()].sort((x, y) => (x.agentName ?? '').localeCompare(y.agentName ?? ''));
+        }
+      }
+
+      const hasData = metrics.some((m) => m.value !== null) || agents.length > 0;
+      cards.push({
+        spaceKey: space.spaceKey,
+        displayName: space.displayName,
+        ownerName: space.ownerName,
+        isJiraSpace: space.isJiraSpace,
+        hasData,
+        note: hasData
+          ? null
+          : 'Escalation metrics are wired for this space but no escalation-family values have been captured yet (awaiting escalation_log rows; rejection-dependent accuracy/rejection-rate await a captured bounce-back).',
+        metrics,
+        agentReportDate,
+        agents,
+      });
+    }
+
+    return { generatedAt: new Date().toISOString(), escalationMetricKeys: escKeys, spaces: cards };
   }
 }

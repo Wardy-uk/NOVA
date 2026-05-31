@@ -12,6 +12,7 @@
  * silently hidden.
  */
 import type { JobRegistry } from '../job-registry.js';
+import type { SettingsQueries } from '../../db/settings-store.js';
 import { ensureKpiSchema, countKpiTables, KPI_TABLE_COUNT } from './kpi-schema.js';
 import { seedKpiFoundation, type SeedCounts } from './kpi-seed.js';
 import { KpiEngine } from './kpi-engine.js';
@@ -20,6 +21,7 @@ import { KpiViewsService } from './kpi-views.js';
 import { KpiManualService } from './kpi-manual.js';
 import { KpiDigestService, type DigestLlm } from './kpi-digest.js';
 import { KpiAdminService } from './kpi-admin.js';
+import { KpiEscalationFixtureService } from './kpi-fixture.js';
 
 export { KpiEngine } from './kpi-engine.js';
 export { KpiEodService } from './kpi-eod.js';
@@ -27,6 +29,7 @@ export { KpiViewsService } from './kpi-views.js';
 export { KpiManualService } from './kpi-manual.js';
 export { KpiDigestService, type DigestLlm } from './kpi-digest.js';
 export { KpiAdminService } from './kpi-admin.js';
+export { KpiEscalationFixtureService } from './kpi-fixture.js';
 export * from './types.js';
 
 /** Stable id of the 3-min snapshot job (design §5.2). Shared with the route layer. */
@@ -84,6 +87,8 @@ export interface KpiFoundation {
   manual: KpiManualService;
   digest: KpiDigestService;
   admin: KpiAdminService;
+  /** Disposable Escalations parity proof fixture (KPX-WP6A). */
+  escalationFixture: KpiEscalationFixtureService;
   status: KpiInitStatus;
 }
 
@@ -97,14 +102,18 @@ export interface KpiFoundation {
  */
 export async function initKpiFoundation(
   jobRegistry: JobRegistry,
-  opts: { llm?: DigestLlm | null } = {},
+  opts: { llm?: DigestLlm | null; settings?: SettingsQueries | null } = {},
 ): Promise<KpiFoundation> {
-  const engine = new KpiEngine();
+  // Settings let the engine reach the KPI / techservicesjsm pool for the QA and
+  // golden-rules source families (KPX-WP3); without it those metrics degrade to
+  // "—" but the rest of the engine is unaffected.
+  const engine = new KpiEngine(opts.settings ?? null);
   const eod = new KpiEodService(engine);
   const views = new KpiViewsService(engine);
   const manual = new KpiManualService(engine);
   const digest = new KpiDigestService(eod, opts.llm ?? null);
   const admin = new KpiAdminService(engine);
+  const escalationFixture = new KpiEscalationFixtureService(engine, eod);
   const status: KpiInitStatus = {
     ...lastStatus,
     schemaTablesExpected: KPI_TABLE_COUNT,
@@ -186,5 +195,5 @@ export async function initKpiFoundation(
   }
 
   lastStatus = status;
-  return { engine, eod, views, manual, digest, admin, status };
+  return { engine, eod, views, manual, digest, admin, escalationFixture, status };
 }

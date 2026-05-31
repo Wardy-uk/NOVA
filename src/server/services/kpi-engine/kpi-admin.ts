@@ -21,6 +21,7 @@
  */
 import { query, execute, queryOne } from '../database.js';
 import type { KpiEngine } from './kpi-engine.js';
+import { hasComputer } from './metric-computers.js';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;        // HH:MM 24h
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -64,6 +65,13 @@ export interface SpaceHealth {
   lastSnapshotAt: string | null;
   snapshotRowsToday: number;
   lastDigestDate: string | null;
+  /**
+   * Enabled computed bindings whose computation_key has NO registered computer —
+   * i.e. metrics that advertise a cell on the dashboards but can never carry a
+   * value in this build. Surfaced so the gap is actionable (wire a source, or
+   * disable the binding) instead of silently rendering a permanent "—".
+   */
+  unwiredBindings: string[];
 }
 
 export class KpiAdminService {
@@ -328,6 +336,19 @@ export class KpiAdminService {
       const lastDigest = await queryOne<{ d: string | Date | null }>(
         `SELECT MAX(report_date) AS d FROM kpi_digests WHERE space_key = ?`, [space.spaceKey]);
 
+      // Enabled computed bindings with no registered computer (structural "—").
+      const computedBindings = await query<{ metric_key: string; computation_key: string | null }>(
+        `SELECT d.metric_key, d.computation_key
+         FROM kpi_space_metrics sm
+         JOIN kpi_metric_definitions d ON d.metric_key = sm.metric_key
+         WHERE sm.space_key = ? AND sm.is_enabled = 1 AND d.is_active = 1 AND d.source = 'computed'`,
+        [space.spaceKey],
+      );
+      const unwiredBindings = computedBindings
+        .filter((r) => !hasComputer(r.computation_key ?? r.metric_key))
+        .map((r) => r.metric_key)
+        .sort();
+
       out.push({
         spaceKey: space.spaceKey,
         displayName: space.displayName,
@@ -338,6 +359,7 @@ export class KpiAdminService {
         lastSnapshotAt: lastSnap?.d ? new Date(lastSnap.d).toISOString() : null,
         snapshotRowsToday: snapToday?.n ?? 0,
         lastDigestDate: lastDigest?.d ? (typeof lastDigest.d === 'string' ? lastDigest.d.slice(0, 10) : new Date(lastDigest.d).toISOString().slice(0, 10)) : null,
+        unwiredBindings,
       });
     }
 

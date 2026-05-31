@@ -304,7 +304,7 @@ function HealthTab({ onErr }: { onErr: (e: unknown) => void }) {
       </div>
       <div style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><th style={th}>Space</th><th style={th}>Type</th><th style={th}>Last daily</th><th style={th}>Days/14</th><th style={th}>Missing biz days</th><th style={th}>Last snapshot</th><th style={th}>Snaps today</th><th style={th}>Last digest</th></tr></thead>
+          <thead><tr><th style={th}>Space</th><th style={th}>Type</th><th style={th}>Last daily</th><th style={th}>Days/14</th><th style={th}>Missing biz days</th><th style={th}>Last snapshot</th><th style={th}>Snaps today</th><th style={th}>Last digest</th><th style={th}>Unwired metrics</th></tr></thead>
           <tbody>
             {data.spaces.map((s: any) => (
               <tr key={s.spaceKey}>
@@ -316,6 +316,7 @@ function HealthTab({ onErr }: { onErr: (e: unknown) => void }) {
                 <td style={{ ...td, fontSize: 11 }}>{s.lastSnapshotAt ? new Date(s.lastSnapshotAt).toLocaleString() : '—'}</td>
                 <td style={td}>{s.snapshotRowsToday}</td>
                 <td style={td}>{s.lastDigestDate ?? '—'}</td>
+                <td style={{ ...td, color: s.unwiredBindings?.length ? C.amber : C.text3, fontSize: 11 }} title={s.unwiredBindings?.join(', ') || ''}>{s.unwiredBindings?.length ? `${s.unwiredBindings.length}: ${s.unwiredBindings.join(', ')}` : '—'}</td>
               </tr>
             ))}
           </tbody>

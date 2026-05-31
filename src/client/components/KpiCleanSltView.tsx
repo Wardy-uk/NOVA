@@ -19,6 +19,7 @@ type Rag = 'green' | 'amber' | 'red' | null;
 interface SltMetric {
   metricKey: string; displayName: string; valueType: string; direction: string;
   value: number | null; target: number | null; rag: Rag; asOf: string | null; valueSource: string | null;
+  unwired?: boolean;
 }
 interface SltSpace {
   spaceKey: string; displayName: string; ownerName: string | null; timezone: string;
@@ -103,7 +104,7 @@ export function KpiCleanSltView() {
             <div style={{ fontSize: 10, color: C.text3, marginBottom: 12 }}>
               {s.ownerName ? `${s.ownerName} · ` : ''}{s.isJiraSpace ? 'Jira-computed' : 'Manual / non-Jira'}
             </div>
-            {(!s.isJiraSpace || !s.hasData) ? (
+            {!s.hasData ? (
               <div style={{ fontSize: 12, color: C.text3, fontStyle: 'italic', padding: '8px 0' }}>{s.note ?? 'No data.'}</div>
             ) : (
               <div>
@@ -111,8 +112,10 @@ export function KpiCleanSltView() {
                   <div key={m.metricKey} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: `1px solid ${C.border}` }}>
                     <span style={{ fontSize: 12, color: C.text2 }}>{m.displayName}</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 16, fontWeight: 700, color: ragColor(m.rag) }}>{fmtValue(m.valueType, m.value)}</span>
-                      {m.target !== null && <span style={{ fontSize: 10, color: C.text3 }}>/ {fmtValue(m.valueType, m.target)}</span>}
+                      {m.unwired
+                        ? <span title="No data source wired yet" style={{ fontSize: 11, fontWeight: 600, color: C.text3, fontStyle: 'italic' }}>not wired</span>
+                        : <span style={{ fontSize: 16, fontWeight: 700, color: ragColor(m.rag) }}>{fmtValue(m.valueType, m.value)}</span>}
+                      {!m.unwired && m.target !== null && <span style={{ fontSize: 10, color: C.text3 }}>/ {fmtValue(m.valueType, m.target)}</span>}
                     </span>
                   </div>
                 ))}

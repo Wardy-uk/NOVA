@@ -10,7 +10,7 @@
  */
 import { Router } from 'express';
 import XLSX from 'xlsx';
-import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService, KpiDigestService, KpiAdminService } from '../services/kpi-engine/index.js';
+import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService, KpiDigestService, KpiAdminService, KpiEscalationFixtureService } from '../services/kpi-engine/index.js';
 import { SNAPSHOT_JOB_ID, EOD_JOB_ID, DIGEST_JOB_ID } from '../services/kpi-engine/index.js';
 import type { RegisteredJob } from '../services/job-registry.js';
 
@@ -29,6 +29,8 @@ export function createKpiEngineRoutes(deps: {
   digest: KpiDigestService;
   /** Config / admin write surface + coverage health (P5-WP1). */
   admin: KpiAdminService;
+  /** Disposable Escalations parity proof fixture (KPX-WP6A). */
+  escalationFixture: KpiEscalationFixtureService;
   /** Foundation activation status (so /health can prove the system is live). */
   getStatus: () => KpiInitStatus;
   /** Snapshot job status from the registry (proves the scheduler is registered/running). */
@@ -39,7 +41,7 @@ export function createKpiEngineRoutes(deps: {
   getDigestJob?: () => RegisteredJob | undefined;
 }): Router {
   const router = Router();
-  const { engine, eod, views, manual, digest, admin } = deps;
+  const { engine, eod, views, manual, digest, admin, escalationFixture } = deps;
 
   // List all active spaces with their resolved config.
   router.get('/spaces', async (_req, res) => {
@@ -290,6 +292,87 @@ export function createKpiEngineRoutes(deps: {
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // QA parity surface (KPX-WP4). Focused cross-space view of the now-wired QA
+  // metric family (qa_score_avg, golden_rules_avg) ONLY — current value/RAG +
+  // 7-day history + per-agent breakdown, all from the clean-sheet path. Spaces
+  // without the QA family are omitted; carried-but-empty spaces surface honestly.
+  router.get('/qa-parity', async (_req, res) => {
+    try {
+      const data = await views.getQaParity();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Escalations parity surface (KPX-WP6). Focused cross-space view of the wired
+  // escalation metric family (escalation_rate, escalation_accuracy, rejection_rate)
+  // ONLY — current value/RAG + 7-day history + per-agent breakdown, all from the
+  // clean-sheet path. Spaces without the family are omitted; carried-but-empty and
+  // rejection-awaiting states surface honestly as "—", never a fabricated %.
+  router.get('/escalations-parity', async (_req, res) => {
+    try {
+      const data = await views.getEscalationsParity();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Escalations parity PROOF FIXTURE (KPX-WP6A). A tightly-bounded, disposable
+  // path that proves the POPULATED escalation family through the real clean-sheet
+  // data path (real escalation_log + jira_issue_cache source rows → live engine
+  // compute → snapshot/EOD freeze), then tears itself back out. It NEVER fabricates
+  // escalation-family values and only touches its own fixture space/project, so
+  // honest null/awaiting behaviour for every real space is preserved.
+  //   GET  /fixtures/escalations            → current fixture status (row counts).
+  //   POST /fixtures/escalations { action } →
+  //     'seed'          : build fixture (escalation_rate populated; accuracy /
+  //                       rejection_rate honestly "—" until a bounce-back exists).
+  //                       Optional { withRejection: true } populates them at once.
+  //     'add-rejection' : capture a real bounce-back so escalation_accuracy /
+  //                       rejection_rate transition from "—" to real values.
+  //     'teardown'      : remove every fixture row; restore the known empty state.
+  //     'status'        : same as the GET.
+  router.get('/fixtures/escalations', async (_req, res) => {
+    try {
+      const data = await escalationFixture.status();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post('/fixtures/escalations', async (req, res) => {
+    const body = (req.body ?? {}) as { action?: string; withRejection?: boolean };
+    const action = body.action ?? 'status';
+    try {
+      switch (action) {
+        case 'seed': {
+          const data = await escalationFixture.seed({ withRejection: body.withRejection === true });
+          return res.json({ ok: true, data });
+        }
+        case 'add-rejection': {
+          const data = await escalationFixture.addRejection();
+          return res.json({ ok: true, data });
+        }
+        case 'teardown': {
+          const data = await escalationFixture.teardown();
+          return res.json({ ok: true, data });
+        }
+        case 'status': {
+          const data = await escalationFixture.status();
+          return res.json({ ok: true, data });
+        }
+        default:
+          return res.status(400).json({ ok: false, error: `unknown action '${action}' (seed | add-rejection | teardown | status)` });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg.includes('not seeded') ? 409 : 500).json({ ok: false, error: msg });
     }
   });
 

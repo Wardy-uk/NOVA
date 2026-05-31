@@ -1076,7 +1076,7 @@ async function main() {
   // /api/kpi/health (and logged as an error). Does not touch the legacy KPI
   // pipeline; the read/observability surface at /api/kpi/* coexists with the
   // legacy POST /api/kpi/derived/run (different path, registered later).
-  const kpiFoundation = await initKpiFoundation(jobRegistry);
+  const kpiFoundation = await initKpiFoundation(jobRegistry, { settings: settingsQueries });
   app.use('/api/kpi', createKpiEngineRoutes({
     engine: kpiFoundation.engine,
     eod: kpiFoundation.eod,
@@ -1084,6 +1084,7 @@ async function main() {
     manual: kpiFoundation.manual,
     digest: kpiFoundation.digest,
     admin: kpiFoundation.admin,
+    escalationFixture: kpiFoundation.escalationFixture,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
     getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),
@@ -1112,6 +1113,17 @@ async function main() {
   const llmDiag = llmService.getDiagnostics();
   console.log(`[N.O.V.A] LLM config: primary=${llmDiag.primaryProvider} (${llmDiag.primaryKeyPrefix}), failover=${llmDiag.failoverProvider} (${llmDiag.failoverKeyPrefix})`);
   if (!llmDiag.primaryAvailable) console.warn(`[N.O.V.A] WARNING: Primary LLM provider has no API key configured!`);
+
+  // Escalation logging — mounted unconditionally so the escalation capture /
+  // stats / list surface is reachable even when no onboarding Jira client is
+  // configured (the agent block below is skipped when agentJiraClient is null).
+  // EscalationLogService is standalone; the jiraClient dep is used only by the
+  // /backfill route, which already returns 503 when it is null.
+  const escalationLog = new EscalationLogService();
+  app.use('/api/escalations', createEscalationRoutes({
+    escalationLog,
+    jiraClient: agentJiraClient,
+  }));
 
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
@@ -1312,13 +1324,6 @@ async function main() {
     // Gamification
     const gamificationService = new GamificationService();
     app.use('/api/gamification', createGamificationRoutes(gamificationService));
-
-    // Escalation logging
-    const escalationLog = new EscalationLogService();
-    app.use('/api/escalations', createEscalationRoutes({
-      escalationLog,
-      jiraClient: agentLoop.getJiraClient(),
-    }));
 
     // P5: Predictive Intelligence + Platform Hardening services
     const escalationPredictor = new EscalationPredictor(llmService, settingsQueries);

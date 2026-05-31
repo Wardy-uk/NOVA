@@ -18,7 +18,7 @@ export interface EscalationLogEntry {
 
 export interface LogEscalationInput {
   ticket_key: string;
-  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk' | 'complaint_portal';
+  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk' | 'complaint_portal' | 'rejection';
   from_tier?: string;
   to_tier?: string;
   reason_code?: string;
@@ -27,6 +27,29 @@ export interface LogEscalationInput {
   assigned_to?: string;
   notes?: string;
   decision_id?: number;
+  source?: string;
+  created_at?: string;
+}
+
+/**
+ * A bounce-back / rejection capture: a higher tier formally returning a ticket
+ * to a lower tier. This is the clean-sheet replacement for the deprecated
+ * JiraTickets.*RejectionAt columns — recorded explicitly when a rejection
+ * happens, never inferred from ambiguous tier-move heuristics.
+ */
+export interface LogRejectionInput {
+  ticket_key: string;
+  /** Tier that rejected/returned the ticket (the higher tier). */
+  from_tier?: string;
+  /** Tier the ticket was returned to (the lower tier). */
+  to_tier?: string;
+  reason_code?: string;
+  reason_label?: string;
+  /** Who rejected it (the returning party). */
+  rejected_by?: string;
+  /** Agent/queue the ticket was returned to. */
+  returned_to?: string;
+  notes?: string;
   source?: string;
   created_at?: string;
 }
@@ -81,6 +104,30 @@ export class EscalationLogService {
     );
   }
 
+  /**
+   * Capture an explicit rejection / bounce-back event into escalation_log with
+   * escalation_type='rejection'. This is the source-of-truth capture path that
+   * lets rejection_rate / escalation_accuracy be computed honestly from real
+   * recorded events. Reuses the existing escalation_log columns: from_tier/to_tier
+   * carry the tier movement, escalated_by = who rejected, assigned_to = where it
+   * was returned.
+   */
+  async logRejection(input: LogRejectionInput): Promise<number> {
+    return this.log({
+      ticket_key: input.ticket_key,
+      escalation_type: 'rejection',
+      from_tier: input.from_tier,
+      to_tier: input.to_tier,
+      reason_code: input.reason_code,
+      reason_label: input.reason_label,
+      escalated_by: input.rejected_by,
+      assigned_to: input.returned_to,
+      notes: input.notes,
+      source: input.source ?? 'manual',
+      created_at: input.created_at,
+    });
+  }
+
   async getAll(opts?: { days?: number; type?: string; tier?: string }): Promise<EscalationLogEntry[]> {
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -108,36 +155,36 @@ export class EscalationLogService {
   async getStats(days = 30): Promise<EscalationStats> {
     const [totalRows, byType, byTier, byReason, daily, ticketCount] = await Promise.all([
       query<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())`,
+        `SELECT COUNT(*) as cnt FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'`,
         [-days],
       ),
       query<{ escalation_type: string; count: number }>(
         `SELECT escalation_type, COUNT(*) as count FROM escalation_log
-         WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
          GROUP BY escalation_type ORDER BY count DESC`,
         [-days],
       ),
       query<{ to_tier: string; count: number }>(
         `SELECT ISNULL(to_tier, 'Unknown') as to_tier, COUNT(*) as count FROM escalation_log
-         WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
          GROUP BY to_tier ORDER BY count DESC`,
         [-days],
       ),
       query<{ reason_code: string; reason_label: string | null; count: number }>(
         `SELECT ISNULL(reason_code, 'unknown') as reason_code, MAX(reason_label) as reason_label, COUNT(*) as count
-         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
          GROUP BY reason_code ORDER BY count DESC`,
         [-days],
       ),
       query<{ date: string; count: number }>(
         `SELECT CONVERT(VARCHAR(10), created_at, 120) as date, COUNT(*) as count
-         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
          GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY date`,
         [-days],
       ),
       query<{ cnt: number }>(
-        `SELECT COUNT(DISTINCT ticket_key) as cnt FROM jira_issue_cache
-         WHERE created >= DATEADD(day, ?, GETUTCDATE())`,
+        `SELECT COUNT(DISTINCT issue_key) as cnt FROM jira_issue_cache
+         WHERE jira_created >= DATEADD(day, ?, GETUTCDATE())`,
         [-days],
       ),
     ]);

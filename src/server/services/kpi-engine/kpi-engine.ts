@@ -14,9 +14,16 @@
  * Source of truth: KPI-Clean-Sheet-Design.md §5.
  */
 import { query, execute } from '../database.js';
+import type { SettingsQueries } from '../../db/settings-store.js';
 import { parseTimeToMinutes } from './business-hours.js';
 import { metricComputers, hasComputer } from './metric-computers.js';
-import type { SpaceConfig, EnabledMetric, TierDefinition, KpiTicket, MetricValue } from './types.js';
+import {
+  buildSourceContext,
+  ESCALATION_METRIC_KEYS,
+  QA_METRIC_KEYS,
+  GOLDEN_RULES_METRIC_KEYS,
+} from './source-providers.js';
+import type { SpaceConfig, EnabledMetric, TierDefinition, KpiTicket, MetricValue, MetricSourceContext } from './types.js';
 
 interface SpaceRow {
   space_key: string;
@@ -101,6 +108,13 @@ function parseLabels(raw: string | null): string[] {
 }
 
 export class KpiEngine {
+  /**
+   * @param settings Optional settings accessor used by source-family computers
+   *   to reach the KPI / techservicesjsm pool (QA, golden rules). When omitted,
+   *   QA-family metrics stay unavailable (render "—") but the engine still works.
+   */
+  constructor(private readonly settings: SettingsQueries | null = null) {}
+
   /** Active spaces (any). */
   async listSpaces(): Promise<SpaceConfig[]> {
     const rows = await query<SpaceRow>(`SELECT * FROM kpi_spaces WHERE is_active = 1 ORDER BY space_key`);
@@ -236,10 +250,30 @@ export class KpiEngine {
   }
 
   /**
+   * Build the escalation/QA source context for a space, fetching only the
+   * families an enabled metric needs (design §4 source families, KPX-WP3). Shared
+   * by the snapshot path (computeSpaceMetrics) and the EOD agent-row path so each
+   * family is read once per cycle.
+   */
+  async buildSourceContextFor(space: SpaceConfig, metrics: EnabledMetric[]): Promise<MetricSourceContext> {
+    const keys = metrics
+      .filter((m) => m.source === 'computed' && m.computationKey)
+      .map((m) => m.computationKey as string);
+    return buildSourceContext(space, {
+      needEscalation: keys.some((k) => ESCALATION_METRIC_KEYS.has(k)),
+      needQa: keys.some((k) => QA_METRIC_KEYS.has(k)),
+      needGoldenRules: keys.some((k) => GOLDEN_RULES_METRIC_KEYS.has(k)),
+      settings: this.settings,
+    });
+  }
+
+  /**
    * Compute all enabled computed metrics for a space (design §5.3). Returns
    * space-level values, plus per-tier breakdowns for tier-aware metrics when the
    * space has tiers. Manual-source metrics and metrics without a computer are
-   * skipped.
+   * skipped. A computer returning `null` (source unavailable / nothing to
+   * measure) is skipped too — no value is recorded, so the metric reads "—"
+   * rather than a fabricated number.
    */
   async computeSpaceMetrics(spaceKey: string): Promise<MetricValue[]> {
     const space = await this.getSpaceConfig(spaceKey);
@@ -247,6 +281,7 @@ export class KpiEngine {
     const metrics = await this.getEnabledMetrics(spaceKey);
     const tickets = await this.getTicketsForSpace(space);
     const tiers = space.hasTiers ? await this.getTierDefinitions(spaceKey) : [];
+    const ctx = await this.buildSourceContextFor(space, metrics);
     const results: MetricValue[] = [];
 
     for (const metric of metrics) {
@@ -255,7 +290,8 @@ export class KpiEngine {
       if (!computer) continue; // no Phase 1 computer for this metric — skip gracefully
 
       try {
-        results.push({ spaceKey, metricKey: metric.metricKey, tierName: null, value: computer(tickets, space, metric) });
+        const value = computer(tickets, space, metric, undefined, ctx);
+        if (value !== null) results.push({ spaceKey, metricKey: metric.metricKey, tierName: null, value });
       } catch (err) {
         console.warn(`[kpi-engine] computer ${metric.computationKey} failed for ${spaceKey}:`, err instanceof Error ? err.message : err);
         continue;
@@ -267,7 +303,8 @@ export class KpiEngine {
             ? tickets.filter((t) => (t.currentTier || '') === tier.jiraFieldValue)
             : tickets;
           try {
-            results.push({ spaceKey, metricKey: metric.metricKey, tierName: tier.tierName, value: computer(tierTickets, space, metric, tier) });
+            const tierValue = computer(tierTickets, space, metric, tier, ctx);
+            if (tierValue !== null) results.push({ spaceKey, metricKey: metric.metricKey, tierName: tier.tierName, value: tierValue });
           } catch { /* per-tier failure non-fatal */ }
         }
       }

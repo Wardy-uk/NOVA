@@ -20,7 +20,7 @@ type Rag = 'green' | 'amber' | 'red' | null;
 interface TeamMetric {
   metricKey: string; displayName: string; category: string; valueType: string; direction: string;
   source: string; value: number | null; target: number | null; rag: Rag; asOf: string | null;
-  valueSource: string | null; history: Array<{ date: string; value: number }>;
+  valueSource: string | null; unwired?: boolean; history: Array<{ date: string; value: number }>;
 }
 interface TeamDashboard {
   spaceKey: string; displayName: string; ownerName: string | null; timezone: string;
@@ -135,7 +135,7 @@ export function KpiCleanTeamView() {
             {data.ownerName ? `Owner: ${data.ownerName} · ` : ''}{data.timezone} · {data.isJiraSpace ? 'Jira-computed' : 'Manual / non-Jira'}
           </div>
 
-          {(!data.isJiraSpace || !data.hasData) ? (
+          {!data.hasData ? (
             <div style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 12, padding: 24, color: C.text2, fontSize: 14 }}>
               {data.note ?? 'No data available for this space.'}
             </div>
@@ -160,7 +160,9 @@ export function KpiCleanTeamView() {
                       <tr key={m.metricKey} style={{ borderTop: `1px solid ${C.border}`, background: ragBg(m.rag) }}>
                         <td style={{ padding: '9px 14px', color: C.text1 }}>{m.displayName}{m.source === 'manual' && <span style={{ color: C.text3, fontSize: 10 }}> · manual</span>}</td>
                         <td style={{ padding: '9px 14px', color: C.text3 }}>{m.category}</td>
-                        <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, color: ragColor(m.rag) }}>{fmtValue(m.valueType, m.value)}</td>
+                        <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, color: m.unwired ? C.text3 : ragColor(m.rag) }}>
+                          {m.unwired ? <span title="No data source wired yet" style={{ fontWeight: 600, fontSize: 11, fontStyle: 'italic' }}>not wired</span> : fmtValue(m.valueType, m.value)}
+                        </td>
                         <td style={{ padding: '9px 14px', textAlign: 'right', color: C.text2 }}>{m.target !== null ? fmtValue(m.valueType, m.target) : '—'}</td>
                         <td style={{ padding: '9px 14px' }}>
                           {m.rag ? <span style={{ color: ragColor(m.rag), fontWeight: 600, textTransform: 'capitalize' }}>{m.rag}</span> : <span style={{ color: C.text3 }}>—</span>}

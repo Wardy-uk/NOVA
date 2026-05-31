@@ -34,6 +34,33 @@ export function createEscalationRoutes(deps: EscalationRouteDeps): Router {
     }
   });
 
+  // Explicit rejection / bounce-back capture (KPX-WP5). Records a real
+  // escalation_type='rejection' event so rejection_rate / escalation_accuracy can
+  // be sourced honestly from captured data rather than inferred from tier moves.
+  router.post('/rejection', requireRole('editor', 'admin', 'super_admin'), async (req: Request, res: Response) => {
+    try {
+      const { ticket_key, from_tier, to_tier, reason_code, reason_label, returned_to, notes } = req.body ?? {};
+      if (!ticket_key || typeof ticket_key !== 'string') {
+        res.status(400).json({ ok: false, error: 'ticket_key is required' });
+        return;
+      }
+      const id = await escalationLog.logRejection({
+        ticket_key,
+        from_tier,
+        to_tier,
+        reason_code,
+        reason_label,
+        rejected_by: req.user?.username,
+        returned_to,
+        notes,
+        source: 'manual',
+      });
+      res.json({ ok: true, data: { id } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to log rejection' });
+    }
+  });
+
   router.post('/backfill', requireRole('admin', 'super_admin'), async (req: Request, res: Response) => {
     if (!jiraClient) {
       res.status(503).json({ ok: false, error: 'Jira client not available' });

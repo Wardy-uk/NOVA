@@ -19,12 +19,12 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | Area | State | Notes |
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
-| Active phase | Phase 5 | AI digest, config admin, health monitoring, and final KPI polish. |
-| Active work package | `P5-WP1` | Final clean-sheet KPI delivery slice. |
-| Current convergence state | Ready For Evaluation | Build completion reviewed; independent evaluation brief prepared. |
+| Active phase | Replacement Parity Closure | Follow-on closure work to reach replacement-grade parity after clean-sheet convergence. |
+| Active work package | `KPX-WP6A` | Escalations parity populated-path proof fixture. |
+| Current convergence state | Build Ready | Prior Escalations parity screen is honest but not yet proven on its populated path; bounded proof slice opened. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
-| Promotion gate | Eval Running | Phase 5 must now pass independent evaluation before convergence can be claimed for this slice. |
+| Promotion gate | Replacement Parity Active | Replacement parity remains open until the populated Escalations path is demonstrated and any checkpoint decision is made. |
 
 ## Work Package Board
 
@@ -40,6 +40,15 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `P3-WP1` | Deliver clean-sheet KPI views on the new data source | Qualified Pass — Converged | View surfaces and wallboards independently validated; bounded sparse-data and fallback gaps remain visible but non-blocking. |
 | `P4-WP1` | Deliver manual entry UI and spreadsheet import on the clean-sheet path | Qualified Pass — Converged | Manual entry, promotion, dry-run import, and real import independently validated. |
 | `P5-WP1` | Deliver AI digest, config admin, health monitoring, and final KPI polish | Ready For Evaluation | Send evaluator brief and await independent behavioural assessment. |
+| `KPX-WP1` | Discover and classify clean-sheet vs legacy parity gaps | Completed | Use findings to sequence data hardening before parity-screen rebuilds. |
+| `KPX-WP2` | Close highest-value data-side replacement gaps | Qualified Pass | Manual-team Team-view visibility fixed; SLT inconsistency remained for a micro-fix. |
+| `KPX-WP2A` | Close the remaining SLT manual-space visibility inconsistency | Pass | SLT and Team now tell the same story for manual-team data. |
+| `KPX-WP3` | Wire missing QA/escalation source families where feasible | Qualified Pass | QA and part of escalation family now wired; remaining escalation capture needed hardening. |
+| `KPX-WP4` | Deliver QA parity surface on the clean-sheet path | Qualified Pass | Surface is correct and honest; populated path remains environment-dependent on upstream QA rows. |
+| `KPX-WP5` | Add explicit rejection capture and wire the remaining escalation metrics | Qualified Pass | Read-side wiring complete; runtime proof initially blocked by auth/router environment. |
+| `KPX-WP5A` | Make escalation router observably present and capture-capable at runtime | Qualified Pass | Router mount, stats, and rejection capture now behaviourally proven. |
+| `KPX-WP6` | Deliver Escalations parity surface on the clean-sheet path | Qualified Pass | Honest empty/awaiting behaviour proven; populated path still unverified in the environment. |
+| `KPX-WP6A` | Prove the populated Escalations parity path with disposable fixture support | Pass — Checkpoint Ready | Populated path, transition logic, history, per-agent output, and teardown cleanliness all independently verified. |
 
 ## Phase Gate Rules
 
@@ -87,6 +96,9 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `B5-1` | Open phase input | Phase 5 should absorb bounded polish items from prior slices only where they naturally fit the clean-sheet admin/health/digest scope. |
 | `B5-2` | Open bounded gap | n8n cut-over remains an operational sign-off item; workflow artefacts can be prepared, but live n8n remains untouched until approved. |
 | `B5-3` | Open process note | Tool-channel reliability was poor during Phase 5 build; Build Agent had to verify file effects via real build artefacts rather than trusting edit confirmations. |
+| `BKX-1` | Closed | Escalation-router evaluation unblocked via the established runtime-settings token-mint path; route-mount truth is now proven. |
+| `BKX-2` | Open process integrity note | Evaluator disclosed repeated premature result narration during escalation-router evaluation; final verdict relies only on later captured responses reflected in the persisted report. |
+| `BKX-3` | Closed | Escalations parity populated-path behaviour is now verified via disposable fixture seed, rejection transition, history/per-agent output, and teardown. |
 
 ## Change Log
 
@@ -116,3 +128,8 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-05-30 | Clean follow-up evaluation returned QUALIFIED PASS from `agent_work/eval_output/phase4_manual_import_eval_report_2026-05-30.md`. Manual entry exists for all scoped teams, any-date edit works, prefill is correct, validation is enforced, valid saves persist to `kpi_manual_entries` and promote to `kpi_daily`, dry-run and real import behave honestly, and legacy remains untouched. Phase 4 is converged for its scoped outcome. |
 | 2026-05-30 | Manager decision: open `P5-WP1` next. Phase 5 will deliver AI digests, config admin, health monitoring, and final clean-sheet KPI polish on top of the converged Phase 1–4 substrate. |
 | 2026-05-31 | `P5-WP1` build completion reviewed from `agent_work/build_status/p5-wp1-final-slice-2026-05-30.md`. Phase 5 slice is classified as build-complete and ready for independent evaluation with bounded residual risk around live n8n cut-over approval and the AI/deterministic-fallback provenance split. Tool-channel unreliability was disclosed and compensated for by direct build verification. |
+| 2026-05-31 | Escalation-router evaluation attempt for `KPX-WP5A` ended BLOCKED rather than pass/fail. The evaluator could not establish any authenticated path: `/api/*` uniformly returned 401 unauthenticated, self-registration is disabled, and no legitimate token/creds were available within role constraints. Final report on disk reflects the blocked state only. |
+| 2026-05-31 | Clean follow-up evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_escalation_router_activation_eval_2026-05-31.md`. `/api/escalations`, `/stats`, and `/rejection` are now observably mounted and behaving honestly; rejection proof rows clean up correctly; escalation-family read-side remains honest. Next step is Escalations parity-screen delivery. |
+| 2026-05-31 | Escalations parity evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_escalations_parity_screen_eval_2026-05-31.md`. Surface presence, clean-sheet isolation, and honest null/awaiting behaviour all passed, but the populated path remained unverified because the environment had no escalation source rows. Do not checkpoint yet; open `KPX-WP6A` to prove real values/history/per-agent output with disposable fixture data and teardown. |
+| 2026-05-31 | `KPX-WP6A` build completion reviewed from `agent_work/build_status/kpi_escalations_parity_fixture_2026-05-31.md`. Disposable fixture controls for seed, add-rejection, status, and teardown are now in place on a bounded fixture space. Open independent evaluation to confirm populated Escalations parity values, history, per-agent output, awaiting-to-populated transition, and teardown cleanliness. |
+| 2026-05-31 | `KPX-WP6A` evaluation returned PASS from `agent_work/eval_output/kpi_escalations_parity_fixture_eval_2026-05-31.md`. The populated Escalations parity path is now proven end to end: real `escalation_rate`, honest awaiting before rejection, real `escalation_accuracy` and `rejection_rate` after rejection, populated history and per-agent output, and clean teardown with no residue. Escalations parity is now checkpoint-ready. |
