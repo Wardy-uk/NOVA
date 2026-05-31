@@ -4,13 +4,13 @@
 
 | Field | Value |
 | --- | --- |
-| Current date | 2026-05-30 |
+| Current date | 2026-05-31 |
 | Active programme | KPI Recovery & Evidence Integrity |
-| Active phase | Phase 4 |
-| Active work package | `P4-WP1` |
-| Lifecycle state | Converged |
-| Next required action | Decide whether to checkpoint the converged Phase 4 slice and then open Phase 5. |
-| Following action after findings | If no extra proof is required, keep Phase 4 closed and open the final governed slice. |
+| Active phase | Phase 5 |
+| Active work package | `P5-WP1` |
+| Lifecycle state | Eval Running |
+| Next required action | Route the Phase 5 evaluator brief to the Evaluator Agent. |
+| Following action after findings | Review evaluator findings, update tracker, then either close the programme slice as converged or route a bounded final iteration. |
 
 ## Isolation Rules Applied
 

@@ -19,12 +19,12 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | Area | State | Notes |
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
-| Active phase | Phase 4 | Manual entry and spreadsheet import delivery for the clean-sheet KPI platform. |
-| Active work package | `P4-WP1` | Manual entry UI, manual promotion, and tracker-import slice. |
-| Current convergence state | Converged | Independent evaluation passed with bounded qualifications only. |
+| Active phase | Phase 5 | AI digest, config admin, health monitoring, and final KPI polish. |
+| Active work package | `P5-WP1` | Final clean-sheet KPI delivery slice. |
+| Current convergence state | Ready For Evaluation | Build completion reviewed; independent evaluation brief prepared. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
-| Promotion gate | Converged | Phase 4 is converged for scope and can feed the final delivery slice. |
+| Promotion gate | Eval Running | Phase 5 must now pass independent evaluation before convergence can be claimed for this slice. |
 
 ## Work Package Board
 
@@ -39,6 +39,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `P2-RP1` | Protect the converged Phase 2 freeze/capture behaviour against regression | Qualified Pass — Regression Protected | Regression harness independently validated; optional auth-gated HTTP probe remains a bounded non-blocking gap. |
 | `P3-WP1` | Deliver clean-sheet KPI views on the new data source | Qualified Pass — Converged | View surfaces and wallboards independently validated; bounded sparse-data and fallback gaps remain visible but non-blocking. |
 | `P4-WP1` | Deliver manual entry UI and spreadsheet import on the clean-sheet path | Qualified Pass — Converged | Manual entry, promotion, dry-run import, and real import independently validated. |
+| `P5-WP1` | Deliver AI digest, config admin, health monitoring, and final KPI polish | Ready For Evaluation | Send evaluator brief and await independent behavioural assessment. |
 
 ## Phase Gate Rules
 
@@ -83,6 +84,9 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `B4-3` | Open bounded gap | The `sheets[]` JSON import path does not currently resolve team/space the same way the xlsx path does. |
 | `B4-4` | Open bounded gap | Manual-entry API currently accepts writes to Jira/computed spaces as well as manual teams; out of current scope but worth tightening later. |
 | `B4-5` | Open process integrity note | An earlier FAIL report for Phase 4 was preserved as a superseded prior-session artefact because that session used a compromised/proxy-tainted runtime path. Final convergence relies only on the later clean DB-verified evaluation. |
+| `B5-1` | Open phase input | Phase 5 should absorb bounded polish items from prior slices only where they naturally fit the clean-sheet admin/health/digest scope. |
+| `B5-2` | Open bounded gap | n8n cut-over remains an operational sign-off item; workflow artefacts can be prepared, but live n8n remains untouched until approved. |
+| `B5-3` | Open process note | Tool-channel reliability was poor during Phase 5 build; Build Agent had to verify file effects via real build artefacts rather than trusting edit confirmations. |
 
 ## Change Log
 
@@ -110,3 +114,5 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-05-30 | `P4-WP1` build completion reviewed from `agent_work/build_status/p4-wp1-manual-import-2026-05-30.md`. Phase 4 slice is classified as build-complete and ready for independent evaluation with bounded residual risk around live-workbook label/layout validation. |
 | 2026-05-30 | A prior FAIL evaluation for Phase 4 was preserved as `agent_work/eval_output/phase4_manual_import_eval_report_2026-05-30_SUPERSEDED_prior-session.md` after later evidence showed that session relied on a compromised/proxy-tainted runtime path. |
 | 2026-05-30 | Clean follow-up evaluation returned QUALIFIED PASS from `agent_work/eval_output/phase4_manual_import_eval_report_2026-05-30.md`. Manual entry exists for all scoped teams, any-date edit works, prefill is correct, validation is enforced, valid saves persist to `kpi_manual_entries` and promote to `kpi_daily`, dry-run and real import behave honestly, and legacy remains untouched. Phase 4 is converged for its scoped outcome. |
+| 2026-05-30 | Manager decision: open `P5-WP1` next. Phase 5 will deliver AI digests, config admin, health monitoring, and final clean-sheet KPI polish on top of the converged Phase 1–4 substrate. |
+| 2026-05-31 | `P5-WP1` build completion reviewed from `agent_work/build_status/p5-wp1-final-slice-2026-05-30.md`. Phase 5 slice is classified as build-complete and ready for independent evaluation with bounded residual risk around live n8n cut-over approval and the AI/deterministic-fallback provenance split. Tool-channel unreliability was disclosed and compensated for by direct build verification. |

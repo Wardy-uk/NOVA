@@ -1,0 +1,88 @@
+{
+  "name": "NOVA KPI — Daily Email (Thin Trigger, clean-sheet P5)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 0 18 * * 1-5" }
+          ]
+        }
+      },
+      "id": "schedule-1800",
+      "name": "18:00 Mon-Fri",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 0 23 * * 1-5" }
+          ]
+        }
+      },
+      "id": "schedule-2300",
+      "name": "23:00 Catch-up",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Thin trigger: compute today's date (UK). No KPI logic here.\nconst now = new Date();\nconst uk = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);\nreturn [{ json: { date: uk } }];"
+      },
+      "id": "date-node",
+      "name": "Today (UK)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 380]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.NOVA_BASE_URL }}/api/kpi/daily-report/{{ $json.date }}",
+        "options": {}
+      },
+      "id": "http-fetch",
+      "name": "Fetch daily report (NOVA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the NOVA-assembled report into email HTML. NO KPI logic, NO SQL,\n// NO API calls — everything (metrics, RAG, EOD snapshot, AI digests) is already\n// in the payload from /api/kpi/daily-report.\nconst d = $json.data || $json;\nconst rag = (s) => ({ green: '#10b981', amber: '#eab308', red: '#ef4444' }[s] || '#94a3b8');\nlet html = `<h2>NOVA KPI Daily — ${d.reportDate}</h2>`;\nif (d.digests && d.digests.slt) {\n  html += `<h3>SLT Summary</h3><p style=\"white-space:pre-wrap\">${d.digests.slt.summary}</p>`;\n}\nconst dbk = {};\nfor (const sp of (d.digests && d.digests.spaces) || []) dbk[sp.spaceKey] = sp.summary;\nfor (const s of d.spaces || []) {\n  html += `<h3>${s.displayName} (${s.spaceKey})</h3>`;\n  html += `<p>Queue ${s.eodSnapshot.totalTickets} open · ${s.eodSnapshot.overSla} over SLA · `;\n  html += `<span style=\"color:#10b981\">${s.ragSummary.green}🟢</span> `;\n  html += `<span style=\"color:#eab308\">${s.ragSummary.amber}🟡</span> `;\n  html += `<span style=\"color:#ef4444\">${s.ragSummary.red}🔴</span></p>`;\n  if (dbk[s.spaceKey]) html += `<p style=\"white-space:pre-wrap;color:#444\">${dbk[s.spaceKey]}</p>`;\n  html += '<table cellpadding=\"4\" style=\"border-collapse:collapse;font-size:13px\">';\n  for (const m of s.metrics.filter(x => !x.tierName)) {\n    html += `<tr><td>${m.displayName}</td><td align=\"right\">${m.value}</td>`;\n    html += `<td align=\"right\">${m.target ?? ''}</td>`;\n    html += `<td style=\"color:${rag(m.rag)}\">${m.rag ? m.rag.toUpperCase() : ''}</td></tr>`;\n  }\n  html += '</table>';\n}\nreturn [{ json: { subject: `NOVA KPI Daily — ${d.reportDate}`, html } }];"
+      },
+      "id": "format",
+      "name": "Format email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 380]
+    },
+    {
+      "parameters": {
+        "fromEmail": "nova@nurtur.tech",
+        "toEmail": "smt@nurtur.tech",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 380],
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "18:00 Mon-Fri": { "main": [[{ "node": "Today (UK)", "type": "main", "index": 0 }]] },
+    "23:00 Catch-up": { "main": [[{ "node": "Today (UK)", "type": "main", "index": 0 }]] },
+    "Today (UK)": { "main": [[{ "node": "Fetch daily report (NOVA)", "type": "main", "index": 0 }]] },
+    "Fetch daily report (NOVA)": { "main": [[{ "node": "Format email", "type": "main", "index": 0 }]] },
+    "Format email": { "main": [[{ "node": "Send email", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "meta": { "note": "Thin trigger for the clean-sheet KPI platform (P5-WP1). All KPI logic lives in NOVA. Set $vars.NOVA_BASE_URL and attach an SMTP credential before activating. Disable the legacy KPI workflow only after the parallel-run validation window." }
+}

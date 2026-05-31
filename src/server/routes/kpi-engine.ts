@@ -10,8 +10,8 @@
  */
 import { Router } from 'express';
 import XLSX from 'xlsx';
-import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService } from '../services/kpi-engine/index.js';
-import { SNAPSHOT_JOB_ID, EOD_JOB_ID } from '../services/kpi-engine/index.js';
+import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService, KpiDigestService, KpiAdminService } from '../services/kpi-engine/index.js';
+import { SNAPSHOT_JOB_ID, EOD_JOB_ID, DIGEST_JOB_ID } from '../services/kpi-engine/index.js';
 import type { RegisteredJob } from '../services/job-registry.js';
 
 /** YYYY-MM-DD validator for date path params. */
@@ -25,15 +25,21 @@ export function createKpiEngineRoutes(deps: {
   views: KpiViewsService;
   /** Manual entry + spreadsheet import (P4-WP1) — non-Jira teams. */
   manual: KpiManualService;
+  /** AI digest generation + store (P5-WP1). */
+  digest: KpiDigestService;
+  /** Config / admin write surface + coverage health (P5-WP1). */
+  admin: KpiAdminService;
   /** Foundation activation status (so /health can prove the system is live). */
   getStatus: () => KpiInitStatus;
   /** Snapshot job status from the registry (proves the scheduler is registered/running). */
   getSnapshotJob: () => RegisteredJob | undefined;
   /** EOD job status from the registry (proves the daily scheduler is live). */
   getEodJob: () => RegisteredJob | undefined;
+  /** Digest job status from the registry (proves the digest scheduler is live). */
+  getDigestJob?: () => RegisteredJob | undefined;
 }): Router {
   const router = Router();
-  const { engine, eod, views, manual } = deps;
+  const { engine, eod, views, manual, digest, admin } = deps;
 
   // List all active spaces with their resolved config.
   router.get('/spaces', async (_req, res) => {
@@ -90,6 +96,7 @@ export function createKpiEngineRoutes(deps: {
     const status = deps.getStatus();
     const job = deps.getSnapshotJob();
     const eodJob = deps.getEodJob();
+    const digestJob = deps.getDigestJob?.();
 
     // DB-backed counts. Degrade gracefully: if the schema never came up, report
     // the error instead of throwing — the foundation surface stays reachable.
@@ -134,6 +141,14 @@ export function createKpiEngineRoutes(deps: {
           runCount: eodJob?.runCount ?? 0,
           lastError: eodJob?.lastError ?? null,
         },
+        digestScheduler: {
+          jobId: DIGEST_JOB_ID,
+          registered: !!digestJob,
+          intervalMs: digestJob?.intervalMs ?? null,
+          lastRun: digestJob?.lastRun ?? null,
+          runCount: digestJob?.runCount ?? 0,
+          lastError: digestJob?.lastError ?? null,
+        },
         snapshots: {
           rows: db?.snapshotRows ?? null,
           lastSnapshotAt: db?.lastSnapshotAt ?? null,
@@ -151,7 +166,10 @@ export function createKpiEngineRoutes(deps: {
     if (!DATE_RE.test(req.params.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
     try {
       const report = await eod.getDailyReport(req.params.date);
-      res.json({ ok: true, data: report });
+      // Enrich with the AI digests (P5-WP1) so the thin n8n trigger only has to
+      // fetch this one endpoint, format, and send — no logic, no SQL, no API calls.
+      const digests = await digest.getForDate(req.params.date);
+      res.json({ ok: true, data: { ...report, digests } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
@@ -360,6 +378,183 @@ export function createKpiEngineRoutes(deps: {
         enteredBy: callerName(req as any),
       });
       res.json({ ok: true, data: summary });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Phase 5: AI digests (per-space + cross-space SLT) ──
+
+  // All digests for a date: { date, slt, spaces[] } (design §9 GET /digest/:date).
+  router.get('/digest/:date', async (req, res) => {
+    if (!DATE_RE.test(req.params.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+    try {
+      const data = await digest.getForDate(req.params.date);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Latest date that has any digest (for the digest view default).
+  router.get('/digest-latest', async (_req, res) => {
+    try {
+      const date = await digest.latestDigestDate();
+      res.json({ ok: true, data: { date } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Generate (or regenerate) digests for a date. Body: { date?, force? }.
+  // Defaults to today (UK). Reads the FROZEN daily report — generate after EOD.
+  router.post('/digest/generate', async (req, res) => {
+    const body = (req.body ?? {}) as { date?: string; force?: boolean };
+    if (body.date && !DATE_RE.test(body.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+    const date = body.date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    try {
+      const result = await digest.generateForDate(date, { force: body.force === true });
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Phase 5: Config / admin (spaces, metrics, tiers, holidays, health) ──
+
+  // Full metric catalogue (admin metric picker).
+  router.get('/metrics-catalogue', async (_req, res) => {
+    try {
+      const data = await admin.listCatalogue();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // All per-space metric bindings INCLUDING disabled (admin metrics grid).
+  router.get('/admin/space-metrics/:spaceKey', async (req, res) => {
+    try {
+      const space = await engine.getSpaceConfig(req.params.spaceKey);
+      if (!space) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      const data = await admin.listSpaceBindings(req.params.spaceKey);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Update a space's editable config (design §9 PUT /spaces/:key).
+  router.put('/spaces/:key', async (req, res) => {
+    try {
+      const result = await admin.updateSpace(req.params.key, (req.body ?? {}) as any);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg === 'Unknown space' ? 404 : 400).json({ ok: false, error: msg });
+    }
+  });
+
+  // Update metric bindings for a space (design §9 PUT /spaces/:key/metrics).
+  // Body: { metricKey, ...patch } (single) OR { metrics: [{ metricKey, ...patch }] }.
+  router.put('/spaces/:key/metrics', async (req, res) => {
+    const body = (req.body ?? {}) as { metricKey?: string; metrics?: Array<{ metricKey: string } & Record<string, unknown>> } & Record<string, unknown>;
+    const items = Array.isArray(body.metrics)
+      ? body.metrics
+      : typeof body.metricKey === 'string'
+        ? [{ ...body, metricKey: body.metricKey } as { metricKey: string } & Record<string, unknown>]
+        : null;
+    if (!items || items.length === 0) return res.status(400).json({ ok: false, error: 'provide metrics[] or metricKey + patch' });
+    try {
+      const result = await admin.updateSpaceMetrics(req.params.key, items as any);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg.startsWith('Unknown') ? 404 : 400).json({ ok: false, error: msg });
+    }
+  });
+
+  // Tiers for a space (incl. the Standard space-level SLA row).
+  router.get('/tiers/:spaceKey', async (req, res) => {
+    try {
+      const data = await admin.listTiers(req.params.spaceKey);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Upsert a tier definition. Body: { tierName, tierOrder, jiraFieldValue, frtTargetMinutes, resolutionTargetMinutes }.
+  router.put('/tiers/:spaceKey', async (req, res) => {
+    const body = (req.body ?? {}) as { tierName?: string; tierOrder?: number; jiraFieldValue?: string | null; frtTargetMinutes?: number | null; resolutionTargetMinutes?: number | null };
+    if (!body.tierName) return res.status(400).json({ ok: false, error: 'tierName required' });
+    if (typeof body.tierOrder !== 'number') return res.status(400).json({ ok: false, error: 'tierOrder (number) required' });
+    try {
+      await admin.upsertTier(req.params.spaceKey, body.tierName, {
+        tierOrder: body.tierOrder,
+        jiraFieldValue: body.jiraFieldValue ?? null,
+        frtTargetMinutes: body.frtTargetMinutes ?? null,
+        resolutionTargetMinutes: body.resolutionTargetMinutes ?? null,
+      });
+      res.json({ ok: true, data: { upserted: true } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg === 'Unknown space' ? 404 : 400).json({ ok: false, error: msg });
+    }
+  });
+
+  // Delete a tier definition.
+  router.delete('/tiers/:spaceKey/:tierName', async (req, res) => {
+    try {
+      const result = await admin.deleteTier(req.params.spaceKey, req.params.tierName);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Holidays. ?spaceKey filters to one space.
+  router.get('/holidays', async (req, res) => {
+    const spaceKey = typeof req.query.spaceKey === 'string' ? req.query.spaceKey : undefined;
+    try {
+      const data = await admin.listHolidays(spaceKey);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Add a holiday. Body: { spaceKey, date, description? }.
+  router.post('/holidays', async (req, res) => {
+    const body = (req.body ?? {}) as { spaceKey?: string; date?: string; description?: string | null };
+    if (!body.spaceKey) return res.status(400).json({ ok: false, error: 'spaceKey required' });
+    if (!body.date || !DATE_RE.test(body.date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+    try {
+      const result = await admin.addHoliday(body.spaceKey, body.date, body.description ?? null);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(msg === 'Unknown space' ? 404 : 400).json({ ok: false, error: msg });
+    }
+  });
+
+  // Delete a holiday by id.
+  router.delete('/holidays/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, error: 'id must be an integer' });
+    try {
+      const result = await admin.deleteHoliday(id);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Data-coverage health for the clean-sheet platform (gaps surfaced honestly).
+  router.get('/admin-health', async (_req, res) => {
+    try {
+      const data = await admin.getHealth();
+      res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }

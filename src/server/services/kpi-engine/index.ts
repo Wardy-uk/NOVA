@@ -18,11 +18,15 @@ import { KpiEngine } from './kpi-engine.js';
 import { KpiEodService } from './kpi-eod.js';
 import { KpiViewsService } from './kpi-views.js';
 import { KpiManualService } from './kpi-manual.js';
+import { KpiDigestService, type DigestLlm } from './kpi-digest.js';
+import { KpiAdminService } from './kpi-admin.js';
 
 export { KpiEngine } from './kpi-engine.js';
 export { KpiEodService } from './kpi-eod.js';
 export { KpiViewsService } from './kpi-views.js';
 export { KpiManualService } from './kpi-manual.js';
+export { KpiDigestService, type DigestLlm } from './kpi-digest.js';
+export { KpiAdminService } from './kpi-admin.js';
 export * from './types.js';
 
 /** Stable id of the 3-min snapshot job (design §5.2). Shared with the route layer. */
@@ -36,6 +40,14 @@ export const EOD_JOB_ID = 'kpi-engine-eod';
 // 17:30/18:00 and subsumes the design's late catch-up via the "already
 // captured" guard.
 const EOD_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Stable id of the AI digest job (P5-WP1). Shared with the route layer. */
+export const DIGEST_JOB_ID = 'kpi-engine-digest';
+// Digest generation is self-gating: it generates today's per-space + SLT digests
+// once EOD rows exist for today and a digest has not already been written. A
+// 15-min tick lands the digest shortly after the 17:30/18:00 EOD freeze (design
+// §5.2 names 17:45) and subsumes the late catch-up.
+const DIGEST_INTERVAL_MS = 15 * 60 * 1000;
 
 /** Observable activation state, surfaced via GET /api/kpi/health. */
 export interface KpiInitStatus {
@@ -70,6 +82,8 @@ export interface KpiFoundation {
   eod: KpiEodService;
   views: KpiViewsService;
   manual: KpiManualService;
+  digest: KpiDigestService;
+  admin: KpiAdminService;
   status: KpiInitStatus;
 }
 
@@ -81,11 +95,16 @@ export interface KpiFoundation {
  * failure honestly. Returns the engine so routes can read spaces/metrics/
  * snapshots/health.
  */
-export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFoundation> {
+export async function initKpiFoundation(
+  jobRegistry: JobRegistry,
+  opts: { llm?: DigestLlm | null } = {},
+): Promise<KpiFoundation> {
   const engine = new KpiEngine();
   const eod = new KpiEodService(engine);
   const views = new KpiViewsService(engine);
   const manual = new KpiManualService(engine);
+  const digest = new KpiDigestService(eod, opts.llm ?? null);
+  const admin = new KpiAdminService(engine);
   const status: KpiInitStatus = {
     ...lastStatus,
     schemaTablesExpected: KPI_TABLE_COUNT,
@@ -128,6 +147,22 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
       EOD_INTERVAL_MS,
     );
 
+    // AI digest cycle (P5-WP1). Self-gates: generate today's per-space + SLT
+    // digests once EOD rows exist for today and no SLT digest has been written.
+    jobRegistry.register(
+      DIGEST_JOB_ID,
+      'KPI Engine: daily AI digest cycle (clean-sheet)',
+      async () => {
+        const todayUk = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const report = await eod.getDailyReport(todayUk);
+        if (report.summary.spacesCaptured === 0) return; // nothing frozen yet today
+        const existing = await digest.getForDate(todayUk);
+        if (existing.slt) return; // already generated today
+        await digest.generateForDate(todayUk);
+      },
+      DIGEST_INTERVAL_MS,
+    );
+
     // Kick initial cycles shortly after boot (window/EOD permitting). The EOD
     // kick lets a restart near 17:30/18:00 still capture without waiting a tick.
     setTimeout(() => { engine.runSnapshotCycle().catch(() => {}); }, 30_000);
@@ -151,5 +186,5 @@ export async function initKpiFoundation(jobRegistry: JobRegistry): Promise<KpiFo
   }
 
   lastStatus = status;
-  return { engine, eod, views, manual, status };
+  return { engine, eod, views, manual, digest, admin, status };
 }

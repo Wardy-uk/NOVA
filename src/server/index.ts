@@ -29,7 +29,7 @@ import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createKpiEngineRoutes } from './routes/kpi-engine.js';
-import { initKpiFoundation, getKpiInitStatus, SNAPSHOT_JOB_ID as KPI_SNAPSHOT_JOB_ID, EOD_JOB_ID as KPI_EOD_JOB_ID } from './services/kpi-engine/index.js';
+import { initKpiFoundation, getKpiInitStatus, SNAPSHOT_JOB_ID as KPI_SNAPSHOT_JOB_ID, EOD_JOB_ID as KPI_EOD_JOB_ID, DIGEST_JOB_ID as KPI_DIGEST_JOB_ID } from './services/kpi-engine/index.js';
 import { createPipelineUatRoutes } from './routes/pipeline-uat.js';
 import { createBoardMiRoutes } from './routes/board-mi.js';
 import { createDevReviewRoutes } from './routes/dev-review.js';
@@ -1082,9 +1082,12 @@ async function main() {
     eod: kpiFoundation.eod,
     views: kpiFoundation.views,
     manual: kpiFoundation.manual,
+    digest: kpiFoundation.digest,
+    admin: kpiFoundation.admin,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
     getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),
+    getDigestJob: () => jobRegistry.getJob(KPI_DIGEST_JOB_ID),
   }));
 
   // Start Jira sync (service was created earlier so routes can reference it)
@@ -1102,6 +1105,10 @@ async function main() {
   const agentJiraClient = buildOnboardingJiraClient();
   const llmService = new LlmService(settingsQueries);
   boardMiLlm = llmService;
+  // Wire the shared LLM into the clean-sheet KPI digest service now it exists
+  // (the KPI foundation is initialised earlier than llmService). When no provider
+  // is configured the digest service falls back to deterministic summaries. (P5-WP1)
+  kpiFoundation.digest.setLlm(llmService);
   const llmDiag = llmService.getDiagnostics();
   console.log(`[N.O.V.A] LLM config: primary=${llmDiag.primaryProvider} (${llmDiag.primaryKeyPrefix}), failover=${llmDiag.failoverProvider} (${llmDiag.failoverKeyPrefix})`);
   if (!llmDiag.primaryAvailable) console.warn(`[N.O.V.A] WARNING: Primary LLM provider has no API key configured!`);

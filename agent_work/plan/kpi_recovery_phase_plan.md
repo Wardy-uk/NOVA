@@ -191,3 +191,26 @@ This slice should not absorb:
 - `P4-WP1` failed evaluation because the manual write/import capability was absent at runtime even though manual-team read surfaces existed.
 - The next slice is intentionally narrow: restore route mounting and observable write/import behaviour for the already-scoped Phase 4 capability.
 - Do not broaden into Phase 5, broader view polish, or auth-process cleanup during this iteration.
+
+## Next Delivery Slice
+
+`P5-WP1` is the final governed slice and should cover only the clean-sheet Phase 5 outcomes already locked in by the spec:
+
+- AI digest generation per space
+- cross-space SLT digest
+- config admin UI
+- health monitoring dashboard
+- deprecate old n8n logic down to the thin trigger pattern
+
+This slice may also absorb bounded polish items from earlier phases where they naturally belong in admin/health surfaces, but it should not reopen converged behaviour unnecessarily.
+
+## Current Evaluation Posture
+
+- `P5-WP1` is ready for independent evaluation.
+- Evaluation should validate only the observable Phase 5 outcomes:
+  - per-space digest generation/storage
+  - cross-space SLT digest generation/storage
+  - config/admin UI behaviour
+  - health monitoring honesty
+  - thin-trigger n8n completion artefacts and non-regression
+  - legacy coexistence
