@@ -335,6 +335,28 @@ export function createKpiEngineRoutes(deps: {
     }
   });
 
+  // Daily History parity surface (KPX-WP9). Clean-sheet, per-space multi-day
+  // historical GRID (date × metric) over the frozen kpi_daily space-level rows —
+  // configurable window via ?window=N (or the ?days=N alias; default 30, clamped
+  // 2–180). A column appears only for a metric with ≥1 frozen row in the window;
+  // a (date, metric) with no frozen row renders "—", never a fabricated value.
+  // Metrics with no frozen history are listed honestly under `unsupported`
+  // (awaiting history / not wired), never given a fake column/row. Reads only the
+  // clean-sheet path — never the legacy Daily-History view or a forbidden table.
+  router.get('/daily-history/:spaceKey', async (req, res) => {
+    const rawWindow = typeof req.query.window === 'string' ? req.query.window
+      : typeof req.query.days === 'string' ? req.query.days : '';
+    const parsed = parseInt(rawWindow, 10);
+    const days = Number.isFinite(parsed) ? Math.min(180, Math.max(2, parsed)) : 30;
+    try {
+      const data = await views.getDailyHistory(req.params.spaceKey, days);
+      if (!data) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Escalations parity surface (KPX-WP6). Focused cross-space view of the wired
   // escalation metric family (escalation_rate, escalation_accuracy, rejection_rate)
   // ONLY — current value/RAG + 7-day history + per-agent breakdown, all from the

@@ -293,6 +293,84 @@ export interface TrendsSpace {
 }
 
 /**
+ * Daily History parity surface (KPX-WP9). A clean-sheet, per-space multi-day
+ * historical GRID over the SAME frozen `kpi_daily` space-level rows every other
+ * Phase 3 view reads — oriented as a date × metric table (one column per metric,
+ * one row per frozen report date in the window) rather than a per-metric line
+ * chart. It is the day-by-day record of what each metric WAS frozen at, with the
+ * RAG that was stored at freeze time.
+ *
+ * Honesty (no fabrication):
+ *   - Only metrics that carry at least one frozen `kpi_daily` row in the window
+ *     become a column ("supported"). A cell with no frozen row for that (date,
+ *     metric) renders null ("—"), never a fabricated 0 or carried-forward value.
+ *   - Enabled metrics that hold NO frozen row in the window are listed separately
+ *     as honestly unsupported: 'awaiting' (wired, no frozen history yet) or
+ *     'unwired' (computed metric with no registered computer — can never carry a
+ *     value in this build). They are NOT given a column / fake history.
+ *   - The grid only ever contains real frozen report dates that exist in
+ *     `kpi_daily` for the space — missing/skipped days are absent rows, never
+ *     synthesised.
+ * Reads only the clean-sheet path (NOVA main pool). It never touches the legacy
+ * KPI pipeline, the legacy Daily-History view's data path, the techservicesjsm
+ * tables, or any forbidden table. No backfill is performed.
+ */
+export type DailyHistoryColumnStatus = 'supported' | 'awaiting' | 'unwired';
+
+/** A metric column in the daily-history grid (supported: has ≥1 frozen row in window). */
+export interface DailyHistoryColumn {
+  metricKey: string;
+  displayName: string;
+  category: string;
+  valueType: string;
+  direction: string;
+  source: string;
+  target: number | null;
+}
+
+/** A metric enabled for the space but with NO frozen history in the window — surfaced honestly, no column. */
+export interface DailyHistoryUnsupportedMetric {
+  metricKey: string;
+  displayName: string;
+  category: string;
+  status: Exclude<DailyHistoryColumnStatus, 'supported'>;
+  reason: string;
+}
+
+/** One frozen value + RAG for a (date, metric) cell. */
+export interface DailyHistoryCell {
+  value: number | null;
+  rag: RagStatus | null;
+}
+
+/** One frozen report-date row across the supported metric columns. */
+export interface DailyHistoryRow {
+  date: string;
+  /** metric_key -> cell. Absent key = no frozen row for that (date, metric) → renders "—". */
+  cells: Record<string, DailyHistoryCell>;
+}
+
+export interface DailyHistorySpace {
+  spaceKey: string;
+  displayName: string;
+  ownerName: string | null;
+  timezone: string;
+  isJiraSpace: boolean;
+  /** The window actually used (clamped). */
+  windowDays: number;
+  /** True once at least one frozen daily row exists in the window. */
+  hasData: boolean;
+  /** Honest note when nothing has been frozen yet in the window. */
+  note: string | null;
+  /** Supported metric columns (each has ≥1 frozen row in the window). */
+  columns: DailyHistoryColumn[];
+  /** Frozen report-date rows, most recent first. */
+  rows: DailyHistoryRow[];
+  /** Enabled metrics with no frozen history in the window — listed honestly, never given a fake column/row. */
+  unsupported: DailyHistoryUnsupportedMetric[];
+}
+
+/**
  * Agent Breaches parity surface (KPX-WP8). A clean-sheet, per-agent breach view
  * over the SAME frozen `kpi_agent_daily` rows the Agent Scorecard reads — but
  * oriented around *breaches* (failing a target) rather than ranking.
@@ -1047,6 +1125,111 @@ export class KpiViewsService {
           ? 'No multi-day clean-sheet history yet for this space — trends appear as EOD freezes accumulate (≥2 frozen days per metric).'
           : 'Manual / non-Jira team — trends appear once ≥2 days of manual entries exist per metric.',
       supported,
+      unsupported,
+    };
+  }
+
+  /**
+   * Daily History parity surface (KPX-WP9). Clean-sheet, per-space multi-day
+   * historical grid over the frozen `kpi_daily` space-level rows.
+   *
+   * Reads the SAME clean-sheet path as every other Phase 3 view — the frozen
+   * `kpi_daily` (tier_name NULL) rows in the NOVA main pool — across a configurable
+   * window (default 30 days, clamped 2–180), and shapes them as a date × metric
+   * grid: one column per metric that carries ≥1 frozen row in the window, one row
+   * per frozen report date (most recent first), each cell the frozen value + the
+   * RAG stored at freeze time. It never touches the legacy KPI pipeline, the legacy
+   * Daily-History view's data path, the techservicesjsm tables, or any forbidden
+   * table, and performs NO backfill.
+   *
+   * Honesty (no fabrication): a (date, metric) with no frozen row is absent from
+   * the row's `cells` and renders "—" — never a fabricated 0 or carried value. A
+   * metric enabled for the space but holding no frozen row in the window is NOT
+   * given a column; it is listed under `unsupported` as 'unwired' (computed, no
+   * registered computer — can never carry a value in this build) or 'awaiting'
+   * (wired, no frozen history yet). Missing/skipped days are simply absent rows.
+   */
+  async getDailyHistory(spaceKey: string, days = 30): Promise<DailyHistorySpace | null> {
+    const space = await this.engine.getSpaceConfig(spaceKey);
+    if (!space) return null;
+    const windowDays = Math.max(2, Math.min(180, Math.floor(Number(days)) || 30));
+    const bindings = await this.getSpaceMetricBindings(spaceKey);
+
+    // Windowed space-level (tier_name NULL) frozen daily rows for every metric,
+    // carrying the RAG that was stored at freeze time. Most-recent date first.
+    const rows = await query<{ metric_key: string; report_date: string | Date; value: number; rag_status: string | null }>(
+      `SELECT metric_key, report_date, value, rag_status
+       FROM kpi_daily
+       WHERE space_key = ? AND tier_name IS NULL
+         AND report_date >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))
+       ORDER BY report_date DESC, metric_key`,
+      [spaceKey, -windowDays],
+    );
+
+    // Which metrics actually carry ≥1 frozen row in the window (→ a column), and
+    // the set of frozen report dates (→ rows). Both come ONLY from real rows.
+    const metricsWithData = new Set<string>();
+    const cellsByDate = new Map<string, Record<string, DailyHistoryCell>>();
+    const dateOrder: string[] = [];
+    for (const r of rows) {
+      metricsWithData.add(r.metric_key);
+      const dk = dateKey(r.report_date);
+      let bucket = cellsByDate.get(dk);
+      if (!bucket) { bucket = {}; cellsByDate.set(dk, bucket); dateOrder.push(dk); }
+      bucket[r.metric_key] = {
+        value: r.value,
+        rag: (r.rag_status as RagStatus | null) ?? null,
+      };
+    }
+
+    // Columns: enabled metrics that have frozen history in the window, in the
+    // space's configured display order (bindings are pre-ordered).
+    const columns: DailyHistoryColumn[] = bindings
+      .filter((b) => metricsWithData.has(b.metricKey))
+      .map((b) => ({
+        metricKey: b.metricKey,
+        displayName: b.displayName,
+        category: b.category,
+        valueType: b.valueType,
+        direction: b.direction,
+        source: b.source,
+        target: b.targetValue,
+      }));
+
+    // Honestly unsupported: enabled metrics with no frozen row in the window.
+    const unsupported: DailyHistoryUnsupportedMetric[] = bindings
+      .filter((b) => !metricsWithData.has(b.metricKey))
+      .map((b) => {
+        const unwired = b.source === 'computed' && !hasComputer(b.computationKey ?? b.metricKey);
+        return {
+          metricKey: b.metricKey,
+          displayName: b.displayName,
+          category: b.category,
+          status: unwired ? 'unwired' as const : 'awaiting' as const,
+          reason: unwired
+            ? 'No data source wired yet — this metric can never carry frozen daily history in this build (not fabricated).'
+            : 'No frozen daily history yet in this window — rows appear once EOD freezes accumulate.',
+        };
+      });
+
+    const historyRows: DailyHistoryRow[] = dateOrder.map((d) => ({ date: d, cells: cellsByDate.get(d) ?? {} }));
+    const hasData = historyRows.length > 0;
+
+    return {
+      spaceKey: space.spaceKey,
+      displayName: space.displayName,
+      ownerName: space.ownerName,
+      timezone: space.timezone,
+      isJiraSpace: space.isJiraSpace,
+      windowDays,
+      hasData,
+      note: hasData
+        ? null
+        : space.isJiraSpace
+          ? 'No clean-sheet daily history frozen yet for this space in this window — rows appear as EOD freezes accumulate.'
+          : 'Manual / non-Jira team — daily history appears once manual entries are saved (each entry promotes into the frozen daily record).',
+      columns,
+      rows: historyRows,
       unsupported,
     };
   }
