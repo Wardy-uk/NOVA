@@ -32,6 +32,7 @@ const KpiCleanSltView = lazy(() => import('./components/KpiCleanSltView.js').the
 const KpiCleanTeamView = lazy(() => import('./components/KpiCleanTeamView.js').then(m => ({ default: m.KpiCleanTeamView })));
 const KpiCleanQaView = lazy(() => import('./components/KpiCleanQaView.js').then(m => ({ default: m.KpiCleanQaView })));
 const KpiCleanEscalationsView = lazy(() => import('./components/KpiCleanEscalationsView.js').then(m => ({ default: m.KpiCleanEscalationsView })));
+const KpiCleanTrendsView = lazy(() => import('./components/KpiCleanTrendsView.js').then(m => ({ default: m.KpiCleanTrendsView })));
 const KpiCleanAgentView = lazy(() => import('./components/KpiCleanAgentView.js').then(m => ({ default: m.KpiCleanAgentView })));
 const KpiCleanManualView = lazy(() => import('./components/KpiCleanManualView.js').then(m => ({ default: m.KpiCleanManualView })));
 const KpiCleanDigestView = lazy(() => import('./components/KpiCleanDigestView.js').then(m => ({ default: m.KpiCleanDigestView })));
@@ -108,7 +109,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
-  | 'kpic-slt' | 'kpic-team' | 'kpic-qa' | 'kpic-escalations' | 'kpic-agent' | 'kpic-wallboard' | 'kpic-manual' | 'kpic-digest' | 'kpic-admin'
+  | 'kpic-slt' | 'kpic-team' | 'kpic-qa' | 'kpic-escalations' | 'kpic-trends' | 'kpic-agent' | 'kpic-wallboard' | 'kpic-manual' | 'kpic-digest' | 'kpic-admin'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -214,6 +215,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpic-team', label: 'Team Dashboard' },
       { view: 'kpic-qa', label: 'QA Parity' },
       { view: 'kpic-escalations', label: 'Escalations Parity' },
+      { view: 'kpic-trends', label: 'Trends' },
       { view: 'kpic-agent', label: 'Agent Scorecard' },
       { view: 'kpic-manual', label: 'Manual Entry' },
       { view: 'kpic-digest', label: 'AI Digests' },
@@ -1111,6 +1113,9 @@ export function App() {
           )}
           {view === 'kpic-escalations' && (
             <KpiCleanEscalationsView />
+          )}
+          {view === 'kpic-trends' && (
+            <KpiCleanTrendsView />
           )}
           {view === 'kpic-agent' && (
             <KpiCleanAgentView />

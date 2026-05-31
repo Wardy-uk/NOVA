@@ -7,10 +7,10 @@
 | Current date | 2026-05-31 |
 | Active programme | KPI Recovery & Evidence Integrity |
 | Active phase | Replacement Parity Closure |
-| Active work package | `KPX-WP6A` |
+| Active work package | `KPX-WP7B` |
 | Lifecycle state | Checkpoint Ready |
-| Next required action | Route the Escalations parity checkpoint scope to the Build Agent for a tight git commit. |
-| Following action after findings | Review the checkpoint result, update tracker, then decide whether to open the next parity slice or pause for human review. |
+| Next required action | Route the Trends parity checkpoint scope to the Build Agent for a tight git commit. |
+| Following action after findings | Review the checkpoint result, update tracker, then decide whether to continue parity closure or pause for review. |
 
 ## Isolation Rules Applied
 

@@ -20,11 +20,11 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
 | Active phase | Replacement Parity Closure | Follow-on closure work to reach replacement-grade parity after clean-sheet convergence. |
-| Active work package | `KPX-WP6A` | Escalations parity populated-path proof fixture. |
-| Current convergence state | Build Ready | Prior Escalations parity screen is honest but not yet proven on its populated path; bounded proof slice opened. |
+| Active work package | `KPX-WP7B` | Trends window-parameter hardening. |
+| Current convergence state | Checkpoint Ready | Trends build defects are closed; remaining supported-path proof is environmental and can follow later without blocking checkpointing. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
-| Promotion gate | Replacement Parity Active | Replacement parity remains open until the populated Escalations path is demonstrated and any checkpoint decision is made. |
+| Promotion gate | Replacement Parity Active | Replacement parity closure continues with the next targeted surface slice. |
 
 ## Work Package Board
 
@@ -48,7 +48,10 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `KPX-WP5` | Add explicit rejection capture and wire the remaining escalation metrics | Qualified Pass | Read-side wiring complete; runtime proof initially blocked by auth/router environment. |
 | `KPX-WP5A` | Make escalation router observably present and capture-capable at runtime | Qualified Pass | Router mount, stats, and rejection capture now behaviourally proven. |
 | `KPX-WP6` | Deliver Escalations parity surface on the clean-sheet path | Qualified Pass | Honest empty/awaiting behaviour proven; populated path still unverified in the environment. |
-| `KPX-WP6A` | Prove the populated Escalations parity path with disposable fixture support | Pass — Checkpoint Ready | Populated path, transition logic, history, per-agent output, and teardown cleanliness all independently verified. |
+| `KPX-WP6A` | Prove the populated Escalations parity path with disposable fixture support | Pass — Checkpointed | Populated path, transition logic, history, per-agent output, teardown cleanliness, and checkpoint all complete. |
+| `KPX-WP7` | Deliver Trends parity surface on the clean-sheet path | Qualified Pass — Checkpoint Ready | Honesty core is good and the supported-path gap is now environmental rather than a build defect. |
+| `KPX-WP7A` | Restore runtime reachability for the Trends parity surface | Qualified Pass — Completed | Built runtime now serves the Trends route; activation blocker closed. |
+| `KPX-WP7B` | Harden Trends window-parameter behaviour | Pass — Checkpoint Ready | Fixed window semantics verified; remaining multi-day proof gap is environmental only. |
 
 ## Phase Gate Rules
 
@@ -99,6 +102,10 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `BKX-1` | Closed | Escalation-router evaluation unblocked via the established runtime-settings token-mint path; route-mount truth is now proven. |
 | `BKX-2` | Open process integrity note | Evaluator disclosed repeated premature result narration during escalation-router evaluation; final verdict relies only on later captured responses reflected in the persisted report. |
 | `BKX-3` | Closed | Escalations parity populated-path behaviour is now verified via disposable fixture seed, rejection transition, history/per-agent output, and teardown. |
+| `BKX-4` | Closed | Trends parity route reachability restored after rebuilding stale compiled artifacts. |
+| `BKX-5` | Open process note | Stale `dist/` means some earlier parity routes were also absent from the built artifact before the rebuild; retain this in the evidence trail and re-check only if needed. |
+| `BKX-6` | Closed | Trends window semantics are now honest and predictable. |
+| `BKX-7` | Open bounded environmental gap | Trends supported-path multi-day rendering remains unobserved because only one EOD freeze exists in the environment. |
 
 ## Change Log
 
@@ -133,3 +140,12 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-05-31 | Escalations parity evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_escalations_parity_screen_eval_2026-05-31.md`. Surface presence, clean-sheet isolation, and honest null/awaiting behaviour all passed, but the populated path remained unverified because the environment had no escalation source rows. Do not checkpoint yet; open `KPX-WP6A` to prove real values/history/per-agent output with disposable fixture data and teardown. |
 | 2026-05-31 | `KPX-WP6A` build completion reviewed from `agent_work/build_status/kpi_escalations_parity_fixture_2026-05-31.md`. Disposable fixture controls for seed, add-rejection, status, and teardown are now in place on a bounded fixture space. Open independent evaluation to confirm populated Escalations parity values, history, per-agent output, awaiting-to-populated transition, and teardown cleanliness. |
 | 2026-05-31 | `KPX-WP6A` evaluation returned PASS from `agent_work/eval_output/kpi_escalations_parity_fixture_eval_2026-05-31.md`. The populated Escalations parity path is now proven end to end: real `escalation_rate`, honest awaiting before rejection, real `escalation_accuracy` and `rejection_rate` after rejection, populated history and per-agent output, and clean teardown with no residue. Escalations parity is now checkpoint-ready. |
+| 2026-05-31 | Escalations parity closure checkpoint created at commit `d9b52e6` and pushed to both remotes. Manager decision: pause for human review rather than immediately opening another parity slice. |
+| 2026-05-31 | Human direction received to keep going. Manager decision: open `KPX-WP7` for Trends parity surface delivery as the next highest-value remaining legacy-only surface. |
+| 2026-05-31 | `KPX-WP7` build completion reviewed from `agent_work/build_status/kpi_trends_parity_screen_2026-05-31.md`. Clean-sheet Trends surface now exists with configurable windows, line-chart history for supported metrics, and explicit awaiting-history / not-wired classification for unsupported families. Open independent evaluation before any checkpoint decision. |
+| 2026-05-31 | `KPX-WP7` evaluation returned FAIL from `agent_work/eval_output/kpi_trends_parity_eval_2026-05-31.md`. No real clean-sheet Trends route was reachable in the running runtime, while sibling KPI routes remained healthy. Treat as a bounded activation/runtime proof failure and open `KPX-WP7A` to make the already-built surface observable before re-evaluation. |
+| 2026-05-31 | `KPX-WP7A` build completion reviewed from `agent_work/build_status/kpi_trends_parity_activation_2026-05-31.md`. Root cause was stale compiled `dist/` artifacts rather than a source bug. Canonical build re-run restored `/api/kpi/trends/:spaceKey` and sibling parity routes to the built runtime. Open bounded activation evaluation, then re-open the full Trends parity evaluation if reachability passes. |
+| 2026-05-31 | `KPX-WP7A` evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_trends_parity_activation_eval_2026-05-31.md`. The Trends route is now observably live and sibling routes remain healthy. Qualification: the window parameter is currently inert/unvalidated, and populated history remains absent in the environment. Re-open full `KPX-WP7` evaluation against the live route. |
+| 2026-05-31 | `KPX-WP7` full re-evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_trends_parity_eval_2026-05-31.md`. Honesty-critical awaiting-history and not-wired classification passed, but the window parameter remains inert/unvalidated and supported multi-day rendering is still environment-limited. Open `KPX-WP7B` for bounded window hardening before any checkpoint decision. |
+| 2026-05-31 | `KPX-WP7B` build completion reviewed from `agent_work/build_status/kpi_trends_parity_window_hardening_2026-05-31.md`. Canonical `window` handling now routes through to the clean-sheet Trends service, legacy `days` remains accepted, and invalid values are clamped/defaulted transparently. Open a short evaluation before deciding whether Trends parity is checkpointable now or should wait for a second EOD freeze. |
+| 2026-05-31 | `KPX-WP7B` evaluation returned PASS from `agent_work/eval_output/kpi_trends_parity_window_hardening_eval_2026-05-31.md`. Window semantics are now honest and predictable. The only remaining Trends gap is environmental: no metric yet has two frozen days to demonstrate a populated multi-day series. Manager decision: checkpoint the Trends slice now and carry the supported-path confirmation as a later operational-data follow-up. |

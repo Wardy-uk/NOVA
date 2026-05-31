@@ -308,6 +308,31 @@ export function createKpiEngineRoutes(deps: {
     }
   });
 
+  // Trends parity surface (KPX-WP7). Clean-sheet, per-space multi-day trend view
+  // over the frozen kpi_daily history — configurable window via ?window=N (or the
+  // legacy ?days=N alias; default 30, clamped 2–90). Metrics are classified honestly as supported (≥2 frozen
+  // days → real trend) / awaiting (wired, <2 days) / unsupported (not wired); no
+  // metric without real multi-day history is ever drawn a fabricated line. Reads
+  // only the clean-sheet path — never the legacy Trends view or a forbidden table.
+  router.get('/trends/:spaceKey', async (req, res) => {
+    // Window is requested via ?window=N (canonical) or ?days=N (legacy alias the
+    // clean-sheet client still sends). Parse honestly: any finite integer is clamped
+    // into the supported [2,90] range; anything unparseable/absent falls back to 30.
+    // The applied value is echoed as data.windowDays, so out-of-range requests are
+    // clamped transparently rather than silently swallowed.
+    const rawWindow = typeof req.query.window === 'string' ? req.query.window
+      : typeof req.query.days === 'string' ? req.query.days : '';
+    const parsed = parseInt(rawWindow, 10);
+    const days = Number.isFinite(parsed) ? Math.min(90, Math.max(2, parsed)) : 30;
+    try {
+      const data = await views.getTrends(req.params.spaceKey, days);
+      if (!data) return res.status(404).json({ ok: false, error: 'Unknown space' });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Escalations parity surface (KPX-WP6). Focused cross-space view of the wired
   // escalation metric family (escalation_rate, escalation_accuracy, rejection_rate)
   // ONLY — current value/RAG + 7-day history + per-agent breakdown, all from the

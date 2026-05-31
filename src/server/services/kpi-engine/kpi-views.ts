@@ -228,6 +228,70 @@ export interface EscalationParitySummary {
   spaces: EscalationParitySpace[];
 }
 
+/**
+ * Trends parity surface (KPX-WP7). A clean-sheet, per-space multi-day trend view
+ * over the SAME frozen `kpi_daily` history every other Phase 3 view reads — but
+ * across a configurable multi-day window (default 30 days) and with real trend
+ * analytics, going beyond the thin fixed 7-day sparkline the Team / QA /
+ * Escalations grids carry.
+ *
+ * A metric is classified honestly into one of three trend states, never faked:
+ *   - 'supported'   : it has ≥2 distinct frozen daily points in the window, so a
+ *                     real multi-day trend (line + delta + direction) can be drawn.
+ *   - 'awaiting'    : it is wired (has a value path) but has <2 frozen daily points
+ *                     yet, so there is not enough history to trend — surfaced as
+ *                     "awaiting history", never a fabricated flat/straight line.
+ *   - 'unsupported' : it is a computed metric with no registered computer (the
+ *                     existing `unwired` flag), so it can never carry history in
+ *                     this build — surfaced as "not wired", never a fabricated line.
+ */
+export type TrendStatus = 'supported' | 'awaiting' | 'unsupported';
+
+export interface TrendPoint { date: string; value: number; }
+
+/** Direction-aware summary of a metric's movement across the window. */
+export interface TrendStats {
+  /** Number of frozen daily points in the window. */
+  points: number;
+  first: number;
+  last: number;
+  min: number;
+  max: number;
+  /** last − first (rounded). */
+  deltaAbs: number;
+  /** Percentage change first→last; null when first is 0 (undefined %). */
+  deltaPct: number | null;
+  /** True if the latest value is better than the first per the metric's direction; false if worse; null if flat or direction is neutral. */
+  improving: boolean | null;
+}
+
+export interface TrendMetric extends ResolvedMetric {
+  history: TrendPoint[];
+  trendStatus: TrendStatus;
+  /** Populated only when trendStatus === 'supported'. */
+  stats: TrendStats | null;
+  /** Honest reason string for awaiting / unsupported; null when supported. */
+  trendNote: string | null;
+}
+
+export interface TrendsSpace {
+  spaceKey: string;
+  displayName: string;
+  ownerName: string | null;
+  timezone: string;
+  isJiraSpace: boolean;
+  /** The window actually used (clamped). */
+  windowDays: number;
+  /** True once at least one metric has a real multi-day (supported) trend. */
+  hasData: boolean;
+  /** Honest note when nothing is trendable yet. */
+  note: string | null;
+  /** Metrics with real multi-day history (a trend can be drawn). */
+  supported: TrendMetric[];
+  /** Metrics with no trend yet — awaiting history or structurally unwired. Surfaced honestly, never fabricated. */
+  unsupported: TrendMetric[];
+}
+
 interface SnapshotRow { metricKey: string; tierName: string | null; value: number; snapshotAt: Date | string; }
 interface DailyLatestRow { metric_key: string; tier_name: string | null; value: number; report_date: string | Date; }
 
@@ -779,5 +843,118 @@ export class KpiViewsService {
     }
 
     return { generatedAt: new Date().toISOString(), escalationMetricKeys: escKeys, spaces: cards };
+  }
+
+  /** Direction-aware movement summary for a ≥2-point series. */
+  private computeTrendStats(history: TrendPoint[], direction: string): TrendStats {
+    const values = history.map((h) => h.value);
+    const first = values[0];
+    const last = values[values.length - 1];
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const deltaAbs = Math.round((last - first) * 1000) / 1000;
+    const deltaPct = first === 0 ? null : Math.round(((last - first) / Math.abs(first)) * 1000) / 10;
+    // Direction-aware: 'higher' is better when it rises, 'lower' is better when it
+    // falls; flat → null; 'neutral'/unknown direction → null (no better/worse).
+    let improving: boolean | null;
+    if (last === first) improving = null;
+    else if (direction === 'higher') improving = last > first;
+    else if (direction === 'lower') improving = last < first;
+    else improving = null;
+    return { points: values.length, first, last, min, max, deltaAbs, deltaPct, improving };
+  }
+
+  /**
+   * Trends parity surface (KPX-WP7). Clean-sheet, per-space multi-day trend view.
+   *
+   * Reads the SAME clean-sheet path as every other Phase 3 view — the frozen
+   * `kpi_daily` space-level rows (NOVA main pool) — but across a configurable
+   * window (default 30 days, clamped 2–90) instead of the fixed 7-day sparkline.
+   * It never touches the legacy KPI pipeline, the techservicesjsm tables, the
+   * legacy Trends view's data path, or any forbidden table. Current value still
+   * resolves live-snapshot-first then latest frozen daily, purely for context.
+   *
+   * Honesty (no fabrication): every enabled metric is classified into exactly one
+   * of supported / awaiting / unsupported. Only metrics with ≥2 real frozen daily
+   * points are "supported" and carry a trend; metrics with <2 points ("awaiting")
+   * or no registered computer ("unsupported") are listed honestly with a reason
+   * and NO drawn line — a missing or single-point series is never extended,
+   * flattened, or back-filled into a fake trend.
+   */
+  async getTrends(spaceKey: string, days = 30): Promise<TrendsSpace | null> {
+    const space = await this.engine.getSpaceConfig(spaceKey);
+    if (!space) return null;
+    const windowDays = Math.max(2, Math.min(90, Math.floor(Number(days)) || 30));
+    const bindings = await this.getSpaceMetricBindings(spaceKey);
+
+    // Current value (context only): same live-snapshot-then-daily resolution as
+    // the Team Dashboard. Manual spaces never snapshot.
+    const snapshots = space.isJiraSpace
+      ? ((await this.engine.getLatestSnapshot(spaceKey)) as unknown as SnapshotRow[])
+      : [];
+    const latestDaily = await this.getLatestDailyByMetric(spaceKey);
+    const resolved = this.resolveCurrent(bindings, snapshots, latestDaily);
+
+    // Windowed space-level (tier_name NULL) frozen daily history for every metric.
+    const historyRows = await query<{ metric_key: string; report_date: string | Date; value: number }>(
+      `SELECT metric_key, report_date, value
+       FROM kpi_daily
+       WHERE space_key = ? AND tier_name IS NULL
+         AND report_date >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))
+       ORDER BY report_date`,
+      [spaceKey, -windowDays],
+    );
+    const histByMetric = new Map<string, TrendPoint[]>();
+    for (const r of historyRows) {
+      const arr = histByMetric.get(r.metric_key) ?? [];
+      arr.push({ date: dateKey(r.report_date), value: r.value });
+      histByMetric.set(r.metric_key, arr);
+    }
+
+    const supported: TrendMetric[] = [];
+    const unsupported: TrendMetric[] = [];
+    for (const m of resolved) {
+      const history = histByMetric.get(m.metricKey) ?? [];
+      // Structurally unwired computed metric — can never carry a trend in this build.
+      if (m.unwired) {
+        unsupported.push({
+          ...m, history: [], trendStatus: 'unsupported', stats: null,
+          trendNote: 'No data source wired yet — no trend can be drawn (not fabricated).',
+        });
+        continue;
+      }
+      // Wired but not enough frozen history to form a multi-day trend.
+      if (history.length < 2) {
+        unsupported.push({
+          ...m, history, trendStatus: 'awaiting', stats: null,
+          trendNote: history.length === 1
+            ? 'Only one frozen day so far — a multi-day trend appears after a second EOD freeze.'
+            : 'No frozen daily history yet — a trend appears once EOD freezes accumulate.',
+        });
+        continue;
+      }
+      supported.push({
+        ...m, history, trendStatus: 'supported',
+        stats: this.computeTrendStats(history, m.direction), trendNote: null,
+      });
+    }
+
+    const hasData = supported.length > 0;
+    return {
+      spaceKey: space.spaceKey,
+      displayName: space.displayName,
+      ownerName: space.ownerName,
+      timezone: space.timezone,
+      isJiraSpace: space.isJiraSpace,
+      windowDays,
+      hasData,
+      note: hasData
+        ? null
+        : space.isJiraSpace
+          ? 'No multi-day clean-sheet history yet for this space — trends appear as EOD freezes accumulate (≥2 frozen days per metric).'
+          : 'Manual / non-Jira team — trends appear once ≥2 days of manual entries exist per metric.',
+      supported,
+      unsupported,
+    };
   }
 }
