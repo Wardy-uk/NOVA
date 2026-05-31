@@ -10,7 +10,7 @@
  */
 import { Router } from 'express';
 import XLSX from 'xlsx';
-import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService, KpiDigestService, KpiAdminService, KpiEscalationFixtureService } from '../services/kpi-engine/index.js';
+import type { KpiEngine, KpiInitStatus, KpiEodService, KpiViewsService, KpiManualService, KpiDigestService, KpiAdminService, KpiEscalationFixtureService, KpiAgentBreachFixtureService } from '../services/kpi-engine/index.js';
 import { SNAPSHOT_JOB_ID, EOD_JOB_ID, DIGEST_JOB_ID } from '../services/kpi-engine/index.js';
 import type { RegisteredJob } from '../services/job-registry.js';
 
@@ -31,6 +31,8 @@ export function createKpiEngineRoutes(deps: {
   admin: KpiAdminService;
   /** Disposable Escalations parity proof fixture (KPX-WP6A). */
   escalationFixture: KpiEscalationFixtureService;
+  /** Disposable Agent Breaches parity proof fixture (KPX-WP8A). */
+  agentBreachFixture: KpiAgentBreachFixtureService;
   /** Foundation activation status (so /health can prove the system is live). */
   getStatus: () => KpiInitStatus;
   /** Snapshot job status from the registry (proves the scheduler is registered/running). */
@@ -41,7 +43,7 @@ export function createKpiEngineRoutes(deps: {
   getDigestJob?: () => RegisteredJob | undefined;
 }): Router {
   const router = Router();
-  const { engine, eod, views, manual, digest, admin, escalationFixture } = deps;
+  const { engine, eod, views, manual, digest, admin, escalationFixture, agentBreachFixture } = deps;
 
   // List all active spaces with their resolved config.
   router.get('/spaces', async (_req, res) => {
@@ -347,6 +349,25 @@ export function createKpiEngineRoutes(deps: {
     }
   });
 
+  // Agent Breaches parity surface (KPX-WP8). Cross-space, per-agent breach view
+  // over the frozen kpi_agent_daily rows — the SAME clean-sheet path as the Agent
+  // Scorecard. Each agent's breach-evaluable metrics (agent-level, computer-backed,
+  // target-bearing) are RAG'd into breach (red) / at-risk (amber) / clear (green).
+  // Spaces without a breach-evaluable agent metric are omitted; carried-but-empty
+  // spaces surface honestly. Legacy live-queue families (per-agent open-over-SLA
+  // count, not-updated, oldest-ticket) the clean-sheet agent path cannot produce are
+  // returned under unsupportedFamilies, never fabricated. Optional ?date=YYYY-MM-DD
+  // resolves the latest frozen date ≤ that date. Reads only the clean-sheet path.
+  router.get('/agent-breaches', async (req, res) => {
+    const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : undefined;
+    try {
+      const data = await views.getAgentBreaches(date);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Escalations parity PROOF FIXTURE (KPX-WP6A). A tightly-bounded, disposable
   // path that proves the POPULATED escalation family through the real clean-sheet
   // data path (real escalation_log + jira_issue_cache source rows → live engine
@@ -398,6 +419,55 @@ export function createKpiEngineRoutes(deps: {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(msg.includes('not seeded') ? 409 : 500).json({ ok: false, error: msg });
+    }
+  });
+
+  // ── KPX-WP8A: Agent Breaches parity proof fixture ──
+  // A tightly-bounded, DISPOSABLE fixture that proves the POPULATED Agent Breaches
+  // path through the real clean-sheet data path (real jira_issue_cache source rows
+  // → live engine compute → EOD freeze of kpi_agent_daily → the Agent Breaches view
+  // surface), then tears itself back out. It NEVER fabricates per-agent breach
+  // results: three fixture agents are given different volumes of tickets resolved
+  // today so the real resolved_today computer + RAG logic place one agent in each
+  // band (breach / at-risk / clear). Only its own __ABFX space/project is touched,
+  // so honest empty-state behaviour for every real space is preserved.
+  //   GET  /fixtures/agent-breaches            → current fixture status (row counts).
+  //   POST /fixtures/agent-breaches { action } →
+  //     'seed'     : build fixture; after this GET /agent-breaches shows __ABFX with
+  //                  one agent breaching, one at-risk, one clear — all real values.
+  //     'teardown' : remove every fixture row; restore the known empty state.
+  //     'status'   : same as the GET.
+  router.get('/fixtures/agent-breaches', async (_req, res) => {
+    try {
+      const data = await agentBreachFixture.status();
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post('/fixtures/agent-breaches', async (req, res) => {
+    const body = (req.body ?? {}) as { action?: string };
+    const action = body.action ?? 'status';
+    try {
+      switch (action) {
+        case 'seed': {
+          const data = await agentBreachFixture.seed();
+          return res.json({ ok: true, data });
+        }
+        case 'teardown': {
+          const data = await agentBreachFixture.teardown();
+          return res.json({ ok: true, data });
+        }
+        case 'status': {
+          const data = await agentBreachFixture.status();
+          return res.json({ ok: true, data });
+        }
+        default:
+          return res.status(400).json({ ok: false, error: `unknown action '${action}' (seed | teardown | status)` });
+      }
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

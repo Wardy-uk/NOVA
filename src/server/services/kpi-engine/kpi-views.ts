@@ -292,6 +292,99 @@ export interface TrendsSpace {
   unsupported: TrendMetric[];
 }
 
+/**
+ * Agent Breaches parity surface (KPX-WP8). A clean-sheet, per-agent breach view
+ * over the SAME frozen `kpi_agent_daily` rows the Agent Scorecard reads — but
+ * oriented around *breaches* (failing a target) rather than ranking.
+ *
+ * A metric is "breach-evaluable" only when the clean-sheet platform can honestly
+ * judge an agent against a standard: it is agent-level, has a registered computer
+ * (so it can carry a real per-agent value), carries a target, and has a RAG-able
+ * direction ('higher'/'lower'). For each such metric the existing RAG logic
+ * decides the per-agent breach state:
+ *   - red   → breach   (failing the target beyond the amber band)
+ *   - amber → at-risk  (within the amber band of the target)
+ *   - green → met
+ * No metric without a computer/target/direction is ever shown as a breach, and a
+ * missing per-agent value renders "—" (null), never a fabricated 0 / pass / fail.
+ *
+ * The legacy Agent-Breaches board (live per-agent ticket health: open-over-SLA
+ * count, not-updated-today count, oldest open ticket age) draws on per-agent LIVE
+ * queue counts the clean-sheet agent path does not capture — it freezes per-agent
+ * SLA *attainment %*, not per-agent live ticket counts. Those families are
+ * surfaced as honestly unsupported rather than fabricated.
+ */
+export type AgentBreachStatus = 'breach' | 'at_risk' | 'clear' | 'no_data';
+
+/** A breach-evaluable agent-level metric (computer + target + RAG-able direction). */
+export interface AgentBreachMetricDef {
+  metricKey: string;
+  displayName: string;
+  valueType: string;
+  direction: string;
+  target: number | null;
+  amberBand: number | null;
+}
+
+/** One agent's value + RAG for a single breach-evaluable metric. */
+export interface AgentBreachCell {
+  metricKey: string;
+  value: number | null;
+  rag: RagStatus | null;
+}
+
+/** One agent's breach row for the latest frozen date. */
+export interface AgentBreachRow {
+  agentId: string;
+  agentName: string | null;
+  status: AgentBreachStatus;
+  /** Count of red (breaching) metrics. */
+  breachCount: number;
+  /** Count of amber (at-risk) metrics. */
+  atRiskCount: number;
+  cells: AgentBreachCell[];
+}
+
+/** A legacy breach family the clean-sheet agent path cannot honestly produce. */
+export interface UnsupportedBreachFamily {
+  key: string;
+  label: string;
+  reason: string;
+}
+
+/** Per-space Agent Breaches card: breach-evaluable metric defs + per-agent rows. */
+export interface AgentBreachesSpace {
+  spaceKey: string;
+  displayName: string;
+  ownerName: string | null;
+  isJiraSpace: boolean;
+  /** True once at least one frozen per-agent breach value exists. */
+  hasData: boolean;
+  /** Honest note when the space carries breach-evaluable metrics but has no rows yet. */
+  note: string | null;
+  /** Report date the agent rows are for (latest frozen with agent data); null if none. */
+  reportDate: string | null;
+  /** The breach-evaluable agent metric definitions in scope (column headers + targets). */
+  metricDefs: AgentBreachMetricDef[];
+  /** Per-agent breach rows, breaching agents first. */
+  agents: AgentBreachRow[];
+  summary: {
+    agentsBreaching: number;
+    agentsAtRisk: number;
+    agentsClear: number;
+    /** metric_key -> number of agents breaching (red) on it. */
+    breachesByMetric: Record<string, number>;
+  };
+}
+
+export interface AgentBreachesSummary {
+  generatedAt: string;
+  /** Legacy live-queue breach families honestly unsupported by the clean-sheet agent path. */
+  unsupportedFamilies: UnsupportedBreachFamily[];
+  /** Only Jira spaces that carry ≥1 breach-evaluable agent metric. */
+  spaces: AgentBreachesSpace[];
+}
+
 interface SnapshotRow { metricKey: string; tierName: string | null; value: number; snapshotAt: Date | string; }
 interface DailyLatestRow { metric_key: string; tier_name: string | null; value: number; report_date: string | Date; }
 
@@ -955,6 +1048,172 @@ export class KpiViewsService {
           : 'Manual / non-Jira team — trends appear once ≥2 days of manual entries exist per metric.',
       supported,
       unsupported,
+    };
+  }
+
+  /**
+   * The legacy Agent-Breaches board's live per-agent ticket-health families that
+   * the clean-sheet agent path does not capture. The clean-sheet EOD freeze stores
+   * per-agent SLA *attainment %* (frt/resolution compliance, csat, …) — not a
+   * per-agent count of live open / stale / oldest tickets. The EOD ticket-state
+   * snapshot (kpi_eod_snapshot) carries over-SLA counts grouped by tier / status /
+   * request-type, never by agent. So these families are surfaced honestly as
+   * unsupported rather than fabricated from data that does not exist.
+   */
+  private static readonly UNSUPPORTED_BREACH_FAMILIES: UnsupportedBreachFamily[] = [
+    {
+      key: 'open_over_sla_per_agent',
+      label: 'Open tickets over SLA (per agent)',
+      reason: 'Clean-sheet per-agent capture freezes SLA attainment % (frt_compliance / resolution_compliance), not a per-agent count of currently-open over-SLA tickets. The EOD ticket-state snapshot holds over-SLA counts grouped by tier/status/request-type, not by agent.',
+    },
+    {
+      key: 'not_updated_per_agent',
+      label: 'Tickets not updated today (per agent)',
+      reason: 'No clean-sheet per-agent stale-ticket (no-update) metric is computed or frozen — there is no honest per-agent value to render.',
+    },
+    {
+      key: 'oldest_ticket_per_agent',
+      label: 'Oldest open ticket age (per agent)',
+      reason: 'oldest_actionable_hrs is captured at space level only, not per agent — a per-agent oldest-ticket age cannot be derived from the clean-sheet path.',
+    },
+  ];
+
+  /**
+   * Agent Breaches parity surface (KPX-WP8). Cross-space, per-agent breach view
+   * over the frozen `kpi_agent_daily` rows — the SAME clean-sheet path the Agent
+   * Scorecard uses. For each Jira space carrying ≥1 breach-evaluable agent metric
+   * it returns, for the latest frozen date that has agent rows, one row per agent
+   * with each metric's value + RAG and a derived breach status (breach / at-risk /
+   * clear / no-data), plus per-space summary counts.
+   *
+   * Honesty: only spaces with a breach-evaluable agent metric appear; a missing
+   * per-agent value renders null ("—"), never a fabricated pass/fail; a space with
+   * the metrics but no frozen agent rows yet is surfaced with hasData=false and an
+   * honest note. Legacy live-queue breach families the clean-sheet agent path
+   * cannot produce are listed under unsupportedFamilies, never invented.
+   *
+   * Reads only the clean-sheet `kpi_*` tables (NOVA main pool). It never touches
+   * the legacy KPI pipeline, the legacy Agent-Breaches data path
+   * (`/api/kpi-data/agents`), the techservicesjsm tables, or any forbidden table.
+   */
+  async getAgentBreaches(date?: string): Promise<AgentBreachesSummary> {
+    const spaces = await this.engine.listSpaces();
+    const cards: AgentBreachesSpace[] = [];
+
+    for (const space of spaces) {
+      const bindings = await this.getSpaceMetricBindings(space.spaceKey);
+      // Breach-evaluable = agent-level, has a registered computer (can carry a real
+      // per-agent value), carries a target, and has a RAG-able direction.
+      const breachDefs = bindings.filter(
+        (b) =>
+          b.isAgentLevel &&
+          hasComputer(b.computationKey ?? b.metricKey) &&
+          b.targetValue !== null &&
+          (b.direction === 'higher' || b.direction === 'lower'),
+      );
+      if (breachDefs.length === 0) continue; // space carries no breach-evaluable agent metric — skip
+
+      const metricDefs: AgentBreachMetricDef[] = breachDefs.map((b) => ({
+        metricKey: b.metricKey,
+        displayName: b.displayName,
+        valueType: b.valueType,
+        direction: b.direction,
+        target: b.targetValue,
+        amberBand: b.amberBand,
+      }));
+      const breachKeys = breachDefs.map((b) => b.metricKey);
+      const inList = breachKeys.map(() => '?').join(', ');
+
+      const baseCard = {
+        spaceKey: space.spaceKey,
+        displayName: space.displayName,
+        ownerName: space.ownerName,
+        isJiraSpace: space.isJiraSpace,
+        metricDefs,
+      };
+
+      const emptySummary = { agentsBreaching: 0, agentsAtRisk: 0, agentsClear: 0, breachesByMetric: {} as Record<string, number> };
+
+      // Most recent frozen date (≤ requested) that has agent rows for these metrics.
+      const dateRow = await query<{ d: string | Date }>(
+        date
+          ? `SELECT TOP 1 report_date AS d FROM kpi_agent_daily WHERE space_key = ? AND report_date <= ? AND metric_key IN (${inList}) ORDER BY report_date DESC`
+          : `SELECT TOP 1 report_date AS d FROM kpi_agent_daily WHERE space_key = ? AND metric_key IN (${inList}) ORDER BY report_date DESC`,
+        date ? [space.spaceKey, date, ...breachKeys] : [space.spaceKey, ...breachKeys],
+      );
+      if (!dateRow[0]) {
+        cards.push({
+          ...baseCard,
+          hasData: false,
+          note: 'Breach-evaluable agent metrics are wired for this space but no per-agent values have been captured yet (populated at EOD freeze where agents have agent-level rows).',
+          reportDate: null,
+          agents: [],
+          summary: emptySummary,
+        });
+        continue;
+      }
+      const reportDate = dateKey(dateRow[0].d);
+
+      const rows = await query<{ agent_id: string; agent_name: string | null; metric_key: string; value: number }>(
+        `SELECT agent_id, agent_name, metric_key, value FROM kpi_agent_daily
+         WHERE space_key = ? AND report_date = ? AND metric_key IN (${inList})`,
+        [space.spaceKey, reportDate, ...breachKeys],
+      );
+
+      const byAgent = new Map<string, { agentId: string; agentName: string | null; values: Map<string, number> }>();
+      for (const r of rows) {
+        let a = byAgent.get(r.agent_id);
+        if (!a) { a = { agentId: r.agent_id, agentName: r.agent_name, values: new Map() }; byAgent.set(r.agent_id, a); }
+        a.values.set(r.metric_key, r.value);
+      }
+
+      const breachesByMetric: Record<string, number> = {};
+      for (const k of breachKeys) breachesByMetric[k] = 0;
+      let agentsBreaching = 0, agentsAtRisk = 0, agentsClear = 0;
+
+      const agents: AgentBreachRow[] = [];
+      for (const a of byAgent.values()) {
+        const cells: AgentBreachCell[] = [];
+        let red = 0, amber = 0, green = 0;
+        for (const def of breachDefs) {
+          const v = a.values.has(def.metricKey) ? a.values.get(def.metricKey)! : null;
+          const rag = v === null ? null : this.eod.computeRag(v, def.targetValue, def.amberBand, def.direction);
+          if (rag === 'red') { red++; breachesByMetric[def.metricKey]++; }
+          else if (rag === 'amber') amber++;
+          else if (rag === 'green') green++;
+          cells.push({ metricKey: def.metricKey, value: v, rag });
+        }
+        let status: AgentBreachStatus;
+        if (red > 0) { status = 'breach'; agentsBreaching++; }
+        else if (amber > 0) { status = 'at_risk'; agentsAtRisk++; }
+        else if (green > 0) { status = 'clear'; agentsClear++; }
+        else status = 'no_data';
+        agents.push({ agentId: a.agentId, agentName: a.agentName, status, breachCount: red, atRiskCount: amber, cells });
+      }
+
+      // Breaching agents first (most breaches), then at-risk, then clear, then no-data; ties by name.
+      const rank: Record<AgentBreachStatus, number> = { breach: 0, at_risk: 1, clear: 2, no_data: 3 };
+      agents.sort((x, y) => {
+        if (rank[x.status] !== rank[y.status]) return rank[x.status] - rank[y.status];
+        if (x.breachCount !== y.breachCount) return y.breachCount - x.breachCount;
+        if (x.atRiskCount !== y.atRiskCount) return y.atRiskCount - x.atRiskCount;
+        return (x.agentName ?? x.agentId).localeCompare(y.agentName ?? y.agentId);
+      });
+
+      cards.push({
+        ...baseCard,
+        hasData: agents.length > 0,
+        note: agents.length ? null : 'No per-agent breach values captured for this date.',
+        reportDate,
+        agents,
+        summary: { agentsBreaching, agentsAtRisk, agentsClear, breachesByMetric },
+      });
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      unsupportedFamilies: KpiViewsService.UNSUPPORTED_BREACH_FAMILIES,
+      spaces: cards,
     };
   }
 }

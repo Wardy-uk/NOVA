@@ -1085,6 +1085,7 @@ async function main() {
     digest: kpiFoundation.digest,
     admin: kpiFoundation.admin,
     escalationFixture: kpiFoundation.escalationFixture,
+    agentBreachFixture: kpiFoundation.agentBreachFixture,
     getStatus: getKpiInitStatus,
     getSnapshotJob: () => jobRegistry.getJob(KPI_SNAPSHOT_JOB_ID),
     getEodJob: () => jobRegistry.getJob(KPI_EOD_JOB_ID),

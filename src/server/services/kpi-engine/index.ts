@@ -22,6 +22,7 @@ import { KpiManualService } from './kpi-manual.js';
 import { KpiDigestService, type DigestLlm } from './kpi-digest.js';
 import { KpiAdminService } from './kpi-admin.js';
 import { KpiEscalationFixtureService } from './kpi-fixture.js';
+import { KpiAgentBreachFixtureService } from './kpi-agent-breach-fixture.js';
 
 export { KpiEngine } from './kpi-engine.js';
 export { KpiEodService } from './kpi-eod.js';
@@ -30,6 +31,7 @@ export { KpiManualService } from './kpi-manual.js';
 export { KpiDigestService, type DigestLlm } from './kpi-digest.js';
 export { KpiAdminService } from './kpi-admin.js';
 export { KpiEscalationFixtureService } from './kpi-fixture.js';
+export { KpiAgentBreachFixtureService } from './kpi-agent-breach-fixture.js';
 export * from './types.js';
 
 /** Stable id of the 3-min snapshot job (design §5.2). Shared with the route layer. */
@@ -89,6 +91,8 @@ export interface KpiFoundation {
   admin: KpiAdminService;
   /** Disposable Escalations parity proof fixture (KPX-WP6A). */
   escalationFixture: KpiEscalationFixtureService;
+  /** Disposable Agent Breaches parity proof fixture (KPX-WP8A). */
+  agentBreachFixture: KpiAgentBreachFixtureService;
   status: KpiInitStatus;
 }
 
@@ -114,6 +118,7 @@ export async function initKpiFoundation(
   const digest = new KpiDigestService(eod, opts.llm ?? null);
   const admin = new KpiAdminService(engine);
   const escalationFixture = new KpiEscalationFixtureService(engine, eod);
+  const agentBreachFixture = new KpiAgentBreachFixtureService(engine, eod);
   const status: KpiInitStatus = {
     ...lastStatus,
     schemaTablesExpected: KPI_TABLE_COUNT,
@@ -195,5 +200,5 @@ export async function initKpiFoundation(
   }
 
   lastStatus = status;
-  return { engine, eod, views, manual, digest, admin, escalationFixture, status };
+  return { engine, eod, views, manual, digest, admin, escalationFixture, agentBreachFixture, status };
 }
