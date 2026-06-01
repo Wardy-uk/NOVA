@@ -2865,6 +2865,157 @@ ${wallboardRefreshScript('/wallboard/dev-review')}
     }
   });
 
+  // ── "Ricky" wallboard — Technical Director risk view ──
+  // Two zones for Tech Support (NT project, dev tiers): what's ON FIRE now
+  // (already breached) and what's AT RISK (breaching within the next 2h).
+  app.get('/wallboard/ricky', async (_req, res) => {
+    const wbStart = Date.now();
+    const AT_RISK_HOURS = 2;
+    type TierAgg = { on_fire: number; at_risk: number; stale: number; active: number };
+    try {
+      // 1. SLA state per Tech Support tier from the Jira issue cache.
+      const tierRows = await query<{ tier: string } & TierAgg>(`
+        SELECT current_tier AS tier,
+          SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS on_fire,
+          SUM(CASE WHEN sla_breached = 0 AND sla_breach_time IS NOT NULL
+                    AND sla_breach_time > GETUTCDATE()
+                    AND sla_breach_time <= DATEADD(hour, ${AT_RISK_HOURS}, GETUTCDATE())
+                   THEN 1 ELSE 0 END) AS at_risk,
+          SUM(CASE WHEN sla_breached = 0 AND no_reply = 1 THEN 1 ELSE 0 END) AS stale,
+          COUNT(*) AS active
+        FROM jira_issue_cache
+        WHERE status_category != 'Done' AND project_key = 'NT'
+          AND current_tier IN ('Production','Tier 2','Tier 3','Development','Escalations')
+        GROUP BY current_tier
+      `);
+      const tierMap = new Map<string, TierAgg>();
+      for (const r of tierRows) {
+        const name = r.tier === 'Escalations' ? 'Tier 2' : r.tier;   // fold Escalations into Tier 2
+        const e = tierMap.get(name) ?? { on_fire: 0, at_risk: 0, stale: 0, active: 0 };
+        e.on_fire += r.on_fire; e.at_risk += r.at_risk; e.stale += r.stale; e.active += r.active;
+        tierMap.set(name, e);
+      }
+      const TIERS = ['Production', 'Tier 2', 'Tier 3', 'Development'];
+      const tiers = TIERS.map(t => ({ tier: t, ...(tierMap.get(t) ?? { on_fire: 0, at_risk: 0, stale: 0, active: 0 }) }));
+      const totalFire = tiers.reduce((s, t) => s + t.on_fire, 0);
+      const totalRisk = tiers.reduce((s, t) => s + t.at_risk, 0);
+      const totalStale = tiers.reduce((s, t) => s + t.stale, 0);
+
+      // 2. Open problem tickets (NT) — fire signal.
+      let openProblems = 0;
+      try {
+        const p = await queryOne<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM problem_ticket_alerts WHERE resolved_at IS NULL AND project_key = 'NT'`,
+        );
+        openProblems = p?.c ?? 0;
+      } catch { /* table may be empty pre-first-scan */ }
+
+      // 3. Dev Review breached + unpicked today.
+      let devBreached = 0, devUnpickedToday = 0;
+      try {
+        const dd = await devReviewQueries.getDashboard();
+        devBreached = dd.unpickedKpi.currentlyBreached;
+        devUnpickedToday = dd.unpickedKpi.today;
+      } catch { /* non-fatal */ }
+
+      // 4. KPIs red/amber today (guarded — separate KPI pool).
+      let kpiRed = 0, kpiAmber = 0, kpiOk = false;
+      try {
+        const s = settingsQueries.getAll();
+        if (s.kpi_sql_server && s.kpi_sql_database && s.kpi_sql_user && s.kpi_sql_password) {
+          const sql = await import('mssql');
+          const pool = await new sql.default.ConnectionPool({
+            server: s.kpi_sql_server, database: s.kpi_sql_database, user: s.kpi_sql_user, password: s.kpi_sql_password,
+            options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 20000,
+          }).connect();
+          const r = await pool.request().query(`
+            SELECT SUM(CASE WHEN rag = 3 THEN 1 ELSE 0 END) AS red,
+                   SUM(CASE WHEN rag = 2 THEN 1 ELSE 0 END) AS amber
+            FROM dbo.jira_kpi_daily
+            WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)`);
+          await pool.close();
+          kpiRed = r.recordset[0]?.red ?? 0;
+          kpiAmber = r.recordset[0]?.amber ?? 0;
+          kpiOk = true;
+        }
+      } catch { /* KPI pool optional */ }
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB');
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const fireTile = (label: string, value: number | string, sub?: string) => {
+        const v = Number(value) || 0;
+        const color = v > 0 ? '#ef4444' : '#10b981';
+        return `<div class="${v > 0 ? 'flash-red' : ''}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">
+          <div style="font-size:12px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${label}</div>
+          <div style="font-size:58px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${value}</div>
+          ${sub ? `<div style="font-size:11px;color:#64748b;margin-top:6px">${sub}</div>` : ''}
+        </div>`;
+      };
+      const riskTile = (label: string, value: number | string, sub?: string) => {
+        const v = Number(value) || 0;
+        const color = v > 0 ? '#f59e0b' : '#10b981';
+        return `<div class="${v > 0 ? 'pulse-amber' : ''}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">
+          <div style="font-size:12px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${label}</div>
+          <div style="font-size:58px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${value}</div>
+          ${sub ? `<div style="font-size:11px;color:#64748b;margin-top:6px">${sub}</div>` : ''}
+        </div>`;
+      };
+
+      const fireTiers = tiers.map(t => fireTile(t.tier, t.on_fire, 'SLA breached')).join('');
+      const fireExtra = [
+        fireTile('KPIs Red', kpiOk ? kpiRed : '—', kpiOk ? 'breaching target today' : 'KPI source offline'),
+        fireTile('Dev Review Breached', devBreached, 'unpicked > 8h'),
+        fireTile('Open Problems', openProblems, 'active problem tickets'),
+      ].join('');
+      const riskTiers = tiers.map(t => riskTile(t.tier, t.at_risk, `breaching < ${AT_RISK_HOURS}h`)).join('');
+      const riskExtra = [
+        riskTile('KPIs Amber', kpiOk ? kpiAmber : '—', kpiOk ? 'approaching target' : 'KPI source offline'),
+        riskTile('No Reply', totalStale, 'awaiting first/next update'),
+        riskTile('Dev Unpicked Today', devUnpickedToday, 'no dev action yet'),
+      ].join('');
+
+      const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tech Support — Risk Board</title>
+${wallboardRefreshScript('/wallboard/ricky')}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}
+.wrap{width:100%;padding:18px 26px;min-height:100vh;display:flex;flex-direction:column;gap:12px}
+.zone{flex:1;display:flex;flex-direction:column;gap:10px;border-radius:16px;padding:14px 16px}
+.zone-fire{background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.18)}
+.zone-risk{background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.18)}
+.zone-head{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;flex:2}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:1}
+.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}
+.pulse-amber{animation:pulseA 1.8s ease-in-out infinite}@keyframes pulseA{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Technical Support — Risk Board</h1><div style="font-size:10px;color:#64748b;margin-top:1px">What's on fire now &middot; what's about to be</div></div>
+  <div style="text-align:right"><div style="font-size:14px;font-weight:800"><span style="color:#ef4444">🔥 ${totalFire}</span> &nbsp; <span style="color:#f59e0b">⚠️ ${totalRisk}</span></div><div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div></div>
+</div>
+<div class="zone zone-fire">
+  <div class="zone-head" style="color:#f87171">🔥 On Fire Now &mdash; SLA breached</div>
+  <div class="grid4">${fireTiers}</div>
+  <div class="grid3">${fireExtra}</div>
+</div>
+<div class="zone zone-risk">
+  <div class="zone-head" style="color:#fbbf24">⚠️ At Risk &mdash; breaching within ${AT_RISK_HOURS}h</div>
+  <div class="grid4">${riskTiers}</div>
+  <div class="grid3">${riskExtra}</div>
+</div>
+<div style="text-align:center;font-size:10px;color:#475569">nurtur.tech &middot; Tech Support Risk Board &middot; ${dateStr}</div>
+</div></body></html>`;
+      res.send(html);
+      logWallboard('/wallboard/ricky', 'info', 200, Date.now() - wbStart, `OK — fire ${totalFire}, risk ${totalRisk}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/ricky', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
   // ── Clean-sheet KPI wallboards (P3-WP1) ──
   // NEW, parallel wallboards sourced ENTIRELY from the clean-sheet KPI data
   // (kpi_* tables via kpiFoundation.views) — never the legacy KPI pipeline pool.
