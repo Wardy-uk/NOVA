@@ -2786,7 +2786,7 @@ ${panelHtml}
             <div style="font-size:13px;color:#f87171;font-weight:700;text-transform:uppercase;letter-spacing:.6px">Unpicked · Last 14 Days</div>
             <div style="font-size:11px;color:#64748b">peak: ${peak}</div>
           </div>
-          <div style="display:flex;gap:4px;flex:1;align-items:flex-end;min-height:90px">${barsHtml}</div>
+          <div style="display:flex;gap:4px;flex:1;align-items:stretch;min-height:120px">${barsHtml}</div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#475569">
             <span>${unpicked.history14d[0]?.date.slice(5) ?? ''}</span>
             <span>${unpicked.history14d[unpicked.history14d.length - 1]?.date.slice(5) ?? ''}</span>
