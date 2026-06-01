@@ -34,6 +34,7 @@ const KpiCleanQaView = lazy(() => import('./components/KpiCleanQaView.js').then(
 const KpiCleanEscalationsView = lazy(() => import('./components/KpiCleanEscalationsView.js').then(m => ({ default: m.KpiCleanEscalationsView })));
 const KpiCleanTrendsView = lazy(() => import('./components/KpiCleanTrendsView.js').then(m => ({ default: m.KpiCleanTrendsView })));
 const KpiCleanDailyHistoryView = lazy(() => import('./components/KpiCleanDailyHistoryView.js').then(m => ({ default: m.KpiCleanDailyHistoryView })));
+const KpiCleanDataView = lazy(() => import('./components/KpiCleanDataView.js').then(m => ({ default: m.KpiCleanDataView })));
 const KpiCleanAgentView = lazy(() => import('./components/KpiCleanAgentView.js').then(m => ({ default: m.KpiCleanAgentView })));
 const KpiCleanAgentBreachesView = lazy(() => import('./components/KpiCleanAgentBreachesView.js').then(m => ({ default: m.KpiCleanAgentBreachesView })));
 const KpiCleanManualView = lazy(() => import('./components/KpiCleanManualView.js').then(m => ({ default: m.KpiCleanManualView })));
@@ -111,7 +112,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
-  | 'kpic-slt' | 'kpic-team' | 'kpic-qa' | 'kpic-escalations' | 'kpic-trends' | 'kpic-daily-history' | 'kpic-agent' | 'kpic-agent-breaches' | 'kpic-wallboard' | 'kpic-manual' | 'kpic-digest' | 'kpic-admin'
+  | 'kpic-slt' | 'kpic-team' | 'kpic-qa' | 'kpic-escalations' | 'kpic-trends' | 'kpic-daily-history' | 'kpic-data' | 'kpic-agent' | 'kpic-agent-breaches' | 'kpic-wallboard' | 'kpic-manual' | 'kpic-digest' | 'kpic-admin'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -219,6 +220,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpic-escalations', label: 'Escalations Parity' },
       { view: 'kpic-trends', label: 'Trends' },
       { view: 'kpic-daily-history', label: 'Daily History' },
+      { view: 'kpic-data', label: 'KPI Data' },
       { view: 'kpic-agent', label: 'Agent Scorecard' },
       { view: 'kpic-agent-breaches', label: 'Agent Breaches' },
       { view: 'kpic-manual', label: 'Manual Entry' },
@@ -336,7 +338,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'kpic-slt', 'kpic-team', 'kpic-agent', 'kpic-agent-breaches', 'kpic-daily-history', 'kpic-wallboard', 'kpic-manual', 'kpic-digest', 'kpic-admin']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'kpic-slt', 'kpic-team', 'kpic-agent', 'kpic-agent-breaches', 'kpic-daily-history', 'kpic-data', 'kpic-wallboard', 'kpic-manual', 'kpic-digest', 'kpic-admin']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1123,6 +1125,9 @@ export function App() {
           )}
           {view === 'kpic-daily-history' && (
             <KpiCleanDailyHistoryView />
+          )}
+          {view === 'kpic-data' && (
+            <KpiCleanDataView />
           )}
           {view === 'kpic-agent' && (
             <KpiCleanAgentView />

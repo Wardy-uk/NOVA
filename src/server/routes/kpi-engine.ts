@@ -357,6 +357,35 @@ export function createKpiEngineRoutes(deps: {
     }
   });
 
+  // KPI Data parity surface (KPX-WP10). Raw/grid-style row inspector over one
+  // clean-sheet OUTPUT table — the parity replacement for the legacy "KPI Data
+  // Explorer" (/api/kpi-data/*). :dataset is one of daily | agent-daily |
+  // eod-snapshot | snapshot; ?spaceKey filters to one space, ?window=N bounds the
+  // date window (default 30, clamped 1–180), ?limit=N caps rows (default 500, max
+  // 2000, most-recent first, truncation reported honestly). Every column is a real
+  // column of the underlying kpi_* table; an empty/sparse dataset returns zero rows
+  // with an honest note, never a fabricated row. Reads only the clean-sheet path.
+  const KPI_DATASETS = new Set(['daily', 'agent-daily', 'eod-snapshot', 'snapshot']);
+  router.get('/data/:dataset', async (req, res) => {
+    const dataset = req.params.dataset;
+    if (!KPI_DATASETS.has(dataset)) {
+      return res.status(400).json({ ok: false, error: `unknown dataset '${dataset}' (daily | agent-daily | eod-snapshot | snapshot)` });
+    }
+    const spaceKey = typeof req.query.spaceKey === 'string' && req.query.spaceKey.trim() ? req.query.spaceKey.trim() : null;
+    const rawWindow = typeof req.query.window === 'string' ? req.query.window
+      : typeof req.query.days === 'string' ? req.query.days : '';
+    const parsedWindow = parseInt(rawWindow, 10);
+    const window = Number.isFinite(parsedWindow) ? Math.min(180, Math.max(1, parsedWindow)) : 30;
+    const parsedLimit = parseInt(typeof req.query.limit === 'string' ? req.query.limit : '', 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(2000, Math.max(1, parsedLimit)) : 500;
+    try {
+      const data = await views.getKpiData(dataset as any, { spaceKey, window, limit });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Escalations parity surface (KPX-WP6). Focused cross-space view of the wired
   // escalation metric family (escalation_rate, escalation_accuracy, rejection_rate)
   // ONLY — current value/RAG + 7-day history + per-agent breakdown, all from the

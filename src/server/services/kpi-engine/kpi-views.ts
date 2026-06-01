@@ -463,6 +463,81 @@ export interface AgentBreachesSummary {
   spaces: AgentBreachesSpace[];
 }
 
+/**
+ * KPI Data parity surface (KPX-WP10). A clean-sheet, raw/grid-style row inspector
+ * over the clean-sheet KPI OUTPUT tables — the parity replacement for the legacy
+ * "KPI Data Explorer" (which reads the legacy pipeline via /api/kpi-data/*). Where
+ * the SLT / Team / QA / Trends views summarise into cards and charts, this surface
+ * exposes the underlying frozen/live rows directly so they can be inspected as-is.
+ *
+ * Exactly four datasets are exposed — one per real clean-sheet output table — and
+ * NOTHING else is fabricated:
+ *   - 'daily'        ← kpi_daily        (frozen space/tier daily metric values + RAG)
+ *   - 'agent-daily'  ← kpi_agent_daily  (frozen per-agent daily metric values)
+ *   - 'eod-snapshot' ← kpi_eod_snapshot (frozen EOD ticket-state freeze rows)
+ *   - 'snapshot'     ← kpi_snapshots    (live computed snapshot values)
+ * Every column is a real column of its table (metric display_name is the only
+ * joined enrichment, from kpi_metric_definitions). No dataset/column is invented
+ * for a legacy tab the clean-sheet path does not store — those are surfaced under
+ * `unsupportedDatasets` (see UNSUPPORTED_DATA_FAMILIES) rather than faked.
+ *
+ * Honesty: a dataset with no rows in the window returns an empty `rows` array with
+ * an explicit note ("not yet frozen" / sparse), never a placeholder row. Results
+ * are bounded (windowed + row-capped, most-recent first) to keep this a focused KPI
+ * Data parity inspector rather than an open-ended analytics/export workbench.
+ *
+ * Reads only the clean-sheet `kpi_*` tables (NOVA main pool). It never touches the
+ * legacy KPI pipeline, the legacy KPI-Data route family, the techservicesjsm
+ * tables, or any forbidden table, and performs NO backfill.
+ */
+export type KpiDataDataset = 'daily' | 'agent-daily' | 'eod-snapshot' | 'snapshot';
+
+export interface KpiDataColumn {
+  key: string;
+  label: string;
+  /** Render hint for the client; the row value itself is always the raw stored value. */
+  type: 'date' | 'datetime' | 'number' | 'text' | 'rag';
+}
+
+/** Static descriptor for one exposed (supported) clean-sheet dataset. */
+export interface KpiDataDatasetInfo {
+  key: KpiDataDataset;
+  label: string;
+  table: string;
+  description: string;
+  /** True if this dataset is date-windowed (vs. a point-in-time live read). */
+  windowed: boolean;
+}
+
+/** A legacy KPI-Data tab the clean-sheet output path cannot honestly produce. */
+export interface UnsupportedDataFamily {
+  key: string;
+  label: string;
+  reason: string;
+}
+
+export interface KpiDataResult {
+  generatedAt: string;
+  dataset: KpiDataDataset;
+  datasetLabel: string;
+  table: string;
+  /** Filters actually applied (echoed so clamping/defaulting is visible). */
+  spaceKey: string | null;
+  windowDays: number | null;
+  rowLimit: number;
+  columns: KpiDataColumn[];
+  rows: Array<Record<string, string | number | null>>;
+  rowCount: number;
+  /** True when more rows existed than rowLimit — the inspector caps output honestly. */
+  truncated: boolean;
+  /** Honest note for an empty / sparse / not-yet-frozen dataset; null when populated. */
+  note: string | null;
+  /** The full registry of supported datasets (for the inspector's dataset switch). */
+  datasets: KpiDataDatasetInfo[];
+  /** Legacy KPI-Data families the clean-sheet output path does not store — listed, never faked. */
+  unsupportedDatasets: UnsupportedDataFamily[];
+}
+
 interface SnapshotRow { metricKey: string; tierName: string | null; value: number; snapshotAt: Date | string; }
 interface DailyLatestRow { metric_key: string; tier_name: string | null; value: number; report_date: string | Date; }
 
@@ -1397,6 +1472,175 @@ export class KpiViewsService {
       generatedAt: new Date().toISOString(),
       unsupportedFamilies: KpiViewsService.UNSUPPORTED_BREACH_FAMILIES,
       spaces: cards,
+    };
+  }
+
+  /** The supported clean-sheet KPI Data datasets — one per real output table. */
+  private static readonly DATA_DATASETS: KpiDataDatasetInfo[] = [
+    { key: 'daily', label: 'Daily Metrics', table: 'kpi_daily', windowed: true,
+      description: 'Frozen space/tier daily metric values with the RAG stored at EOD freeze time.' },
+    { key: 'agent-daily', label: 'Agent Daily', table: 'kpi_agent_daily', windowed: true,
+      description: 'Frozen per-agent daily metric values (agent-level metrics only).' },
+    { key: 'eod-snapshot', label: 'EOD Snapshot', table: 'kpi_eod_snapshot', windowed: true,
+      description: 'Frozen end-of-day ticket-state rows grouped by tier / status / request type, with over-SLA counts.' },
+    { key: 'snapshot', label: 'Live Snapshot', table: 'kpi_snapshots', windowed: true,
+      description: 'Live computed snapshot values written each snapshot cycle (most recent first).' },
+  ];
+
+  /**
+   * Legacy "KPI Data Explorer" tabs the clean-sheet OUTPUT path does not store as
+   * raw rows. Surfaced honestly so the parity gap is explicit rather than papered
+   * over with a fabricated dataset. (These mirror the unsupported per-agent live
+   * families already documented for Agent Breaches.)
+   */
+  private static readonly UNSUPPORTED_DATA_FAMILIES: UnsupportedDataFamily[] = [
+    {
+      key: 'agents_live_roster',
+      label: 'Agents (live ticket-health roster)',
+      reason: 'The legacy Agents tab lists per-agent LIVE queue health (open total, open >2h, stale, solved today/week, availability). The clean-sheet path freezes per-agent metric VALUES into kpi_agent_daily (see Agent Daily) — it does not store a per-agent live ticket-count roster, so there is no honest raw row to show.',
+    },
+  ];
+
+  /**
+   * KPI Data parity surface (KPX-WP10). Returns the raw rows of ONE clean-sheet
+   * output dataset, bounded by an optional space filter, a date window, and a row
+   * cap. Every column is a real column of the underlying table (metric
+   * display_name is the only joined enrichment). Reads only the clean-sheet
+   * `kpi_*` tables (NOVA main pool) — never the legacy KPI pipeline / KPI-Data
+   * routes / techservicesjsm / any forbidden table — and fabricates nothing: an
+   * empty/sparse dataset returns zero rows with an honest note.
+   */
+  async getKpiData(
+    dataset: KpiDataDataset,
+    opts: { spaceKey?: string | null; window?: number; limit?: number } = {},
+  ): Promise<KpiDataResult> {
+    const windowDays = Math.max(1, Math.min(180, Math.floor(Number(opts.window)) || 30));
+    const rowLimit = Math.max(1, Math.min(2000, Math.floor(Number(opts.limit)) || 500));
+    const spaceKey = opts.spaceKey && opts.spaceKey.trim() ? opts.spaceKey.trim() : null;
+    // Fetch one over the cap so truncation can be reported honestly.
+    const fetchN = rowLimit + 1;
+
+    const info = KpiViewsService.DATA_DATASETS.find((d) => d.key === dataset)!;
+    let columns: KpiDataColumn[];
+    let rawRows: Array<Record<string, string | number | null>>;
+
+    if (dataset === 'daily') {
+      columns = [
+        { key: 'report_date', label: 'Date', type: 'date' },
+        { key: 'space_key', label: 'Space', type: 'text' },
+        { key: 'metric_key', label: 'Metric Key', type: 'text' },
+        { key: 'display_name', label: 'Metric', type: 'text' },
+        { key: 'tier_name', label: 'Tier', type: 'text' },
+        { key: 'value', label: 'Value', type: 'number' },
+        { key: 'target_value', label: 'Target', type: 'number' },
+        { key: 'rag_status', label: 'RAG', type: 'rag' },
+      ];
+      const rows = await query<{ report_date: string | Date; space_key: string; metric_key: string; display_name: string | null; tier_name: string | null; value: number; target_value: number | null; rag_status: string | null }>(
+        `SELECT TOP (${fetchN}) d.report_date, d.space_key, d.metric_key, md.display_name,
+                d.tier_name, d.value, d.target_value, d.rag_status
+         FROM kpi_daily d
+         LEFT JOIN kpi_metric_definitions md ON md.metric_key = d.metric_key
+         WHERE d.report_date >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))${spaceKey ? ' AND d.space_key = ?' : ''}
+         ORDER BY d.report_date DESC, d.space_key, d.metric_key`,
+        spaceKey ? [-windowDays, spaceKey] : [-windowDays],
+      );
+      rawRows = rows.map((r) => ({
+        report_date: dateKey(r.report_date), space_key: r.space_key, metric_key: r.metric_key,
+        display_name: r.display_name ?? r.metric_key, tier_name: r.tier_name,
+        value: r.value, target_value: r.target_value, rag_status: r.rag_status,
+      }));
+    } else if (dataset === 'agent-daily') {
+      columns = [
+        { key: 'report_date', label: 'Date', type: 'date' },
+        { key: 'space_key', label: 'Space', type: 'text' },
+        { key: 'agent_id', label: 'Agent ID', type: 'text' },
+        { key: 'agent_name', label: 'Agent', type: 'text' },
+        { key: 'metric_key', label: 'Metric Key', type: 'text' },
+        { key: 'display_name', label: 'Metric', type: 'text' },
+        { key: 'value', label: 'Value', type: 'number' },
+      ];
+      const rows = await query<{ report_date: string | Date; space_key: string; agent_id: string; agent_name: string | null; metric_key: string; display_name: string | null; value: number }>(
+        `SELECT TOP (${fetchN}) a.report_date, a.space_key, a.agent_id, a.agent_name,
+                a.metric_key, md.display_name, a.value
+         FROM kpi_agent_daily a
+         LEFT JOIN kpi_metric_definitions md ON md.metric_key = a.metric_key
+         WHERE a.report_date >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))${spaceKey ? ' AND a.space_key = ?' : ''}
+         ORDER BY a.report_date DESC, a.space_key, a.agent_name, a.metric_key`,
+        spaceKey ? [-windowDays, spaceKey] : [-windowDays],
+      );
+      rawRows = rows.map((r) => ({
+        report_date: dateKey(r.report_date), space_key: r.space_key, agent_id: r.agent_id,
+        agent_name: r.agent_name, metric_key: r.metric_key, display_name: r.display_name ?? r.metric_key, value: r.value,
+      }));
+    } else if (dataset === 'eod-snapshot') {
+      columns = [
+        { key: 'snapshot_date', label: 'Date', type: 'date' },
+        { key: 'snapshot_time', label: 'Time', type: 'text' },
+        { key: 'space_key', label: 'Space', type: 'text' },
+        { key: 'tier_name', label: 'Tier', type: 'text' },
+        { key: 'status', label: 'Status', type: 'text' },
+        { key: 'request_type', label: 'Request Type', type: 'text' },
+        { key: 'ticket_count', label: 'Tickets', type: 'number' },
+        { key: 'over_sla_count', label: 'Over SLA', type: 'number' },
+      ];
+      const rows = await query<{ snapshot_date: string | Date; snapshot_time: string; space_key: string; tier_name: string | null; status: string | null; request_type: string | null; ticket_count: number; over_sla_count: number }>(
+        `SELECT TOP (${fetchN}) snapshot_date, snapshot_time, space_key, tier_name, status, request_type, ticket_count, over_sla_count
+         FROM kpi_eod_snapshot
+         WHERE snapshot_date >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))${spaceKey ? ' AND space_key = ?' : ''}
+         ORDER BY snapshot_date DESC, space_key, tier_name, status, request_type`,
+        spaceKey ? [-windowDays, spaceKey] : [-windowDays],
+      );
+      rawRows = rows.map((r) => ({
+        snapshot_date: dateKey(r.snapshot_date), snapshot_time: r.snapshot_time, space_key: r.space_key,
+        tier_name: r.tier_name, status: r.status, request_type: r.request_type,
+        ticket_count: r.ticket_count, over_sla_count: r.over_sla_count,
+      }));
+    } else {
+      // 'snapshot' — live computed values.
+      columns = [
+        { key: 'snapshot_at', label: 'Snapshot At', type: 'datetime' },
+        { key: 'space_key', label: 'Space', type: 'text' },
+        { key: 'metric_key', label: 'Metric Key', type: 'text' },
+        { key: 'display_name', label: 'Metric', type: 'text' },
+        { key: 'tier_name', label: 'Tier', type: 'text' },
+        { key: 'value', label: 'Value', type: 'number' },
+      ];
+      const rows = await query<{ snapshot_at: string | Date; space_key: string; metric_key: string; display_name: string | null; tier_name: string | null; value: number }>(
+        `SELECT TOP (${fetchN}) s.snapshot_at, s.space_key, s.metric_key, md.display_name, s.tier_name, s.value
+         FROM kpi_snapshots s
+         LEFT JOIN kpi_metric_definitions md ON md.metric_key = s.metric_key
+         WHERE s.snapshot_at >= DATEADD(day, ?, CAST(GETUTCDATE() AS DATE))${spaceKey ? ' AND s.space_key = ?' : ''}
+         ORDER BY s.snapshot_at DESC, s.space_key, s.metric_key`,
+        spaceKey ? [-windowDays, spaceKey] : [-windowDays],
+      );
+      rawRows = rows.map((r) => ({
+        snapshot_at: isoOf(r.snapshot_at), space_key: r.space_key, metric_key: r.metric_key,
+        display_name: r.display_name ?? r.metric_key, tier_name: r.tier_name, value: r.value,
+      }));
+    }
+
+    const truncated = rawRows.length > rowLimit;
+    const rows = truncated ? rawRows.slice(0, rowLimit) : rawRows;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      dataset,
+      datasetLabel: info.label,
+      table: info.table,
+      spaceKey,
+      windowDays,
+      rowLimit,
+      columns,
+      rows,
+      rowCount: rows.length,
+      truncated,
+      note: rows.length > 0
+        ? null
+        : spaceKey
+          ? `No clean-sheet ${info.label} rows for ${spaceKey} in the last ${windowDays} days — nothing has been frozen/captured yet in this window (not fabricated).`
+          : `No clean-sheet ${info.label} rows in the last ${windowDays} days — nothing has been frozen/captured yet in this window (not fabricated).`,
+      datasets: KpiViewsService.DATA_DATASETS,
+      unsupportedDatasets: KpiViewsService.UNSUPPORTED_DATA_FAMILIES,
     };
   }
 }
