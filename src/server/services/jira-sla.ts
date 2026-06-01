@@ -23,6 +23,13 @@ const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Statuses where a breached resolution SLA is NOT actionable — the ticket is
+// resolved or the ball is in someone else's court (customer/partner). A completed
+// SLA cycle may still read as breached, but it shouldn't surface as a live breach.
+const SLA_NON_ACTIONABLE_STATUSES = new Set([
+  'done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner',
+]);
+
 // ── Helpers ──
 
 /** Parse a date value; return null if falsy or invalid. */
@@ -205,11 +212,12 @@ export function computeUrgencyScore(
   now: Date = new Date(),
 ): number {
   let score = 0;
+  const actionable = !SLA_NON_ACTIONABLE_STATUSES.has(getStatusName(issue));
 
-  // Factor 1: SLA Breached (30 pts)
-  if (isResolutionSlaBreached(issue)) {
+  // Factor 1: SLA Breached (30 pts) — only when the breach is actionable
+  if (actionable && isResolutionSlaBreached(issue)) {
     score += 30;
-  } else {
+  } else if (actionable) {
     // Factor 2: SLA Approaching (20 pts) — only if not already breached
     const remaining = getSlaRemainingMs(issue);
     if (remaining !== null && remaining > 0 && remaining < TWO_HOURS_MS) {
@@ -260,10 +268,11 @@ export function dueIsOk(issue: Record<string, unknown>, now: Date = new Date()):
  */
 export function evaluateAttention(issue: Record<string, unknown>, now: Date = new Date(), priority: number = 50): AttentionResult {
   const reasons: AttentionReason[] = [];
+  const actionable = !SLA_NON_ACTIONABLE_STATUSES.has(getStatusName(issue));
 
   if (isOverdueUpdate(issue, now)) reasons.push('overdue_update');
-  if (isResolutionSlaBreached(issue)) reasons.push('sla_breached');
-  if (isSlaNearBreach(issue)) reasons.push('sla_approaching');
+  if (actionable && isResolutionSlaBreached(issue)) reasons.push('sla_breached');
+  if (actionable && isSlaNearBreach(issue)) reasons.push('sla_approaching');
 
   const urgencyScore = computeUrgencyScore(issue, priority, now);
   const slaRemainingMs = getSlaRemainingMs(issue);
