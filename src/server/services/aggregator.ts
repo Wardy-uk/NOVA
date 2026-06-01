@@ -196,8 +196,14 @@ export class TaskAggregator {
 
     const sdProject = this.settingsQueries?.get('jira_sd_project');
     const sdTiers = this.settingsQueries?.get('jira_sd_tiers');
-    const jiraBaseUrl = this.settingsQueries?.get('jira_ob_url')
-      ?? this.settingsQueries?.get('jira_url') ?? undefined;
+    // Browse links must point at the user-facing site, not the api.atlassian.* REST
+    // gateway. If jira_ob_url (the browse-link setting) is unset and we fall back to
+    // the API URL, ticket links 404 into Atlassian's "join team" page — so guard it.
+    const rawBrowseBase = this.settingsQueries?.get('jira_ob_url')
+      ?? this.settingsQueries?.get('jira_url') ?? '';
+    const jiraBaseUrl = (!rawBrowseBase || /api\.atlassian\./i.test(rawBrowseBase))
+      ? 'https://nurturtech.atlassian.net'
+      : rawBrowseBase;
 
     // Build JQL based on filter
     const parts: string[] = [];
