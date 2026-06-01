@@ -112,6 +112,7 @@ import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
+import { enrichTickets, countForPanel } from './services/wallboard-drill.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
@@ -2542,6 +2543,57 @@ ${panelHtml}
 </div></body></html>`;
   }
 
+  // Live variant of renderStatWallboard. Counts are derived from the SAME live
+  // ticket set + filter logic as the drill-down panel (services/wallboard-drill),
+  // so each tile number always equals what the drill lists. No jira_kpi_daily.
+  async function renderLiveStatWallboard(
+    aggregator: TaskAggregator,
+    title: string,
+    subtitle: string,
+    panels: Array<{ label: string; kpi: string; altKpi?: string; sumKpis?: string[] }>,
+    cols: number,
+    route: string,
+  ): Promise<string> {
+    const tickets = await aggregator.fetchServiceDeskTickets('all');
+    const now = new Date();
+    const enriched = enrichTickets(tickets);
+
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+    // "over SLA" / "No Reply" panels should be zero → red when breached.
+    // Volume panels ("Number of Tickets in …") are informational → neutral.
+    const isBreachKpi = (kpi: string) => /over SLA|No Reply/i.test(kpi);
+
+    const panelHtml = panels.map(p => {
+      const count = countForPanel(enriched, now, p) ?? 0;
+      const breach = isBreachKpi(p.kpi);
+      const color = breach ? (count > 0 ? '#ef4444' : '#10b981') : '#5ec1ca';
+      const flashClass = breach && count > 0 ? ' flash-red' : '';
+      const escaped = p.kpi.replace(/'/g, "\\'");
+      return `<div class="${flashClass}" data-kpi="${p.kpi}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escaped}',label:'${p.label.replace(/'/g, "\\'")}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:transform .1s">
+        <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
+        <div style="font-size:96px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${count}</div>
+      </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+${wallboardRefreshScript(route)}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}[data-kpi]:hover{transform:scale(1.02);filter:brightness(1.1)}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${subtitle}</div></div>
+  <div style="font-size:10px;color:#64748b">Live &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:14px;flex:1">
+${panelHtml}
+</div>
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr}</div>
+</div></body></html>`;
+  }
+
   type LivePanel = { label: string; queueKey: string; stat: 'active' | 'slaBreached' | 'noReply' | null };
 
   const LIVE_PANELS: LivePanel[] = [
@@ -2626,7 +2678,7 @@ ${panelHtml}
   app.get('/wallboard/cc', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const html = await renderStatWallboard(settingsQueries, 'Customer Care', 'Live queue metrics', [
+      const html = await renderLiveStatWallboard(aggregator, 'Customer Care', 'Live queue metrics', [
         { label: 'CC Incidents', kpi: 'Number of Tickets in CC (Incidents)' },
         { label: 'CC Service Requests', kpi: 'Number of Tickets in CC (Service Requests)' },
         { label: 'Property Jungle', kpi: 'Number of Tickets in CC (TPJ)' },
@@ -2650,7 +2702,7 @@ ${panelHtml}
   app.get('/wallboard/tech-support', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const html = await renderStatWallboard(settingsQueries, 'Technical Support', 'Live queue metrics', [
+      const html = await renderLiveStatWallboard(aggregator, 'Technical Support', 'Live queue metrics', [
         { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
         { label: 'Tier 2 Active Tickets', kpi: 'Number of Tickets in Tier 2' },
         { label: 'Development — Active Tickets', kpi: 'Number of Tickets in Development', sumKpis: ['Number of Tickets in Development', 'Number of Tickets in Tier 3'] },
