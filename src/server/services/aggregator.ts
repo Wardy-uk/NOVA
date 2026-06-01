@@ -229,7 +229,10 @@ export class TaskAggregator {
     try {
       const SD_FIELDS = ['summary', 'status', 'priority', 'description', 'assignee', 'created', 'duedate',
         'customfield_12981', 'customfield_14081', 'customfield_14185', 'customfield_14048',
-        'customfield_13183', 'customfield_14527', 'customfield_13184'];
+        'customfield_13183', 'customfield_14527', 'customfield_13184',
+        // Request type — needed so CC tiles (Incidents / Service Requests / TPJ) bucket correctly
+        // in the wallboard drill-down. Without these, ccBucket() never matches and CC drills are empty.
+        'customfield_13482', 'customfield_12800'];
       const result = await jiraClient.searchJqlAll(jql, SD_FIELDS, 500);
       return (result.issues ?? []).map(issue => {
         const flat: Record<string, unknown> = { key: issue.key, id: issue.id, self: issue.self, ...issue.fields };
