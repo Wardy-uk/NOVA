@@ -2745,21 +2745,38 @@ ${panelHtml}
       const peak = Math.max(...unpicked.history14d.map(h => h.count), 0);
       const maxBar = Math.max(peak, 1);
       const barsHtml = unpicked.history14d.map(h => {
-        const pct = Math.round((h.count / maxBar) * 100);
-        return `<div title="${h.date}: ${h.count}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center"><div style="width:60%;height:${pct}%;min-height:${h.count > 0 ? 4 : 0}px;background:#ef4444;border-radius:3px 3px 0 0"></div></div>`;
+        // Reserve the top ~15% for the count label; non-zero bars get a visible floor.
+        const pct = h.count > 0 ? Math.max(Math.round((h.count / maxBar) * 80), 14) : 0;
+        return `<div title="${h.date}: ${h.count}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px">
+          <div style="font-size:15px;font-weight:800;line-height:1;color:${h.count > 0 ? '#f87171' : '#475569'}">${h.count}</div>
+          <div style="width:64%;height:${pct}%;background:#ef4444;border-radius:4px 4px 0 0"></div>
+        </div>`;
       }).join('');
+
+      // ── Targets / breach thresholds ──
+      const ACCEPTANCE_TARGET_PCT = 75;   // below target → breach
+      const TIME_TARGET_MIN = 8 * 60;     // 8 hours → breach when exceeded
+      const acceptColor = (pct: number | null) =>
+        pct === null ? '#94a3b8' : pct < ACCEPTANCE_TARGET_PCT ? '#ef4444' : '#10b981';
+      const timeColor = (min: number | null) =>
+        min === null ? '#94a3b8' : min > TIME_TARGET_MIN ? '#ef4444' : '#10b981';
+      // This Week reuses the acceptance-rate criteria, computed from this week's decisions.
+      const weekDecisions = d.week.accepted + d.week.returned;
+      const weekAcceptPct = weekDecisions > 0 ? Math.round((d.week.accepted / weekDecisions) * 100) : null;
+      // In Queue breaches when any unclaimed ticket has passed the 8h SLA (no first dev touch).
+      const queueColor = unpicked.currentlyBreached > 0 ? '#ef4444' : '#9b6aed';
 
       const row1 = [
         tile('New Today', d.today.new, '#5ec1ca'),
         tile('Processed Today', d.today.processed, '#10b981', `${d.today.accepted} accepted · ${d.today.returned} returned`),
-        tile('In Queue Now', d.queue.total, '#9b6aed', `${d.queue.unclaimed} unclaimed · ${d.queue.fast_track} 🔥`),
+        tile('In Queue Now', d.queue.total, queueColor, `${d.queue.unclaimed} unclaimed · ${d.queue.fast_track} 🔥`),
         tile('Oldest Pending', devReviewFmtHours(d.averages.oldestPendingHours), devReviewAgeColor(d.averages.oldestPendingHours)),
       ].join('');
       const row2 = [
-        tile('Acceptance Rate', d.averages.acceptanceRatePct === null ? '—' : `${d.averages.acceptanceRatePct}%`, '#5ec1ca'),
-        tile('Avg Time to Claim', devReviewFmtMinutes(d.averages.avgTimeToClaimMinutes), '#94a3b8'),
-        tile('Avg Time to Decision', devReviewFmtMinutes(d.averages.avgTimeToDecisionMinutes), '#94a3b8'),
-        tile('This Week', d.week.new, '#9b6aed', `${d.week.accepted} accepted · ${d.week.returned} returned`),
+        tile('Acceptance Rate', d.averages.acceptanceRatePct === null ? '—' : `${d.averages.acceptanceRatePct}%`, acceptColor(d.averages.acceptanceRatePct)),
+        tile('Avg Time to Claim', devReviewFmtMinutes(d.averages.avgTimeToClaimMinutes), timeColor(d.averages.avgTimeToClaimMinutes)),
+        tile('Avg Time to Decision', devReviewFmtMinutes(d.averages.avgTimeToDecisionMinutes), timeColor(d.averages.avgTimeToDecisionMinutes)),
+        tile('This Week', d.week.new, acceptColor(weekAcceptPct), `${d.week.accepted} accepted · ${d.week.returned} returned`),
       ].join('');
       const row3 = [
         tile('Unpicked Today', unpicked.today, unpicked.today === 0 ? '#10b981' : unpicked.today < 3 ? '#f59e0b' : '#ef4444', 'Passed 8 working hours with no dev action today'),
