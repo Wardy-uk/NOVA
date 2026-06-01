@@ -113,7 +113,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'kpic-slt' | 'kpic-team' | 'kpic-qa' | 'kpic-escalations' | 'kpic-trends' | 'kpic-daily-history' | 'kpic-data' | 'kpic-agent' | 'kpic-agent-breaches' | 'kpic-wallboard' | 'kpic-manual' | 'kpic-digest' | 'kpic-admin'
-  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success'
+  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -254,6 +254,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'wb-tech-support', label: 'Technical Support' },
       { view: 'wb-key-accounts', label: 'Key Accounts' },
       { view: 'wb-customer-success', label: 'Customer Success' },
+      { view: 'wb-dev-review', label: 'Dev Review' },
     ],
   },
   training: {
@@ -1193,6 +1194,13 @@ export function App() {
               src="/wallboard/customer-success"
               style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
               title="Customer Success"
+            />
+          )}
+          {view === 'wb-dev-review' && (
+            <iframe
+              src="/wallboard/dev-review"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Dev Review Wallboard"
             />
           )}
 

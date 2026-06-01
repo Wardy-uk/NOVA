@@ -2700,6 +2700,107 @@ ${panelHtml}
     }
   });
 
+  // ── Dev Review wallboard ──
+  // Server-rendered TV display of the Dev Review queue dashboard stat cards.
+  function devReviewFmtMinutes(m: number | null): string {
+    if (m === null) return '—';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    if (h < 24) return rem ? `${h}h ${rem}m` : `${h}h`;
+    const d = Math.floor(h / 24);
+    const remH = h % 24;
+    return remH ? `${d}d ${remH}h` : `${d}d`;
+  }
+  function devReviewFmtHours(h: number | null): string {
+    if (h === null) return '—';
+    if (h < 24) return `${h}h`;
+    const d = Math.floor(h / 24);
+    const rem = h % 24;
+    return rem ? `${d}d ${rem}h` : `${d}d`;
+  }
+  function devReviewAgeColor(hours: number | null): string {
+    if (hours === null) return '#64748b';
+    if (hours < 4) return '#10b981';
+    if (hours < 24) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  app.get('/wallboard/dev-review', async (_req, res) => {
+    const wbStart = Date.now();
+    try {
+      const d = await devReviewQueries.getDashboard();
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB');
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const tile = (label: string, value: string | number, color: string, sub?: string) => `
+        <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">
+          <div style="font-size:13px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">${label}</div>
+          <div style="font-size:72px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${value}</div>
+          ${sub ? `<div style="font-size:12px;color:#64748b;margin-top:8px">${sub}</div>` : ''}
+        </div>`;
+
+      const unpicked = d.unpickedKpi;
+      const peak = Math.max(...unpicked.history14d.map(h => h.count), 0);
+      const maxBar = Math.max(peak, 1);
+      const barsHtml = unpicked.history14d.map(h => {
+        const pct = Math.round((h.count / maxBar) * 100);
+        return `<div title="${h.date}: ${h.count}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center"><div style="width:60%;height:${pct}%;min-height:${h.count > 0 ? 4 : 0}px;background:#ef4444;border-radius:3px 3px 0 0"></div></div>`;
+      }).join('');
+
+      const row1 = [
+        tile('New Today', d.today.new, '#5ec1ca'),
+        tile('Processed Today', d.today.processed, '#10b981', `${d.today.accepted} accepted · ${d.today.returned} returned`),
+        tile('In Queue Now', d.queue.total, '#9b6aed', `${d.queue.unclaimed} unclaimed · ${d.queue.fast_track} 🔥`),
+        tile('Oldest Pending', devReviewFmtHours(d.averages.oldestPendingHours), devReviewAgeColor(d.averages.oldestPendingHours)),
+      ].join('');
+      const row2 = [
+        tile('Acceptance Rate', d.averages.acceptanceRatePct === null ? '—' : `${d.averages.acceptanceRatePct}%`, '#5ec1ca'),
+        tile('Avg Time to Claim', devReviewFmtMinutes(d.averages.avgTimeToClaimMinutes), '#94a3b8'),
+        tile('Avg Time to Decision', devReviewFmtMinutes(d.averages.avgTimeToDecisionMinutes), '#94a3b8'),
+        tile('This Week', d.week.new, '#9b6aed', `${d.week.accepted} accepted · ${d.week.returned} returned`),
+      ].join('');
+      const row3 = [
+        tile('Unpicked Today', unpicked.today, unpicked.today === 0 ? '#10b981' : unpicked.today < 3 ? '#f59e0b' : '#ef4444', 'Passed 8 working hours with no dev action today'),
+        tile('Currently Breached', unpicked.currentlyBreached, unpicked.currentlyBreached === 0 ? '#10b981' : '#ef4444', 'Still waiting on a first dev touch'),
+        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="font-size:13px;color:#f87171;font-weight:700;text-transform:uppercase;letter-spacing:.6px">Unpicked · Last 14 Days</div>
+            <div style="font-size:11px;color:#64748b">peak: ${peak}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex:1;align-items:flex-end;min-height:90px">${barsHtml}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#475569">
+            <span>${unpicked.history14d[0]?.date.slice(5) ?? ''}</span>
+            <span>${unpicked.history14d[unpicked.history14d.length - 1]?.date.slice(5) ?? ''}</span>
+          </div>
+        </div>`,
+      ].join('');
+
+      const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dev Review</title>
+${wallboardRefreshScript('/wallboard/dev-review')}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column;gap:14px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.grid3{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Dev Review Dashboard</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Technical Support · review queue</div></div>
+  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<div class="grid4">${row1}</div>
+<div class="grid4">${row2}</div>
+<div class="grid3" style="flex:1">${row3}</div>
+<div style="text-align:center;font-size:10px;color:#475569">nurtur.tech &middot; Dev Review &middot; ${dateStr}</div>
+</div></body></html>`;
+      res.send(html);
+      logWallboard('/wallboard/dev-review', 'info', 200, Date.now() - wbStart, `OK — queue ${d.queue.total}, breached ${unpicked.currentlyBreached}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/wallboard/dev-review', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
   // ── Clean-sheet KPI wallboards (P3-WP1) ──
   // NEW, parallel wallboards sourced ENTIRELY from the clean-sheet KPI data
   // (kpi_* tables via kpiFoundation.views) — never the legacy KPI pipeline pool.
