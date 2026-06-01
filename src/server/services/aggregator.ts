@@ -244,6 +244,21 @@ export class TaskAggregator {
     }
   }
 
+  /** Run an arbitrary Service Desk JQL and return RAW Jira issues (key + fields).
+   *  Used by wallboards that need queries the normalized fetch doesn't cover
+   *  (e.g. "solved today" = status changed to Resolved/Closed since start of day). */
+  async searchServiceDeskRaw(jql: string, fields: string[], max = 500): Promise<Array<{ key: string; fields: Record<string, unknown> }>> {
+    const jiraClient = this.getJiraClient?.() ?? null;
+    if (!jiraClient) return [];
+    try {
+      const result = await jiraClient.searchJqlAll(jql, fields, max);
+      return (result.issues ?? []) as Array<{ key: string; fields: Record<string, unknown> }>;
+    } catch (err) {
+      console.warn(`[ServiceDesk] raw JQL search failed: ${err instanceof Error ? err.message : err}`);
+      return [];
+    }
+  }
+
   /** Sync a single source by name. userId tags synced tasks with the owning user. */
   async syncSource(sourceName: string, userId?: number, ctx?: SyncContext): Promise<{ source: string; count: number; error?: string }> {
     const adapter = this.adapters.find((a) => a.source === sourceName);

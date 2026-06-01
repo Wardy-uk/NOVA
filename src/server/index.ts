@@ -112,7 +112,7 @@ import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
-import { enrichTickets, countForPanel, buildKpiFilter } from './services/wallboard-drill.js';
+import { enrichTickets, countForPanel, buildKpiFilter, extractAssignee, agentNameMatches, agentStatsForSubset } from './services/wallboard-drill.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
@@ -2255,7 +2255,7 @@ async function main() {
       const hasDept = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
       const deptFilter = hasDept.recordset.length > 0 ? "AND Department IN ('NT', 'NOVA_AI')" : '';
       const result = await pool.request().query(`
-        SELECT AgentName, AgentSurname, TierCode, Team,
+        SELECT AgentName, AgentSurname, TierCode, Team, AccountId,
                OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
                ${oldestCol} AS OldestTicketDays${oldestKeyCol},
                SolvedTickets_Today, TicketsSnapshotAt
@@ -2264,6 +2264,48 @@ async function main() {
       `);
       const data = result.recordset;
       await pool.close();
+
+      // Compute the per-agent stats LIVE so each row matches its agent drill-down
+      // (the agent roster still comes from dbo.Agent; only the numbers are live).
+      // Mirrors the n8n "Daily KPI Report v4" logic: open set + over-SLA (resolution
+      // SLA cycle), not-updated, oldest, and solved-today (status→Resolved/Closed today).
+      try {
+        const liveTickets = await aggregator.fetchServiceDeskTickets('all');
+        const nowLive = new Date();
+        const enrichedLive = enrichTickets(liveTickets).map(e => ({ e, aLower: extractAssignee(e.ticket).toLowerCase() }));
+
+        // Solved today, by assignee accountId (n8n attributes solves by accountId).
+        const solvedRaw = await aggregator.searchServiceDeskRaw(
+          'project = NT AND status CHANGED TO (Resolved, Closed) AFTER startOfDay()',
+          ['assignee', 'customfield_12981', 'status'], 500,
+        );
+        const SOLVE_TIERS = new Set(['customer care', 'production', 'tier 2', 'tier 3']);
+        const solvedByAccount = new Map<string, number>();
+        for (const iss of solvedRaw) {
+          const tv = iss.fields?.customfield_12981 as { value?: string } | string | undefined;
+          const tier = (typeof tv === 'string' ? tv : tv?.value ?? '').toString().trim().toLowerCase();
+          if (!SOLVE_TIERS.has(tier)) continue;
+          const acc = (iss.fields?.assignee as { accountId?: string } | undefined)?.accountId;
+          if (!acc) continue;
+          solvedByAccount.set(acc, (solvedByAccount.get(acc) || 0) + 1);
+        }
+
+        for (const a of data as any[]) {
+          const nameLower = (a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName || '').toLowerCase();
+          const subset = enrichedLive.filter(x => agentNameMatches(x.aLower, nameLower)).map(x => x.e);
+          const stats = agentStatsForSubset(subset, nowLive);
+          a.OpenTickets_Total = stats.open;
+          a.OpenTickets_Over2Hours = stats.overSla;
+          a.OpenTickets_NoUpdateToday = stats.notUpdated;
+          a.OldestTicketDays = stats.oldestDays;
+          a.OldestTicketKey = stats.oldestKey || a.OldestTicketKey;
+          a.SolvedTickets_Today = a.AccountId ? (solvedByAccount.get(a.AccountId) || 0) : a.SolvedTickets_Today;
+          a.TicketsSnapshotAt = nowLive; // data is genuinely live now — suppress stale ⚠
+        }
+        data.sort((x: any, y: any) => (y.OpenTickets_Over2Hours || 0) - (x.OpenTickets_Over2Hours || 0));
+      } catch (e) {
+        console.warn('[wallboard/breached] live stat computation failed, using snapshot:', e instanceof Error ? e.message : e);
+      }
 
       const TEAM_COLORS: Record<string, string> = { CC: '#3b82f6', 'Customer Care': '#3b82f6', Production: '#8b5cf6', 'Tier 2': '#f59e0b', 'Tier 3': '#ef4444', Development: '#10b981', NTL: '#3b82f6' };
       const totalOver = data.reduce((s: number, a: any) => s + (a.OpenTickets_Over2Hours || 0), 0);

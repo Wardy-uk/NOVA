@@ -148,6 +148,118 @@ export function buildKpiFilter(kpiName: string, now: Date): ((t: TicketWithMeta)
   return null;
 }
 
+// ── SLA Breach board: per-agent stats, ported from n8n "Daily KPI Report v4" ──
+// raw_data is the flat Jira issue (custom fields at top level), so we read the
+// fields directly off `issue` rather than `issue.fields`.
+
+const SLA_RESOLUTION_FIELD = 'customfield_14048';   // Time to resolution SLA
+const AGENT_LAST_UPDATE_FIELD = 'customfield_14081';
+const AGENT_NEXT_UPDATE_FIELD = 'customfield_14185';
+const SLA_EXCLUDED_STATUSES = new Set(['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner']);
+const FIFTY_TWO_WEEKS_MS = 52 * 7 * 24 * 60 * 60 * 1000;
+
+function rawStatusName(issue: Record<string, unknown>): string {
+  const s = issue?.status as Record<string, unknown> | string | undefined;
+  const name = typeof s === 'string' ? s : (s?.name as string) ?? '';
+  return name.toString().trim().toLowerCase();
+}
+
+function toDate(v: unknown): Date | null {
+  if (!v) return null;
+  const d = new Date(v as string);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Mirror of n8n isSlaBreached: ongoing or completed resolution SLA cycle breached. */
+function slaResolutionBreached(slaField: unknown): boolean {
+  if (!slaField) return false;
+  const arr = Array.isArray(slaField) ? slaField : [slaField];
+  for (const x of arr as Array<Record<string, unknown>>) {
+    if (!x) continue;
+    const ongoing = x.ongoingCycle as Record<string, unknown> | undefined;
+    if (ongoing) {
+      if (ongoing.breached === true) return true;
+      const rem = (ongoing.remainingTime as Record<string, unknown> | undefined)?.millis;
+      if (typeof rem === 'number' && rem < 0) return true;
+    }
+    const completed = x.completedCycles as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(completed)) {
+      for (const c of completed) {
+        if (!c) continue;
+        if (c.breached === true) return true;
+        const crem = (c.remainingTime as Record<string, unknown> | undefined)?.millis;
+        if (typeof crem === 'number' && crem < 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** n8n isOverSla: resolution SLA breached, excluding done/closed/resolved/waiting, with duedate guard. */
+export function isOverSlaResolution(issue: Record<string, unknown>, now: Date): boolean {
+  const status = rawStatusName(issue);
+  if (SLA_EXCLUDED_STATUSES.has(status)) return false;
+  const dueStr = issue?.duedate as string | undefined;
+  if (dueStr) {
+    const due = toDate(dueStr + 'T23:59:59.999');
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    if (due && due > endOfDay) return false;
+  }
+  return slaResolutionBreached(issue?.[SLA_RESOLUTION_FIELD]);
+}
+
+/** n8n isNotUpdated: agent last-update before today, next-update not in future, not waiting-on-requestor. */
+export function isNotUpdatedToday(issue: Record<string, unknown>, now: Date): boolean {
+  const status = rawStatusName(issue);
+  if (status === 'waiting on requestor') return false;
+  const lastDt = toDate(issue?.[AGENT_LAST_UPDATE_FIELD]);
+  const nextDt = toDate(issue?.[AGENT_NEXT_UPDATE_FIELD]);
+  if (nextDt && nextDt > now) return false;
+  if (!lastDt) return false;
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (lastDt >= startOfToday) return false;
+  if (lastDt < new Date(now.getTime() - FIFTY_TWO_WEEKS_MS)) return false;
+  return true;
+}
+
+export interface AgentLiveStats {
+  open: number;
+  overSla: number;
+  notUpdated: number;
+  oldestDays: number;
+  oldestKey: string;
+}
+
+/** Compute the SLA-board stats for one agent's subset of enriched open tickets. */
+export function agentStatsForSubset(subset: TicketWithMeta[], now: Date): AgentLiveStats {
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  let overSla = 0, notUpdated = 0;
+  let oldestCreated: Date | null = null;
+  let oldestKey = '';
+  for (const { issue, ticket } of subset) {
+    if (isOverSlaResolution(issue, now)) overSla++;
+    if (isNotUpdatedToday(issue, now)) notUpdated++;
+    const created = toDate(issue?.created);
+    if (created && (!oldestCreated || created < oldestCreated)) {
+      oldestCreated = created;
+      oldestKey = ticket.source_id || '';
+    }
+  }
+  return {
+    open: subset.length,
+    overSla,
+    notUpdated,
+    oldestDays: oldestCreated ? Math.floor((now.getTime() - oldestCreated.getTime()) / ONE_DAY_MS) : 0,
+    oldestKey,
+  };
+}
+
+/** Fuzzy assignee↔agent-name match — identical to the agent drill, so tile == drill. */
+export function agentNameMatches(assigneeLower: string, agentNameLower: string): boolean {
+  if (!assigneeLower || !agentNameLower) return false;
+  return assigneeLower.includes(agentNameLower) || agentNameLower.includes(assigneeLower);
+}
+
 /**
  * Live count for a KPI from an enriched ticket set. Supports `sumKpis`
  * (e.g. Development = Development + Tier 3). Returns null if none of the
