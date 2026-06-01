@@ -112,7 +112,7 @@ import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
-import { enrichTickets, countForPanel } from './services/wallboard-drill.js';
+import { enrichTickets, countForPanel, buildKpiFilter } from './services/wallboard-drill.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
@@ -2380,6 +2380,22 @@ ${wallboardRefreshScript('/wallboard/breached')}
       `);
       const allKpis = result.recordset as Array<{ KPI: string; KPIGroup: string; Count: number; KPITarget: number | null; KPIDirection: string | null; RAG: number | null; CreatedAt: string }>;
       await pool.close();
+
+      // Override each ticket-based KPI's snapshot count with a LIVE count derived
+      // from the same filter as the drill-down, so every tile == what its drill lists.
+      // (RAG / which-KPIs-listed still come from the n8n snapshot.) CSAT/FRT etc.
+      // aren't ticket-drillable so they keep their snapshot count.
+      try {
+        const liveTickets = await aggregator.fetchServiceDeskTickets('all');
+        const enrichedLive = enrichTickets(liveTickets);
+        const nowLive = new Date();
+        for (const k of allKpis) {
+          const f = buildKpiFilter(k.KPI, nowLive);
+          if (f) k.Count = enrichedLive.filter(f).length;
+        }
+      } catch (e) {
+        console.warn('[wallboard/team-kpis] live count override failed, using snapshot counts:', e instanceof Error ? e.message : e);
+      }
 
       const now = new Date();
       const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
