@@ -2742,16 +2742,6 @@ ${panelHtml}
         </div>`;
 
       const unpicked = d.unpickedKpi;
-      const peak = Math.max(...unpicked.history14d.map(h => h.count), 0);
-      const maxBar = Math.max(peak, 1);
-      const barsHtml = unpicked.history14d.map(h => {
-        // Reserve the top ~15% for the count label; non-zero bars get a visible floor.
-        const pct = h.count > 0 ? Math.max(Math.round((h.count / maxBar) * 80), 14) : 0;
-        return `<div title="${h.date}: ${h.count}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px">
-          <div style="font-size:15px;font-weight:800;line-height:1;color:${h.count > 0 ? '#f87171' : '#475569'}">${h.count}</div>
-          <div style="width:64%;height:${pct}%;background:#ef4444;border-radius:4px 4px 0 0"></div>
-        </div>`;
-      }).join('');
 
       // ── Targets / breach thresholds ──
       const ACCEPTANCE_TARGET_PCT = 75;   // below target → breach
@@ -2766,9 +2756,13 @@ ${panelHtml}
       // In Queue breaches when any unclaimed ticket has passed the 8h SLA (no first dev touch).
       const queueColor = unpicked.currentlyBreached > 0 ? '#ef4444' : '#9b6aed';
 
+      const unpickedColor = unpicked.today === 0 ? '#10b981' : unpicked.today < 3 ? '#f59e0b' : '#ef4444';
+      const breachedColor = unpicked.currentlyBreached === 0 ? '#10b981' : '#ef4444';
+
       const row1 = [
         tile('New Today', d.today.new, '#5ec1ca'),
         tile('Processed Today', d.today.processed, '#10b981', `${d.today.accepted} accepted · ${d.today.returned} returned`),
+        tile('Unpicked Today', unpicked.today, unpickedColor, 'Passed 8 working hours with no dev action today'),
         tile('In Queue Now', d.queue.total, queueColor, `${d.queue.unclaimed} unclaimed · ${d.queue.fast_track} 🔥`),
         tile('Oldest Pending', devReviewFmtHours(d.averages.oldestPendingHours), devReviewAgeColor(d.averages.oldestPendingHours)),
       ].join('');
@@ -2777,35 +2771,88 @@ ${panelHtml}
         tile('Avg Time to Claim', devReviewFmtMinutes(d.averages.avgTimeToClaimMinutes), timeColor(d.averages.avgTimeToClaimMinutes)),
         tile('Avg Time to Decision', devReviewFmtMinutes(d.averages.avgTimeToDecisionMinutes), timeColor(d.averages.avgTimeToDecisionMinutes)),
         tile('This Week', d.week.new, acceptColor(weekAcceptPct), `${d.week.accepted} accepted · ${d.week.returned} returned`),
+        tile('Currently Breached', unpicked.currentlyBreached, breachedColor, 'Still waiting on a first dev touch'),
       ].join('');
-      const row3 = [
-        tile('Unpicked Today', unpicked.today, unpicked.today === 0 ? '#10b981' : unpicked.today < 3 ? '#f59e0b' : '#ef4444', 'Passed 8 working hours with no dev action today'),
-        tile('Currently Breached', unpicked.currentlyBreached, unpicked.currentlyBreached === 0 ? '#10b981' : '#ef4444', 'Still waiting on a first dev touch'),
-        `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column">
+
+      // ── 14-day charts (pad sparse series to a full 14 days) ──
+      const dayKeys: string[] = [];
+      for (let i = 13; i >= 0; i--) {
+        const dt = new Date(now);
+        dt.setDate(dt.getDate() - i);
+        dayKeys.push(dt.toISOString().slice(0, 10));
+      }
+      const arrivalsMap = new Map(d.arrivals14d.map(a => [a.date, a.count]));
+      const decisionsMap = new Map(d.decisions14d.map(x => [x.date, x]));
+      const arrivals = dayKeys.map(date => ({ date, count: arrivalsMap.get(date) ?? 0 }));
+      const decisions = dayKeys.map(date => {
+        const e = decisionsMap.get(date);
+        return { date, accepted: e?.accepted ?? 0, returned: e?.returned ?? 0 };
+      });
+
+      const chartShell = (title: string, titleColor: string, headerRight: string, barsHtml: string, axis: string[]) => `
+        <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div style="font-size:13px;color:#f87171;font-weight:700;text-transform:uppercase;letter-spacing:.6px">Unpicked · Last 14 Days</div>
-            <div style="font-size:11px;color:#64748b">peak: ${peak}</div>
+            <div style="font-size:13px;color:${titleColor};font-weight:700;text-transform:uppercase;letter-spacing:.6px">${title}</div>
+            <div style="font-size:11px;color:#64748b">${headerRight}</div>
           </div>
           <div style="display:flex;gap:4px;flex:1;align-items:stretch;min-height:120px">${barsHtml}</div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#475569">
-            <span>${unpicked.history14d[0]?.date.slice(5) ?? ''}</span>
-            <span>${unpicked.history14d[unpicked.history14d.length - 1]?.date.slice(5) ?? ''}</span>
+            <span>${axis[0]?.slice(5) ?? ''}</span><span>${axis[axis.length - 1]?.slice(5) ?? ''}</span>
           </div>
-        </div>`,
+        </div>`;
+
+      const barChart = (title: string, titleColor: string, rows: Array<{ date: string; count: number }>, color: string) => {
+        const max = Math.max(...rows.map(r => r.count), 1);
+        const bars = rows.map(r => {
+          const pct = r.count > 0 ? Math.max(Math.round((r.count / max) * 80), 14) : 0;
+          return `<div title="${r.date}: ${r.count}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px">
+            <div style="font-size:14px;font-weight:800;line-height:1;color:${r.count > 0 ? color : '#475569'}">${r.count}</div>
+            <div style="width:64%;height:${pct}%;background:${color};border-radius:4px 4px 0 0"></div>
+          </div>`;
+        }).join('');
+        return chartShell(title, titleColor, `peak: ${Math.max(...rows.map(r => r.count), 0)}`, bars, rows.map(r => r.date));
+      };
+
+      const decisionsChart = () => {
+        const max = Math.max(...decisions.map(r => r.accepted + r.returned), 1);
+        const bars = decisions.map(r => {
+          const tot = r.accepted + r.returned;
+          const totPct = tot > 0 ? Math.max(Math.round((tot / max) * 80), 14) : 0;
+          const aShare = tot > 0 ? (r.accepted / tot) * 100 : 0;
+          const rShare = tot > 0 ? (r.returned / tot) * 100 : 0;
+          return `<div title="${r.date}: ${r.accepted} accepted, ${r.returned} returned" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px">
+            <div style="font-size:14px;font-weight:800;line-height:1;color:${tot > 0 ? '#cbd5e1' : '#475569'}">${tot}</div>
+            <div style="width:64%;height:${totPct}%;display:flex;flex-direction:column;border-radius:4px 4px 0 0;overflow:hidden">
+              <div style="height:${rShare}%;background:#9b6aed"></div>
+              <div style="height:${aShare}%;background:#10b981"></div>
+            </div>
+          </div>`;
+        }).join('');
+        const legend = `<div style="display:flex;gap:10px;align-items:center;color:#94a3b8">
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#10b981;display:inline-block"></span>accepted</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#9b6aed;display:inline-block"></span>returned</span>
+        </div>`;
+        return chartShell('Decisions · Last 14 Days', '#9b6aed', legend, bars, decisions.map(r => r.date));
+      };
+
+      const row3 = [
+        barChart('Arrivals · Last 14 Days', '#5ec1ca', arrivals, '#5ec1ca'),
+        decisionsChart(),
+        barChart('Unpicked · Last 14 Days', '#f87171', unpicked.history14d, '#ef4444'),
       ].join('');
 
       const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dev Review</title>
 ${wallboardRefreshScript('/wallboard/dev-review')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{width:100%;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column;gap:14px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex:1}.grid3{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px;flex:1}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{width:100%;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column;gap:14px}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;flex:1}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center">
   <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">Dev Review Dashboard</h1><div style="font-size:10px;color:#64748b;margin-top:1px">Technical Support · review queue</div></div>
   <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
-<div class="grid4">${row1}</div>
-<div class="grid4">${row2}</div>
+<div class="grid5">${row1}</div>
+<div class="grid5">${row2}</div>
 <div class="grid3">${row3}</div>
 <div style="text-align:center;font-size:10px;color:#475569">nurtur.tech &middot; Dev Review &middot; ${dateStr}</div>
 </div></body></html>`;
