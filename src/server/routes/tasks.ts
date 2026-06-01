@@ -6,7 +6,7 @@ import { JiraRestClient } from '../services/jira-client.js';
 import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention, getSlaRemainingMs } from '../services/jira-sla.js';
 import { getAllowedSources } from '../utils/source-filter.js';
-import { enrichTickets, buildKpiFilter, extractAssignee } from '../services/wallboard-drill.js';
+import { enrichTickets, buildKpiFilter, extractAssignee, extractTier, isSlaBoardTier } from '../services/wallboard-drill.js';
 
 /** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
 async function isJiraEnabled(
@@ -329,10 +329,12 @@ export function createTaskRoutes(
       const tickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
       const now = new Date();
 
-      // Agent drill-down: filter by assignee name
+      // Agent drill-down: filter by assignee name. Scope to the four support tiers
+      // (excludes Development) to match the SLA Breach board's per-agent counts.
       if (agent) {
         const agentLower = agent.toLowerCase();
         const matching = tickets.filter(t => {
+          if (!isSlaBoardTier(extractTier(t))) return false;
           const assignee = extractAssignee(t).toLowerCase();
           return assignee.includes(agentLower) || agentLower.includes(assignee);
         });

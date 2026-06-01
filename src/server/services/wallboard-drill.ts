@@ -50,6 +50,16 @@ export function extractTier(t: { raw_data?: unknown }): string | null {
   return val.toString().trim();
 }
 
+// Per-agent SLA Breach board scope: the four support tiers the n8n "Daily KPI
+// Report v4" counts. Development is a backlog tier with no support resolution SLA
+// and is excluded from agent SLA stats (matching the board's Solved Today column).
+const SLA_BOARD_TIERS = new Set(['Customer Care', 'Production', 'Tier 2', 'Tier 3']);
+
+/** True if a ticket's tier belongs in the per-agent SLA Breach board counts. */
+export function isSlaBoardTier(tier: string | null): boolean {
+  return tier !== null && SLA_BOARD_TIERS.has(tier);
+}
+
 export function extractRequestType(t: { raw_data?: unknown }): string {
   const rd = (t.raw_data && typeof t.raw_data === 'object') ? t.raw_data as Record<string, unknown> : null;
   if (!rd) return '';

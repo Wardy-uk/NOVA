@@ -112,7 +112,7 @@ import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
-import { enrichTickets, countForPanel, buildKpiFilter, extractAssignee, agentNameMatches, agentStatsForSubset } from './services/wallboard-drill.js';
+import { enrichTickets, countForPanel, buildKpiFilter, extractAssignee, agentNameMatches, agentStatsForSubset, isSlaBoardTier } from './services/wallboard-drill.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
@@ -2272,7 +2272,11 @@ async function main() {
       try {
         const liveTickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
         const nowLive = new Date();
-        const enrichedLive = enrichTickets(liveTickets).map(e => ({ e, aLower: extractAssignee(e.ticket).toLowerCase() }));
+        // Scope to the four support tiers (excludes Development) so Open / Over SLA /
+        // Not Updated / Oldest match the Solved Today column and the n8n KPI report.
+        const enrichedLive = enrichTickets(liveTickets)
+          .filter(e => isSlaBoardTier(e.tier))
+          .map(e => ({ e, aLower: extractAssignee(e.ticket).toLowerCase() }));
 
         // Solved today, by assignee accountId (n8n attributes solves by accountId).
         const solvedRaw = await aggregator.searchServiceDeskRaw(
