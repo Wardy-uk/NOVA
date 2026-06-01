@@ -2435,6 +2435,26 @@ ${wallboardRefreshScript('/wallboard/breached')}
           const f = buildKpiFilter(k.KPI, nowLive);
           if (f) k.Count = enrichedLive.filter(f).length;
         }
+
+        // CSAT: live from customfield_12802 ratings on tickets resolved today.
+        // Rule (per Nick): no CSAT responses today → 100%. Applies to any CSAT KPI
+        // (incl. "CSAT % (Derived)"), recomputing RAG so a 100% drops off the breach board.
+        const csatKpis = allKpis.filter(k => /csat/i.test(k.KPI));
+        if (csatKpis.length) {
+          const csatRaw = await aggregator.searchServiceDeskRaw(
+            'project = NT AND resolutiondate >= startOfDay()', ['customfield_12802', 'resolutiondate'], 500,
+          );
+          let sum = 0, count = 0;
+          for (const iss of csatRaw) {
+            const c = iss.fields?.customfield_12802 as { rating?: number } | undefined;
+            const r = Number(c?.rating);
+            if (!c || isNaN(r)) continue;
+            sum += r; count++;
+          }
+          const csatPct = count > 0 ? Math.round((sum / (count * 5)) * 1000) / 10 : 100;
+          const csatRag = csatPct >= 80 ? 1 : csatPct >= 60 ? 2 : 3;
+          for (const k of csatKpis) { k.Count = csatPct; k.RAG = csatRag; }
+        }
       } catch (e) {
         console.warn('[wallboard/team-kpis] live count override failed, using snapshot counts:', e instanceof Error ? e.message : e);
       }
