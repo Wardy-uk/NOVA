@@ -20,8 +20,8 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
 | Active phase | Replacement Parity Closure | Follow-on closure work to reach replacement-grade parity after clean-sheet convergence. |
-| Active work package | `KPX-WP8A` | Agent Breaches populated-path proof fixture. |
-| Current convergence state | Checkpoint Ready | Agent Breaches populated classification is now proven; next step is checkpointing the slice. |
+| Active work package | `KPX-WP9` | Daily History parity surface delivery. |
+| Current convergence state | Checkpoint Ready | Daily History passed evaluation; remaining richer multi-row proof is environmental rather than a build defect. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
 | Promotion gate | Replacement Parity Active | Replacement parity closure continues with the next targeted surface slice. |
@@ -54,6 +54,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `KPX-WP7B` | Harden Trends window-parameter behaviour | Pass — Checkpointed | Fixed window semantics verified; remaining multi-day proof gap is environmental only. |
 | `KPX-WP8` | Deliver Agent Breaches parity surface on the clean-sheet path | Qualified Pass — Checkpoint Ready | Honesty and isolation passed, and the populated breach classification path is now proven by fixture. |
 | `KPX-WP8A` | Prove the populated Agent Breaches path with disposable fixture support | Pass — Checkpoint Ready | Breach / at-risk / clear outcomes and teardown cleanliness are independently verified. |
+| `KPX-WP9` | Deliver Daily History parity surface on the clean-sheet path | Qualified Pass — Checkpoint Ready | Honest frozen-grid behaviour is proven; remaining richer multi-row proof is environmental only. |
 
 ## Phase Gate Rules
 
@@ -109,6 +110,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `BKX-6` | Closed | Trends window semantics are now honest and predictable. |
 | `BKX-7` | Open bounded environmental gap | Trends supported-path multi-day rendering remains unobserved because only one EOD freeze exists in the environment. |
 | `BKX-8` | Closed | Agent Breaches populated-path classification is now verified via disposable fixture seed, classification proof, and teardown. |
+| `BKX-9` | Open bounded environmental gap | Daily History multi-row presentation remains lightly proven because only one frozen day exists in the environment. |
 
 ## Change Log
 
@@ -158,3 +160,5 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-05-31 | `KPX-WP8` evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_agent_breaches_parity_eval_2026-05-31.md`. Honesty and isolation passed, but the populated breach-classification path remains unverified because no agent-level frozen rows exist in the environment. Do not checkpoint yet; open `KPX-WP8A` for bounded populated-path proof and teardown. |
 | 2026-05-31 | `KPX-WP8A` build completion reviewed from `agent_work/build_status/kpi_agent_breaches_parity_fixture_2026-05-31.md`. Disposable fixture controls for Agent Breaches are now in place on a bounded fixture space, designed to produce one green, one amber, and one red agent via real clean-sheet computation. Open independent evaluation before any checkpoint decision. |
 | 2026-05-31 | `KPX-WP8A` evaluation returned PASS from `agent_work/eval_output/kpi_agent_breaches_parity_fixture_eval_2026-05-31.md`. The populated Agent Breaches path is now proven end to end: one breaching, one at-risk, and one clear agent were observed from real clean-sheet computed/frozen data, and teardown left no residue. Agent Breaches parity is now checkpoint-ready. |
+| 2026-05-31 | Agent Breaches parity closure checkpoint created at commit `a8062b3` and pushed to both remotes. Human direction remains to keep closing named legacy surfaces. Manager decision: open `KPX-WP9` for Daily History parity surface delivery as the next clearly named remaining legacy surface. |
+| 2026-06-01 | `KPX-WP9` evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_daily_history_parity_eval_2026-06-01.md`. Daily History is present, clean-sheet-backed, and honest about supported vs awaiting vs unwired history. The only remaining gap is environmental: only one frozen day exists, so richer multi-row proof can follow later. Manager decision: checkpoint the slice now. |
