@@ -324,7 +324,9 @@ export function createTaskRoutes(
         return;
       }
 
-      const tickets = await aggregator.fetchServiceDeskTickets('all');
+      // includeAllTiers: wallboards count Development too (the normal SD view hides it),
+      // so the drill set matches the live tile counts exactly.
+      const tickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
       const now = new Date();
 
       // Agent drill-down: filter by assignee name

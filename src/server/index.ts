@@ -2270,7 +2270,7 @@ async function main() {
       // Mirrors the n8n "Daily KPI Report v4" logic: open set + over-SLA (resolution
       // SLA cycle), not-updated, oldest, and solved-today (status→Resolved/Closed today).
       try {
-        const liveTickets = await aggregator.fetchServiceDeskTickets('all');
+        const liveTickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
         const nowLive = new Date();
         const enrichedLive = enrichTickets(liveTickets).map(e => ({ e, aLower: extractAssignee(e.ticket).toLowerCase() }));
 
@@ -2428,7 +2428,7 @@ ${wallboardRefreshScript('/wallboard/breached')}
       // (RAG / which-KPIs-listed still come from the n8n snapshot.) CSAT/FRT etc.
       // aren't ticket-drillable so they keep their snapshot count.
       try {
-        const liveTickets = await aggregator.fetchServiceDeskTickets('all');
+        const liveTickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
         const enrichedLive = enrichTickets(liveTickets);
         const nowLive = new Date();
         for (const k of allKpis) {
@@ -2612,7 +2612,7 @@ ${panelHtml}
     cols: number,
     route: string,
   ): Promise<string> {
-    const tickets = await aggregator.fetchServiceDeskTickets('all');
+    const tickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
     const now = new Date();
     const enriched = enrichTickets(tickets);
 

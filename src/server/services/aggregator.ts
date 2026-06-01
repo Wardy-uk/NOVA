@@ -190,7 +190,7 @@ export class TaskAggregator {
   }
 
   /** Live Jira search for Service Desk with ownership filter. Returns normalized tasks (not persisted). */
-  async fetchServiceDeskTickets(filter: SdFilter = 'mine', userJiraIdentity?: string): Promise<NormalizedTask[]> {
+  async fetchServiceDeskTickets(filter: SdFilter = 'mine', userJiraIdentity?: string, opts?: { includeAllTiers?: boolean }): Promise<NormalizedTask[]> {
     const jiraClient = this.getJiraClient?.() ?? null;
     if (!jiraClient) return [];
 
@@ -216,8 +216,9 @@ export class TaskAggregator {
       parts.push(`project = ${sdProject}`);
     }
 
-    // Exclude configured tiers (e.g. Development) from global views only — My Tickets shows everything
-    if (sdTiers && filter !== 'mine') {
+    // Exclude configured tiers (e.g. Development) from global views only — My Tickets shows everything.
+    // Wallboards/KPIs pass includeAllTiers to keep Development (and any other excluded tier) IN the set.
+    if (sdTiers && filter !== 'mine' && !opts?.includeAllTiers) {
       const tierValues = sdTiers.split(',').map(t => `"${t.trim()}"`).join(', ');
       parts.push(`"Current Tier" NOT IN (${tierValues})`);
     }
