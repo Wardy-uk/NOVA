@@ -198,16 +198,31 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     return false;
   }, [signerOverrides]);
 
-  // Split fields by who fills them. Sender fields appear as wizard inputs; signer
-  // fields appear as a read-only "Signer will fill" panel. A field is sender-only
-  // when Adobe's assignee says so AND no selected template's overrides list it.
+  // Calculated fields are computed by Adobe at sign time from other fields'
+  // values (e.g. a Total = Quantity × Price). NOVA must not pre-fill them:
+  // any value we send via mergeFieldInfo would either be ignored by Adobe's
+  // calculation engine or collide with it. They're shown to the sender as a
+  // read-only summary so they know which values are automated.
+  const calculatedFields = useMemo(
+    () => mergedFields.filter(f => f.calculated === true),
+    [mergedFields]
+  );
+  const nonCalculatedFields = useMemo(
+    () => mergedFields.filter(f => f.calculated !== true),
+    [mergedFields]
+  );
+
+  // Split non-calculated fields by who fills them. Sender fields appear as
+  // wizard inputs; signer fields appear as a read-only "Signer will fill"
+  // panel. A field is sender-only when Adobe's assignee says so AND no
+  // selected template's overrides list it.
   const senderFields = useMemo(
-    () => mergedFields.filter(f => isSenderField(f) && !isOverriddenSigner(f)),
-    [mergedFields, isOverriddenSigner]
+    () => nonCalculatedFields.filter(f => isSenderField(f) && !isOverriddenSigner(f)),
+    [nonCalculatedFields, isOverriddenSigner]
   );
   const signerFields = useMemo(
-    () => mergedFields.filter(f => !isSenderField(f) || isOverriddenSigner(f)),
-    [mergedFields, isOverriddenSigner]
+    () => nonCalculatedFields.filter(f => !isSenderField(f) || isOverriddenSigner(f)),
+    [nonCalculatedFields, isOverriddenSigner]
   );
 
   const fetchTemplates = useCallback(async (force = false) => {
@@ -926,6 +941,25 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     </ul>
                     <div className="text-[10px] text-neutral-600 mt-2">
                       These fields appear in the agreement for the signer to fill when they open it in Adobe Sign.
+                    </div>
+                  </div>
+                )}
+
+                {calculatedFields.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-[#3a424d] bg-[#1e2228] p-3">
+                    <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">
+                      Auto-calculated by Adobe ({calculatedFields.length})
+                    </div>
+                    <ul className="space-y-1">
+                      {calculatedFields.map(f => (
+                        <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
+                          <span className="text-neutral-300">{f.displayLabel || f.name}</span>
+                          <span className="text-[9px] text-neutral-600 ml-auto">calculated</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-[10px] text-neutral-600 mt-2">
+                      Adobe computes these from other field values at sign time. NOVA doesn't pre-fill them.
                     </div>
                   </div>
                 )}
