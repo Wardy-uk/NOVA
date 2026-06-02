@@ -815,6 +815,7 @@ CREATE TABLE bc_customers (
     country             NVARCHAR(100)   NULL,
     postal_code         NVARCHAR(50)    NULL,
     tax_registration_number NVARCHAR(100) NULL,
+    company_registration_number NVARCHAR(100) NULL,
     primary_contact_name NVARCHAR(200)  NULL,
     currency_code       NVARCHAR(10)    NULL,
     balance             DECIMAL(18,4)   NULL,

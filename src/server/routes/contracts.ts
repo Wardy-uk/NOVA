@@ -95,6 +95,17 @@ export function createContractsRoutes(
           country: c.country ?? null,
           postal_code: c.postalCode ?? null,
           tax_registration_number: c.taxRegistrationNumber ?? null,
+          // Companies House-style company registration. Different BC tenants
+          // (and localizations) expose this under different property names —
+          // the "Registration No." field on the Invoicing fast-tab usually
+          // comes back as `registrationNumber`, while the Credit Control
+          // "Company Registration" field surfaces as `companyRegistrationNumber`.
+          // Coalesce both — pick the first non-empty so the wizard's
+          // "Reg No. BYM" field is populated however the BC user filled it in.
+          company_registration_number:
+            (c.registrationNumber && c.registrationNumber.trim())
+            || (c.companyRegistrationNumber && c.companyRegistrationNumber.trim())
+            || null,
           primary_contact_name: c.contact ?? null,
           currency_code: c.currencyCode ?? null,
           balance: c.balance ?? null,

@@ -2275,7 +2275,9 @@ export interface BcCustomer {
   email: string | null; phone_number: string | null;
   address: string | null; address_line_2: string | null;
   city: string | null; state: string | null; country: string | null;
-  postal_code: string | null; tax_registration_number: string | null;
+  postal_code: string | null;
+  tax_registration_number: string | null;             // VAT Registration No.
+  company_registration_number: string | null;         // Companies House-style reg
   primary_contact_name: string | null;
   currency_code: string | null;
   balance: number | null; blocked: string | null; last_synced: string; created_at: string;
@@ -2301,10 +2303,10 @@ export class BcCustomerQueries {
   async upsert(c: Omit<BcCustomer, 'id' | 'created_at'>): Promise<void> {
     await execute(`
       MERGE INTO bc_customers WITH (HOLDLOCK) AS target
-      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
+      USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
         AS source(bc_id, [number], display_name, email, phone_number,
                   address, address_line_2, city, state, country, postal_code,
-                  tax_registration_number, primary_contact_name,
+                  tax_registration_number, company_registration_number, primary_contact_name,
                   currency_code, balance, blocked)
       ON target.bc_id = source.bc_id
       WHEN MATCHED THEN UPDATE SET
@@ -2312,22 +2314,24 @@ export class BcCustomerQueries {
         phone_number=source.phone_number,
         address=source.address, address_line_2=source.address_line_2,
         city=source.city, state=source.state, country=source.country,
-        postal_code=source.postal_code, tax_registration_number=source.tax_registration_number,
+        postal_code=source.postal_code,
+        tax_registration_number=source.tax_registration_number,
+        company_registration_number=source.company_registration_number,
         primary_contact_name=source.primary_contact_name,
         currency_code=source.currency_code, balance=source.balance,
         blocked=source.blocked, last_synced=GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (bc_id, [number], display_name, email, phone_number,
         address, address_line_2, city, state, country, postal_code,
-        tax_registration_number, primary_contact_name,
+        tax_registration_number, company_registration_number, primary_contact_name,
         currency_code, balance, blocked, last_synced)
         VALUES (source.bc_id, source.[number], source.display_name, source.email, source.phone_number,
           source.address, source.address_line_2, source.city, source.state, source.country, source.postal_code,
-          source.tax_registration_number, source.primary_contact_name,
+          source.tax_registration_number, source.company_registration_number, source.primary_contact_name,
           source.currency_code, source.balance, source.blocked, GETUTCDATE());
     `, [c.bc_id, c.number ?? null, c.display_name, c.email ?? null, c.phone_number ?? null,
         c.address ?? null, c.address_line_2 ?? null,
         c.city ?? null, c.state ?? null, c.country ?? null, c.postal_code ?? null,
-        c.tax_registration_number ?? null, c.primary_contact_name ?? null,
+        c.tax_registration_number ?? null, c.company_registration_number ?? null, c.primary_contact_name ?? null,
         c.currency_code ?? null, c.balance ?? null, c.blocked ?? null]);
   }
 
