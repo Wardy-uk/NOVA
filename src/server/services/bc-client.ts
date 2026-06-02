@@ -112,9 +112,11 @@ export class BusinessCentralClient {
     return this.tokenCache.token;
   }
 
-  private async request<T>(path: string, params?: Record<string, string>): Promise<T> {
+  private async request<T>(pathOrUrl: string, params?: Record<string, string>): Promise<T> {
     const token = await this.getToken();
-    let urlStr = `${this.baseUrl}${path}`;
+    // Absolute URL → use as-is (used for @odata.nextLink continuation, which
+    // already encodes $skiptoken etc. and must not be re-encoded).
+    let urlStr = pathOrUrl.startsWith('http') ? pathOrUrl : `${this.baseUrl}${pathOrUrl}`;
     if (params) {
       // Use manual query string — URLSearchParams encodes '$' as '%24' which breaks OData
       const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
@@ -148,10 +150,26 @@ export class BusinessCentralClient {
     // 400 "Could not find a property named '...'" and breaks the whole sync.
     // Drop $select → BC returns the full projection it knows about; we read
     // whatever we recognise on the TS side.
-    const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
-      '$top': '500',
-    });
-    return data.value ?? [];
+    //
+    // Pagination: BC v2.0 returns up to ~20,000 records per page and includes
+    // @odata.nextLink when more exist. Follow nextLink until exhausted so
+    // tenants with >500 customers don't silently truncate (the previous
+    // $top=500 cap was hiding everything past CU00xxxxx in the wizard picker).
+    const all: BcRawCustomer[] = [];
+    let next: string | null = `${this.baseUrl}/customers`;
+    const MAX_PAGES = 50; // safety: 50 × ~20k = 1M cap before we bail
+    let page = 0;
+    while (next && page < MAX_PAGES) {
+      const data: { value: BcRawCustomer[]; '@odata.nextLink'?: string } =
+        await this.request<{ value: BcRawCustomer[]; '@odata.nextLink'?: string }>(next);
+      if (data.value?.length) all.push(...data.value);
+      next = data['@odata.nextLink'] ?? null;
+      page++;
+    }
+    if (page === MAX_PAGES && next) {
+      console.warn(`[BC] getCustomers hit ${MAX_PAGES}-page safety cap with more pages remaining — investigate.`);
+    }
+    return all;
   }
 
   async getCustomerByNumber(customerNumber: string): Promise<BcRawCustomer | null> {
