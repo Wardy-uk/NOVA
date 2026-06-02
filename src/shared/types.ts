@@ -129,7 +129,8 @@ export interface BcCustomerLite {
   state: string | null;
   country: string | null;
   postal_code: string | null;
-  tax_registration_number: string | null;
+  tax_registration_number: string | null;          // VAT Registration No.
+  company_registration_number: string | null;       // Companies House-style reg
   primary_contact_name: string | null;
 }
 
