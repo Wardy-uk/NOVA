@@ -1047,7 +1047,7 @@ export function createDevReviewRoutes(
         const issueForBug = await client.getIssue(key, [
           'summary', 'reporter', 'priority',
           CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
-          CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT,
+          CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
         ]);
         const issueFields = (issueForBug?.fields || {}) as Record<string, unknown>;
         const reporterName = (issueFields.reporter as { displayName?: string } | null)?.displayName || 'Unknown';
@@ -1059,6 +1059,9 @@ export function createDevReviewRoutes(
         const briefTroubleshooting = adfToPlainText(issueFields[CF_TROUBLESHOOTING]) || 'None';
         const briefExpectedOutcome = adfToPlainText(issueFields[CF_EXPECTED_OUTCOME]) || 'None';
         const briefEnvironment = adfToPlainText(issueFields[CF_ISSUE_ENVIRONMENT]) || 'None';
+
+        // Copy the Nurtur Product select value from the support ticket onto the Bug
+        const nurturProduct = (issueFields[CF_NURTUR_PRODUCT] as { value?: string } | null)?.value || null;
 
         const descriptionText =
           `Support Ticket: ${key}\n` +
@@ -1072,15 +1075,34 @@ export function createDevReviewRoutes(
           `── Environment ──\n${briefEnvironment}\n\n` +
           `── Developer Comment ──\n${workItemComment || 'None'}`;
 
-        const createdBug = await client.createIssue({
-          fields: {
-            project: { key: targetProjectKey },
-            issuetype: { name: 'Bug' },
-            summary: `[Support] ${issueSummary}`,
-            description: adfDoc(descriptionText),
-            customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
-          },
-        });
+        const baseFields = {
+          project: { key: targetProjectKey },
+          issuetype: { name: 'Bug' },
+          summary: `[Support] ${issueSummary}`,
+          description: adfDoc(descriptionText),
+          customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
+        };
+        // Mirror the support ticket's Nurtur Product onto the Bug when set.
+        // If the field/option isn't valid for the target project, fall back to
+        // creating the Bug without it rather than failing the whole accept.
+        let createdBug;
+        try {
+          createdBug = await client.createIssue({
+            fields: {
+              ...baseFields,
+              ...(nurturProduct ? { [CF_NURTUR_PRODUCT]: { value: nurturProduct } } : {}),
+            },
+          });
+        } catch (createErr: unknown) {
+          const createMsg = createErr instanceof Error ? createErr.message : String(createErr);
+          if (nurturProduct && (createMsg.includes('cannot be set') || createMsg.includes('not on the appropriate screen') || createMsg.includes('customfield_13183'))) {
+            console.warn(`[DevReview/accept] Nurtur Product rejected for ${targetProjectKey}, creating Bug without it: ${createMsg}`);
+            warnings.push(`Bug created without Nurtur Product (not valid for ${targetProjectKey})`);
+            createdBug = await client.createIssue({ fields: baseFields });
+          } else {
+            throw createErr;
+          }
+        }
         workItemKey = createdBug.key;
         console.log(`[DevReview/accept] Created Bug ${workItemKey} in ${targetProjectKey} for ${key}`);
         await devQueries.markAccepted(key, workItemKey);
