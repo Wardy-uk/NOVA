@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { JiraRestClient, type JiraIssue, type JiraComment } from './jira-client.js';
 import {
   isResolutionSlaBreached,
+  dueDateDefersBreach,
   isSlaNearBreach,
   getSlaRemainingMs,
   isOverdueUpdate,
@@ -282,7 +283,7 @@ export class ProblemTicketScanner {
 
         // Rule: sla_breached
         const slaBreachedConfig = config.get('sla_breached');
-        if (slaBreachedConfig?.enabled && isResolutionSlaBreached(issue as any)) {
+        if (slaBreachedConfig?.enabled && !dueDateDefersBreach(issue as any, now) && isResolutionSlaBreached(issue as any)) {
           const w = slaBreachedConfig.weight;
           reasons.push({ rule: 'sla_breached', label: 'SLA Breached', weight: w, detail: null });
           score += w;

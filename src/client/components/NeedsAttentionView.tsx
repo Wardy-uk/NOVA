@@ -116,6 +116,21 @@ export function NeedsAttentionView({ onUpdateTask, scope = 'all' }: Props) {
 
   useEffect(() => { fetchAttention(); }, [fetchAttention]);
 
+  // Keep the list live: poll every 90s and refetch when the tab regains focus,
+  // so a ticket that just changed state in Jira (e.g. moved to Waiting on
+  // Requestor with a future next-update) drops off without a manual reload.
+  useEffect(() => {
+    const interval = setInterval(() => { fetchAttention(); }, 90_000);
+    const onFocus = () => { if (document.visibilityState === 'visible') fetchAttention(); };
+    document.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [fetchAttention]);
+
   // Counts
   const overdueCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('overdue_update')).length, [tasks]);
   const slaCount = useMemo(() => tasks.filter(t => t.attention_reasons.includes('sla_breached')).length, [tasks]);

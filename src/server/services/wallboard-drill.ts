@@ -6,7 +6,7 @@
 // (Previously tiles read n8n's jira_kpi_daily snapshot while the drill queried
 // live Jira — two sources, so counts drifted, e.g. tile 6 vs drill 7.)
 
-import { isOverdueUpdate, isResolutionSlaBreached } from './jira-sla.js';
+import { isOverdueUpdate, isResolutionSlaBreached, dueDateDefersBreach } from './jira-sla.js';
 
 /** Minimal shape we need off an aggregator NormalizedTask. */
 export interface DrillTicket {
@@ -147,6 +147,9 @@ export function buildKpiFilter(kpiName: string, now: Date): ((t: TicketWithMeta)
 
       if (!tierMatch) return false;
       if (!isResolutionSlaBreached(t.issue)) return false;
+      // A future due date defers the breach (re-dated/escalated tickets) — keep the
+      // KPI "over SLA" drill list in step with the board's per-agent counts.
+      if (dueDateDefersBreach(t.issue, now)) return false;
       const statusLower = t.status.toLowerCase();
       if (EXCLUDED_STATUSES.has(statusLower)) return false;
       return actionable === isActionableSla(statusLower);
@@ -162,7 +165,6 @@ export function buildKpiFilter(kpiName: string, now: Date): ((t: TicketWithMeta)
 // raw_data is the flat Jira issue (custom fields at top level), so we read the
 // fields directly off `issue` rather than `issue.fields`.
 
-const SLA_RESOLUTION_FIELD = 'customfield_14048';   // Time to resolution SLA
 const AGENT_LAST_UPDATE_FIELD = 'customfield_14081';
 const AGENT_NEXT_UPDATE_FIELD = 'customfield_14185';
 const SLA_EXCLUDED_STATUSES = new Set(['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner']);
@@ -180,42 +182,14 @@ function toDate(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Mirror of n8n isSlaBreached: ongoing or completed resolution SLA cycle breached. */
-function slaResolutionBreached(slaField: unknown): boolean {
-  if (!slaField) return false;
-  const arr = Array.isArray(slaField) ? slaField : [slaField];
-  for (const x of arr as Array<Record<string, unknown>>) {
-    if (!x) continue;
-    const ongoing = x.ongoingCycle as Record<string, unknown> | undefined;
-    if (ongoing) {
-      if (ongoing.breached === true) return true;
-      const rem = (ongoing.remainingTime as Record<string, unknown> | undefined)?.millis;
-      if (typeof rem === 'number' && rem < 0) return true;
-    }
-    const completed = x.completedCycles as Array<Record<string, unknown>> | undefined;
-    if (Array.isArray(completed)) {
-      for (const c of completed) {
-        if (!c) continue;
-        if (c.breached === true) return true;
-        const crem = (c.remainingTime as Record<string, unknown> | undefined)?.millis;
-        if (typeof crem === 'number' && crem < 0) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/** n8n isOverSla: resolution SLA breached, excluding done/closed/resolved/waiting, with duedate guard. */
+/** n8n isOverSla: resolution SLA breached, excluding done/closed/resolved/waiting, with duedate guard.
+ *  Shares the single breach definition (isResolutionSlaBreached + dueDateDefersBreach) from jira-sla
+ *  so the per-agent board counts and the drill-down ticket lists can never drift. */
 export function isOverSlaResolution(issue: Record<string, unknown>, now: Date): boolean {
   const status = rawStatusName(issue);
   if (SLA_EXCLUDED_STATUSES.has(status)) return false;
-  const dueStr = issue?.duedate as string | undefined;
-  if (dueStr) {
-    const due = toDate(dueStr + 'T23:59:59.999');
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    if (due && due > endOfDay) return false;
-  }
-  return slaResolutionBreached(issue?.[SLA_RESOLUTION_FIELD]);
+  if (dueDateDefersBreach(issue, now)) return false;
+  return isResolutionSlaBreached(issue);
 }
 
 /** n8n isNotUpdated: agent last-update before today, next-update not in future, not waiting-on-requestor. */
