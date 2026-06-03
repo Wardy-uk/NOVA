@@ -145,7 +145,7 @@ import { TfsDocsSyncProvider } from './services/kb-tfs-docs-sync.js';
 import { ConfluenceSyncProvider } from './services/kb-confluence-sync.js';
 import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
-import { KpiPipeline } from './services/kpi-pipeline.js';
+import { KpiPipeline, computeRag } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
 import { CoachingEngine } from './services/coach.js';
@@ -2437,7 +2437,15 @@ ${wallboardRefreshScript('/wallboard/breached')}
         const nowLive = new Date();
         for (const k of allKpis) {
           const f = buildKpiFilter(k.KPI, nowLive);
-          if (f) k.Count = enrichedLive.filter(f).length;
+          if (f) {
+            k.Count = enrichedLive.filter(f).length;
+            // Recompute RAG from the LIVE count so a KPI that has dropped to/under
+            // target (e.g. 0 over SLA) turns green and falls off the breach board,
+            // instead of keeping the stale snapshot RAG that was red when n8n ran.
+            if (k.KPITarget !== null && k.KPIDirection) {
+              k.RAG = computeRag(k.Count, k.KPITarget, k.KPIDirection);
+            }
+          }
         }
 
         // CSAT: live from customfield_12802 ratings on tickets resolved today.

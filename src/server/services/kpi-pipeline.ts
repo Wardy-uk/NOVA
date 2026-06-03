@@ -32,7 +32,7 @@ export async function getKpiPool(settings: SettingsQueries): Promise<sql.Connect
   return pool;
 }
 
-function computeRag(value: number, target: number, direction: string): number {
+export function computeRag(value: number, target: number, direction: string): number {
   if (direction === 'Higher is better') {
     if (value >= target) return 1;
     if (value >= target * 0.8) return 2;
