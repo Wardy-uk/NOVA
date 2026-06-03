@@ -1,7 +1,86 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
-const CF_REQUEST_TYPE = 'customfield_10020';
+// JSM customer request type field. This is an `sd-customerrequesttype` field
+// that must be set BY ID (e.g. { id: '243' }), not by name, and is the field
+// JSM/portal actually uses. The legacy customfield_10020 is NOT editable on NT
+// issues (absent from editmeta), so writes to it silently no-op — that was the
+// long-standing bug. Configurable via setting `jira_request_type_field`
+// (the same setting the onboarding orchestrator uses).
+const DEFAULT_REQUEST_TYPE_FIELD = 'customfield_12800';
+const DEFAULT_SERVICE_DESK_ID = '50';
+
+const CF_REQUEST_TYPE = DEFAULT_REQUEST_TYPE_FIELD;
+
+// Fallback request-type name → ID map for NT / service desk 50. Used only when
+// the live servicedesk catalog can't be fetched or a name isn't found in it.
+// Verified IDs (Jun 2026); the live catalog (getRequestTypes) takes precedence.
+const REQUEST_TYPE_ID_SEED: Record<string, string> = {
+  'ai request': '1064',
+  'service request': '598',
+  'tpj request': '897',
+  'incident': '243',
+  'onboarding': '930',
+  'chat': '268',
+};
+
+// Cached name(lowercased) → id from the live servicedesk catalog.
+let catalogCache: Record<string, string> | null = null;
+let catalogFetchedAt = 0;
+const CATALOG_TTL_MS = 60 * 60 * 1000; // 1h
+
+export function getRequestTypeField(settings: SettingsQueries): string {
+  return settings.get('jira_request_type_field') || DEFAULT_REQUEST_TYPE_FIELD;
+}
+
+/** Resolve a request-type name to its JSM ID, preferring the live servicedesk
+ *  catalog and falling back to the seed map. */
+async function resolveRequestTypeId(
+  jiraClient: JiraRestClient,
+  settings: SettingsQueries,
+  name: string,
+): Promise<string | null> {
+  const wantLower = name.toLowerCase();
+  if (!catalogCache || Date.now() - catalogFetchedAt > CATALOG_TTL_MS) {
+    const sdId = settings.get('jira_servicedesk_id') || DEFAULT_SERVICE_DESK_ID;
+    const types = await jiraClient.getRequestTypes(sdId);
+    if (types.length > 0) {
+      const next: Record<string, string> = {};
+      for (const t of types) next[t.name.toLowerCase()] = t.id;
+      catalogCache = next;
+      catalogFetchedAt = Date.now();
+    }
+  }
+  return catalogCache?.[wantLower] ?? REQUEST_TYPE_ID_SEED[wantLower] ?? null;
+}
+
+/**
+ * Set the JSM customer request type on a ticket — maps NOVA's classification
+ * category to the correct request type and writes it BY ID to the request-type
+ * field. This is the single source of truth for "change request type away from
+ * AI Request"; all handoff/assign/close paths call it.
+ */
+export async function setRequestType(
+  jiraClient: JiraRestClient,
+  settings: SettingsQueries,
+  ticketKey: string,
+  classification?: { category?: string; ticket_type?: string },
+  override?: string,
+): Promise<void> {
+  const name = override ?? resolveRequestType(classification);
+  const field = getRequestTypeField(settings);
+  const id = await resolveRequestTypeId(jiraClient, settings, name);
+  if (!id) {
+    console.warn(`[request-type] No ID for request type "${name}" — skipping update on ${ticketKey}`);
+    return;
+  }
+  try {
+    await jiraClient.updateFields(ticketKey, { [field]: { id } });
+    console.log(`[request-type] Set Request Type "${name}" (id ${id}) on ${ticketKey}`);
+  } catch (err) {
+    console.warn(`[request-type] Failed to set Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
+  }
+}
 
 const CATEGORY_TO_REQUEST_TYPE: Record<string, string> = {
   'email': 'Emailed request',
@@ -62,15 +141,7 @@ export async function prepareTicketForClose(
     console.error('[close-helper] CRITICAL: nova_ai_jira_account_id not configured');
   }
 
-  const requestType = ctx.requestTypeOverride ?? resolveRequestType(ctx.classification);
-  try {
-    await jiraClient.updateFields(ctx.ticketKey, {
-      [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
-    });
-    console.log(`[close-helper] Updated Request Type to "${requestType}" on ${ctx.ticketKey}`);
-  } catch (err) {
-    console.warn(`[close-helper] Failed to update Request Type on ${ctx.ticketKey}:`, err instanceof Error ? err.message : err);
-  }
+  await setRequestType(jiraClient, settings, ctx.ticketKey, ctx.classification, ctx.requestTypeOverride);
 }
 
 export function resolveRequestType(classification?: { category?: string; ticket_type?: string }): string {

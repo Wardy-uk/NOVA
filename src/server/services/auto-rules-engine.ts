@@ -9,7 +9,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { AutoRuleOverrideQueries } from '../db/queries.js';
 import { executeAndGetId, query } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
-import { CF_REQUEST_TYPE } from './close-ticket-helper.js';
+import { setRequestType } from './close-ticket-helper.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_CURRENT_TIER = 'customfield_12981';
@@ -490,13 +490,7 @@ export class AutoRulesEngine {
     }
 
     // Update request type from "AI Request" to correct type
-    try {
-      await this.jiraClient.updateFields(ticketKey, {
-        [CF_REQUEST_TYPE]: { requestType: { name: 'Emailed request' } },
-      });
-    } catch (err) {
-      console.warn(`[auto-rules] Failed to update request type on ${ticketKey}:`, err instanceof Error ? err.message : err);
-    }
+    await setRequestType(this.jiraClient, this.settings, ticketKey, undefined, 'Emailed request');
 
     // Validate transition is available before attempting
     try {
@@ -541,16 +535,9 @@ export class AutoRulesEngine {
     // screen / unknown request type) rolls back the tier change too. See NT-20498.
     await this.jiraClient.updateFields(ticketKey, updatePayload);
 
-    // Request Type (customfield_10020) is a special JSM field that often isn't settable
-    // via the edit API. Attempt it separately so a failure can't undo the tier move.
+    // Set the request type separately so a failure can't undo the tier move.
     if (action.requestType) {
-      try {
-        await this.jiraClient.updateFields(ticketKey, {
-          [CF_REQUEST_TYPE]: { requestType: { name: action.requestType } },
-        });
-      } catch (err) {
-        console.warn(`[auto-rules] Failed to set request type '${action.requestType}' on ${ticketKey} (tier change already applied):`, err instanceof Error ? err.message : err);
-      }
+      await setRequestType(this.jiraClient, this.settings, ticketKey, undefined, action.requestType);
     }
 
     // Assign via round-robin if a pool is specified

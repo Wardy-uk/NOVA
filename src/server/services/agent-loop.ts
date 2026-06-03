@@ -27,7 +27,7 @@ import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
-import { prepareTicketForClose } from './close-ticket-helper.js';
+import { prepareTicketForClose, setRequestType } from './close-ticket-helper.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 import { createHash } from 'crypto';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
@@ -1132,45 +1132,11 @@ export class AgentLoop {
   }
 
   private async updateRequestTypeAfterAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
-    const CF_REQUEST_TYPE = 'customfield_10020';
-    const CATEGORY_MAP: Record<string, string> = {
-      email: 'Emailed request', email_delivery: 'Emailed request',
-      gdpr: 'GDPR', data_protection: 'GDPR', incident: 'Incident',
-      integration: 'Incident', integration_issue: 'Incident', api_error: 'Incident',
-      server_error: 'Incident', database_issue: 'Incident', feed_issue: 'Incident',
-      data_feed: 'Incident', website: 'Incident', portal: 'Incident', crm: 'Incident',
-      reporting: 'Service Request', user_management: 'Service Request',
-      onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
-      franchise: 'Franchise Hub', chat: 'Chat',
-      template: 'Service Request', design: 'Service Request', branding: 'Service Request',
-    };
     const classification = decision.output?.classification as { category?: string; ticket_type?: string } | undefined;
-    const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
-    const ticketType = classification?.ticket_type ?? '';
-    const requestType = CATEGORY_MAP[category]
-      ?? (ticketType === 'incident' ? 'Incident' : null)
-      ?? (ticketType === 'change' ? 'Service Request' : null)
-      ?? 'Emailed request';
-
-    await this.jiraClient.updateFields(decision.ticketKey, {
-      [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
-    });
-    console.log(`[agent] Updated Request Type to "${requestType}" on ${decision.ticketKey} after assignment`);
+    await setRequestType(this.jiraClient, this.settings, decision.ticketKey, classification);
   }
 
   private async updateRequestTypeFromDecision(ticketKey: string): Promise<void> {
-    const CF_REQUEST_TYPE = 'customfield_10020';
-    const CATEGORY_MAP: Record<string, string> = {
-      email: 'Emailed request', email_delivery: 'Emailed request',
-      gdpr: 'GDPR', data_protection: 'GDPR', incident: 'Incident',
-      integration: 'Incident', integration_issue: 'Incident', api_error: 'Incident',
-      server_error: 'Incident', database_issue: 'Incident', feed_issue: 'Incident',
-      data_feed: 'Incident', website: 'Incident', portal: 'Incident', crm: 'Incident',
-      reporting: 'Service Request', user_management: 'Service Request',
-      onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
-      franchise: 'Franchise Hub', chat: 'Chat',
-      template: 'Service Request', design: 'Service Request', branding: 'Service Request',
-    };
     const decRow = await query<{ output: string }>(
       `SELECT TOP 1 output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
       [ticketKey],
@@ -1179,16 +1145,7 @@ export class AgentLoop {
     try {
       const out = JSON.parse(decRow.output || '{}');
       const classification = out.classification as { category?: string; ticket_type?: string } | undefined;
-      const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
-      const ticketType = classification?.ticket_type ?? '';
-      const requestType = CATEGORY_MAP[category]
-        ?? (ticketType === 'incident' ? 'Incident' : null)
-        ?? (ticketType === 'change' ? 'Service Request' : null)
-        ?? 'Emailed request';
-      await this.jiraClient.updateFields(ticketKey, {
-        [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
-      });
-      console.log(`[agent] Updated Request Type to "${requestType}" on ${ticketKey} after sweep assignment`);
+      await setRequestType(this.jiraClient, this.settings, ticketKey, classification);
     } catch { /* classification not available */ }
   }
 
@@ -1815,44 +1772,42 @@ export class AgentLoop {
           }
 
           const needsReply = !!(decision.output.needs_customer_reply ?? true);
-
-          if (needsReply) {
-            // AI asked a question — stay on ticket, assign to NOVA-Jira, enter ai_conversation
-            console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, entering ai_conversation`);
-            const novaAccountId = this.settings.get('nova_ai_jira_account_id');
-            let assignedToNova = false;
-            if (novaAccountId) {
-              try {
-                await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId: novaAccountId } });
-                assignedToNova = true;
-                console.log(`[agent] Assigned ${decision.ticketKey} to NOVA-Jira for ai_conversation`);
-              } catch (err) {
-                console.error(`[agent] Failed to assign ${decision.ticketKey} to NOVA-Jira — falling back to handoff:`, err instanceof Error ? err.message : err);
-              }
-            } else {
-              console.warn(`[agent] nova_ai_jira_account_id not configured — cannot assign ${decision.ticketKey} to NOVA-Jira`);
-            }
-
-            if (assignedToNova) {
-              try {
-                await ticketState.transition(decision.ticketKey, 'ai_conversation', {
-                  lastAgentActionAt: new Date().toISOString(),
-                });
-              } catch { /* best effort */ }
-
-              try {
-                await this.updateRequestTypeAfterAssign(decision);
-              } catch (err) {
-                console.warn(`[agent] Request type update failed for ${decision.ticketKey} (needsReply):`, err instanceof Error ? err.message : err);
-              }
-            } else {
-              // Assignment failed — fall back to human handoff so ticket doesn't sit unassigned
-              console.log(`[agent] NOVA-Jira assignment failed for ${decision.ticketKey} — falling back to executeHandoff`);
-              await this.executeHandoff(decision, decisionId, ticketState, 'high confidence no question');
+          // NOVA keeps the ticket assigned to itself and works it — it does NOT
+          // round-robin to a human here. If it asked a question → ai_conversation
+          // (await reply, continue dialogue); if it gave a definitive answer →
+          // awaiting_customer (lifecycle sweep handles chase/auto-close, or
+          // re-engages on customer reply). Round-robin only fires on genuine
+          // handoff (low confidence, escalation, frustration, or assign failure).
+          const targetState = needsReply ? 'ai_conversation' : 'awaiting_customer';
+          const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+          let assignedToNova = false;
+          if (novaAccountId) {
+            try {
+              await this.jiraClient.updateFields(decision.ticketKey, { assignee: { accountId: novaAccountId } });
+              assignedToNova = true;
+            } catch (err) {
+              console.error(`[agent] Failed to assign ${decision.ticketKey} to NOVA-Jira — falling back to handoff:`, err instanceof Error ? err.message : err);
             }
           } else {
-            // AI gave a definitive answer — no question asked, immediate handoff
-            console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, no question asked → immediate handoff`);
+            console.warn(`[agent] nova_ai_jira_account_id not configured — cannot keep ${decision.ticketKey} on NOVA`);
+          }
+
+          if (assignedToNova) {
+            console.log(`[agent] First reply posted (AI draft) on ${decision.ticketKey} — confidence ${(decision.confidence * 100).toFixed(0)}%, ${needsReply ? 'awaiting reply (ai_conversation)' : 'answer given, awaiting customer (awaiting_customer)'}`);
+            try {
+              await ticketState.transition(decision.ticketKey, targetState, {
+                lastAgentActionAt: new Date().toISOString(),
+              });
+            } catch { /* best effort */ }
+
+            try {
+              await this.updateRequestTypeAfterAssign(decision);
+            } catch (err) {
+              console.warn(`[agent] Request type update failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+            }
+          } else {
+            // Assignment failed — fall back to human handoff so ticket doesn't sit unassigned
+            console.log(`[agent] NOVA-Jira assignment failed for ${decision.ticketKey} — falling back to executeHandoff`);
             await this.executeHandoff(decision, decisionId, ticketState, 'high confidence no question');
           }
         }
@@ -2607,35 +2562,7 @@ export class AgentLoop {
       // Change Request Type from "AI Request" on any handoff (respond, escalate, assign)
       // This ensures the ticket appears in agent queues with the correct type
       try {
-        const decRow = await query<{ output: string }>(
-          `SELECT TOP 1 output FROM agent_decisions WHERE ticket_id = ? ORDER BY created_at DESC`,
-          [ticketKey],
-        ).then(rows => rows[0] ?? null);
-        if (decRow) {
-          const out = JSON.parse(decRow.output || '{}');
-          const classification = out.classification as { category?: string; ticket_type?: string } | undefined;
-          const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
-          const ticketType = classification?.ticket_type ?? '';
-          const categoryMap: Record<string, string> = {
-            email: 'Emailed request', email_delivery: 'Emailed request',
-            gdpr: 'GDPR', data_protection: 'GDPR', incident: 'Incident',
-            integration: 'Incident', integration_issue: 'Incident', api_error: 'Incident',
-            server_error: 'Incident', database_issue: 'Incident', feed_issue: 'Incident',
-            data_feed: 'Incident', website: 'Incident', portal: 'Incident', crm: 'Incident',
-            reporting: 'Service Request', user_management: 'Service Request',
-            onboarding: 'Onboarding', delivery: 'Delivery QA', delivery_qa: 'Delivery QA',
-            franchise: 'Franchise Hub', chat: 'Chat',
-            template: 'Service Request', design: 'Service Request', branding: 'Service Request',
-          };
-          const requestType = categoryMap[category]
-            ?? (ticketType === 'incident' ? 'Incident' : null)
-            ?? (ticketType === 'change' ? 'Service Request' : null)
-            ?? 'Emailed request';
-          await this.jiraClient.updateFields(ticketKey, {
-            customfield_10020: { requestType: { name: requestType } },
-          });
-          console.log(`[agent] Updated Request Type to "${requestType}" on ${ticketKey} after approval`);
-        }
+        await this.updateRequestTypeFromDecision(ticketKey);
       } catch (err) {
         console.warn(`[agent] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
       }

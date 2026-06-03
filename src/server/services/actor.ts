@@ -7,7 +7,7 @@ import type { LlmService } from './llm-service.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
-import { CATEGORY_TO_REQUEST_TYPE, CF_REQUEST_TYPE } from './close-ticket-helper.js';
+import { setRequestType } from './close-ticket-helper.js';
 
 const CriticResultSchema = z.object({
   approved: z.boolean(),
@@ -350,32 +350,13 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
    * Resolve the appropriate JSM Request Type based on the triage classification.
    * "AI Request" must NEVER remain on a ticket being handed to a human.
    */
-  private resolveRequestType(decision: AgentDecision): string {
-    const classification = decision.output?.classification as { category?: string; ticket_type?: string } | undefined;
-    const category = classification?.category?.toLowerCase().replace(/\s+/g, '_') ?? '';
-    const ticketType = classification?.ticket_type ?? '';
-
-    if (CATEGORY_TO_REQUEST_TYPE[category]) return CATEGORY_TO_REQUEST_TYPE[category];
-    if (ticketType === 'incident') return 'Incident';
-    if (ticketType === 'change') return 'Service Request';
-
-    return 'Emailed request';
-  }
-
   /**
    * Change Request Type from "AI Request" to the correct type.
    * Called on every handoff (escalate, assign, approval callback).
    */
   private async updateRequestTypeOnHandoff(ticketKey: string, decision: AgentDecision): Promise<void> {
-    const requestType = this.resolveRequestType(decision);
-    try {
-      await this.jiraClient.updateFields(ticketKey, {
-        [CF_REQUEST_TYPE]: { requestType: { name: requestType } },
-      });
-      console.log(`[actor] Updated Request Type to "${requestType}" on ${ticketKey}`);
-    } catch (err) {
-      console.warn(`[actor] Failed to update Request Type on ${ticketKey}:`, err instanceof Error ? err.message : err);
-    }
+    const classification = decision.output?.classification as { category?: string; ticket_type?: string } | undefined;
+    await setRequestType(this.jiraClient, this.settings, ticketKey, classification);
   }
 
   private async escalate(decision: AgentDecision): Promise<ActionResult> {

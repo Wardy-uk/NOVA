@@ -451,6 +451,28 @@ export class JiraRestClient {
     }
   }
 
+  /** List customer request types for a JSM service desk (id + name).
+   *  Used to resolve request-type names → IDs for setting the customer
+   *  request type field (sd-customerrequesttype, e.g. customfield_12800),
+   *  which must be set by ID, not name. Hits servicedeskapi (not /rest/api/3). */
+  async getRequestTypes(serviceDeskId: string): Promise<Array<{ id: string; name: string }>> {
+    const url = `${this.baseUrl}/rest/servicedeskapi/servicedesk/${serviceDeskId}/requesttype?limit=100`;
+    try {
+      const res = await fetch(url, {
+        headers: { 'Authorization': this.authHeader, 'Accept': 'application/json' },
+      });
+      if (!res.ok) {
+        console.warn(`[JiraClient] getRequestTypes(${serviceDeskId}) → ${res.status} ${res.statusText}`);
+        return [];
+      }
+      const data = await res.json() as { values?: Array<{ id: number | string; name: string }> };
+      return (data.values ?? []).map(v => ({ id: String(v.id), name: v.name }));
+    } catch (err) {
+      console.warn(`[JiraClient] getRequestTypes(${serviceDeskId}) failed:`, err instanceof Error ? err.message : err);
+      return [];
+    }
+  }
+
   async uploadAttachment(issueKey: string, filename: string, buffer: Buffer, mimeType: string): Promise<unknown> {
     const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/attachments`;
     const form = new FormData();
