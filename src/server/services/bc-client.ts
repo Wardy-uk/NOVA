@@ -19,23 +19,31 @@ export interface BcConfig {
   companyId: string;
 }
 
+// All fields except the core identity ones are optional — BC tenant configurations
+// vary (e.g. `contact` doesn't exist on every tenant; UK localization exposes a
+// "Reg. No." field that's not in the standard schema). Sync code coalesces
+// missing/null values defensively rather than assuming a fixed shape.
 export interface BcRawCustomer {
   id: string;
   number: string;
   displayName: string;
-  email: string;
-  phoneNumber: string;
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  state: string;
-  country: string;
-  postalCode: string;
-  taxRegistrationNumber: string;
-  contact: string;
-  currencyCode: string;
-  balance: number;
-  blocked: string;
+  email?: string;
+  phoneNumber?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  taxRegistrationNumber?: string;       // VAT Registration No.
+  // Company registration ("Companies House" style). Different BC tenants expose
+  // this under different names — sync coalesces the first non-empty.
+  registrationNumber?: string;
+  companyRegistrationNumber?: string;
+  contact?: string;
+  currencyCode?: string;
+  balance?: number;
+  blocked?: string;
 }
 
 export interface BcRawOrder {
@@ -104,9 +112,11 @@ export class BusinessCentralClient {
     return this.tokenCache.token;
   }
 
-  private async request<T>(path: string, params?: Record<string, string>): Promise<T> {
+  private async request<T>(pathOrUrl: string, params?: Record<string, string>): Promise<T> {
     const token = await this.getToken();
-    let urlStr = `${this.baseUrl}${path}`;
+    // Absolute URL → use as-is (used for @odata.nextLink continuation, which
+    // already encodes $skiptoken etc. and must not be re-encoded).
+    let urlStr = pathOrUrl.startsWith('http') ? pathOrUrl : `${this.baseUrl}${pathOrUrl}`;
     if (params) {
       // Use manual query string — URLSearchParams encodes '$' as '%24' which breaks OData
       const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
@@ -133,13 +143,33 @@ export class BusinessCentralClient {
   }
 
   async getCustomers(): Promise<BcRawCustomer[]> {
-    const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
-      // Explicit $select keeps the payload small AND prevents BC from quietly
-      // dropping fields when their default projection changes between BC versions.
-      '$select': 'id,number,displayName,email,phoneNumber,addressLine1,addressLine2,city,state,country,postalCode,taxRegistrationNumber,contact,currencyCode,balance,blocked',
-      '$top': '500',
-    });
-    return data.value ?? [];
+    // No $select — BC tenants vary in which properties they expose (e.g. the
+    // `contact` property doesn't exist on every tenant, UK localization adds
+    // `registrationNumber`, custom extensions add `companyRegistrationNumber`
+    // etc.). Requesting a property the tenant doesn't expose returns
+    // 400 "Could not find a property named '...'" and breaks the whole sync.
+    // Drop $select → BC returns the full projection it knows about; we read
+    // whatever we recognise on the TS side.
+    //
+    // Pagination: BC v2.0 returns up to ~20,000 records per page and includes
+    // @odata.nextLink when more exist. Follow nextLink until exhausted so
+    // tenants with >500 customers don't silently truncate (the previous
+    // $top=500 cap was hiding everything past CU00xxxxx in the wizard picker).
+    const all: BcRawCustomer[] = [];
+    let next: string | null = `${this.baseUrl}/customers`;
+    const MAX_PAGES = 50; // safety: 50 × ~20k = 1M cap before we bail
+    let page = 0;
+    while (next && page < MAX_PAGES) {
+      const data: { value: BcRawCustomer[]; '@odata.nextLink'?: string } =
+        await this.request<{ value: BcRawCustomer[]; '@odata.nextLink'?: string }>(next);
+      if (data.value?.length) all.push(...data.value);
+      next = data['@odata.nextLink'] ?? null;
+      page++;
+    }
+    if (page === MAX_PAGES && next) {
+      console.warn(`[BC] getCustomers hit ${MAX_PAGES}-page safety cap with more pages remaining — investigate.`);
+    }
+    return all;
   }
 
   async getCustomerByNumber(customerNumber: string): Promise<BcRawCustomer | null> {

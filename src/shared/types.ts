@@ -129,7 +129,8 @@ export interface BcCustomerLite {
   state: string | null;
   country: string | null;
   postal_code: string | null;
-  tax_registration_number: string | null;
+  tax_registration_number: string | null;          // VAT Registration No.
+  company_registration_number: string | null;       // Companies House-style reg
   primary_contact_name: string | null;
 }
 
@@ -155,6 +156,11 @@ export interface AdobeSignFormField {
   assignee?: string;
   multiLine?: boolean;
   isMultiLine?: boolean;
+  // True if this field's value is computed by Adobe from other fields (e.g.
+  // a Total derived from Quantity × Price). NOVA must not pre-fill these
+  // via mergeFieldInfo — Adobe overwrites the value at sign time anyway,
+  // and any value we send risks colliding with the calculation expression.
+  calculated?: boolean;
 }
 
 export interface ContractTerm {

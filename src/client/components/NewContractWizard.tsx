@@ -94,31 +94,44 @@ function isSenderField(f: AdobeSignFormField): boolean {
 }
 
 // Map an Adobe form-field name (e.g. "COMPANY NAME BYM", "address_line_1_yomdel")
-// to a BC customer property. Brand suffixes (BYM, YOMDEL, LEADPRO, etc.) are
-// ignored — the patterns just look for the meaningful substring. First match wins.
-const BC_FIELD_PATTERNS: Array<[RegExp, keyof BcCustomerLite]> = [
-  [/customer\s*(?:no\.?|number|num|id)/i,    'number'],
-  [/company\s*name|business\s*name|^company$/i, 'display_name'],
-  [/reg(?:istration)?\s*(?:no\.?|number|num)|tax\s*reg(?:istration)?|vat\s*(?:no|number|reg)?/i, 'tax_registration_number'],
-  [/address\s*(?:line\s*)?2/i,               'address_line_2'],
-  [/address\s*(?:line\s*)?1|^address$|street/i, 'address'],
-  [/post(?:al)?\s*code|^postcode$|zip\s*code|^zip$/i, 'postal_code'],
-  [/^city$|^town$/i,                          'city'],
-  [/county|state|province|region/i,           'state'],
-  [/country/i,                                'country'],
-  [/e[\-_]?mail/i,                            'email'],
-  [/mobile|cell(?:phone)?/i,                  'phone_number'],  // Phase 2 will use a dedicated mobile field from contacts
-  [/tel(?:ephone)?|^phone$|landline/i,        'phone_number'],
-  [/contact\s*name|primary\s*contact|^contact$/i, 'primary_contact_name'],
+// to one or more BC customer properties. The second tuple element is an *ordered*
+// list of keys — the first non-empty value wins. This lets a single Adobe field
+// (e.g. "Reg No. BYM") draw from multiple BC source columns with priority.
+// Brand suffixes (BYM, YOMDEL, LEADPRO, etc.) are ignored. First regex match wins.
+//
+// Ordering note: more specific patterns must come before more general ones (e.g.
+// VAT-specific is listed before the generic "Reg No." pattern so "VAT Reg No."
+// goes to tax_registration_number, not company_registration_number).
+const BC_FIELD_PATTERNS: Array<[RegExp, Array<keyof BcCustomerLite>]> = [
+  [/customer\s*(?:no\.?|number|num|id)/i,         ['number']],
+  [/company\s*name|business\s*name|^company$/i,   ['display_name']],
+  // VAT-specific — goes to tax_registration_number only
+  [/\bvat\s*(?:reg(?:istration)?|no\.?|number)\b/i, ['tax_registration_number']],
+  [/\btax\s*reg(?:istration)?\b/i,                ['tax_registration_number']],
+  // Generic "Reg No." / "Registration" / "Company Reg" — prefer company reg
+  // (Companies House style) but fall back to VAT reg if that's all we have.
+  [/(?:^|[^a-z])(?:company\s*)?reg(?:istration)?(?:\s*(?:no\.?|number|num))?/i,
+                                                  ['company_registration_number', 'tax_registration_number']],
+  [/address\s*(?:line\s*)?2/i,                    ['address_line_2']],
+  [/address\s*(?:line\s*)?1|^address$|street/i,   ['address']],
+  [/post(?:al)?\s*code|^postcode$|zip\s*code|^zip$/i, ['postal_code']],
+  [/^city$|^town$/i,                              ['city']],
+  [/county|state|province|region/i,               ['state']],
+  [/country/i,                                    ['country']],
+  [/e[\-_]?mail/i,                                ['email']],
+  [/mobile|cell(?:phone)?/i,                      ['phone_number']],  // Phase 2 will use a dedicated mobile field from contacts
+  [/tel(?:ephone)?|^phone$|landline/i,            ['phone_number']],
+  [/contact\s*name|primary\s*contact|^contact$/i, ['primary_contact_name']],
 ];
 
-// Returns the BC property name to fill from for a given Adobe field, or null if
-// the field doesn't match any BC field — caller leaves those untouched.
-function mapAdobeFieldToBcKey(adobeName: string): keyof BcCustomerLite | null {
-  for (const [pattern, key] of BC_FIELD_PATTERNS) {
-    if (pattern.test(adobeName)) return key;
+// Returns the ordered BC property-key candidates for a given Adobe field. The
+// caller iterates them in order and uses the first non-empty value. An empty
+// array means the field doesn't map to any BC property and is left untouched.
+function mapAdobeFieldToBcKeys(adobeName: string): Array<keyof BcCustomerLite> {
+  for (const [pattern, keys] of BC_FIELD_PATTERNS) {
+    if (pattern.test(adobeName)) return keys;
   }
-  return null;
+  return [];
 }
 
 export function NewContractWizard({ onNavigateToAgreements }: Props) {
@@ -198,16 +211,31 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     return false;
   }, [signerOverrides]);
 
-  // Split fields by who fills them. Sender fields appear as wizard inputs; signer
-  // fields appear as a read-only "Signer will fill" panel. A field is sender-only
-  // when Adobe's assignee says so AND no selected template's overrides list it.
+  // Calculated fields are computed by Adobe at sign time from other fields'
+  // values (e.g. a Total = Quantity × Price). NOVA must not pre-fill them:
+  // any value we send via mergeFieldInfo would either be ignored by Adobe's
+  // calculation engine or collide with it. They're shown to the sender as a
+  // read-only summary so they know which values are automated.
+  const calculatedFields = useMemo(
+    () => mergedFields.filter(f => f.calculated === true),
+    [mergedFields]
+  );
+  const nonCalculatedFields = useMemo(
+    () => mergedFields.filter(f => f.calculated !== true),
+    [mergedFields]
+  );
+
+  // Split non-calculated fields by who fills them. Sender fields appear as
+  // wizard inputs; signer fields appear as a read-only "Signer will fill"
+  // panel. A field is sender-only when Adobe's assignee says so AND no
+  // selected template's overrides list it.
   const senderFields = useMemo(
-    () => mergedFields.filter(f => isSenderField(f) && !isOverriddenSigner(f)),
-    [mergedFields, isOverriddenSigner]
+    () => nonCalculatedFields.filter(f => isSenderField(f) && !isOverriddenSigner(f)),
+    [nonCalculatedFields, isOverriddenSigner]
   );
   const signerFields = useMemo(
-    () => mergedFields.filter(f => !isSenderField(f) || isOverriddenSigner(f)),
-    [mergedFields, isOverriddenSigner]
+    () => nonCalculatedFields.filter(f => !isSenderField(f) || isOverriddenSigner(f)),
+    [nonCalculatedFields, isOverriddenSigner]
   );
 
   const fetchTemplates = useCallback(async (force = false) => {
@@ -355,11 +383,21 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       const next = { ...prev };
       const filled = new Set<string>();
       for (const f of senderFields) {
-        const key = mapAdobeFieldToBcKey(f.name);
-        if (!key) continue;
-        const val = customer[key];
-        if (val !== null && val !== undefined && String(val).trim() !== '') {
-          next[f.name] = String(val);
+        const keys = mapAdobeFieldToBcKeys(f.name);
+        if (keys.length === 0) continue;
+        // Walk the candidate keys in priority order — first non-empty wins.
+        // Lets a single Adobe field (e.g. "Reg No. BYM") draw from
+        // company_registration_number with fallback to tax_registration_number.
+        let val: string | null = null;
+        for (const k of keys) {
+          const v = customer[k];
+          if (v !== null && v !== undefined && String(v).trim() !== '') {
+            val = String(v);
+            break;
+          }
+        }
+        if (val !== null) {
+          next[f.name] = val;
           filled.add(f.name);
         }
       }
@@ -926,6 +964,25 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                     </ul>
                     <div className="text-[10px] text-neutral-600 mt-2">
                       These fields appear in the agreement for the signer to fill when they open it in Adobe Sign.
+                    </div>
+                  </div>
+                )}
+
+                {calculatedFields.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-[#3a424d] bg-[#1e2228] p-3">
+                    <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">
+                      Auto-calculated by Adobe ({calculatedFields.length})
+                    </div>
+                    <ul className="space-y-1">
+                      {calculatedFields.map(f => (
+                        <li key={f.name} className="text-[11px] text-neutral-400 flex items-baseline gap-2">
+                          <span className="text-neutral-300">{f.displayLabel || f.name}</span>
+                          <span className="text-[9px] text-neutral-600 ml-auto">calculated</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-[10px] text-neutral-600 mt-2">
+                      Adobe computes these from other field values at sign time. NOVA doesn't pre-fill them.
                     </div>
                   </div>
                 )}

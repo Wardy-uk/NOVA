@@ -1930,6 +1930,11 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE bc_customers ADD tax_registration_number NVARCHAR(100) NULL;`,
     `IF COL_LENGTH('bc_customers', 'primary_contact_name') IS NULL
      ALTER TABLE bc_customers ADD primary_contact_name NVARCHAR(200) NULL;`,
+    // Company registration number (Companies House-style — separate from VAT).
+    // Populated from BC's 'registrationNumber' (Invoicing fast-tab) OR
+    // 'companyRegistrationNumber' (Credit Control) — sync coalesces the two.
+    `IF COL_LENGTH('bc_customers', 'company_registration_number') IS NULL
+     ALTER TABLE bc_customers ADD company_registration_number NVARCHAR(100) NULL;`,
 
     // Post-sign capture columns on adobe_sign_agreements. Set when an agreement
     // transitions to SIGNED — used as the raw material for downstream BC write-back.
