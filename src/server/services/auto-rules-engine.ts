@@ -536,11 +536,22 @@ export class AutoRulesEngine {
       updatePayload.priority = { name: action.priority };
     }
 
-    if (action.requestType) {
-      updatePayload['customfield_10020'] = { requestType: { name: action.requestType } };
-    }
-
+    // Set tier (+ priority) first. This MUST succeed on its own — do not bundle the
+    // JSM Request Type field into this call, or a 400 on that field (not on the edit
+    // screen / unknown request type) rolls back the tier change too. See NT-20498.
     await this.jiraClient.updateFields(ticketKey, updatePayload);
+
+    // Request Type (customfield_10020) is a special JSM field that often isn't settable
+    // via the edit API. Attempt it separately so a failure can't undo the tier move.
+    if (action.requestType) {
+      try {
+        await this.jiraClient.updateFields(ticketKey, {
+          [CF_REQUEST_TYPE]: { requestType: { name: action.requestType } },
+        });
+      } catch (err) {
+        console.warn(`[auto-rules] Failed to set request type '${action.requestType}' on ${ticketKey} (tier change already applied):`, err instanceof Error ? err.message : err);
+      }
+    }
 
     // Assign via round-robin if a pool is specified
     if (action.assignToPool && this.assignmentEngine) {

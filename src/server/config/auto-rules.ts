@@ -195,6 +195,7 @@ const RULES_RAW: unknown[] = [
       tier: 'Tier 2',
       requestType: 'Incident',
       priority: 'Critical',
+      assignToPool: 't2',
       note: 'MWU/DW check report routed to Tier 2 as Critical Incident.',
     },
   },
