@@ -2294,6 +2294,27 @@ async function main() {
           solvedByAccount.set(acc, (solvedByAccount.get(acc) || 0) + 1);
         }
 
+        // NOVA AI resolves tickets via the status transition but is not the assignee,
+        // so the assignee-based count above misses every NOVA solve. Credit NOVA for
+        // tickets it closed today (mirrors the n8n "Daily KPI Report v4" closed-by logic).
+        const novaAccountId = settings.nova_ai_jira_account_id || '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
+        if (novaAccountId) {
+          const novaClosedRaw = await aggregator.searchServiceDeskRaw(
+            `project = NT AND status CHANGED TO (Resolved, Closed) BY "${novaAccountId}" AFTER startOfDay() AND status in (Resolved, Closed)`,
+            ['assignee', 'customfield_12981', 'status'], 500,
+          );
+          let novaSolved = 0;
+          for (const iss of novaClosedRaw) {
+            const tv = iss.fields?.customfield_12981 as { value?: string } | string | undefined;
+            const tier = (typeof tv === 'string' ? tv : tv?.value ?? '').toString().trim().toLowerCase();
+            if (!SOLVE_TIERS.has(tier)) continue;
+            const acc = (iss.fields?.assignee as { accountId?: string } | undefined)?.accountId;
+            if (acc === novaAccountId) continue; // already counted via the assignee path
+            novaSolved++;
+          }
+          if (novaSolved > 0) solvedByAccount.set(novaAccountId, (solvedByAccount.get(novaAccountId) || 0) + novaSolved);
+        }
+
         for (const a of data as any[]) {
           const nameLower = (a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName || '').toLowerCase();
           const subset = enrichedLive.filter(x => agentNameMatches(x.aLower, nameLower)).map(x => x.e);
