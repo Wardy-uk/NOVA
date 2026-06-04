@@ -279,6 +279,8 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'agent_kb_confluence_space', label: 'KB Confluence Space Key', type: 'text', placeholder: 'SUPPORT', required: false },
       { key: 'agent_kb_parent_page_id', label: 'KB Parent Page ID', type: 'text', placeholder: 'Confluence parent page ID for KB articles', required: false },
       { key: 'agent_weekend_mode', label: 'Out-of-Hours Reduced Mode', type: 'toggle', placeholder: 'true', required: false },
+      { key: 'agent_backfill_enabled', label: 'Backfill Untriaged Tickets (every tick)', type: 'toggle', placeholder: 'true', required: false },
+      { key: 'agent_backfill_batch_size', label: 'Backfill Batch Size (tickets/tick)', type: 'text', placeholder: '10', required: false },
       { key: 'agent_working_hours', label: 'Working Hours (HH:MM-HH:MM)', type: 'text', placeholder: '08:00-18:00', required: false },
       { key: 'agent_working_days', label: 'Working Days (0=Sun, 6=Sat)', type: 'text', placeholder: '1,2,3,4,5', required: false },
       { key: 'abuse_report_db_connection', label: 'Abuse Report DB Connection', type: 'password', placeholder: 'Server=...;Database=...;User Id=...;Password=...', required: false },
