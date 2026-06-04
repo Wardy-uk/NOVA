@@ -118,6 +118,18 @@ try {
 catch {
     Write-Host ""
     Write-Host "Deployment failed: $_" -ForegroundColor Red
+    # The service was stopped at step [0/4]. Never leave NOVA down after a failed deploy —
+    # bring it back on the PREVIOUS build so triage/assignment keep running while you
+    # investigate. (A failed build leaves the old dist in place, so this is safe.)
+    Write-Host "Restarting $ServiceName so it isn't left stopped..." -ForegroundColor Yellow
+    nssm start $ServiceName 2>$null
+    Start-Sleep -Seconds 3
+    $recovery = nssm status $ServiceName
+    if ($recovery -match "RUNNING") {
+        Write-Host "$ServiceName recovered on the previous build." -ForegroundColor Green
+    } else {
+        Write-Host "$ServiceName is $recovery — NEEDS MANUAL ATTENTION." -ForegroundColor Red
+    }
     exit 1
 }
 finally {
