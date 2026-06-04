@@ -1057,6 +1057,25 @@ export class AgentLoop {
     }
   }
 
+  // True when the decision is a high-confidence customer resolution-confirmation that the
+  // model already recommended closing. Used to let such tickets auto-close even when a human
+  // is the assignee (observer mode). Narrow by design — gated on the existing thank-you
+  // auto-close toggle and the quick-win min-confidence threshold.
+  private isResolutionConfirmationClose(decision: import('./agent-types.js').AgentDecision): boolean {
+    if (this.settings.get('agent_quick_win_auto_close_thank_you') !== 'true') return false;
+
+    const recommended = (decision.output.recommended_action as string) || '';
+    const closes = recommended === 'close' || recommended === 'resolve' || decision.action === 'transition';
+    if (!closes) return false;
+
+    const intent = decision.output.intent as { type?: string; confidence?: number } | undefined;
+    if (intent?.type !== 'confirming_resolution' && intent?.type !== 'thank_you') return false;
+
+    const minConf = parseFloat(this.settings.get('agent_quick_win_min_confidence') || '0.90');
+    const conf = intent?.confidence ?? decision.confidence ?? 0;
+    return conf >= minConf;
+  }
+
   // ── C2: Auto-assign after triage ──
   private async tryAutoAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
     if (!this.assignmentEngine) return;
@@ -1632,8 +1651,26 @@ export class AgentLoop {
       return;
     }
 
-    // Observer mode: post notes only, no external actions on assigned tickets
+    // Observer mode: post notes only, no external actions on assigned tickets —
+    // EXCEPT a high-confidence customer resolution-confirmation, which auto-closes even
+    // on a human-assigned ticket. A clear "thanks, this is resolved" needs no human input;
+    // without this carve-out NOVA would only post a note and leave the ticket open.
     if (isAssigned && mode === 'observer') {
+      if (!decision.shadowMode && this.isResolutionConfirmationClose(decision) && this.guardrails.validate(decision).allowed) {
+        if (!(decision.output.quick_win as { type?: string } | undefined)?.type) {
+          const intent = decision.output.intent as { confidence?: number } | undefined;
+          decision.output.quick_win = {
+            type: 'thank_you',
+            confidence: intent?.confidence ?? decision.confidence,
+            reasoning: 'Customer confirmed resolution — auto-closing despite human assignee.',
+          };
+        }
+        const qwResult = await this.quickWinExecutor.executeAutoClose(decision, decisionId);
+        await this.observer.logOutcome(decisionId, qwResult);
+        console.log(`[agent] [OBSERVER→AUTO-CLOSE] ${decision.ticketKey}: customer confirmed resolution, closed without human input (${qwResult.success ? 'ok' : 'failed: ' + qwResult.error})`);
+        this.ticketsProcessed++;
+        return;
+      }
       await this.observer.logOutcome(decisionId, {
         success: true, action: decision.action, ticketKey: decision.ticketKey,
         detail: `[OBSERVER] Ticket assigned — posted internal note only, no external action taken.`,
