@@ -1241,8 +1241,12 @@ export class AgentLoop {
     if (!this.assignmentEngine) return { assigned: 0, failed: 0, total: 0 };
     if (!options?.skipWorkingHoursCheck && !this.assignmentEngine.isWorkingTime()) return { assigned: 0, failed: 0, total: 0 };
 
-    const maxAgeHours = options?.maxAgeHours ?? this.getNumber('agent_sweep_max_age_hours', 168);
-    const limit = options?.limit ?? 30;
+    // 0 = no age cap. A ticket shouldn't go permanently unassigned just because it aged past
+    // a window — round-robin should still place it. Was 168h (7 days), which silently stranded
+    // older tickets. Configurable via agent_sweep_max_age_hours (default 0 = no limit).
+    const maxAgeHours = options?.maxAgeHours ?? this.getNumber('agent_sweep_max_age_hours', 0);
+    const limit = options?.limit ?? this.getNumber('agent_sweep_limit', 30);
+    const ageClause = maxAgeHours > 0 ? `AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())` : '';
 
     try {
       const projects = this.assignmentEngine.getConfiguredProjects();
@@ -1262,7 +1266,7 @@ export class AgentLoop {
            AND c.status_category != 'done'
            AND (c.current_tier IS NULL OR c.current_tier != 'Development')
            AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
-           AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())
+           ${ageClause}
            AND c.project_key IN (${projectPlaceholders})
            AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation'))
            AND (c.labels IS NULL OR c.labels NOT LIKE '%TPJ_Feed%')
@@ -1275,11 +1279,11 @@ export class AgentLoop {
       );
 
       if (unassigned.length === 0) return { assigned: 0, failed: 0, total: 0 };
-      console.log(`[agent] Unassigned sweep (${maxAgeHours}h window): ${unassigned.length} tickets found`);
+      console.log(`[agent] Unassigned sweep (${maxAgeHours > 0 ? maxAgeHours + 'h window' : 'no age cap'}): ${unassigned.length} tickets found`);
 
       const maxPerPool: Record<string, number> = {
-        cc: this.getNumber('assignment_max_per_run_cc', 10),
-        t2: this.getNumber('assignment_max_per_run_t2', 10),
+        cc: this.getNumber('assignment_max_per_run_cc', 30),
+        t2: this.getNumber('assignment_max_per_run_t2', 30),
         tpj: this.getNumber('assignment_max_per_run_tpj', 10),
         digital: 10,
       };

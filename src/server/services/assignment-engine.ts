@@ -878,10 +878,34 @@ export class AssignmentEngine {
   private buildWorkingDayClock(): WorkingDayClock {
     const bankHolidays = this.loadBankHolidays();
     this.bankHolidaysHash = bankHolidays.join(',');
+    // Align assignment hours with the agent loop / team working hours (agent_working_hours,
+    // default 08:00-18:00). Previously hardcoded to 09:00-17:00, which left round-robin dark
+    // before 09:00 and after 17:00 even while the loop was active — so the morning restart
+    // catch-up could triage tickets but not assign them until 09:00.
+    const { start, end } = this.parseWorkingHours();
     return createWorkingDayClock(
-      { start: 9, end: 17, timezone: 'Europe/London', daysOfWeek: [1, 2, 3, 4, 5] },
+      { start, end, timezone: 'Europe/London', daysOfWeek: this.parseWorkingDays() },
       bankHolidays,
     );
+  }
+
+  /** Parse agent_working_hours ("HH:MM-HH:MM") into integer start/end hours. Defaults to 08-18. */
+  private parseWorkingHours(): { start: number; end: number } {
+    const raw = (this.settingsQueries.get('agent_working_hours') || '08:00-18:00').trim();
+    const m = raw.match(/^(\d{1,2}):\d{2}-(\d{1,2}):\d{2}$/);
+    if (!m) return { start: 8, end: 18 };
+    const start = parseInt(m[1], 10);
+    const end = parseInt(m[2], 10);
+    if (isNaN(start) || isNaN(end) || start >= end) return { start: 8, end: 18 };
+    return { start, end };
+  }
+
+  /** Parse agent_working_days ("1,2,3,4,5", 0=Sun) into a day array. Defaults to Mon-Fri. */
+  private parseWorkingDays(): number[] {
+    const raw = (this.settingsQueries.get('agent_working_days') || '').trim();
+    if (!raw) return [1, 2, 3, 4, 5];
+    const days = raw.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6);
+    return days.length ? days : [1, 2, 3, 4, 5];
   }
 
   private loadBankHolidays(): string[] {
