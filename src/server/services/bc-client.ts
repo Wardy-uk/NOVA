@@ -183,20 +183,34 @@ export class BusinessCentralClient {
 
   async searchCustomers(query: string): Promise<BcRawCustomer[]> {
     const escaped = query.replace(/'/g, "''");
-    const filter = `contains(displayName, '${escaped}') or contains(email, '${escaped}') or contains(number, '${escaped}')`;
-    console.log(`[bc] Searching customers: filter=${filter}`);
-    try {
-      const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
-        '$filter': filter,
-        '$top': '20',
-        '$select': 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked',
-      });
-      console.log(`[bc] Search returned ${data.value?.length ?? 0} results`);
-      return data.value ?? [];
-    } catch (err) {
-      console.error(`[bc] Search failed:`, err instanceof Error ? err.message : err);
-      throw err;
-    }
+    const select = 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked';
+    // BC OData does NOT support the OR operator across distinct fields in a single
+    // $filter — it returns 400 "The 'OR' operator is not supported on distinct
+    // fields on an OData filter". The old single-filter
+    //   contains(displayName,..) or contains(email,..) or contains(number,..)
+    // therefore failed on EVERY search (which the UI surfaced as "No results
+    // found"). Run one contains() per field instead and merge unique results.
+    const fields = ['displayName', 'email', 'number'];
+    const byNumber = new Map<string, BcRawCustomer>();
+    await Promise.all(fields.map(async (field) => {
+      try {
+        const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
+          '$filter': `contains(${field}, '${escaped}')`,
+          '$top': '20',
+          '$select': select,
+        });
+        for (const c of data.value ?? []) {
+          if (c.number && !byNumber.has(c.number)) byNumber.set(c.number, c);
+        }
+      } catch (err) {
+        // Don't let one unfilterable field kill the whole search — the primary
+        // path (displayName) should still return even if e.g. a tenant rejects
+        // contains() on another field.
+        console.warn(`[bc] search field '${field}' failed:`, err instanceof Error ? err.message : err);
+      }
+    }));
+    console.log(`[bc] Search "${query}" returned ${byNumber.size} unique results`);
+    return [...byNumber.values()];
   }
 
   async getSalesOrders(customerNumber: string): Promise<BcRawOrder[]> {
