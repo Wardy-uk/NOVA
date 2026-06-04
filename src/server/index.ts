@@ -3671,6 +3671,13 @@ ${bodyGrid}
               throw fieldErr;
             }
           }
+          // Move CurrentTier off Tier 3 → Development so the ticket leaves
+          // the dev review queue (the transition doesn't do this on its own).
+          try {
+            await client.updateFields(entry.jira_key, { customfield_12981: { id: '13064' } });
+          } catch (tierErr) {
+            console.warn(`[DevReviewOutbox] ${entry.jira_key}: tier→Development update failed: ${tierErr instanceof Error ? tierErr.message : tierErr}`);
+          }
           await devReviewQueries.markAccepted(entry.jira_key);
         } else if (entry.op === 'return') {
           const transitionId = String(payload.returnTransitionId || '');

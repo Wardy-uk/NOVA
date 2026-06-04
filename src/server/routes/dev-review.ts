@@ -37,6 +37,7 @@ const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
 // Tier 3 option id for CurrentTier
 const TIER_ID_T3 = '13063';
 const TIER_ID_T2 = '13062';
+const TIER_ID_DEVELOPMENT = '13064';
 
 /** Map a Jira Nurtur Product value to a Dev Team bucket. All TPJ variants
  *  collapse into a single "TPJ" bucket. Unknown products pass through as-is;
@@ -307,6 +308,15 @@ export function createDevReviewRoutes(
           claimed_by_display: st?.claimed_by_user_id ? claimerDisplayMap.get(st.claimed_by_user_id) || null : null,
         };
       });
+
+      // Hide tickets NOVA has already resolved (accepted into development /
+      // returned to T2) even if the Jira cache hasn't yet picked up the tier
+      // change. Without this an accepted ticket lingers in the queue until the
+      // next cache sync, and the queue count drifts from the wallboard — which
+      // already counts dev_review_state and excludes these statuses.
+      enriched = enriched.filter(
+        (item) => item.state?.status !== 'accepted' && item.state?.status !== 'returned',
+      );
 
       // Filter by user's NOVA team jira_products. Admins always see all.
       // If the user's team has no products set (NULL or empty), they see all
@@ -967,25 +977,32 @@ export function createDevReviewRoutes(
     await devQueries.markThreadSynced(threadId, null);
     await devQueries.markAccepted(key);
 
-    // Step 2 — restore the original assignee (post-functions clear it).
+    // Step 2 — restore the original assignee (post-functions clear it) AND
+    // move CurrentTier off Tier 3 → Development. The Escalate to Development
+    // transition doesn't change CurrentTier on its own, so without this the
+    // ticket stays at Tier 3 and keeps appearing in the dev review queue.
     // TL;DR + Development Details were already set during the transition.
     // Logged loudly on failure — the accept is already committed in
     // NOVA and the ticket has moved in Jira, so we return ok: true with
     // a warnings list rather than failing the whole request.
-    const postUpdatePayload: Record<string, unknown> = {};
+    const postUpdatePayload: Record<string, unknown> = {
+      [CF_CURRENT_TIER]: { id: TIER_ID_DEVELOPMENT },
+    };
     if (originalAssigneeAccountId) {
       postUpdatePayload.assignee = { accountId: originalAssigneeAccountId };
     }
     const warnings: string[] = [];
-    if (Object.keys(postUpdatePayload).length > 0) {
-      try {
-        await client.updateFields(key, postUpdatePayload);
-      } catch (postErr) {
-        const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
-        console.warn(`[DevReview/accept] Post-transition field update failed for ${key}: ${msg}`);
-        warnings.push(`Field update after transition failed: ${msg}`);
-      }
+    try {
+      await client.updateFields(key, postUpdatePayload);
+    } catch (postErr) {
+      const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
+      console.warn(`[DevReview/accept] Post-transition field update failed for ${key}: ${msg}`);
+      warnings.push(`Field update after transition failed (ticket may linger in queue): ${msg}`);
     }
+    // Refresh this issue in the Jira cache so the new tier propagates and the
+    // ticket drops out of getTier3Issues() promptly — otherwise the queue can
+    // re-open the accepted state row on its next poll.
+    if (syncService) syncService.syncSingleIssue(key).catch(() => {});
 
     // Step 3 — internal comment aimed at the T2 agent. Fire-and-forget
     // so a slow/hung Jira call can't time out the accept response.
@@ -1283,21 +1300,26 @@ export function createDevReviewRoutes(
     await devQueries.markThreadSynced(threadId, null);
     await devQueries.markAccepted(key, workItemKey);
 
-    // Step 2 — restore the original assignee
+    // Step 2 — restore the original assignee AND move CurrentTier off Tier 3
+    // → Development so the ticket leaves the dev review queue (the transition
+    // doesn't change CurrentTier on its own).
     const warnings: string[] = [];
-    const postUpdatePayload: Record<string, unknown> = {};
+    const postUpdatePayload: Record<string, unknown> = {
+      [CF_CURRENT_TIER]: { id: TIER_ID_DEVELOPMENT },
+    };
     if (originalAssigneeAccountId) {
       postUpdatePayload.assignee = { accountId: originalAssigneeAccountId };
     }
-    if (Object.keys(postUpdatePayload).length > 0) {
-      try {
-        await client.updateFields(key, postUpdatePayload);
-      } catch (postErr) {
-        const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
-        console.warn(`[DevReview/link-existing] Post-transition field update failed for ${key}: ${msg}`);
-        warnings.push(`Field update after transition failed: ${msg}`);
-      }
+    try {
+      await client.updateFields(key, postUpdatePayload);
+    } catch (postErr) {
+      const msg = postErr instanceof Error ? postErr.message : 'post-transition update failed';
+      console.warn(`[DevReview/link-existing] Post-transition field update failed for ${key}: ${msg}`);
+      warnings.push(`Field update after transition failed (ticket may linger in queue): ${msg}`);
     }
+    // Refresh the Jira cache so the tier change propagates and the ticket
+    // drops out of getTier3Issues() promptly.
+    if (syncService) syncService.syncSingleIssue(key).catch(() => {});
 
     // Step 3 — internal comment aimed at the T2 agent (fire-and-forget)
     const agentNoticeText =
