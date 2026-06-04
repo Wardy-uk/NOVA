@@ -1754,14 +1754,16 @@ async function main() {
           fullSyncPromise.then(async () => {
             try {
               const projects = (settingsQueries.get('agent_jira_project') || 'NT').split(',').map((p: string) => p.trim()).filter(Boolean);
-              // Look back 24h (not 1h) so tickets that arrived during an overnight or
-              // multi-hour outage are still caught on restart. getRestartGapTickets only
-              // returns tickets with NO agent state, so a wider window never re-processes
-              // anything already handled — it just back-fills genuinely-missed tickets.
-              const catchUpSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+              // Look back 72h (not 1h) so tickets that arrived during an outage spanning
+              // a weekend are still caught on restart. This is the ONLY recovery net while
+              // the unbounded backfill sweep (agent_backfill_enabled) is off, so the window
+              // is deliberately generous. getRestartGapTickets only returns tickets with NO
+              // agent state, so a wider window never re-processes anything already handled —
+              // it just back-fills genuinely-missed tickets.
+              const catchUpSince = new Date(Date.now() - 72 * 60 * 60 * 1000);
               const gapTickets = await jiraCacheQueries.getRestartGapTickets(projects, catchUpSince);
               if (gapTickets.length > 0) {
-                console.log(`[Startup] Restart catch-up: ${gapTickets.length} ticket(s) created in last 24h with no agent state — queuing`);
+                console.log(`[Startup] Restart catch-up: ${gapTickets.length} ticket(s) created in last 72h with no agent state — queuing`);
                 agentLoop!.getPerceiver().queueCatchUpIssues(gapTickets);
               }
             } catch (err) {
