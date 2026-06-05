@@ -72,6 +72,8 @@ export class BusinessCentralClient {
   private baseUrl: string;
   private tokenUrl: string;
   private tokenCache: { token: string; expiresAt: number } | null = null;
+  private customerCache: { at: number; rows: BcRawCustomer[] } | null = null;
+  private static readonly CUSTOMER_CACHE_MS = 5 * 60_000;
 
   constructor(private config: BcConfig) {
     this.baseUrl = `https://api.businesscentral.dynamics.com/v2.0/${config.tenantId}/${config.environment}/api/v2.0/companies(${config.companyId})`;
@@ -181,36 +183,34 @@ export class BusinessCentralClient {
     return data.value?.[0] ?? null;
   }
 
+  private async getCustomersCached(): Promise<BcRawCustomer[]> {
+    if (this.customerCache && Date.now() - this.customerCache.at < BusinessCentralClient.CUSTOMER_CACHE_MS) {
+      return this.customerCache.rows;
+    }
+    const rows = await this.getCustomers();
+    this.customerCache = { at: Date.now(), rows };
+    return rows;
+  }
+
   async searchCustomers(query: string): Promise<BcRawCustomer[]> {
-    const escaped = query.replace(/'/g, "''");
-    const select = 'id,number,displayName,email,phoneNumber,addressLine1,city,country,balance,blocked';
-    // BC OData does NOT support the OR operator across distinct fields in a single
-    // $filter — it returns 400 "The 'OR' operator is not supported on distinct
-    // fields on an OData filter". The old single-filter
-    //   contains(displayName,..) or contains(email,..) or contains(number,..)
-    // therefore failed on EVERY search (which the UI surfaced as "No results
-    // found"). Run one contains() per field instead and merge unique results.
-    const fields = ['displayName', 'email', 'number'];
-    const byNumber = new Map<string, BcRawCustomer>();
-    await Promise.all(fields.map(async (field) => {
-      try {
-        const data = await this.request<{ value: BcRawCustomer[] }>('/customers', {
-          '$filter': `contains(${field}, '${escaped}')`,
-          '$top': '20',
-          '$select': select,
-        });
-        for (const c of data.value ?? []) {
-          if (c.number && !byNumber.has(c.number)) byNumber.set(c.number, c);
-        }
-      } catch (err) {
-        // Don't let one unfilterable field kill the whole search — the primary
-        // path (displayName) should still return even if e.g. a tenant rejects
-        // contains() on another field.
-        console.warn(`[bc] search field '${field}' failed:`, err instanceof Error ? err.message : err);
-      }
-    }));
-    console.log(`[bc] Search "${query}" returned ${byNumber.size} unique results`);
-    return [...byNumber.values()];
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    // BC's OData $filter can't do this search server-side:
+    //   - contains() is CASE-SENSITIVE (contains(displayName,'guild') returns
+    //     nothing; only 'Guild' matches), and tolower()/toupper() are silently
+    //     ignored (200 OK, empty result) — so there's no case-insensitive filter.
+    //   - OR across distinct fields is rejected (400 "The 'OR' operator is not
+    //     supported on distinct fields on an OData filter").
+    // So pull the (cached) customer list and filter in JS — case-insensitive,
+    // substring, across number/displayName/email. ~2k customers, cached 5 min.
+    const rows = await this.getCustomersCached();
+    const matches = rows.filter(c =>
+      (c.displayName && c.displayName.toLowerCase().includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)) ||
+      (c.number && c.number.toLowerCase().includes(q))
+    );
+    console.log(`[bc] Search "${query}" matched ${matches.length}/${rows.length} customers`);
+    return matches.slice(0, 25);
   }
 
   async getSalesOrders(customerNumber: string): Promise<BcRawOrder[]> {
