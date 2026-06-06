@@ -190,6 +190,8 @@ import { processEmailQueue } from './services/calyx-email.js';
 import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 */
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
+import { createKpiOrgRoutes } from './routes/kpi-org.js';
+import { captureSupportNt } from './services/kpi-org/index.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -1095,6 +1097,13 @@ async function main() {
     jiraClient: agentJiraClient,
   }));
 
+  // ── Org KPIs (Layer 1 rebuild) — Support/NT scorecard from kpi_org_daily ──
+  // New, fully isolated parallel system: reads/computes the agreed Support/NT
+  // KPI definitions (agent_work/ba/org-kpis-spec.md). Jira-backed KPIs compute
+  // via the REST client (validated JQL); manual KPIs are entered via the API.
+  app.use('/api/kpi-org', requireAreaAccess(['kpis', 'qa'], 'view'),
+    createKpiOrgRoutes({ getJiraClient: () => agentJiraClient }));
+
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
@@ -1541,6 +1550,16 @@ async function main() {
       kpiPipeline.captureEodSnapshot().catch(() => {});
       kpiPipeline.collectDerivedKpis().catch(err => console.error('[kpi-pipeline] Derived KPIs startup failed:', err instanceof Error ? err.message : err));
     }, 120_000);
+
+    // Org KPI (Layer 1) capture — freeze Support/NT KPIs at 18:00 UK each day.
+    jobRegistry.register('kpi-org-capture', 'Org KPI capture (Support/NT 18:00 freeze)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+      if (ukHour === 18 && ukMin < 10 && agentJiraClient) {
+        await captureSupportNt(agentJiraClient);
+      }
+    }, 10 * 60 * 1000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00, EOD snapshot 17:25, derived KPIs 17:30
     jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + EOD + derived', async () => {

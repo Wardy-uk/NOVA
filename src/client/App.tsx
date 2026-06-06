@@ -27,6 +27,7 @@ const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js')
 const KpiLeaderboardView = lazy(() => import('./components/KpiLeaderboardView.js').then(m => ({ default: m.KpiLeaderboardView })));
 const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.js').then(m => ({ default: m.KpiDailyHistoryView })));
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
+const SupportKpiScorecard = lazy(() => import('./components/SupportKpiScorecard.js').then(m => ({ default: m.SupportKpiScorecard })));
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
 const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
@@ -93,12 +94,13 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
 type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
+  | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review' | 'wb-ricky'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
@@ -194,6 +196,13 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-team-breached', label: 'Team Breaches' },
       { view: 'kpi-escalations', label: 'Escalations' },
       { view: 'agent-kpis', label: 'Agent KPIs' },
+    ],
+  },
+  'kpi-rebuild': {
+    label: 'KPIs (Rebuild)',
+    defaultView: 'kpi-rebuild-support',
+    tabs: [
+      { view: 'kpi-rebuild-support', label: 'Support' },
     ],
   },
   trends: {
@@ -295,7 +304,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -709,6 +718,7 @@ export function App() {
 
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
+    if (area === 'kpi-rebuild') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -1071,6 +1081,11 @@ export function App() {
           )}
           {view === 'agent-kpis' && (
             <AgentKpisView />
+          )}
+
+          {/* KPIs (Rebuild) — Layer 1 org KPIs */}
+          {view === 'kpi-rebuild-support' && (
+            <SupportKpiScorecard />
           )}
 
           {/* Wallboards */}
