@@ -87,6 +87,10 @@ const ACTIONABLE_JQL = `status not in ("Waiting On Requestor", "Waiting On Partn
 export const RESOLUTION_SLA_NAME = 'Time to resolution';
 const RES_BREACHED = `"${RESOLUTION_SLA_NAME}" = breached()`;
 
+/** Legacy due-date gate for over-SLA (ACTIONABLE only): count only tickets whose
+ *  due date has passed (or have none). Matches the SLA Breach Board / n8n report. */
+export const DUE_GATE = `(duedate is EMPTY OR duedate <= endOfDay())`;
+
 /** NOVA-Jira service account — splits Solved by Team vs NOVA. */
 export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
@@ -153,13 +157,13 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_incidents_sla_actionable', label: 'Number of Incident tickets over SLA (actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest',
     rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${INCIDENT_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL}` },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${INCIDENT_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` },
   },
   {
     key: 'nt_production_sla_actionable', label: 'Number of Production tickets over SLA (actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest',
     rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${PRODUCTION_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL}` },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${PRODUCTION_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` },
   },
   {
     key: 'nt_incidents_sla_not_actionable', label: 'Number of Incident tickets over SLA (Not actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',

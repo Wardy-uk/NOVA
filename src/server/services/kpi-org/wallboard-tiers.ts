@@ -5,7 +5,7 @@
 // (NT open-filter, isNoReply, resolution-SLA-breached + actionable). 60s-cached.
 
 import type { JiraRestClient } from '../jira-client.js';
-import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RESOLUTION_SLA_NAME } from './registry.js';
+import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RESOLUTION_SLA_NAME, DUE_GATE } from './registry.js';
 import { countNoReply } from './nt-compute.js';
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
@@ -56,7 +56,7 @@ async function build(jira: JiraRestClient): Promise<TierSnapshot> {
     const base = `${NT_OPEN} AND ${b.filter}`;
     const [active, overSla] = await Promise.all([
       jira.jqlCount(base),
-      jira.jqlCount(`${base} AND ${RES_BREACHED} AND ${ACTIONABLE}`),
+      jira.jqlCount(`${base} AND ${RES_BREACHED} AND ${ACTIONABLE} AND ${DUE_GATE}`),
     ]);
     let noReply: number | null;
     try { noReply = await countNoReply(jira, base, now); } catch { noReply = null; }

@@ -263,6 +263,9 @@ Status:        AGREED
 
 ### Shared conditions: Over-SLA + actionable split (#9–#12)
 - **Over SLA** = Resolution SLA breached = `customfield_14048` JSM SLA cycle `breached` or remaining < 0.
+- **Due-date gate (ACTIONABLE only)** — added 2026-06-06 per Nick (legacy def is correct):
+  over-SLA *actionable* (#9/#10) counts only tickets with `(duedate is EMPTY OR duedate <= endOfDay())`.
+  The *not-actionable* counts (#11/#12) keep NO due-date gate. Applied in registry + wallboard-tiers.
 - **Actionable** statuses (target 0 — we can act): Open, Work in progress, Reopened,
   Waiting on Assignee, Pending Rejection Approval (+ any other open status NOT waiting-on-external).
 - **Not actionable** statuses (target 20 — out of our hands): Waiting On Requestor,
