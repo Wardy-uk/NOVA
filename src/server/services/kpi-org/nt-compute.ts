@@ -38,6 +38,18 @@ function parseDate(v: unknown): Date | null {
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
 
+/** Count open tickets matching `jql` that satisfy the isNoReply predicate. */
+export async function countNoReply(jira: JiraRestClient, jql: string, now: Date): Promise<number> {
+  const res = await jira.searchJqlAll(jql, ['status', 'created', 'customfield_14081', 'customfield_14185'], 2000);
+  let count = 0;
+  for (const issue of res.issues) {
+    const f = issue.fields as Record<string, unknown>;
+    const status = (f.status as { name?: string } | undefined)?.name ?? null;
+    if (isNoReply(status, parseDate(f.created), parseDate(f.customfield_14081), parseDate(f.customfield_14185), now)) count++;
+  }
+  return count;
+}
+
 export interface ComputeResult {
   value: number | null;
   /** True when the compute path failed (vs a legitimate zero/null). */
@@ -76,26 +88,8 @@ export async function computeNtKpi(
       return { value: rows[0]?.n ?? 0, failed: false };
     }
 
-    case 'no_reply': {
-      const res = await jira.searchJqlAll(
-        c.bucketJql,
-        ['status', 'created', 'customfield_14081', 'customfield_14185'],
-        2000,
-      );
-      let count = 0;
-      for (const issue of res.issues) {
-        const f = issue.fields as Record<string, unknown>;
-        const status = (f.status as { name?: string } | undefined)?.name ?? null;
-        if (isNoReply(
-          status,
-          parseDate(f.created),
-          parseDate(f.customfield_14081),
-          parseDate(f.customfield_14185),
-          now,
-        )) count++;
-      }
-      return { value: count, failed: false };
-    }
+    case 'no_reply':
+      return { value: await countNoReply(jira, c.bucketJql, now), failed: false };
 
     case 'oldest_actionable': {
       const jql = `${c.bucketJql} AND status not in (${NOT_ACTIONABLE_LIST}) ORDER BY created ASC`;

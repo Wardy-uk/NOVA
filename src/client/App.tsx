@@ -102,7 +102,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review' | 'wb-ricky'
-  | 'wbr-support' | 'wbr-breach'
+  | 'wbr-support' | 'wbr-breach' | 'wbr-cc' | 'wbr-tech-support'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -237,9 +237,11 @@ const AREAS: Record<Area, AreaDef> = {
   },
   'wallboards-rebuild': {
     label: 'Wallboards (Rebuild)',
-    defaultView: 'wbr-support',
+    defaultView: 'wbr-cc',
     tabs: [
-      { view: 'wbr-support', label: 'Support' },
+      { view: 'wbr-cc', label: 'Customer Care' },
+      { view: 'wbr-tech-support', label: 'Technical Support' },
+      { view: 'wbr-support', label: 'Support (All KPIs)' },
       { view: 'wbr-breach', label: 'KPI Breach' },
     ],
   },
@@ -325,7 +327,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'wbr-cc', 'wbr-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1157,6 +1159,20 @@ export function App() {
           )}
 
           {/* Wallboards (Rebuild) — Layer-1 org KPIs */}
+          {view === 'wbr-cc' && (
+            <iframe
+              src="/wallboard/rebuild/cc"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Customer Care (Rebuild) Wallboard"
+            />
+          )}
+          {view === 'wbr-tech-support' && (
+            <iframe
+              src="/wallboard/rebuild/tech-support"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Technical Support (Rebuild) Wallboard"
+            />
+          )}
           {view === 'wbr-support' && (
             <iframe
               src="/wallboard/rebuild/support"

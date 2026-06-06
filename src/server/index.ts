@@ -193,6 +193,7 @@ import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
+import { getTierSnapshot, type TierSnapshot } from './services/kpi-org/wallboard-tiers.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -3258,6 +3259,77 @@ ${body}
     serveRebuildWb(res, '/wallboard/rebuild/support', 'Support — KPIs (Rebuild)', 'Live Support/NT KPIs', false));
   app.get('/wallboard/rebuild/breach', (_req, res) =>
     serveRebuildWb(res, '/wallboard/rebuild/breach', 'KPI Breach (Rebuild)', 'Support/NT KPIs currently in the red', true));
+
+  // Like-for-like rebuild boards — mirror the original Customer Care / Technical
+  // Support panels (legacy tier-slices) but computed by the new engine.
+  function renderRebuildTierWb(
+    snap: TierSnapshot,
+    opts: { title: string; subtitle: string; route: string; buckets: Array<{ key: string; label: string }> },
+  ): string {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const fmt = (v: number | null) => (v == null ? '—' : String(v));
+    const panel = (label: string, value: number | null, breach: boolean) => {
+      const color = breach ? ((value ?? 0) > 0 ? '#ef4444' : '#10b981') : '#5ec1ca';
+      const flash = breach && (value ?? 0) > 0 ? ' flash-red' : '';
+      return `<div class="${flash}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+        <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${label}</div>
+        <div style="font-size:84px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${fmt(value)}</div>
+      </div>`;
+    };
+    const cells = [
+      ...opts.buckets.map(b => panel(b.label, snap.tiers[b.key]?.active ?? null, false)),
+      ...opts.buckets.map(b => panel(`${b.label} — No Reply`, snap.tiers[b.key]?.noReply ?? null, true)),
+      ...opts.buckets.map(b => panel(`${b.label} — Over SLA`, snap.tiers[b.key]?.overSla ?? null, true)),
+    ].join('');
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${opts.title}</title>
+${wallboardRefreshScript(opts.route)}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${opts.title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${opts.subtitle}</div></div>
+  <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1">
+${cells}
+</div>
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${opts.title} &middot; ${dateStr} &middot; Source: kpi-org (NT)</div>
+</div></body></html>`;
+  }
+
+  async function serveRebuildTierWb(res: import('express').Response, route: string, title: string, subtitle: string, buckets: Array<{ key: string; label: string }>): Promise<void> {
+    const wbStart = Date.now();
+    if (!agentJiraClient) {
+      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
+      return;
+    }
+    try {
+      const snap = await getTierSnapshot(agentJiraClient);
+      res.send(renderRebuildTierWb(snap, { title, subtitle, route, buckets }));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, 'OK');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  }
+
+  app.get('/wallboard/rebuild/cc', (_req, res) =>
+    serveRebuildTierWb(res, '/wallboard/rebuild/cc', 'Customer Care (Rebuild)', 'Live queue metrics — new engine', [
+      { key: 'cc_incidents', label: 'CC Incidents' },
+      { key: 'cc_service_requests', label: 'CC Service Requests' },
+      { key: 'cc_tpj', label: 'Property Jungle' },
+    ]));
+  app.get('/wallboard/rebuild/tech-support', (_req, res) =>
+    serveRebuildTierWb(res, '/wallboard/rebuild/tech-support', 'Technical Support (Rebuild)', 'Live queue metrics — new engine', [
+      { key: 'production', label: 'Production' },
+      { key: 'tier2', label: 'Tier 2' },
+      { key: 'development', label: 'Development' },
+    ]));
 
   // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
   const portalGate: import('express').RequestHandler = (_req, res, next) => {
