@@ -192,6 +192,7 @@ import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt } from './services/kpi-org/index.js';
+import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -3171,6 +3172,92 @@ ${wallboardRefreshScript('/wallboard/ricky')}
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
+
+  // ── Wallboards (Rebuild) — Layer-1 org KPIs (Support/NT) ──
+  // NEW, parallel TV boards sourced ENTIRELY from the rebuilt KPI engine
+  // (kpi-org live snapshot). The legacy /wallboard/* boards above are untouched.
+  // Live (60s-cached) recompute so the board isn't stuck on the 18:00 freeze.
+  function rebuildWbValue(unit: string, value: number | null): string {
+    if (value == null) return '—';
+    if (unit === 'days') return `${value}d`;
+    if (unit === 'percent') return `${value}%`;
+    if (unit === 'currency') return `£${Math.round(value).toLocaleString('en-GB')}`;
+    return String(value);
+  }
+  function rebuildWbColor(rag: string | null): string {
+    if (rag === 'green') return '#10b981';
+    if (rag === 'amber') return '#eab308';
+    if (rag === 'red') return '#ef4444';
+    return '#5ec1ca';
+  }
+  function renderRebuildSupportWb(
+    snap: { day: string; items: Array<{ label: string; colA: string; unit: string; value: number | null; target: number | null; rag: string | null }> },
+    opts: { title: string; subtitle: string; route: string; breachOnly: boolean },
+  ): string {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const items = opts.breachOnly ? snap.items.filter(i => i.rag === 'red') : snap.items;
+    const groups = ['Support', 'Development'];
+
+    const sections = groups.map(group => {
+      const rows = items.filter(i => (i.colA || 'Support') === group);
+      if (!rows.length) return '';
+      const cards = rows.map(p => {
+        const color = rebuildWbColor(p.rag);
+        const flash = p.rag === 'red' ? ' flash-red' : '';
+        const target = p.target != null ? `Target ${rebuildWbValue(p.unit, p.target)}` : '';
+        return `<div class="${flash}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+          <div style="font-size:13px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:8px;letter-spacing:.2px;min-height:2.4em;display:flex;align-items:center">${p.label}</div>
+          <div style="font-size:54px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${rebuildWbValue(p.unit, p.value)}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:6px">${target}</div>
+        </div>`;
+      }).join('');
+      return `<div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin:8px 0 6px">${group}</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">${cards}</div>`;
+    }).join('');
+
+    const body = items.length
+      ? sections
+      : `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#10b981;font-size:28px">No breaching KPIs — all green ✅</div>`;
+
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${opts.title}</title>
+${wallboardRefreshScript(opts.route)}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${opts.title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${opts.subtitle}</div></div>
+  <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+${body}
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${opts.title} &middot; ${dateStr} &middot; Source: kpi-org (NT)</div>
+</div></body></html>`;
+  }
+
+  async function serveRebuildWb(res: import('express').Response, route: string, title: string, subtitle: string, breachOnly: boolean): Promise<void> {
+    const wbStart = Date.now();
+    if (!agentJiraClient) {
+      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
+      return;
+    }
+    try {
+      const snap = await getSupportLiveSnapshot(agentJiraClient);
+      res.send(renderRebuildSupportWb(snap, { title, subtitle, route, breachOnly }));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${snap.items.length} KPIs`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  }
+
+  app.get('/wallboard/rebuild/support', (_req, res) =>
+    serveRebuildWb(res, '/wallboard/rebuild/support', 'Support — KPIs (Rebuild)', 'Live Support/NT KPIs', false));
+  app.get('/wallboard/rebuild/breach', (_req, res) =>
+    serveRebuildWb(res, '/wallboard/rebuild/breach', 'KPI Breach (Rebuild)', 'Support/NT KPIs currently in the red', true));
 
   // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
   const portalGate: import('express').RequestHandler = (_req, res, next) => {

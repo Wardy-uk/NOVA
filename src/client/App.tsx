@@ -94,7 +94,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'wallboards-rebuild' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
 type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
@@ -102,6 +102,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review' | 'wb-ricky'
+  | 'wbr-support' | 'wbr-breach'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -234,6 +235,14 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'wb-ricky', label: 'Risk Board' },
     ],
   },
+  'wallboards-rebuild': {
+    label: 'Wallboards (Rebuild)',
+    defaultView: 'wbr-support',
+    tabs: [
+      { view: 'wbr-support', label: 'Support' },
+      { view: 'wbr-breach', label: 'KPI Breach' },
+    ],
+  },
   training: {
     label: 'Training',
     defaultView: 'training-matrix',
@@ -304,7 +313,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'wallboards-rebuild', 'training', 'devreview', 'board', 'backlog'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -316,7 +325,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -719,6 +728,7 @@ export function App() {
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
     if (area === 'kpi-rebuild') return true;
+    if (area === 'wallboards-rebuild') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -1143,6 +1153,22 @@ export function App() {
               src="/wallboard/ricky"
               style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
               title="Tech Support Risk Board"
+            />
+          )}
+
+          {/* Wallboards (Rebuild) — Layer-1 org KPIs */}
+          {view === 'wbr-support' && (
+            <iframe
+              src="/wallboard/rebuild/support"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="Support KPIs (Rebuild) Wallboard"
+            />
+          )}
+          {view === 'wbr-breach' && (
+            <iframe
+              src="/wallboard/rebuild/breach"
+              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
+              title="KPI Breach (Rebuild) Wallboard"
             />
           )}
 
