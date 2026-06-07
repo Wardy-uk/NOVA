@@ -10,6 +10,7 @@ import { Actor } from './actor.js';
 import { Observer } from './observer.js';
 import { KbSearchService } from './kb-search.js';
 import { LifecycleManager } from './lifecycle-manager.js';
+import { StaleLifecycleService } from './stale-lifecycle.js';
 
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { Guardrails, type GuardrailResult } from './guardrails.js';
@@ -64,6 +65,7 @@ export class AgentLoop {
   private actor: Actor;
   private observer: Observer;
   private lifecycleManager: LifecycleManager;
+  private staleLifecycle: StaleLifecycleService;
 
   private guardrails: Guardrails;
   private queueMonitor: QueueMonitor;
@@ -108,6 +110,7 @@ export class AgentLoop {
       approvalQueries, cache, llmService,
     );
     this.reasoner.setLifecycleManager(this.lifecycleManager);
+    this.staleLifecycle = new StaleLifecycleService(settings, jiraClient, this.observer, llmService);
 
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
@@ -720,7 +723,10 @@ export class AgentLoop {
       if ((isFirstSweep || this.tickCount % sweepInterval === 0) && this.currentMode === 'full') {
         await this.runApprovalSlaSweep();
         await this.runPipelineHealthCheck();
-        await this.runChaseSweep(shadowMode);
+        // Unified stale-ticket lifecycle (chase up to N, then auto-close). Working-hours only
+        // so we never email customers overnight. Supersedes the old runChaseSweep + the
+        // lifecycle-manager stale→close branches. See stale-lifecycle.ts.
+        await this.staleLifecycle.sweep(shadowMode);
         await this.runUnassignedSweep();
         await this.runPatternExtraction();
 
@@ -987,80 +993,10 @@ export class AgentLoop {
     }
   }
 
-  // ── C1: Chase sweep ──
-  private async runChaseSweep(shadowMode: AgentShadowMode): Promise<void> {
-    const enabled = this.settings.get('agent_chase_enabled') !== 'false';
-    if (!enabled) return;
-
-    const afterDays = this.getNumber('agent_chase_after_days', 5);
-    const intervalDays = this.getNumber('agent_chase_interval_days', 3);
-    const maxCount = this.getNumber('agent_chase_max_count', 2);
-    const batchSize = this.getNumber('agent_chase_batch_size', 10);
-
-    try {
-      const staleWaiting = await query<{
-        issue_key: string; summary: string; status_name: string;
-        assignee_email: string; reporter_display: string; reporter_email: string;
-        organisation: string; days_stale: number;
-      }>(
-        `SELECT TOP (${batchSize}) c.issue_key, c.summary, c.status_name, c.assignee_email,
-                c.reporter_display, c.reporter_email, c.organisation,
-                DATEDIFF(day, c.jira_updated, GETUTCDATE()) as days_stale
-         FROM jira_issue_cache c
-         LEFT JOIN agent_decisions d ON d.ticket_id = c.issue_key AND d.action = 'chase'
-           AND d.created_at > DATEADD(day, -${intervalDays}, GETUTCDATE())
-         WHERE c.status_name IN ('Waiting on Customer', 'Waiting for Customer')
-           AND c.status_category != 'done'
-           AND DATEDIFF(day, c.jira_updated, GETUTCDATE()) >= ${afterDays}
-           AND d.id IS NULL
-         ORDER BY c.jira_updated ASC`,
-      );
-
-      if (staleWaiting.length === 0) return;
-      console.log(`[agent] Chase sweep: ${staleWaiting.length} stale tickets found`);
-
-      for (const ticket of staleWaiting) {
-        // Check chase count cap
-        const priorChases = await query<{ cnt: number }>(
-          `SELECT COUNT(*) as cnt FROM agent_decisions WHERE ticket_id = ? AND action = 'chase'`,
-          [ticket.issue_key],
-        );
-        if ((priorChases[0]?.cnt ?? 0) >= maxCount) {
-          console.log(`[agent] Chase: ${ticket.issue_key} already chased ${priorChases[0]?.cnt} times — skipping`);
-          continue;
-        }
-
-        const chaseText = `Hi,\n\nWe're following up on ${ticket.issue_key} — "${ticket.summary}".\n\nWe've been waiting for your reply for ${ticket.days_stale} days. Could you let us know if you still need help with this issue?\n\nIf we don't hear back within 5 working days, we'll close this ticket automatically. You can always raise a new ticket or reply to this one to reopen it.\n\nThanks,\nNurtur Support`;
-
-        const decision: import('./agent-types.js').AgentDecision = {
-          ticketId: ticket.issue_key,
-          ticketKey: ticket.issue_key,
-          eventType: 'stale',
-          action: 'chase',
-          confidence: 1.0,
-          reasoning: `Ticket waiting on customer for ${ticket.days_stale} days — automated chase per SOP-003`,
-          approvalRequired: shadowMode === 'hybrid',
-          shadowMode: shadowMode === 'full_shadow',
-          inputs: { summary: ticket.summary, status: ticket.status_name, updated: new Date(Date.now() - ticket.days_stale * 86400000).toISOString() },
-          output: { draft_response: chaseText, recommended_action: 'chase' },
-        };
-
-        if (shadowMode === 'full_shadow') {
-          const decisionId = await this.observer.logDecision(decision);
-          await this.observer.logOutcome(decisionId, {
-            success: true, action: 'chase', ticketKey: ticket.issue_key,
-            detail: `[SHADOW] Would chase (${ticket.days_stale} days stale)`,
-          });
-        } else if (shadowMode === 'hybrid') {
-          await this.submitToApprovalQueue(decision, await this.observer.logDecision(decision));
-        } else {
-          await this.executeDecision(decision);
-        }
-      }
-    } catch (err) {
-      console.warn('[agent] Chase sweep failed:', err instanceof Error ? err.message : err);
-    }
-  }
+  // ── C1: Chase sweep — RETIRED. Superseded by StaleLifecycleService (stale-lifecycle.ts),
+  // invoked in the extended-sweeps block. The old version queried 'Waiting on Customer' /
+  // 'Waiting for Customer' (statuses that don't exist in NT — the real one is 'Waiting On
+  // Requestor', id 11768) and never auto-closed. See agent_work/ba/stale-ticket-autoclose-spec.md.
 
   // True when the decision is a high-confidence customer resolution-confirmation that the
   // model already recommended closing. Used to let such tickets auto-close even when a human

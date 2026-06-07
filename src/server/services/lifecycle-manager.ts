@@ -295,6 +295,14 @@ export class LifecycleManager {
   private async checkStaleTickets(shadow: boolean): Promise<{
     stale: number; chased: number; autoCloseCandidates: number; autoClosed: number;
   }> {
+    // RETIRED in favour of the unified StaleLifecycleService (stale-lifecycle.ts), which is
+    // JQL-driven (covers ALL waiting tickets, not just NOVA-tracked ones), counts human-or-AI
+    // chases, and closes as 'Request Cancelled / Withdrawn'. This internal-state path stays for
+    // rollback only — disabled while the unified service is enabled (the default).
+    if (this.settings.get('stale_autoclose_enabled') !== 'false') {
+      return { stale: 0, chased: 0, autoCloseCandidates: 0, autoClosed: 0 };
+    }
+
     const awaitingHours = this.getNumber('agent_awaiting_customer_hours', 48);
     const chaseDays = 5;
     const closeDays = 10;

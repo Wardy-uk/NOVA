@@ -116,6 +116,38 @@ export function addBusinessHours(start: Date, hours: number): Date {
 }
 
 /**
+ * Count whole business days elapsed between two dates (date granularity).
+ * Counts each business day strictly after `start`'s date up to and including `end`'s date.
+ * e.g. Mon 15:00 → Wed 10:00 = 2 (Tue, Wed). Weekends/bank holidays don't count.
+ */
+export function businessDaysBetween(start: Date, end: Date): number {
+  if (end <= start) return 0;
+  const cur = new Date(start);
+  cur.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+  let count = 0;
+  while (cur < last) {
+    cur.setDate(cur.getDate() + 1);
+    if (isBusinessDay(cur)) count++;
+  }
+  return count;
+}
+
+/**
+ * Return the date `n` business days after `start` (preserving the time-of-day of `start`).
+ */
+export function addBusinessDays(start: Date, n: number): Date {
+  const cur = new Date(start);
+  let added = 0;
+  while (added < n) {
+    cur.setDate(cur.getDate() + 1);
+    if (isBusinessDay(cur)) added++;
+  }
+  return cur;
+}
+
+/**
  * Check if a given date is within business hours.
  */
 export function isWithinBusinessHours(d: Date): boolean {

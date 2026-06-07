@@ -187,6 +187,11 @@ in the lifecycle manager.
 
 ## 12. Status
 
-**AGREED** (D1–D5 signed off). Next: write the implementation card (single `stale-lifecycle.ts`
-service + config keys + migration off `runChaseSweep` and the lifecycle stale→close branches),
-then build. Acceptance criterion #1 (the P6 wrong-status-name + coverage gap) is the headline fix.
+**BUILT** — implemented in `src/server/services/stale-lifecycle.ts` (`StaleLifecycleService`),
+wired into the agent-loop extended-sweep (working hours only). `runChaseSweep` and the
+lifecycle-manager stale→chase→close branches are retired (gated off while `stale_autoclose_enabled`
+≠ `false`). Working-day helpers added to `utils/business-hours.ts`.
+
+Implementation note (refinement on §4): a ticket is **never closed until at least one chase/warning
+has gone out** and a grace working-day has passed since it — so backlog tickets that were never
+chased get a final warning first, then close on the next cycle, rather than closing cold.
