@@ -1166,30 +1166,20 @@ export class AgentLoop {
     project: string,
     ticket?: { current_tier?: string | null; labels?: string | null } | null,
   ): Pool | null {
-    // int_setup label → TPJ (n8n parity)
+    // New tickets ALWAYS route to Customer Care. The only things that can divert a fresh
+    // ticket out of CC are explicit routing rules — and the deterministic ones
+    // (mwu-tier-2, plugin_to_tpj) plus the NTPJ fast-path run earlier in the tick and
+    // never reach here. So the only rules left to apply at triage are the int_setup
+    // label and the Development guard. The current_tier field is NOT authoritative at
+    // triage time and must not divert routing: a T2/T3/Production tier on a brand-new
+    // ticket does not pull it out of CC (it goes to CC; if it is genuinely T2 it gets
+    // re-tiered and the unassigned sweep / a routing rule reassigns it to a T2 agent).
+
+    // int_setup label is a routing rule → TPJ
     if (ticket?.labels && ticket.labels.includes('int_setup')) return 'tpj';
 
-    // Tier-based routing takes priority (matches n8n's customfield_12981)
-    if (ticket?.current_tier) {
-      const tier = ticket.current_tier.trim();
-      if (tier === 'Development') return null;
-      if (tier === 'Customer Care' || tier === 'T1') return 'cc';
-      if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
-    }
-
-    // Fallback: AI decision action/category
-    const action = decision.action || (decision.output?.recommended_action as string);
-    if (action === 'escalate') return 't2';
-
-    const category = (decision.output?.classification as any)?.category
-      || (decision.output?.category as string)
-      || (decision.inputs?.category as string);
-
-    const t2Categories = [
-      'integration_issue', 'api_error', 'data_migration', 'server_error',
-      'database_issue', 'feed_issue', 'technical_escalation',
-    ];
-    if (category && t2Categories.includes(category)) return 't2';
+    // Development-tier tickets are never auto-assigned
+    if (ticket?.current_tier && ticket.current_tier.trim() === 'Development') return null;
 
     return 'cc';
   }

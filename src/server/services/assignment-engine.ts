@@ -236,16 +236,11 @@ export class AssignmentEngine {
   }
 
   async assignWithFallback(ticketKey: string, pool: Pool, project: string, preferredSkills?: string[]): Promise<AssignmentResult | null> {
-    const config = this.getProjectPoolConfig(project);
+    // No cross-tier fallback: a ticket stays in its assigned pool. New tickets default
+    // to CC; only a routing rule pushes to T2/TPJ. If the assigned pool has no available
+    // agent we queue for retry rather than spilling to another tier — T2 must never fall
+    // to CC, and CC must never fall to T2.
     const fallbackChain: Pool[] = [pool];
-
-    if (config) {
-      for (const p of config.allowedPools) {
-        if (!fallbackChain.includes(p)) fallbackChain.push(p);
-      }
-    }
-    // No implicit cross-tier fallback — tickets stay in their assigned pool.
-    // T2 must not fall to CC, CC must not fall to T2.
 
     for (const tryPool of fallbackChain) {
       const result = await this.assignToJira(ticketKey, tryPool, preferredSkills, project);
@@ -946,8 +941,10 @@ export class AssignmentEngine {
     const config = this.getProjectPoolConfig(project);
     if (!config) return pool;
     if (!config.allowedPools.includes(pool)) {
-      console.warn(`[assignment] Pool ${pool} not allowed for ${project}, using default ${config.defaultPool}`);
-      return config.defaultPool;
+      // Never coerce across tiers (that would put e.g. a T2 ticket on a CC agent).
+      // Keep the routed pool; if it has no agents the caller queues for retry.
+      console.warn(`[assignment] Pool ${pool} not in allowedPools for ${project}; keeping pool (no cross-tier coercion)`);
+      return pool;
     }
     return pool;
   }
