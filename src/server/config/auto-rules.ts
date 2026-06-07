@@ -226,14 +226,9 @@ const RULES_RAW: unknown[] = [
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — duplicate of an existing open CIA Letter Alerting ticket.' },
   },
   {
-    id: 'general-same-reporter-dedup',
-    match: {
-      subject: { regex: '.{10,}' },
-    },
-    conditional: { type: 'duplicate_open_ticket', sameSubject: true, sameReporter: true },
-    action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — same reporter already has an open ticket with an identical subject.' },
-  },
-  {
+    // MUST stay before general-same-reporter-dedup: that rule's `.{10,}` subject regex
+    // also matches "CIA Letter Alerting", and would otherwise intercept the fall-through
+    // from cia-letter-dedup and block this time gate from ever running.
     id: 'cia-letter-autoclose',
     match: {
       subject: { equals: 'CIA Letter Alerting' },
@@ -246,6 +241,14 @@ const RULES_RAW: unknown[] = [
       resolution: 'No Fault Found',
       note: 'Auto-closed — CIA Letter Alerting ticket raised after 11:00, or over 24h old with no human assigned.',
     },
+  },
+  {
+    id: 'general-same-reporter-dedup',
+    match: {
+      subject: { regex: '.{10,}' },
+    },
+    conditional: { type: 'duplicate_open_ticket', sameSubject: true, sameReporter: true },
+    action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — same reporter already has an open ticket with an identical subject.' },
   },
   // ── Vendor / spam / non-support email auto-close (Snag 1 — NT-18602) ──
   // These catch automated vendor emails, subscription notifications, marketing,

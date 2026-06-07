@@ -10,6 +10,7 @@ import type { AutoRuleOverrideQueries } from '../db/queries.js';
 import { executeAndGetId, query } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { setRequestType } from './close-ticket-helper.js';
+import { extractText } from './shared/adf-utils.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_CURRENT_TIER = 'customfield_12981';
@@ -33,8 +34,11 @@ const ABUSE_FIELD_PATTERNS = {
   instanceUrl: /instance\s*url\s*[:=]\s*(https?:\/\/[^\s\r\n]+)/i,
 };
 
-function normaliseForComparison(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 500);
+function normaliseForComparison(text: unknown): string {
+  // Jira REST v3 returns description as an ADF object, not a string — coerce before
+  // string ops or .replace throws ("text.replace is not a function").
+  const str = typeof text === 'string' ? text : extractText(text);
+  return str.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 500);
 }
 
 function descriptionSimilarity(a: string, b: string): number {
