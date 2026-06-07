@@ -1045,12 +1045,9 @@ export class AgentLoop {
       if (ticket.labels && ticket.labels.includes('TPJ_Feed')) return;
     }
 
-    // Guard: defer to sweep if current_tier not yet in cache — avoids defaulting to CC
-    if (ticket && !ticket.current_tier) {
-      console.log(`[agent] Deferring assignment for ${decision.ticketKey} — current_tier not yet in cache, sweep will pick up`);
-      return;
-    }
-
+    // Unknown tier no longer defers: new tickets always route to CC, so a missing
+    // current_tier just means "default CC" rather than "wait for the sweep". Deferring
+    // here was orphaning fresh tickets on NOVA when the tier hadn't synced yet.
     const project = this.assignmentEngine.resolveProjectFromTicketKey(decision.ticketKey);
     const pool = this.determinePool(decision, project, ticket);
     if (!pool) {
@@ -1852,13 +1849,9 @@ export class AgentLoop {
           [decision.ticketKey],
         );
 
-        // Keep handoff routing aligned with the main auto-assign path: prefer authoritative ticket state,
-        // and avoid silently defaulting Tier 2/Development tickets into CC when cache state is incomplete.
-        if (ticket && !ticket.current_tier) {
-          console.log(`[agent] Handoff: deferring assignment for ${decision.ticketKey} — current_tier not yet in cache, sweep will pick up`);
-          return;
-        }
-
+        // Unknown tier no longer aborts the handoff: new tickets always route to CC,
+        // so a missing current_tier defaults to CC rather than bailing out and leaving
+        // the ticket parked on NOVA. (The Development guard still applies in determinePool.)
         const handoffPool = this.determinePool(decision, project, ticket);
         if (!handoffPool) {
           console.log(`[agent] Handoff: skipping assignment for ${decision.ticketKey} — Development tier`);
