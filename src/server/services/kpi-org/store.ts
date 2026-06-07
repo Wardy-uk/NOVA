@@ -104,6 +104,17 @@ export async function getLatest(teamKey: string): Promise<OrgKpiDailyRow[]> {
   );
 }
 
+/** All rows for a team across a date range (inclusive) — used by period rollups. */
+export async function getTeamRange(teamKey: string, fromDay: string, toDay: string): Promise<OrgKpiDailyRow[]> {
+  await ensureOrgKpiTable();
+  return query<OrgKpiDailyRow>(
+    `SELECT CONVERT(varchar(10), kpi_date, 23) AS kpi_date, team_key, kpi_key, value, target, rag, source,
+            CONVERT(varchar(33), captured_at, 126) AS captured_at
+     FROM kpi_org_daily WHERE team_key = ? AND kpi_date >= ? AND kpi_date <= ? ORDER BY kpi_key, kpi_date`,
+    [teamKey, fromDay, toDay],
+  );
+}
+
 /** Daily history for one KPI over a date range (inclusive). */
 export async function getRange(teamKey: string, kpiKey: string, fromDay: string, toDay: string): Promise<OrgKpiDailyRow[]> {
   await ensureOrgKpiTable();

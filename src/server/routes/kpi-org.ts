@@ -6,7 +6,7 @@ import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
 import {
   captureSupportNt, getDay, getLatest, getRange, setManualValue,
-  ORG_KPIS, getKpi,
+  ORG_KPIS, getKpi, getOrgPeriod,
 } from '../services/kpi-org/index.js';
 import type { OrgKpiDailyRow } from '../services/kpi-org/store.js';
 
@@ -58,6 +58,17 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
         };
       });
       res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Weekly / monthly rollup: /support/period?period=week|month&anchor=YYYY-MM-DD
+  router.get('/support/period', async (req, res) => {
+    const period = (req.query.period === 'month' ? 'month' : 'week') as 'week' | 'month';
+    const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+    try {
+      res.json({ ok: true, data: await getOrgPeriod('Support', period, anchor) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

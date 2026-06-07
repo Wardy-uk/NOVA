@@ -31,18 +31,35 @@ function fmt(value: number | null, unit: string): string {
   return String(value);
 }
 
+type ViewPeriod = 'live' | 'week' | 'month';
+
 export function SupportKpiScorecard() {
   const [rows, setRows] = useState<KpiRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [period, setPeriod] = useState<ViewPeriod>('live');
 
   async function load() {
     setLoading(true);
     try {
-      const r = await fetch('/api/kpi-org/support/latest');
-      const j = await r.json();
-      if (j.ok) { setRows(j.data); setError(null); } else setError(j.error ?? 'Failed to load');
+      if (period === 'live') {
+        const r = await fetch('/api/kpi-org/support/latest');
+        const j = await r.json();
+        if (j.ok) { setRows(j.data); setError(null); } else setError(j.error ?? 'Failed to load');
+      } else {
+        const r = await fetch(`/api/kpi-org/support/period?period=${period}`);
+        const j = await r.json();
+        if (j.ok) {
+          const d = j.data;
+          setRows((d.kpis as Array<{ key: string; label: string; colA: string; unit: string; rollup: string; value: number | null; target: number | null; rag: string | null; days: number }>).map(k => ({
+            key: k.key, label: k.label, colA: k.colA, unit: k.unit, direction: '', rollup: k.rollup,
+            manual: false, note: `${k.days} day(s) · ${k.rollup}`, date: `${d.from} → ${d.to}`,
+            value: k.value, target: k.target, rag: k.rag, source: period, capturedAt: null,
+          })));
+          setError(null);
+        } else setError(j.error ?? 'Failed to load');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -50,7 +67,7 @@ export function SupportKpiScorecard() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runCapture() {
     setBusy(true);
@@ -82,13 +99,22 @@ export function SupportKpiScorecard() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold">Support KPIs <span className="text-sm font-normal text-slate-400">(Layer 1 — rebuild)</span></h1>
-        <button
-          onClick={runCapture}
-          disabled={busy}
-          className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
-        >
-          {busy ? 'Capturing…' : 'Run capture now'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg overflow-hidden border border-white/10 text-sm">
+            {(['live', 'week', 'month'] as ViewPeriod[]).map(p => (
+              <button key={p} onClick={() => setPeriod(p)}
+                className={`px-3 py-1.5 ${period === p ? 'bg-blue-600 text-white' : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]'}`}>
+                {p === 'live' ? 'Today' : p === 'week' ? 'Week' : 'Month'}
+              </button>
+            ))}
+          </div>
+          {period === 'live' && (
+            <button onClick={runCapture} disabled={busy}
+              className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+              {busy ? 'Capturing…' : 'Run capture now'}
+            </button>
+          )}
+        </div>
       </div>
       <p className="text-xs text-slate-500 mb-4">
         Jira KPIs freeze at 18:00 daily. Source: NT project · spec in agent_work/ba/org-kpis-spec.md

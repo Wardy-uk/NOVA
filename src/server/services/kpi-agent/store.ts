@@ -72,6 +72,18 @@ export async function getDay(day: string): Promise<Array<AgentKpiRow & { date: s
   return parseRows(rows);
 }
 
+/** All agent rows across a date range — used by period rollups. */
+export async function getAllInRange(fromDay: string, toDay: string): Promise<Array<AgentKpiRow & { date: string; capturedAt: string }>> {
+  await ensureAgentTable();
+  const rows = await query<{ metrics_json: string; kpi_date: string; captured_at: string }>(
+    `SELECT CONVERT(varchar(10), kpi_date, 23) AS kpi_date, metrics_json,
+            CONVERT(varchar(33), captured_at, 126) AS captured_at
+     FROM kpi_agent_daily WHERE kpi_date >= ? AND kpi_date <= ? ORDER BY agent_account_id, kpi_date`,
+    [fromDay, toDay],
+  );
+  return parseRows(rows);
+}
+
 export async function getAgentHistory(accountId: string, fromDay: string, toDay: string): Promise<Array<AgentKpiRow & { date: string; capturedAt: string }>> {
   await ensureAgentTable();
   const rows = await query<{ metrics_json: string; kpi_date: string; captured_at: string }>(

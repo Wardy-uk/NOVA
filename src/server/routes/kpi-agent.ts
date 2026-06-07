@@ -4,7 +4,7 @@ import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
-  captureAgentKpis, getAgentLiveSnapshot, getLatestDay, getDay, getAgentHistory,
+  captureAgentKpis, getAgentLiveSnapshot, getLatestDay, getDay, getAgentHistory, getAgentPeriod,
 } from '../services/kpi-agent/index.js';
 
 export interface KpiAgentDeps {
@@ -39,6 +39,17 @@ export function createKpiAgentRoutes(deps: KpiAgentDeps): Router {
   router.get('/day/:day', async (req, res) => {
     try { res.json({ ok: true, data: await getDay(req.params.day) }); }
     catch (err) { res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' }); }
+  });
+
+  // Weekly / monthly rollup across all agents: /period?period=week|month&anchor=YYYY-MM-DD
+  router.get('/period', async (req, res) => {
+    const period = (req.query.period === 'month' ? 'month' : 'week') as 'week' | 'month';
+    const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+    try {
+      res.json({ ok: true, data: await getAgentPeriod(deps.settings, period, anchor) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
   });
 
   router.get('/agent/:accountId/history', async (req, res) => {
