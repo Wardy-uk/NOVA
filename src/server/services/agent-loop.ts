@@ -699,6 +699,11 @@ export class AgentLoop {
         // Lifecycle manager runs in all modes (approval timeouts + SLA breaches matter out of hours)
         await this.runLifecycleSweep(shadowMode === 'full_shadow');
 
+        // Re-check historic open tickets against time_gate auto-rules (all modes —
+        // deterministic, shadowed in full_shadow). The normal backfill skips
+        // already-triaged tickets, so this is what lets the ">Nh old" branch fire.
+        await this.runTimeGateStaleSweep();
+
         // These only run during working hours
         if (this.currentMode === 'full') {
           await this.runTicketClassification();
@@ -2757,6 +2762,91 @@ export class AgentLoop {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[agent] Re-review failed for ${ticketKey}:`, errMsg);
       return { ok: false, error: errMsg };
+    }
+  }
+
+  /**
+   * Re-checks historic open tickets against time_gate auto-rules. The normal backfill
+   * sweep ({@link runBackfillSweep}) only picks tickets with no prior agent_decisions
+   * row, so a ticket triaged when fresh is never re-evaluated as it ages — the
+   * ">Nh old + unassigned" branch of a time_gate rule would otherwise never fire.
+   * This sweep feeds open tickets older than each rule's staleHours straight through
+   * the auto-rules engine. Config-driven: any rule with a time_gate conditional and a
+   * subject `equals` match is covered automatically. Idempotent — the engine skips
+   * already-actioned and already-resolved tickets, and is rate-limited by the rule's
+   * daily cap.
+   */
+  private async runTimeGateStaleSweep(): Promise<void> {
+    const enabled = this.settings.get('agent_backfill_enabled');
+    if (enabled === 'false' || enabled === '0') return;
+
+    const gates = this.autoRulesEngine.getRules()
+      .map(r => {
+        const cond = r.conditional;
+        const subj = (r.match as { subject?: { equals?: string } }).subject;
+        if (cond?.type === 'time_gate' && subj?.equals) {
+          return { summary: subj.equals, staleHours: cond.staleHours };
+        }
+        return null;
+      })
+      .filter((g): g is { summary: string; staleHours: number } => g !== null);
+
+    if (gates.length === 0) return;
+
+    const shadowMode = this.getShadowMode();
+
+    for (const gate of gates) {
+      let rows: Array<{
+        issue_key: string; jira_id: string; summary: string; description_text: string;
+        status_name: string; priority_name: string; request_type: string;
+        assignee_display: string; reporter_display: string; reporter_email: string;
+        jira_created: string; jira_updated: string; sla_breach_time: string; fields_json: string;
+      }>;
+      try {
+        rows = await query(
+          `SELECT TOP (50) issue_key, jira_id, summary, description_text, status_name,
+                  priority_name, request_type, assignee_display, reporter_display,
+                  reporter_email, jira_created, jira_updated, sla_breach_time, fields_json
+           FROM jira_issue_cache
+           WHERE summary = ?
+             AND status_category != 'done'
+             AND jira_created < DATEADD(HOUR, ?, GETUTCDATE())
+           ORDER BY jira_created ASC`,
+          [gate.summary, -gate.staleHours],
+        );
+      } catch (err) {
+        console.warn(`[time-gate-sweep] Query failed for "${gate.summary}":`, err instanceof Error ? err.message : err);
+        continue;
+      }
+
+      if (rows.length === 0) continue;
+      console.log(`[time-gate-sweep] Re-checking ${rows.length} open "${gate.summary}" ticket(s) older than ${gate.staleHours}h`);
+
+      for (const row of rows) {
+        const event = {
+          ticketId: row.jira_id,
+          ticketKey: row.issue_key,
+          eventType: 'backfill' as const,
+          summary: row.summary ?? '',
+          description: row.description_text ?? '',
+          status: row.status_name ?? 'Unknown',
+          priority: row.priority_name ?? 'Medium',
+          requestType: row.request_type ?? '',
+          assignee: row.assignee_display ?? null,
+          reporter: row.reporter_display ?? null,
+          reporterEmail: row.reporter_email ?? null,
+          organisation: row.reporter_email?.split('@')[1] ?? null,
+          created: row.jira_created ? new Date(row.jira_created).toISOString() : '',
+          updated: row.jira_updated ? new Date(row.jira_updated).toISOString() : '',
+          slaBreachTime: row.sla_breach_time ?? null,
+          fields: row.fields_json ? JSON.parse(row.fields_json) : {},
+        };
+        try {
+          await this.autoRulesEngine.evaluateAndExecute(event, shadowMode);
+        } catch (err) {
+          console.error(`[time-gate-sweep] Failed for ${row.issue_key}:`, err instanceof Error ? err.message : err);
+        }
+      }
     }
   }
 
