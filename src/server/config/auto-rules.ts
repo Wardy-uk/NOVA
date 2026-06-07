@@ -35,7 +35,17 @@ const PreEmptionConditional = z.object({
   actionedIndicators: z.array(z.string()).optional(),
 });
 
-const Conditional = z.discriminatedUnion('type', [DuplicateConditional, PreEmptionConditional]);
+const TimeGateConditional = z.object({
+  type: z.literal('time_gate'),
+  /** Tickets raised at/after this local hour-of-day (0–23) are always closed. */
+  closeAfterHour: z.number().int().min(0).max(23),
+  /** Tickets older than this many hours AND not assigned to a human are also closed. */
+  staleHours: z.number().int().positive(),
+  /** IANA timezone used to derive the local hour-of-day. Defaults to Europe/London. */
+  timezone: z.string().optional().default('Europe/London'),
+});
+
+const Conditional = z.discriminatedUnion('type', [DuplicateConditional, PreEmptionConditional, TimeGateConditional]);
 
 // ── Actions ──
 
@@ -90,6 +100,12 @@ export const AutoRuleSchema = z.object({
   caseInsensitive: z.boolean().optional().default(true),
   /** If true, this rule requires human approval before executing (e.g. abuse_report phase A) */
   requiresApproval: z.boolean().optional().default(false),
+  /**
+   * If true, when this rule's match passes but its conditional is NOT met, evaluation
+   * falls through to the next matching rule instead of short-circuiting. Lets a
+   * conditional rule (e.g. CIA dedup) defer to a later sibling (CIA autoclose).
+   */
+  continueOnConditionalFail: z.boolean().optional().default(false),
 });
 
 export type AutoRule = z.infer<typeof AutoRuleSchema>;
@@ -205,6 +221,8 @@ const RULES_RAW: unknown[] = [
       subject: { equals: 'CIA Letter Alerting' },
     },
     conditional: { type: 'duplicate_open_ticket', sameSubject: true },
+    // If not a duplicate, fall through to cia-letter-autoclose's time gate.
+    continueOnConditionalFail: true,
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — duplicate of an existing open CIA Letter Alerting ticket.' },
   },
   {
@@ -216,15 +234,17 @@ const RULES_RAW: unknown[] = [
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — same reporter already has an open ticket with an identical subject.' },
   },
   {
-    id: 'cia-letter-assign',
+    id: 'cia-letter-autoclose',
     match: {
       subject: { equals: 'CIA Letter Alerting' },
     },
+    // Close if raised at/after 11:00 (local), OR if >24h old and not assigned to a
+    // human. Tickets raised before 11:00 and under 24h old are left untouched.
+    conditional: { type: 'time_gate', closeAfterHour: 11, staleHours: 24, timezone: 'Europe/London' },
     action: {
-      type: 'assign',
-      team: 'Customer Care',
-      comment: 'This CIA Letter alert has been assigned for triage. Please check the CIA instance to confirm letters are being processed correctly.',
-      note: 'Auto-assigned by NOVA — CIA Letter Alerting ticket, routed to Customer Care for CIA instance verification.',
+      type: 'close',
+      resolution: 'No Fault Found',
+      note: 'Auto-closed — CIA Letter Alerting ticket raised after 11:00, or over 24h old with no human assigned.',
     },
   },
   // ── Vendor / spam / non-support email auto-close (Snag 1 — NT-18602) ──

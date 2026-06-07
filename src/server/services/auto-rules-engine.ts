@@ -208,7 +208,21 @@ export class AutoRulesEngine {
         continue;
       }
       const result = this.matchRule(rule, event);
-      if (result.matched) return { rule, ticketKey: event.ticketKey, ticketId: event.ticketId, matchedFields: result.fields };
+      if (result.matched) {
+        // Scoped fall-through: a rule flagged continueOnConditionalFail that matches but
+        // whose conditional is not met yields to the next matching rule instead of
+        // short-circuiting evaluation (e.g. CIA dedup → CIA autoclose). All other rules
+        // keep the default behaviour (the returned rule's conditional is checked later in
+        // evaluateAndExecute, and a failure stops evaluation).
+        if (rule.continueOnConditionalFail && rule.conditional) {
+          const ok = await this.checkConditional(rule, event);
+          if (!ok) {
+            console.log(`[auto-rules] '${rule.id}' matched on ${event.ticketKey} but conditional not met — falling through to next rule`);
+            continue;
+          }
+        }
+        return { rule, ticketKey: event.ticketKey, ticketId: event.ticketId, matchedFields: result.fields };
+      }
       if (result.nearMiss) {
         const matched = Object.entries(result.fields).filter(([, v]) => v).map(([k]) => k).join(', ');
         const missed = Object.entries(result.fields).filter(([, v]) => !v).map(([k]) => k).join(', ');
@@ -390,6 +404,54 @@ export class AutoRulesEngine {
       }
 
       return true; // Not pre-empted, not exhausted — proceed
+    }
+
+    if (rule.conditional.type === 'time_gate') {
+      const { closeAfterHour, staleHours } = rule.conditional;
+      const tz = rule.conditional.timezone ?? 'Europe/London';
+
+      const createdMs = Date.parse(event.created);
+      if (isNaN(createdMs)) {
+        console.warn(`[auto-rules] time_gate '${rule.id}': cannot parse created date "${event.created}" for ${event.ticketKey} — condition not met`);
+        return false;
+      }
+
+      // Branch 1: raised at/after closeAfterHour (local time) → always close.
+      let hour: number;
+      try {
+        const hourStr = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date(createdMs));
+        hour = parseInt(hourStr, 10) % 24;
+      } catch {
+        // Invalid timezone — fall back to UTC hour.
+        hour = new Date(createdMs).getUTCHours();
+      }
+      if (hour >= closeAfterHour) {
+        console.log(`[auto-rules] time_gate '${rule.id}': ${event.ticketKey} raised at ${hour}:00 ${tz} (>= ${closeAfterHour}) — condition met`);
+        return true;
+      }
+
+      // Branch 2: older than staleHours AND not assigned to a human → close.
+      const ageHours = (Date.now() - createdMs) / 3_600_000;
+      if (ageHours >= staleHours) {
+        let humanAssigned = false;
+        try {
+          const issue = await this.jiraClient.getIssue(event.ticketKey, ['assignee']);
+          const assigneeId = (issue?.fields?.assignee as { accountId?: string } | undefined)?.accountId;
+          const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+          humanAssigned = !!assigneeId && assigneeId !== novaAccountId;
+        } catch (err) {
+          console.warn(`[auto-rules] time_gate '${rule.id}': assignee check failed for ${event.ticketKey}, treating as unassigned:`, err instanceof Error ? err.message : err);
+        }
+        if (!humanAssigned) {
+          console.log(`[auto-rules] time_gate '${rule.id}': ${event.ticketKey} is ${ageHours.toFixed(1)}h old (>= ${staleHours}) and not human-assigned — condition met`);
+          return true;
+        }
+        console.log(`[auto-rules] time_gate '${rule.id}': ${event.ticketKey} is ${ageHours.toFixed(1)}h old but assigned to a human — condition not met`);
+        return false;
+      }
+
+      console.log(`[auto-rules] time_gate '${rule.id}': ${event.ticketKey} raised at ${hour}:00 ${tz} (< ${closeAfterHour}) and only ${ageHours.toFixed(1)}h old — condition not met`);
+      return false;
     }
 
     return false;
