@@ -202,7 +202,8 @@ export class StaleLifecycleService {
   }
 
   private isCustomer(c: JiraComment, reporterAccountId?: string, reporterEmail?: string): boolean {
-    const a = c.author ?? {};
+    const a = c.author;
+    if (!a) return false;
     if (a.accountType === 'customer') return true;
     if (reporterAccountId && a.accountId === reporterAccountId) return true;
     if (reporterEmail && a.emailAddress && a.emailAddress.toLowerCase() === reporterEmail.toLowerCase()) return true;
