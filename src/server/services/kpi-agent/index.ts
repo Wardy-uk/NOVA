@@ -8,6 +8,7 @@ import { ensureAgentTable, saveDay } from './store.js';
 
 export { getLatestDay, getDay, getAgentHistory, ensureAgentTable } from './store.js';
 export { getAgentPeriod } from './period.js';
+export { backfillAgentFromLegacy } from './backfill.js';
 export type { AgentKpiRow } from './compute.js';
 export { getRagThresholds, DEFAULT_RAG_THRESHOLDS } from './rag.js';
 

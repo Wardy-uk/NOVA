@@ -83,6 +83,21 @@ export function SupportKpiScorecard() {
     }
   }
 
+  async function runBackfill() {
+    const to = new Date(); to.setDate(to.getDate() - 1);
+    const from = new Date(); from.setDate(from.getDate() - 90);
+    const f = from.toLocaleDateString('en-CA'); const t = to.toLocaleDateString('en-CA');
+    if (!confirm(`Backfill Support KPIs ${f} → ${t}? (flows recomputed from Jira, stocks from legacy — can take a few minutes)`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/kpi-org/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: f, to: t }) });
+      const j = await r.json();
+      if (j.ok) alert(`Backfill done: ${j.data.flowKpis} flow values over ${j.data.flowDays} days, ${j.data.stockRows} legacy stock rows.`);
+      else setError(j.error ?? 'Backfill failed');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Backfill failed'); }
+    finally { setBusy(false); }
+  }
+
   async function saveManual(key: string, value: number) {
     const day = new Date().toLocaleDateString('en-CA');
     await fetch('/api/kpi-org/manual', {
@@ -109,10 +124,16 @@ export function SupportKpiScorecard() {
             ))}
           </div>
           {period === 'live' && (
-            <button onClick={runCapture} disabled={busy}
-              className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-              {busy ? 'Capturing…' : 'Run capture now'}
-            </button>
+            <>
+              <button onClick={runCapture} disabled={busy}
+                className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+                {busy ? 'Working…' : 'Run capture now'}
+              </button>
+              <button onClick={runBackfill} disabled={busy}
+                className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
+                Backfill 90d
+              </button>
+            </>
           )}
         </div>
       </div>

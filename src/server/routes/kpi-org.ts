@@ -4,14 +4,16 @@
 
 import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 import {
   captureSupportNt, getDay, getLatest, getRange, setManualValue,
-  ORG_KPIS, getKpi, getOrgPeriod,
+  ORG_KPIS, getKpi, getOrgPeriod, backfillOrg,
 } from '../services/kpi-org/index.js';
 import type { OrgKpiDailyRow } from '../services/kpi-org/store.js';
 
 export interface KpiOrgDeps {
   getJiraClient: () => JiraRestClient | null;
+  settings: SettingsQueries;
 }
 
 /** Merge a stored row with its registry definition for the client. */
@@ -105,6 +107,19 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
       res.json({ ok: true, data: { kpiKey: kpi.key, day, value: value ?? null } });
     } catch (err) {
       res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Backfill historic days: hybrid (flows from Jira, stocks from legacy). Body: { from, to }.
+  router.post('/backfill', async (req, res) => {
+    const jira = deps.getJiraClient();
+    if (!jira) { res.status(503).json({ ok: false, error: 'Jira client not configured' }); return; }
+    const { from, to } = req.body as { from?: string; to?: string };
+    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to (YYYY-MM-DD) required' }); return; }
+    try {
+      res.json({ ok: true, data: await backfillOrg(deps.settings, jira, from, to) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }
   });
 

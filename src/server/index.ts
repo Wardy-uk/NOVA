@@ -1106,7 +1106,7 @@ async function main() {
   // KPI definitions (agent_work/ba/org-kpis-spec.md). Jira-backed KPIs compute
   // via the REST client (validated JQL); manual KPIs are entered via the API.
   app.use('/api/kpi-org', requireAreaAccess(['kpis', 'qa'], 'view'),
-    createKpiOrgRoutes({ getJiraClient: () => agentJiraClient }));
+    createKpiOrgRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
   // ── Agent KPIs (Layer 3 rebuild) — per-agent scorecard + SLA Breach Board ──
   app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
