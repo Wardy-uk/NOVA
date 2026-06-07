@@ -194,6 +194,8 @@ import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot } from './services/kpi-org/wallboard-tiers.js';
+import { createKpiAgentRoutes } from './routes/kpi-agent.js';
+import { captureAgentKpis, getAgentLiveSnapshot, type AgentKpiRow } from './services/kpi-agent/index.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -1106,6 +1108,10 @@ async function main() {
   app.use('/api/kpi-org', requireAreaAccess(['kpis', 'qa'], 'view'),
     createKpiOrgRoutes({ getJiraClient: () => agentJiraClient }));
 
+  // ── Agent KPIs (Layer 3 rebuild) — per-agent scorecard + SLA Breach Board ──
+  app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
+    createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
+
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
@@ -1560,6 +1566,7 @@ async function main() {
       const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
       if (ukHour === 18 && ukMin < 10 && agentJiraClient) {
         await captureSupportNt(agentJiraClient);
+        await captureAgentKpis(settingsQueries, agentJiraClient);
       }
     }, 10 * 60 * 1000);
 
@@ -3330,6 +3337,67 @@ ${cells}
       { key: 'tier2', label: 'Tier 2' },
       { key: 'development', label: 'Development' },
     ]));
+
+  // SLA Breach Board (Rebuild) — per-agent table from the Layer-3 agent engine.
+  function ragCellColor(rag: string | null | undefined): string {
+    if (rag === 'green') return '#10b981';
+    if (rag === 'amber') return '#eab308';
+    if (rag === 'red') return '#ef4444';
+    return '#94a3b8';
+  }
+  function renderBreachBoardRebuild(agents: AgentKpiRow[]): string {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB');
+    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const rows = [...agents].sort((a, b) => b.overSla - a.overSla || b.noReply - a.noReply);
+    const totalOver = agents.reduce((s, a) => s + a.overSla, 0);
+    const breachedAgents = agents.filter(a => a.overSla > 0).length;
+    const cell = (v: number | string, rag?: string | null) =>
+      `<td style="padding:8px 12px;text-align:center;font-size:20px;font-weight:700;color:${ragCellColor(rag)}">${v}</td>`;
+    const body = rows.map(a => `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
+      <td style="padding:8px 12px;font-size:15px;color:#e2e8f0">${a.agentName}<span style="font-size:10px;color:#64748b;margin-left:6px">${a.tierCode || ''}</span></td>
+      ${cell(a.open)}
+      ${cell(a.overSla, a.rag.over2h)}
+      ${cell(a.noReply, a.rag.stale)}
+      ${cell(a.oldestDays + 'd', a.rag.oldest)}
+      ${cell(a.solvedToday)}
+    </tr>`).join('');
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SLA Breach Board (Rebuild)</title>
+${wallboardRefreshScript('/wallboard/rebuild/breach-board')}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0}.wrap{max-width:1400px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}th{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;text-align:center}th:first-child{text-align:left}</style>
+</head><body><div class="wrap">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <div><h1 style="font-size:22px;font-weight:800">SLA Breach Board <span style="font-size:12px;color:#64748b">(Rebuild)</span></h1>
+  <div style="font-size:11px;color:#64748b;margin-top:2px">${breachedAgents} agents breached &middot; ${totalOver} tickets over SLA</div></div>
+  <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
+</div>
+<table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.02);border-radius:12px;overflow:hidden">
+<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Open</th><th>Over SLA</th><th>No Reply</th><th>Oldest</th><th>Solved Today</th></tr></thead>
+<tbody>${body || '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
+</table>
+<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board (Rebuild) &middot; ${dateStr} &middot; Source: kpi-agent</div>
+</div></body></html>`;
+  }
+  app.get('/wallboard/rebuild/breach-board', async (_req, res) => {
+    const wbStart = Date.now();
+    const route = '/wallboard/rebuild/breach-board';
+    if (!agentJiraClient) {
+      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
+      return;
+    }
+    try {
+      const snap = await getAgentLiveSnapshot(settingsQueries, agentJiraClient);
+      res.send(renderBreachBoardRebuild(snap.agents));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${snap.agents.length} agents`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
 
   // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
   const portalGate: import('express').RequestHandler = (_req, res, next) => {

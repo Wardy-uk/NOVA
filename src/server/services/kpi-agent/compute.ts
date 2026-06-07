@@ -1,0 +1,252 @@
+// Per-agent KPI computation (Layer 3). Roster from dbo.Agent (KPI pool); tier-1
+// operational stocks from a single pass over jira_issue_cache bucketed by assignee
+// (with the agreed corrected definitions); Solved via the status-transition JQL;
+// tier-2 quality read & aggregated from the existing QA/GR/CSAT pipelines; tier-3
+// derived + configurable RAG. Mirrors kpi-pipeline's proven SQL.
+
+import type { JiraRestClient } from '../jira-client.js';
+import type { SettingsQueries } from '../../db/settings-store.js';
+import { query } from '../database.js';
+import { getKpiPool } from '../kpi-pipeline.js';
+import { NOVA_JIRA_ACCOUNT_ID } from '../kpi-org/registry.js';
+import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
+
+const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
+const FOUR_HOURS = 4 * 60 * 60 * 1000;
+const FIFTY_TWO_WEEKS = 52 * 7 * 24 * 60 * 60 * 1000;
+
+export interface AgentKpiRow {
+  accountId: string;
+  agentId: number | null;
+  agentName: string;
+  tierCode: string;
+  team: string;
+  // tier 1
+  open: number;
+  overSla: number;
+  noReply: number;
+  oldestDays: number;
+  oldestKey: string | null;
+  solvedToday: number;
+  solvedWeek: number;
+  // tier 2
+  qaScored: number; qaOverall: number | null; qaAccuracy: number | null; qaClarity: number | null; qaTone: number | null;
+  qaGreen: number; qaAmber: number; qaRed: number; qaConcerning: number;
+  grScored: number; grOverall: number | null; grOwnership: number | null; grNextAction: number | null; grTimeframe: number | null;
+  csatAvg: number | null; csatCount: number;
+  // tier 3
+  slaCompliancePct: number | null;
+  ticketsPerHour: number | null;
+  rag: Record<string, Rag | null>;
+}
+
+function parseDate(v: unknown): Date | null {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v as string);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function slaBreached(fieldsJson: string | null, field: string): boolean | null {
+  if (!fieldsJson) return null;
+  let sla: any;
+  try { sla = JSON.parse(fieldsJson)?.[field]; } catch { return null; }
+  if (!sla) return null;
+  const oc = sla.ongoingCycle;
+  if (oc) {
+    if (oc.breached === true) return true;
+    if (oc.remainingTime?.millis != null) return oc.remainingTime.millis < 0;
+  }
+  const completed = sla.completedCycles;
+  if (Array.isArray(completed) && completed.length) {
+    const last = completed[completed.length - 1];
+    if (last?.breached != null) return last.breached === true;
+  }
+  return null;
+}
+
+function parseCsat(fieldsJson: string | null): number | null {
+  if (!fieldsJson) return null;
+  try {
+    const rating = JSON.parse(fieldsJson)?.customfield_12802?.rating;
+    return typeof rating === 'number' && rating >= 1 && rating <= 5 ? rating : null;
+  } catch { return null; }
+}
+
+function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date): boolean {
+  if ((status || '').toLowerCase() === 'waiting on requestor') return false;
+  if (!created || now.getTime() - created.getTime() < FOUR_HOURS) return false;
+  if (nextUpd && nextUpd > now) return false;
+  if (!lastUpd) return false;
+  const startToday = new Date(now); startToday.setUTCHours(0, 0, 0, 0);
+  if (lastUpd >= startToday) return false;
+  if (lastUpd < new Date(now.getTime() - FIFTY_TWO_WEEKS)) return false;
+  return true;
+}
+
+interface Stat1 { open: number; overSla: number; noReply: number; oldestDays: number; oldestKey: string | null; }
+
+function ukWeekStart(now: Date): string {
+  // Monday of the current week (UTC-ish; close enough for the EOD capture).
+  const d = new Date(now); const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
+  d.setUTCDate(d.getUTCDate() - dow); d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 10);
+}
+function ukDay(now: Date): string { return now.toISOString().slice(0, 10); }
+function addDay(day: string): string { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+
+/** Bucket solved-during-window tickets by current assignee accountId. */
+async function solvedByAssignee(jira: JiraRestClient, fromDay: string, toDay: string): Promise<Map<string, number>> {
+  const jql = `project = NT AND status CHANGED TO ("Resolved","Closed","Done") DURING ("${fromDay}","${toDay}")`;
+  const res = await jira.searchJqlAll(jql, ['assignee'], 2000);
+  const map = new Map<string, number>();
+  for (const issue of res.issues) {
+    const acc = (issue.fields as Record<string, unknown>)?.assignee as { accountId?: string } | undefined;
+    if (acc?.accountId) map.set(acc.accountId, (map.get(acc.accountId) || 0) + 1);
+  }
+  return map;
+}
+
+export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRestClient, now: Date = new Date()): Promise<AgentKpiRow[]> {
+  const pool = await getKpiPool(settings);
+  const thresholds = getRagThresholds(settings);
+  const day = ukDay(now);
+  const tomorrow = addDay(day);
+  const weekStart = ukWeekStart(now);
+
+  // 1. Roster (dbo.Agent)
+  const roster = (await pool.request().query(`
+    SELECT AgentId, AccountId,
+           RTRIM(LTRIM(ISNULL(AgentName,'') + ' ' + ISNULL(AgentSurname,''))) AS AgentName,
+           ISNULL(TierCode,'') AS TierCode, ISNULL(Team,'') AS Team, ISNULL(IsAvailable,0) AS IsAvailable
+    FROM dbo.Agent WHERE IsActive = 1 AND AccountId IS NOT NULL
+  `)).recordset as Array<{ AgentId: number; AccountId: string; AgentName: string; TierCode: string; Team: string; IsAvailable: number }>;
+
+  // 2. Tier-1 stocks from jira_issue_cache (one pass, bucket by assignee). ALL tiers, project NT.
+  const openRows = await query<{
+    issue_key: string; assignee_account_id: string | null; status_name: string | null;
+    jira_created: Date | null; agent_last_updated: Date | null; agent_next_update: Date | null;
+    due_date: Date | null; fields_json: string | null;
+  }>(`
+    SELECT issue_key, assignee_account_id, status_name, jira_created, agent_last_updated, agent_next_update, due_date, fields_json
+    FROM jira_issue_cache
+    WHERE project_key = 'NT' AND status_category <> 'Done' AND assignee_account_id IS NOT NULL
+  `);
+  const endToday = new Date(now); endToday.setUTCHours(23, 59, 59, 999);
+  const stats1 = new Map<string, Stat1>();
+  for (const t of openRows) {
+    const acc = t.assignee_account_id!;
+    const s = stats1.get(acc) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null };
+    s.open++;
+    const status = (t.status_name || '').toLowerCase();
+    const actionable = !NOT_ACTIONABLE.has(status);
+    // over-SLA (actionable): resolution SLA breached + actionable + due-date gate
+    if (actionable && slaBreached(t.fields_json, 'customfield_14048') === true) {
+      const dueOk = !t.due_date || new Date(t.due_date) <= endToday;
+      if (dueOk) s.overSla++;
+    }
+    if (isNoReply(t.status_name, parseDate(t.jira_created), parseDate(t.agent_last_updated), parseDate(t.agent_next_update), now)) s.noReply++;
+    if (actionable && t.jira_created) {
+      const days = Math.floor((now.getTime() - new Date(t.jira_created).getTime()) / 86_400_000);
+      if (days > s.oldestDays) { s.oldestDays = days; s.oldestKey = t.issue_key; }
+    }
+    stats1.set(acc, s);
+  }
+
+  // 3. Solved (transition JQL), bucket by assignee
+  const [solvedToday, solvedWeek] = await Promise.all([
+    solvedByAssignee(jira, day, tomorrow),
+    solvedByAssignee(jira, weekStart, tomorrow),
+  ]);
+
+  // 4a. QA + Golden Rules (by agent name, today) — read existing pipelines
+  const qaByName = new Map<string, any>();
+  try {
+    const r = await pool.request().query(`
+      SELECT assigneeName, COUNT(*) AS scored,
+             AVG(CAST(overallScore AS FLOAT)) AS overall, AVG(CAST(accuracyScore AS FLOAT)) AS accuracy,
+             AVG(CAST(clarityScore AS FLOAT)) AS clarity, AVG(CAST(toneScore AS FLOAT)) AS tone,
+             SUM(CASE WHEN grade='RED' THEN 1 ELSE 0 END) AS red,
+             SUM(CASE WHEN grade='AMBER' THEN 1 ELSE 0 END) AS amber,
+             SUM(CASE WHEN grade='GREEN' THEN 1 ELSE 0 END) AS green,
+             SUM(CAST(ISNULL(isConcerning,0) AS INT)) AS concerning
+      FROM dbo.jira_qa_results WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY assigneeName
+    `);
+    for (const x of r.recordset) qaByName.set((x.assigneeName || '').trim().toLowerCase(), x);
+  } catch { /* table may not exist */ }
+
+  const grByName = new Map<string, any>();
+  try {
+    const r = await pool.request().query(`
+      SELECT Assignee, COUNT(*) AS scored, AVG(CAST(OverallScore AS FLOAT)) AS overall,
+             AVG(CAST(Rule1Score AS FLOAT)) AS ownership, AVG(CAST(Rule2Score AS FLOAT)) AS nextAction,
+             AVG(CAST(Rule3Score AS FLOAT)) AS timeframe
+      FROM dbo.Jira_QA_GoldenRules WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY Assignee
+    `);
+    for (const x of r.recordset) grByName.set((x.Assignee || '').trim().toLowerCase(), x);
+  } catch { /* table may not exist */ }
+
+  // 4b. CSAT + SLA compliance from resolved-today tickets (cache), by accountId
+  const csatByAcc = new Map<string, { count: number; sum: number }>();
+  const slaByAcc = new Map<string, { resolved: number; breached: number }>();
+  const resolvedRows = await query<{ assignee_account_id: string; fields_json: string | null }>(`
+    SELECT assignee_account_id, fields_json FROM jira_issue_cache
+    WHERE project_key = 'NT' AND status_category = 'Done'
+      AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE) AND assignee_account_id IS NOT NULL
+  `);
+  for (const r of resolvedRows) {
+    const rating = parseCsat(r.fields_json);
+    if (rating != null) {
+      const c = csatByAcc.get(r.assignee_account_id) ?? { count: 0, sum: 0 };
+      c.count++; c.sum += rating; csatByAcc.set(r.assignee_account_id, c);
+    }
+    const breached = slaBreached(r.fields_json, 'customfield_14048');
+    if (breached != null) {
+      const s = slaByAcc.get(r.assignee_account_id) ?? { resolved: 0, breached: 0 };
+      s.resolved++; if (breached) s.breached++; slaByAcc.set(r.assignee_account_id, s);
+    }
+  }
+
+  // 5. Assemble per agent
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return roster.map(a => {
+    const s1 = stats1.get(a.AccountId) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null };
+    const nameLower = (a.AgentName || '').trim().toLowerCase();
+    const qa = qaByName.get(nameLower);
+    const gr = grByName.get(nameLower);
+    const csat = csatByAcc.get(a.AccountId);
+    const sla = slaByAcc.get(a.AccountId);
+    const solvedT = solvedToday.get(a.AccountId) || 0;
+
+    const ticketsPerHour = a.IsAvailable ? round(solvedT / 7.5) : null;
+    const slaCompliancePct = sla && sla.resolved > 0 ? round(((sla.resolved - sla.breached) / sla.resolved) * 100) : null;
+    const csatAvg = csat && csat.count > 0 ? round(csat.sum / csat.count) : null;
+    const qaOverall = qa?.overall != null ? round(qa.overall) : null;
+    const grOverall = gr?.overall != null ? round(gr.overall) : null;
+
+    const rag: Record<string, Rag | null> = {
+      productivity: ragHigher(ticketsPerHour, thresholds.productivity),
+      csat: ragHigher(csatAvg, thresholds.csat),
+      qa: ragHigher(qaOverall, thresholds.qa),
+      goldenRules: ragHigher(grOverall, thresholds.goldenRules),
+      sla: ragHigher(slaCompliancePct, thresholds.sla),
+      over2h: ragLower(s1.overSla, thresholds.over2h),
+      stale: ragLower(s1.noReply, thresholds.stale),
+      oldest: ragLower(s1.oldestDays, thresholds.oldest),
+    };
+
+    return {
+      accountId: a.AccountId, agentId: a.AgentId ?? null, agentName: a.AgentName, tierCode: a.TierCode, team: a.Team,
+      open: s1.open, overSla: s1.overSla, noReply: s1.noReply, oldestDays: s1.oldestDays, oldestKey: s1.oldestKey,
+      solvedToday: solvedT, solvedWeek: solvedWeek.get(a.AccountId) || 0,
+      qaScored: qa?.scored || 0, qaOverall, qaAccuracy: qa?.accuracy != null ? round(qa.accuracy) : null,
+      qaClarity: qa?.clarity != null ? round(qa.clarity) : null, qaTone: qa?.tone != null ? round(qa.tone) : null,
+      qaGreen: qa?.green || 0, qaAmber: qa?.amber || 0, qaRed: qa?.red || 0, qaConcerning: qa?.concerning || 0,
+      grScored: gr?.scored || 0, grOverall, grOwnership: gr?.ownership != null ? round(gr.ownership) : null,
+      grNextAction: gr?.nextAction != null ? round(gr.nextAction) : null, grTimeframe: gr?.timeframe != null ? round(gr.timeframe) : null,
+      csatAvg, csatCount: csat?.count || 0,
+      slaCompliancePct, ticketsPerHour, rag,
+    };
+  });
+}
+
+export { NOVA_JIRA_ACCOUNT_ID };
