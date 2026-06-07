@@ -141,6 +141,7 @@ export class AgentLoop {
   setAssignmentEngine(engine: AssignmentEngine): void {
     this.assignmentEngine = engine;
     this.actor.setAssignmentEngine(engine);
+    this.lifecycleManager.setAssignmentEngine(engine);
   }
 
   getSettings(): SettingsQueries { return this.settings; }

@@ -9,6 +9,7 @@ import { TicketStateStore } from './ticket-state.js';
 import { query } from './database.js';
 import { LlmService } from './llm-service.js';
 import { Actor } from './actor.js';
+import type { AssignmentEngine, Pool } from './assignment-engine.js';
 import { ChaseResultSchema, type ChaseResult } from './chase-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
@@ -37,6 +38,7 @@ export class LifecycleManager {
   private alertService: AlertService;
   private observer: Observer;
   private llmService: LlmService | null;
+  private assignmentEngine: AssignmentEngine | null = null;
 
   constructor(
     settings: SettingsQueries,
@@ -59,6 +61,40 @@ export class LifecycleManager {
 
   getTicketState(): TicketStateStore {
     return this.ticketState;
+  }
+
+  setAssignmentEngine(engine: AssignmentEngine): void {
+    this.assignmentEngine = engine;
+  }
+
+  /** Pool routing for a timed-out ticket: CC by default, T2 only if the tier is authoritative. */
+  private poolForTier(currentTier: string | null, labels: string | null): Pool | null {
+    if (labels && labels.includes('int_setup')) return 'tpj';
+    const tier = (currentTier || '').trim();
+    if (tier === 'Development') return null; // never auto-assign Development
+    if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';
+    return 'cc';
+  }
+
+  /** Round-robin a timed-out ticket to a human agent. Returns the assignee name, or null if none was available. */
+  private async handoffTimedOutTicket(ticketKey: string): Promise<string | null> {
+    if (!this.assignmentEngine) return null;
+    try {
+      const rows = await query<{ current_tier: string | null; labels: string | null }>(
+        `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
+        [ticketKey],
+      );
+      const pool = this.poolForTier(rows[0]?.current_tier ?? null, rows[0]?.labels ?? null);
+      if (!pool) return null;
+      const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
+      const assignment = await this.assignmentEngine.assignWithFallback(ticketKey, pool, project);
+      if (!assignment) return null;
+      await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);
+      return assignment.agent.display_name;
+    } catch (err) {
+      console.warn(`[lifecycle] Handoff assignment failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+      return null;
+    }
   }
 
   getAssignedTicketMode(): AssignedTicketMode {
@@ -202,28 +238,43 @@ export class LifecycleManager {
             await this.approvalQueries.decide(approval.id, 'timed_out', 'NOVA-lifecycle');
           }
 
+          // Actually hand the ticket to a human. The old behaviour posted "needs human
+          // attention" and flipped state to awaiting_customer — which left the ticket
+          // assigned to NOVA and let it loop (re-draft on the next customer reply). Now we
+          // round-robin it to a real agent so NOVA is taken off the ticket.
+          let assignedTo: string | null = null;
+          if (!shadow) {
+            assignedTo = await this.handoffTimedOutTicket(approval.ticket_id);
+          }
+
           await this.alertService.createAlert({
             alertType: 'approval_timeout',
             severity: 'warning',
             title: `Approval timed out: ${approval.ticket_id}`,
-            detail: `Approval pending for ${Math.round(ageMins)} minutes. Confidence ${(confidence * 100).toFixed(0)}% below auto-approve threshold (${(autoApproveThreshold * 100).toFixed(0)}%). ${shadow ? '[SHADOW] Would escalate.' : 'Escalated.'}`,
+            detail: `Approval pending for ${Math.round(ageMins)} minutes. Confidence ${(confidence * 100).toFixed(0)}% below auto-approve threshold (${(autoApproveThreshold * 100).toFixed(0)}%). ${shadow ? '[SHADOW] Would hand off to a human.' : assignedTo ? `Handed off to ${assignedTo}.` : 'Handoff failed — no agent available, manual assignment required.'}`,
             ticketKey: approval.ticket_id,
           });
 
           if (!shadow) {
             await this.jiraClient.addComment(
               approval.ticket_id,
-              `\u{1F916} Lifecycle Manager\n\nApproval timed out after ${Math.round(ageMins)} minutes. Confidence (${(confidence * 100).toFixed(0)}%) is below the auto-approve threshold. This ticket needs human attention.`,
+              assignedTo
+                ? `\u{1F916} Lifecycle Manager\n\nApproval timed out after ${Math.round(ageMins)} minutes (confidence ${(confidence * 100).toFixed(0)}% below the auto-approve threshold). Handed off to ${assignedTo} for human review.`
+                : `\u{1F916} Lifecycle Manager\n\nApproval timed out after ${Math.round(ageMins)} minutes (confidence ${(confidence * 100).toFixed(0)}% below the auto-approve threshold). No agent was available to take it automatically — this ticket needs manual assignment.`,
               { internal: true },
             );
 
-            await this.ticketState.transition(approval.ticket_id, 'awaiting_customer', {
-              approvalId: null,
-              approvalSubmittedAt: null,
-            });
+            // Only fall back to awaiting_customer when we could NOT hand off (out of hours /
+            // no free agent). If a human was assigned, mark it handed_off so NOVA doesn't
+            // re-engage on the next customer reply.
+            await this.ticketState.transition(
+              approval.ticket_id,
+              assignedTo ? 'handed_off' : 'awaiting_customer',
+              { approvalId: null, approvalSubmittedAt: null },
+            );
           }
 
-          console.log(`[lifecycle] Approval timed out for ${approval.ticket_id} — ${shadow ? '[SHADOW] would escalate' : 'escalated'} (confidence: ${confidence.toFixed(2)})`);
+          console.log(`[lifecycle] Approval timed out for ${approval.ticket_id} — ${shadow ? '[SHADOW] would hand off' : assignedTo ? `handed off to ${assignedTo}` : 'handoff failed, needs manual assignment'} (confidence: ${confidence.toFixed(2)})`);
         }
         timedOut++;
       } else if (now >= alertDeadline) {
