@@ -6,6 +6,9 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import {
   captureAgentKpis, getAgentLiveSnapshot, getLatestDay, getDay, getAgentHistory, getAgentPeriod, backfillAgentFromLegacy,
 } from '../services/kpi-agent/index.js';
+import { getLegacyEarliest } from '../services/kpi-org/index.js';
+
+function yesterday(): string { const d = new Date(); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); }
 
 export interface KpiAgentDeps {
   getJiraClient: () => JiraRestClient | null;
@@ -66,12 +69,14 @@ export function createKpiAgentRoutes(deps: KpiAgentDeps): Router {
     res.json({ ok: summary.failed ? false : true, data: summary });
   });
 
-  // Backfill agent history from legacy dbo.jira_agent_kpi_daily. Body: { from, to }.
+  // Backfill agent history from legacy dbo.jira_agent_kpi_daily (single SQL pull —
+  // fast even for full history). Body: { from?, to? } — defaults to FULL history.
   router.post('/backfill', async (req, res) => {
-    const { from, to } = req.body as { from?: string; to?: string };
-    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to (YYYY-MM-DD) required' }); return; }
     try {
-      res.json({ ok: true, data: await backfillAgentFromLegacy(deps.settings, from, to) });
+      const body = req.body as { from?: string; to?: string };
+      const to = body.to || yesterday();
+      const from = body.from || (await getLegacyEarliest(deps.settings)).agent || '2024-01-01';
+      res.json({ ok: true, data: { ...(await backfillAgentFromLegacy(deps.settings, from, to)), from, to } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

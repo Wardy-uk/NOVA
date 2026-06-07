@@ -39,6 +39,7 @@ export function SupportKpiScorecard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState<ViewPeriod>('live');
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -83,19 +84,36 @@ export function SupportKpiScorecard() {
     }
   }
 
+  function pollBackfill() {
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/kpi-org/backfill-status');
+        const j = await r.json();
+        if (j.ok) {
+          const s = j.data;
+          if (s.running) {
+            setBackfillMsg(`Backfilling… ${s.doneDays}/${s.totalDays} days · ${s.flowKpis} flow values`);
+            setTimeout(tick, 3000);
+          } else {
+            setBackfillMsg(`Backfill complete: ${s.doneDays} days · ${s.flowKpis} flow values · ${s.stockRows} legacy stock rows${s.error ? ` (error: ${s.error})` : ''}`);
+            load();
+          }
+        }
+      } catch { setTimeout(tick, 5000); }
+    };
+    setTimeout(tick, 2000);
+  }
+
   async function runBackfill() {
-    const to = new Date(); to.setDate(to.getDate() - 1);
-    const from = new Date(); from.setDate(from.getDate() - 90);
-    const f = from.toLocaleDateString('en-CA'); const t = to.toLocaleDateString('en-CA');
-    if (!confirm(`Backfill Support KPIs ${f} → ${t}? (flows recomputed from Jira, stocks from legacy — can take a few minutes)`)) return;
-    setBusy(true);
+    if (!confirm('Backfill ALL Support history (earliest legacy data → yesterday)? Flows recompute from Jira, so this runs in the background and can take several minutes.')) return;
     try {
-      const r = await fetch('/api/kpi-org/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: f, to: t }) });
+      const r = await fetch('/api/kpi-org/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const j = await r.json();
-      if (j.ok) alert(`Backfill done: ${j.data.flowKpis} flow values over ${j.data.flowDays} days, ${j.data.stockRows} legacy stock rows.`);
-      else setError(j.error ?? 'Backfill failed');
+      if (!j.ok) { setError(j.error ?? 'Backfill failed'); return; }
+      if (j.data.started === false) setBackfillMsg('A backfill is already running — watching progress…');
+      else setBackfillMsg(`Backfill started: ${j.data.from} → ${j.data.to} (${j.data.totalDays} days). Running in background…`);
+      pollBackfill();
     } catch (e) { setError(e instanceof Error ? e.message : 'Backfill failed'); }
-    finally { setBusy(false); }
   }
 
   async function saveManual(key: string, value: number) {
@@ -129,9 +147,9 @@ export function SupportKpiScorecard() {
                 className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
                 {busy ? 'Working…' : 'Run capture now'}
               </button>
-              <button onClick={runBackfill} disabled={busy}
-                className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
-                Backfill 90d
+              <button onClick={runBackfill}
+                className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1]">
+                Backfill all
               </button>
             </>
           )}
@@ -142,6 +160,7 @@ export function SupportKpiScorecard() {
       </p>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
+      {backfillMsg && <div className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-700 text-blue-200 text-sm">{backfillMsg}</div>}
       {loading && <div className="text-slate-400">Loading…</div>}
 
       {!loading && groups.map(group => {

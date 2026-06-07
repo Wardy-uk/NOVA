@@ -40,6 +40,36 @@ function* dateRange(from: string, to: string): Generator<string> {
 }
 function addDay(day: string): string { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
 
+// Progress state for the (potentially long-running) org backfill.
+export interface OrgBackfillState {
+  running: boolean; from: string | null; to: string | null;
+  totalDays: number; doneDays: number; flowKpis: number; stockRows: number;
+  error: string | null; finishedAt: string | null;
+}
+export const orgBackfillState: OrgBackfillState = {
+  running: false, from: null, to: null, totalDays: 0, doneDays: 0, flowKpis: 0, stockRows: 0, error: null, finishedAt: null,
+};
+
+/** Earliest available historic date in each legacy source table. */
+export async function getLegacyEarliest(settings: SettingsQueries): Promise<{ org: string | null; agent: string | null }> {
+  const pool = await getKpiPool(settings);
+  const org = await pool.request().query(`SELECT CONVERT(varchar(10), MIN(CreatedAt), 23) AS d FROM dbo.jira_kpi_daily`);
+  const agent = await pool.request().query(`SELECT CONVERT(varchar(10), MIN(ReportDate), 23) AS d FROM dbo.jira_agent_kpi_daily`);
+  return { org: (org.recordset[0] as { d: string | null })?.d ?? null, agent: (agent.recordset[0] as { d: string | null })?.d ?? null };
+}
+
+/** Kick off a full org backfill in the background (returns immediately). Poll orgBackfillState. */
+export function startOrgBackfill(settings: SettingsQueries, jira: JiraRestClient, fromDay: string, toDay: string): { started: boolean; totalDays: number } {
+  if (orgBackfillState.running) return { started: false, totalDays: orgBackfillState.totalDays };
+  let total = 0; for (const _d of dateRange(fromDay, toDay)) total++;
+  Object.assign(orgBackfillState, { running: true, from: fromDay, to: toDay, totalDays: total, doneDays: 0, flowKpis: 0, stockRows: 0, error: null, finishedAt: null });
+  backfillOrg(settings, jira, fromDay, toDay)
+    .then(r => { orgBackfillState.stockRows = r.stockRows; })
+    .catch(e => { orgBackfillState.error = e instanceof Error ? e.message : String(e); })
+    .finally(() => { orgBackfillState.running = false; orgBackfillState.finishedAt = new Date().toISOString(); });
+  return { started: true, totalDays: total };
+}
+
 export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClient, fromDay: string, toDay: string): Promise<{ flowDays: number; flowKpis: number; stockRows: number; failures: string[] }> {
   const failures: string[] = [];
   const flowKpiDefs = SUPPORT_NT_KPIS.filter(k => k.rollup === 'sum' && k.compute.kind !== 'manual');
@@ -56,6 +86,8 @@ export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClien
       } catch { failures.push(`${day}:${kpi.key}`); }
     }
     flowDays++;
+    orgBackfillState.doneDays = flowDays;
+    orgBackfillState.flowKpis = flowKpis;
   }
 
   // ── Stocks: pull from legacy dbo.jira_kpi_daily, mapped onto new keys ──

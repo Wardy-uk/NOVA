@@ -67,16 +67,14 @@ export function AgentScorecardRebuild() {
   }
 
   async function runBackfill() {
-    const to = new Date(); to.setDate(to.getDate() - 1);
-    const from = new Date(); from.setDate(from.getDate() - 90);
-    const f = from.toLocaleDateString('en-CA'); const t = to.toLocaleDateString('en-CA');
-    if (!confirm(`Backfill agent history ${f} → ${t} from the legacy daily snapshot?`)) return;
+    if (!confirm('Backfill ALL agent history (earliest legacy data → yesterday) from the daily snapshot?')) return;
     setBusy(true);
     try {
-      const r = await fetch('/api/kpi-agent/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: f, to: t }) });
+      const r = await fetch('/api/kpi-agent/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const j = await r.json();
-      if (j.ok) alert(`Backfill done: ${j.data.rows} agent-rows over ${j.data.days} days.`);
+      if (j.ok) alert(`Backfill done: ${j.data.rows} agent-rows over ${j.data.days} days (${j.data.from} → ${j.data.to}).`);
       else setError(j.error ?? 'Backfill failed');
+      await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Backfill failed'); }
     finally { setBusy(false); }
   }
@@ -106,7 +104,7 @@ export function AgentScorecardRebuild() {
                 {busy ? 'Working…' : 'Run capture now'}
               </button>
               <button onClick={runBackfill} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
-                Backfill 90d
+                Backfill all
               </button>
             </>
           )}

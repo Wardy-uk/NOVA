@@ -7,8 +7,10 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
   captureSupportNt, getDay, getLatest, getRange, setManualValue,
-  ORG_KPIS, getKpi, getOrgPeriod, backfillOrg,
+  ORG_KPIS, getKpi, getOrgPeriod, startOrgBackfill, getLegacyEarliest, orgBackfillState,
 } from '../services/kpi-org/index.js';
+
+function yesterday(): string { const d = new Date(); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); }
 import type { OrgKpiDailyRow } from '../services/kpi-org/store.js';
 
 export interface KpiOrgDeps {
@@ -110,14 +112,27 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     }
   });
 
-  // Backfill historic days: hybrid (flows from Jira, stocks from legacy). Body: { from, to }.
+  // Backfill historic days (background): hybrid (flows from Jira, stocks from legacy).
+  // Body: { from?, to? } — defaults to the FULL legacy history (earliest → yesterday).
   router.post('/backfill', async (req, res) => {
     const jira = deps.getJiraClient();
     if (!jira) { res.status(503).json({ ok: false, error: 'Jira client not configured' }); return; }
-    const { from, to } = req.body as { from?: string; to?: string };
-    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to (YYYY-MM-DD) required' }); return; }
     try {
-      res.json({ ok: true, data: await backfillOrg(deps.settings, jira, from, to) });
+      const body = req.body as { from?: string; to?: string };
+      const to = body.to || yesterday();
+      const from = body.from || (await getLegacyEarliest(deps.settings)).org || '2024-01-01';
+      const r = startOrgBackfill(deps.settings, jira, from, to);
+      res.json({ ok: true, data: { ...r, from, to } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Poll backfill progress + earliest available dates.
+  router.get('/backfill-status', async (_req, res) => {
+    try {
+      const earliest = await getLegacyEarliest(deps.settings).catch(() => ({ org: null, agent: null }));
+      res.json({ ok: true, data: { ...orgBackfillState, earliest } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }
