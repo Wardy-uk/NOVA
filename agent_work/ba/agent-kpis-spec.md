@@ -114,6 +114,60 @@ Unit: days | Direction: lower-better | Rollup: latest
 RAG (legacy ragOldestTicket): green ≤3 / amber ≤7 / red >7 | Status: AGREED
 ```
 
-### Tier 2 — quality / Tier 3 — productivity-health
-<!-- to be carded next -->
+### Tier 2 — quality (AGREED: read & aggregate existing pipelines, per agent)
+Do NOT redefine the scoring. Aggregate the existing results per agent (resolved-today, by assignee).
+```
+AGENT KPI: QA scores — overall / accuracy / clarity / tone (avg), grade dist (R/A/G), concerning count
+Source: dbo.jira_qa_results WHERE CAST(CreatedAt AS DATE)=today AND assignee_name=agent
+Unit: score(1-5)/count | Direction: higher-better (scores), lower-better (red/concerning) | Rollup: average/sum
+Status: AGREED (read-as-is)
+```
+```
+AGENT KPI: Golden Rules — overall / ownership(Rule1) / next-action(Rule2) / timeframe(Rule3) (avg)
+Source: dbo.Jira_QA_GoldenRules WHERE CAST(CreatedAt AS DATE)=today AND Assignee=agent
+Unit: score | Direction: higher-better | Rollup: average | Status: AGREED (read-as-is)
+```
+```
+AGENT KPI: CSAT (avg)
+Source: Jira cf12802.rating among the agent's resolved-today tickets (jira_issue_cache fields_json)
+Unit: score(1-5) | Direction: higher-better | Rollup: average | Status: AGREED (read-as-is)
+```
+```
+AGENT KPI: Call QA — tone / confidence / knowledge / flow / satisfaction (avg)
+Source: n8n.dbo.SupportCallAnalysis (OPTIONAL — only if table present), by agent
+Unit: score | Direction: higher-better | Rollup: average | Status: AGREED (read-as-is, optional)
+```
+
+### Tier 3 — productivity / health (AGREED)
+```
+AGENT KPI: SLA compliance %
+Computation: among the agent's resolved-today tickets: (resolved − breached)/resolved × 100
+             (breached = resolution SLA cf14048 breached)
+Unit: % | Direction: higher-better | Rollup: average | Status: AGREED
+```
+```
+AGENT KPI: Tickets per hour
+Computation: SolvedToday / availableHours (availableHours = 7.5 if IsAvailable else 0, from availability service)
+Unit: rate | Direction: higher-better | Rollup: average | Status: AGREED (revisit availableHours source)
+```
+```
+AGENT KPI: RAG health statuses (8) — CONFIGURABLE thresholds in settings.json (seed = legacy values)
+  ragProductivity (ticketsPerHour): green ≥1.5 / amber ≥1.0 / red <1.0
+  ragCSAT:        green ≥4.0 / amber ≥3.0 / red <3.0
+  ragQA:          green ≥4.0 / amber ≥3.0 / red <3.0
+  ragGoldenRules: green ≥3.0 / amber ≥2.0 / red <2.0
+  ragOver2h:      green 0   / amber ≤2   / red >2
+  ragStale:       green 0   / amber ≤1   / red >1
+  ragSLA:         green ≥95 / amber ≥90  / red <90
+  ragOldestTicket:green ≤3  / amber ≤7   / red >7
+Status: AGREED — settings keys e.g. agent_rag_* ; UI to edit later
+```
+
+---
+
+## ✅ Agent KPI (Layer 3) BA — COMPLETE (2026-06-07)
+Tier 1 computed fresh (per-assignee, all tiers); Tier 2 reads existing QA/GR/CSAT/CallQA pipelines;
+Tier 3 derived (SLA% , tickets/hour) + 8 configurable RAG statuses. Gamification excluded.
+Roster = dbo.Agent. Cadence = live + 18:00 freeze into a per-agent daily table.
+Powers the SLA Breach Board (rebuild) + per-agent scorecard.
 
