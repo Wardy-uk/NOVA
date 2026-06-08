@@ -118,6 +118,22 @@ Per in-scope project, walk only days NOT marked `complete`, oldest-first from Da
 Self-healing backfill: grinds backwards, seals fully-attributed days, auto-retries the long tail.
 Surfaces "X days complete / Y partial / Z unresolved tickets" — watch it converge.
 
+## Manual risk-register import (added 08 Jun 2026)
+
+Nick maintains a manual risk register of at-risk accounts — many NOVA AI has not yet
+auto-identified. Import these as **verified** seed rows so they're scored from day one and so
+their domains bootstrap the resolution map. For now this is a manual spreadsheet import (later
+could sync automatically).
+
+- Each row upserts: `agent_account_risk` (verified, `needs_manual_resolution = 0`) + one or more
+  `agent_customer_domains` rows (`is_verified = 1`, high confidence) so future tickets from those
+  domains resolve to the registered customer.
+- "Not already identified by NOVA AI" → import is upsert-by-key: rows that already exist (matched on
+  BC number / domain) are updated, not duplicated; brand-new ones are inserted.
+- Delivery mechanism: an admin xlsx import (mirrors the existing delivery/onboarding import pattern).
+  Exact columns TBC — **Nick to upload the risk-register file in a later session**; importer to be
+  written to match it. (Until then, the dry-run seeds the map from `bc_customers` only.)
+
 ## Ticket-level enrichment
 
 The per-ticket AI triage already runs in-app. Inject the resolved customer's account-risk tier into
