@@ -52,14 +52,38 @@ export class AgentAvailabilityService {
     } catch { return null; }
   }
 
+  /**
+   * Run a KPI query with one reconnect-and-retry. Azure SQL silently drops idle
+   * connections (~30 min) while pool.connected can still report true, so a cached
+   * pool's first query throws. Without this, a single stale-pool failure would
+   * sink the scheduled People HR sync indefinitely. On any query error we discard
+   * the pool, rebuild a fresh one, and retry once.
+   */
+  private async runKpiQuery(text: string): Promise<sql.IRecordSet<any> | null> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const pool = await this.getKpiPool();
+      if (!pool) return null;
+      try {
+        const result = await pool.request().query(text);
+        return result.recordset;
+      } catch (err) {
+        try { await this.kpiPool?.close(); } catch { /* ignore */ }
+        this.kpiPool = null;
+        if (attempt === 1) {
+          console.warn('[agent-availability] KPI query failed after retry:', err instanceof Error ? err.message : err);
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
   async getAgentsFromKpiPublic(): Promise<KpiAgent[]> {
     return this.getAgentsFromKpi();
   }
 
   private async getAgentsFromKpi(): Promise<KpiAgent[]> {
-    const p = await this.getKpiPool();
-    if (!p) return [];
-    const result = await p.request().query(`
+    const recordset = await this.runKpiQuery(`
       SELECT AgentId,
              LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS display_name,
              LOWER(Team) AS pool,
@@ -67,7 +91,7 @@ export class AgentAvailabilityService {
       FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'
       ORDER BY AgentName
     `);
-    return result.recordset;
+    return recordset ?? [];
   }
 
   async setAvailability(rosterId: number, date: string, status: AvailabilityStatus, reason?: string): Promise<void> {
