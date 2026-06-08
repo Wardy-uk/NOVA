@@ -777,6 +777,112 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_flagged_tickets', 'dismissed_at') IS NULL
      ALTER TABLE agent_flagged_tickets ADD dismissed_at DATETIME2 NULL;`,
 
+    // ── Account-level risk intelligence (Jun 2026) ──────────────────────────
+    // Per-CUSTOMER risk (churn / formal complaint / termination), distinct from
+    // the per-TICKET risk in agent_flagged_tickets. See agent_work/ba/account-risk-spec.md.
+
+    // Domain → customer map. The backbone of customer resolution: only ~14% of
+    // tickets carry a structured identifier (BC Account Number, Instance URL,
+    // JSM Organization), but 99% have a reporter email. Seeded from bc_customers
+    // email domains + the known at-risk accounts; grows as tickets are resolved.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_customer_domains') AND type = 'U')
+     CREATE TABLE agent_customer_domains (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       customer_ref NVARCHAR(100) NOT NULL,        -- canonical key, e.g. BC number 'CU0001155'
+       customer_source NVARCHAR(20) NOT NULL DEFAULT 'bc',  -- 'bc' | 'crm' | 'manual'
+       customer_name NVARCHAR(200) NULL,
+       domain NVARCHAR(255) NOT NULL,              -- lower-cased; e.g. 'acenproperties.co.uk'
+       domain_type NVARCHAR(20) NOT NULL DEFAULT 'email',   -- 'email' | 'instance_url' | 'website'
+       confidence TINYINT NOT NULL DEFAULT 100,    -- AI-inferred mappings score lower
+       is_verified BIT NOT NULL DEFAULT 0,
+       is_network BIT NOT NULL DEFAULT 0,          -- umbrella domain (Guild/PFG/EweMove)
+       source_note NVARCHAR(200) NULL,
+       added_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_agent_customer_domains UNIQUE (domain, domain_type)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_customer_domains_ref')
+     CREATE INDEX IX_agent_customer_domains_ref ON agent_customer_domains (customer_ref);`,
+
+    // Per-customer risk profile.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_account_risk') AND type = 'U')
+     CREATE TABLE agent_account_risk (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       customer_ref NVARCHAR(100) NOT NULL,
+       customer_source NVARCHAR(20) NOT NULL DEFAULT 'bc',
+       customer_name NVARCHAR(200) NOT NULL,
+       bc_number NVARCHAR(50) NULL,
+       primary_domain NVARCHAR(255) NULL,
+       risk_score INT NOT NULL DEFAULT 0,
+       risk_tier TINYINT NOT NULL DEFAULT 0,       -- 0 Normal .. 4 Critical
+       has_formal_complaint BIT NOT NULL DEFAULT 0,
+       has_termination BIT NOT NULL DEFAULT 0,
+       has_active_refund BIT NOT NULL DEFAULT 0,
+       has_open_escalation BIT NOT NULL DEFAULT 0,
+       is_network_account BIT NOT NULL DEFAULT 0,
+       needs_manual_resolution BIT NOT NULL DEFAULT 0,
+       total_ticket_count INT NOT NULL DEFAULT 0,
+       first_ticket_date DATETIME2 NULL,
+       last_ticket_date DATETIME2 NULL,
+       last_score_update DATETIME2 NULL,
+       notes NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_agent_account_risk_ref UNIQUE (customer_ref)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_account_risk_tier')
+     CREATE INDEX IX_agent_account_risk_tier ON agent_account_risk (risk_tier DESC, risk_score DESC);`,
+
+    // Individual ticket-linked signal events that feed the score.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_account_risk_signals') AND type = 'U')
+     CREATE TABLE agent_account_risk_signals (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       customer_ref NVARCHAR(100) NOT NULL,
+       ticket_key NVARCHAR(30) NOT NULL,
+       project_key NVARCHAR(10) NOT NULL,
+       signal_type NVARCHAR(80) NOT NULL,          -- 'formal_complaint', 'termination', ...
+       signal_weight INT NOT NULL,
+       is_active BIT NOT NULL DEFAULT 1,           -- 0 once ticket resolved/closed
+       evidence_text NVARCHAR(500) NULL,
+       detected_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       ticket_created_at DATETIME2 NULL,
+       ticket_status NVARCHAR(60) NULL,
+       CONSTRAINT UQ_agent_account_risk_signal UNIQUE (ticket_key, signal_type)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_account_risk_signals_ref')
+     CREATE INDEX IX_agent_account_risk_signals_ref ON agent_account_risk_signals (customer_ref, is_active);`,
+
+    // Audit trail of score/tier changes.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_account_risk_history') AND type = 'U')
+     CREATE TABLE agent_account_risk_history (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       customer_ref NVARCHAR(100) NOT NULL,
+       previous_score INT NOT NULL,
+       new_score INT NOT NULL,
+       previous_tier TINYINT NOT NULL,
+       new_tier TINYINT NOT NULL,
+       trigger_ticket_key NVARCHAR(30) NULL,
+       change_reason NVARCHAR(500) NULL,
+       changed_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_account_risk_history_ref')
+     CREATE INDEX IX_agent_account_risk_history_ref ON agent_account_risk_history (customer_ref, changed_at DESC);`,
+
+    // Nightly reconciliation ledger. Each in-scope project/day: total tickets vs
+    // resolved-to-a-customer. status='complete' days are sealed and never re-checked.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_risk_recon_days') AND type = 'U')
+     CREATE TABLE agent_risk_recon_days (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       project_key NVARCHAR(10) NOT NULL,
+       recon_date DATE NOT NULL,
+       total_tickets INT NOT NULL DEFAULT 0,
+       resolved_tickets INT NOT NULL DEFAULT 0,
+       status NVARCHAR(20) NOT NULL DEFAULT 'partial',  -- 'partial' | 'complete'
+       last_checked_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_agent_risk_recon_day UNIQUE (project_key, recon_date)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_risk_recon_days_status')
+     CREATE INDEX IX_agent_risk_recon_days_status ON agent_risk_recon_days (status, recon_date);`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)
