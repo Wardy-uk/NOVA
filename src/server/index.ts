@@ -130,6 +130,7 @@ import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
+import { CustomerResolver } from './services/customer-resolver.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -1124,6 +1125,18 @@ async function main() {
     assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
+
+    // One-time account-risk customer-resolver dry-run (chunk 1). Seeds the domain map
+    // from bc_customers and logs the resolution rate over cached in-scope tickets, then
+    // never runs again. Read-only except for the additive seed. Non-blocking.
+    if (!settingsQueries.get('risk_resolver_dryrun_v1')) {
+      const RISK_SCOPE_PROJECTS = ['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'];
+      const resolver = new CustomerResolver(settingsQueries);
+      resolver.runDryRunReport(RISK_SCOPE_PROJECTS)
+        .then(() => settingsQueries.set('risk_resolver_dryrun_v1', 'true'))
+        .catch(err => console.warn('[risk-resolver] dry-run failed:', err instanceof Error ? err.message : err));
+    }
+
     const availabilityService = new AgentAvailabilityService(settingsQueries);
 
     // People HR → agent_availability sync (variable schedule matching workday pattern)

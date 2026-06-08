@@ -62,11 +62,41 @@ const UNRESOLVED: ResolveResult = {
   confidence: 0, isNetwork: false, internalReporter: false,
 };
 
+type DomainHit = { customer_ref: string; customer_name: string | null; confidence: number; is_network: boolean };
+
 export class CustomerResolver {
   private settings: SettingsQueries;
 
+  // Optional in-memory index. When loaded (via loadIndex), lookups hit memory
+  // instead of the DB — used by the dry-run to avoid a query per ticket (NOVA has
+  // a documented connection-pool-exhaustion history).
+  private domainCache: Map<string, DomainHit> | null = null;
+  private orgCache: Map<string, DomainHit> | null = null;
+  private bcNames: Map<string, string> | null = null;
+
   constructor(settings: SettingsQueries) {
     this.settings = settings;
+  }
+
+  /** Preload the domain/org map and BC customer names into memory. */
+  async loadIndex(): Promise<void> {
+    const domains = await query<{ customer_ref: string; customer_name: string | null; domain: string; domain_type: string; confidence: number; is_network: boolean; is_verified: boolean }>(
+      `SELECT customer_ref, customer_name, domain, domain_type, confidence, is_network, is_verified
+       FROM agent_customer_domains ORDER BY is_verified DESC, confidence DESC`,
+    );
+    const dc = new Map<string, DomainHit>();
+    const oc = new Map<string, DomainHit>();
+    for (const r of domains) {
+      const hit: DomainHit = { customer_ref: r.customer_ref, customer_name: r.customer_name, confidence: r.confidence, is_network: r.is_network };
+      const target = r.domain_type === 'org' ? oc : dc;
+      if (!target.has(r.domain)) target.set(r.domain, hit); // first wins (ordered by verified/confidence)
+    }
+    this.domainCache = dc;
+    this.orgCache = oc;
+    const bc = await query<{ number: string; display_name: string }>(
+      `SELECT number, display_name FROM bc_customers WHERE number IS NOT NULL`,
+    );
+    this.bcNames = new Map(bc.map(r => [r.number, r.display_name]));
   }
 
   /** Normalise a host/domain: strip scheme, path, leading www., lower-case. */
@@ -103,13 +133,26 @@ export class CustomerResolver {
     return [...out];
   }
 
-  /** Look up a domain in the customer-domain map. */
-  private async lookupDomain(domain: string | null): Promise<{ customer_ref: string; customer_name: string | null; confidence: number; is_network: boolean } | null> {
+  /** Look up a domain in the customer-domain map (memory if indexed, else DB). */
+  private async lookupDomain(domain: string | null): Promise<DomainHit | null> {
     if (!domain) return null;
-    return (await queryOne<{ customer_ref: string; customer_name: string | null; confidence: number; is_network: boolean }>(
+    if (this.domainCache) return this.domainCache.get(domain) ?? null;
+    return (await queryOne<DomainHit>(
       `SELECT TOP(1) customer_ref, customer_name, confidence, is_network
        FROM agent_customer_domains WHERE domain = ? ORDER BY is_verified DESC, confidence DESC`,
       [domain],
+    )) ?? null;
+  }
+
+  /** Look up a JSM organization name in the map (domain_type='org'). */
+  private async lookupOrg(orgName: string | null): Promise<DomainHit | null> {
+    if (!orgName) return null;
+    const key = orgName.toLowerCase();
+    if (this.orgCache) return this.orgCache.get(key) ?? null;
+    return (await queryOne<DomainHit>(
+      `SELECT TOP(1) customer_ref, customer_name, confidence, is_network FROM agent_customer_domains
+       WHERE domain = ? AND domain_type = 'org' ORDER BY is_verified DESC`,
+      [key],
     )) ?? null;
   }
 
@@ -118,12 +161,18 @@ export class CustomerResolver {
     if (!bcNumber) return null;
     const n = bcNumber.trim();
     if (!n) return null;
-    const row = await queryOne<{ number: string; display_name: string }>(
-      `SELECT TOP(1) number, display_name FROM bc_customers WHERE number = ? OR bc_id = ?`,
-      [n, n],
-    );
+    let displayName: string | undefined;
+    if (this.bcNames) {
+      displayName = this.bcNames.get(n);
+    } else {
+      const row = await queryOne<{ number: string; display_name: string }>(
+        `SELECT TOP(1) number, display_name FROM bc_customers WHERE number = ? OR bc_id = ?`,
+        [n, n],
+      );
+      displayName = row?.display_name;
+    }
     // Even if not in bc_customers yet, the BC number is itself a valid canonical ref.
-    return { customer_ref: n, customer_name: row?.display_name ?? n };
+    return { customer_ref: n, customer_name: displayName ?? n };
   }
 
   async resolveTicket(input: ResolveInput): Promise<ResolveResult> {
@@ -140,15 +189,9 @@ export class CustomerResolver {
 
     // 2. JSM Organization (~6%).
     const orgName = input.organizations?.find(o => o.name)?.name ?? null;
-    if (orgName) {
-      const byOrg = await queryOne<{ customer_ref: string; customer_name: string | null; is_network: boolean }>(
-        `SELECT TOP(1) customer_ref, customer_name, is_network FROM agent_customer_domains
-         WHERE domain = ? AND domain_type = 'org' ORDER BY is_verified DESC`,
-        [orgName.toLowerCase()],
-      );
-      if (byOrg) {
-        return { customerRef: byOrg.customer_ref, customerName: byOrg.customer_name, source: 'jsm_org', confidence: 95, isNetwork: byOrg.is_network, internalReporter };
-      }
+    const byOrg = await this.lookupOrg(orgName);
+    if (byOrg) {
+      return { customerRef: byOrg.customer_ref, customerName: byOrg.customer_name, source: 'jsm_org', confidence: 95, isNetwork: byOrg.is_network, internalReporter };
     }
 
     // 3. Structured URL fields → domain map (instance URL, customer domain, website URL).
@@ -215,5 +258,86 @@ export class CustomerResolver {
       added++;
     }
     return { added, skipped };
+  }
+
+  /**
+   * One-time dry-run: seed the domain map, then resolve every cached in-scope ticket
+   * and log the resolution rate by source. Read-only except for the seed. Guarded by
+   * the caller via a settings flag so it runs once per deploy of this change.
+   */
+  async runDryRunReport(projects: string[], sinceIso = '2025-10-31'): Promise<void> {
+    const t0 = Date.now();
+    console.log('[risk-resolver] Dry-run starting…');
+    const seed = await this.seedFromBcCustomers();
+    console.log(`[risk-resolver] Domain seed from bc_customers: +${seed.added} new, ${seed.skipped} skipped`);
+
+    await this.loadIndex();
+    console.log(`[risk-resolver] Index: ${this.domainCache?.size ?? 0} domains, ${this.orgCache?.size ?? 0} orgs, ${this.bcNames?.size ?? 0} BC customers`);
+
+    const placeholders = projects.map(() => '?').join(',');
+    const tickets = await query<{
+      issue_key: string; project_key: string; summary: string | null;
+      description_text: string | null; reporter_email: string | null;
+      bc_account_number: string | null; organisation_name: string | null;
+      fields_json: string | null;
+    }>(
+      `SELECT issue_key, project_key, summary, description_text, reporter_email,
+              bc_account_number, organisation_name, fields_json
+       FROM jira_issue_cache
+       WHERE project_key IN (${placeholders}) AND jira_created >= ?`,
+      [...projects, sinceIso],
+    );
+
+    const bySource = new Map<string, number>();
+    const byProjectTotal = new Map<string, number>();
+    const byProjectResolved = new Map<string, number>();
+    let resolved = 0;
+    const unresolvedSamples: string[] = [];
+
+    for (const t of tickets) {
+      let instanceUrl: string | null = null, customerDomain: string | null = null, websiteUrl: string | null = null;
+      if (t.fields_json) {
+        try {
+          const f = JSON.parse(t.fields_json) as Record<string, unknown>;
+          instanceUrl = (f[FIELD.INSTANCE_URL] as string) ?? null;
+          customerDomain = (f[FIELD.CUSTOMER_DOMAIN] as string) ?? null;
+          websiteUrl = (f[FIELD.WEBSITE_URL] as string) ?? null;
+        } catch { /* malformed cache row — ignore */ }
+      }
+      const res = await this.resolveTicket({
+        bcAccountNumber: t.bc_account_number,
+        instanceUrl, customerDomain, websiteUrl,
+        organizations: t.organisation_name ? [{ name: t.organisation_name }] : null,
+        reporterEmail: t.reporter_email,
+        summary: t.summary,
+        description: t.description_text,
+      });
+      bySource.set(res.source, (bySource.get(res.source) ?? 0) + 1);
+      byProjectTotal.set(t.project_key, (byProjectTotal.get(t.project_key) ?? 0) + 1);
+      if (res.source !== 'unresolved') {
+        resolved++;
+        byProjectResolved.set(t.project_key, (byProjectResolved.get(t.project_key) ?? 0) + 1);
+      } else if (unresolvedSamples.length < 20) {
+        unresolvedSamples.push(`${t.issue_key} <${t.reporter_email ?? 'no-email'}>`);
+      }
+    }
+
+    const total = tickets.length;
+    const pct = (n: number) => total ? `${Math.round((n / total) * 1000) / 10}%` : '0%';
+    console.log('[risk-resolver] ===== DRY-RUN REPORT =====');
+    console.log(`[risk-resolver] In-scope tickets since ${sinceIso}: ${total}`);
+    console.log(`[risk-resolver] Resolved to a customer: ${resolved} (${pct(resolved)})`);
+    console.log('[risk-resolver] By source:');
+    for (const [src, n] of [...bySource.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`[risk-resolver]   ${src.padEnd(16)} ${n} (${pct(n)})`);
+    }
+    console.log('[risk-resolver] By project (resolved/total):');
+    for (const proj of projects) {
+      const tot = byProjectTotal.get(proj) ?? 0;
+      const r = byProjectResolved.get(proj) ?? 0;
+      console.log(`[risk-resolver]   ${proj.padEnd(6)} ${r}/${tot}`);
+    }
+    console.log(`[risk-resolver] Unresolved samples: ${unresolvedSamples.join(', ') || '(none)'}`);
+    console.log(`[risk-resolver] ===== done in ${Math.round((Date.now() - t0) / 1000)}s =====`);
   }
 }
