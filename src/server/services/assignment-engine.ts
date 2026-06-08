@@ -70,6 +70,10 @@ export class AssignmentEngine {
   private bankHolidaysHash: string = '';
   private approvalQueries: { withdrawByTicketKey(ticketKey: string, reason: string): Promise<number> } | null = null;
   private retryQueries: { insert(ticketKey: string, pool: string, projectKey: string, error?: string): Promise<number>; markResolved(ticketKey: string, reason: string): Promise<void> } | null = null;
+  // Recent assignments made this process, by agent account id (timestamps). Folded into the
+  // workload snapshot so a batch/sweep can't pile every ticket onto whoever was lowest at the
+  // start — the snapshot (KPI/cache) lags behind by minutes, so we track in-flight here.
+  private recentAssignments = new Map<string, number[]>();
 
   constructor(
     private jiraClient: JiraRestClient,
@@ -119,6 +123,21 @@ export class AssignmentEngine {
     if (available.length === 0) return null;
 
     const allBuckets = await this.getAgentLoadsBatch(available);
+
+    // Fold in assignments made in the last few minutes that the workload snapshot
+    // (KPI/cache) hasn't reflected yet. Without this, every ticket in a sweep sees the
+    // same stale snapshot and piles onto whoever was lowest at the start (e.g. all of a
+    // backlog landing on one agent and blowing past their cap).
+    for (const agent of available) {
+      const recent = this.getRecentAssignmentCount(agent.jira_account_id);
+      if (recent === 0) continue;
+      const b = allBuckets.get(agent.jira_account_id);
+      if (!b) continue;
+      b.total += recent;
+      if (pool === 'cc') b.cc += recent;
+      else if (pool === 't2') b.t2t3 += recent;
+      else if (pool === 'tpj') b.tpj += recent;
+    }
 
     // TPJ stickiness: domain-based, overrides caps (n8n parity)
     if (pool === 'tpj' && options?.reporterEmail) {
@@ -788,10 +807,29 @@ export class AssignmentEngine {
   }
 
   private async recordAssignment(ticketKey: string, pool: Pool, chosen: AgentLoad, project: string = 'NT', assignmentReason: string = 'capacity_best'): Promise<void> {
+    // Track in-flight so the next pick in this batch sees this agent as fuller.
+    this.noteRecentAssignment(chosen.agent.jira_account_id);
     await executeAndGetId(`
       INSERT INTO agent_assignment_log (ticket_key, pool, assigned_to, reason, open_ticket_count, project_key, assignment_reason)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [ticketKey, pool, chosen.agent.display_name, this.buildReason(chosen), chosen.openCount, project, assignmentReason]);
+  }
+
+  /** Count of assignments made to this agent within the recent-TTL window (default 15 min). */
+  private getRecentAssignmentCount(accountId: string): number {
+    const arr = this.recentAssignments.get(accountId);
+    if (!arr || arr.length === 0) return 0;
+    const ttlMs = (parseFloat(this.settingsQueries.get('assignment_recent_ttl_mins') || '') || 15) * 60_000;
+    const cutoff = Date.now() - ttlMs;
+    const fresh = arr.filter(ts => ts >= cutoff);
+    if (fresh.length !== arr.length) this.recentAssignments.set(accountId, fresh);
+    return fresh.length;
+  }
+
+  private noteRecentAssignment(accountId: string): void {
+    const arr = this.recentAssignments.get(accountId) ?? [];
+    arr.push(Date.now());
+    this.recentAssignments.set(accountId, arr);
   }
 
   private async updateLastAssigned(agentId: number): Promise<void> {
