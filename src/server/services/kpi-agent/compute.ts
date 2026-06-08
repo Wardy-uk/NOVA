@@ -27,6 +27,8 @@ export interface AgentKpiRow {
   noReply: number;
   oldestDays: number;
   oldestKey: string | null;
+  oldestSupportDays: number;   // oldest actionable ticket at tier CC / Tier 2
+  oldestSupportKey: string | null;
   solvedToday: number;
   solvedWeek: number;
   // tier 2
@@ -83,7 +85,8 @@ function isNoReply(status: string | null, created: Date | null, lastUpd: Date | 
   return true;
 }
 
-interface Stat1 { open: number; overSla: number; noReply: number; oldestDays: number; oldestKey: string | null; }
+const SUPPORT_TIERS = new Set(['customer care', 'tier 2']);
+interface Stat1 { open: number; overSla: number; noReply: number; oldestDays: number; oldestKey: string | null; oldestSupportDays: number; oldestSupportKey: string | null; }
 
 function ukWeekStart(now: Date): string {
   // Monday of the current week (UTC-ish; close enough for the EOD capture).
@@ -113,21 +116,25 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
   const tomorrow = addDay(day);
   const weekStart = ukWeekStart(now);
 
-  // 1. Roster (dbo.Agent)
+  // 1. Roster (dbo.Agent) — NT space only (Department IN NT/NOVA_AI), matching the legacy breach board.
+  const hasDept = (await pool.request().query(
+    `SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`,
+  )).recordset.length > 0;
+  const deptFilter = hasDept ? "AND Department IN ('NT', 'NOVA_AI')" : '';
   const roster = (await pool.request().query(`
     SELECT AgentId, AccountId,
            RTRIM(LTRIM(ISNULL(AgentName,'') + ' ' + ISNULL(AgentSurname,''))) AS AgentName,
            ISNULL(TierCode,'') AS TierCode, ISNULL(Team,'') AS Team, ISNULL(IsAvailable,0) AS IsAvailable
-    FROM dbo.Agent WHERE IsActive = 1 AND AccountId IS NOT NULL
+    FROM dbo.Agent WHERE IsActive = 1 AND AccountId IS NOT NULL ${deptFilter}
   `)).recordset as Array<{ AgentId: number; AccountId: string; AgentName: string; TierCode: string; Team: string; IsAvailable: number }>;
 
   // 2. Tier-1 stocks from jira_issue_cache (one pass, bucket by assignee). ALL tiers, project NT.
   const openRows = await query<{
-    issue_key: string; assignee_account_id: string | null; status_name: string | null;
+    issue_key: string; assignee_account_id: string | null; status_name: string | null; current_tier: string | null;
     jira_created: Date | null; agent_last_updated: Date | null; agent_next_update: Date | null;
     due_date: Date | null; fields_json: string | null;
   }>(`
-    SELECT issue_key, assignee_account_id, status_name, jira_created, agent_last_updated, agent_next_update, due_date, fields_json
+    SELECT issue_key, assignee_account_id, status_name, current_tier, jira_created, agent_last_updated, agent_next_update, due_date, fields_json
     FROM jira_issue_cache
     WHERE project_key = 'NT' AND status_category <> 'Done' AND assignee_account_id IS NOT NULL
   `);
@@ -135,7 +142,7 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
   const stats1 = new Map<string, Stat1>();
   for (const t of openRows) {
     const acc = t.assignee_account_id!;
-    const s = stats1.get(acc) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null };
+    const s = stats1.get(acc) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null };
     s.open++;
     const status = (t.status_name || '').toLowerCase();
     const actionable = !NOT_ACTIONABLE.has(status);
@@ -148,6 +155,9 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
     if (actionable && t.jira_created) {
       const days = Math.floor((now.getTime() - new Date(t.jira_created).getTime()) / 86_400_000);
       if (days > s.oldestDays) { s.oldestDays = days; s.oldestKey = t.issue_key; }
+      if (SUPPORT_TIERS.has((t.current_tier || '').toLowerCase()) && days > s.oldestSupportDays) {
+        s.oldestSupportDays = days; s.oldestSupportKey = t.issue_key;
+      }
     }
     stats1.set(acc, s);
   }
@@ -209,7 +219,7 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
   // 5. Assemble per agent
   const round = (n: number) => Math.round(n * 100) / 100;
   return roster.map(a => {
-    const s1 = stats1.get(a.AccountId) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null };
+    const s1 = stats1.get(a.AccountId) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null };
     const nameLower = (a.AgentName || '').trim().toLowerCase();
     const qa = qaByName.get(nameLower);
     const gr = grByName.get(nameLower);
@@ -232,11 +242,13 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
       over2h: ragLower(s1.overSla, thresholds.over2h),
       stale: ragLower(s1.noReply, thresholds.stale),
       oldest: ragLower(s1.oldestDays, thresholds.oldest),
+      oldestSupport: ragLower(s1.oldestSupportDays, thresholds.oldest),
     };
 
     return {
       accountId: a.AccountId, agentId: a.AgentId ?? null, agentName: a.AgentName, tierCode: a.TierCode, team: a.Team,
       open: s1.open, overSla: s1.overSla, noReply: s1.noReply, oldestDays: s1.oldestDays, oldestKey: s1.oldestKey,
+      oldestSupportDays: s1.oldestSupportDays, oldestSupportKey: s1.oldestSupportKey,
       solvedToday: solvedT, solvedWeek: solvedWeek.get(a.AccountId) || 0,
       qaScored: qa?.scored || 0, qaOverall, qaAccuracy: qa?.accuracy != null ? round(qa.accuracy) : null,
       qaClarity: qa?.clarity != null ? round(qa.clarity) : null, qaTone: qa?.tone != null ? round(qa.tone) : null,

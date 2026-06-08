@@ -3376,6 +3376,7 @@ ${cells}
       ${cell(a.open)}
       ${cell(a.overSla, a.rag.over2h)}
       ${cell(a.noReply, a.rag.stale)}
+      ${cell(a.oldestSupportDays + 'd', a.rag.oldestSupport)}
       ${cell(a.oldestDays + 'd', a.rag.oldest)}
       ${cell(a.solvedToday)}
     </tr>`).join('');
@@ -3392,8 +3393,8 @@ ${wallboardRefreshScript('/wallboard/rebuild/breach-board')}
 </div>
 ${summary}
 <table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.02);border-radius:12px;overflow:hidden">
-<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Team</th><th>Open</th><th>Over SLA</th><th>Not Updated</th><th>Oldest (days)</th><th>Solved Today</th></tr></thead>
-<tbody>${body || '<tr><td colspan="7" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
+<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Team</th><th>Open</th><th>Over SLA</th><th>Not Updated</th><th>Oldest Support</th><th>Oldest (days)</th><th>Solved Today</th></tr></thead>
+<tbody>${body || '<tr><td colspan="8" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
 </table>
 <div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board (Rebuild) &middot; ${dateStr} &middot; Source: kpi-agent</div>
 </div></body></html>`;

@@ -41,6 +41,8 @@ export async function backfillAgentFromLegacy(settings: SettingsQueries, fromDay
       accountId: r.AccountId, agentId: r.AgentId ?? null, agentName: r.AgentName, tierCode: r.TierCode || '', team: r.Team || '',
       open: n(r.OpenTickets_Total), overSla: n(r.OpenTickets_Over2Hours), noReply: n(r.OpenTickets_NoUpdateToday),
       oldestDays: n(r.OldestTicketDays), oldestKey: null,
+      oldestSupportDays: 0, oldestSupportKey: null, // not in legacy snapshot
+
       solvedToday: n(r.SolvedTickets_Today), solvedWeek: n(r.SolvedTickets_ThisWeek),
       qaScored: n(r.QATicketsScored), qaOverall: nOrNull(r.QAOverallAvg), qaAccuracy: nOrNull(r.QAAccuracyAvg),
       qaClarity: nOrNull(r.QAClarityAvg), qaTone: nOrNull(r.QAToneAvg),
