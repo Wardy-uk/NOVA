@@ -67,8 +67,9 @@ export class LifecycleManager {
     this.assignmentEngine = engine;
   }
 
-  /** Pool routing for a timed-out ticket: CC by default, T2 only if the tier is authoritative. */
-  private poolForTier(currentTier: string | null, labels: string | null): Pool | null {
+  /** Pool routing for a timed-out ticket: NTPJ by project, CC by default, T2 only if the tier is authoritative. */
+  private poolForTier(project: string, currentTier: string | null, labels: string | null): Pool | null {
+    if (project === 'NTPJ') return 'tpj'; // TPJ Maintenance routes by project, not tier
     if (labels && labels.includes('int_setup')) return 'tpj';
     const tier = (currentTier || '').trim();
     if (tier === 'Development') return null; // never auto-assign Development
@@ -84,9 +85,9 @@ export class LifecycleManager {
         `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
         [ticketKey],
       );
-      const pool = this.poolForTier(rows[0]?.current_tier ?? null, rows[0]?.labels ?? null);
-      if (!pool) return null;
       const project = this.assignmentEngine.resolveProjectFromTicketKey(ticketKey);
+      const pool = this.poolForTier(project, rows[0]?.current_tier ?? null, rows[0]?.labels ?? null);
+      if (!pool) return null;
       const assignment = await this.assignmentEngine.assignWithFallback(ticketKey, pool, project);
       if (!assignment) return null;
       await this.assignmentEngine.postAssignmentComment(ticketKey, assignment);

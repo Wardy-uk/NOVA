@@ -1173,6 +1173,11 @@ export class AgentLoop {
     // ticket does not pull it out of CC (it goes to CC; if it is genuinely T2 it gets
     // re-tiered and the unassigned sweep / a routing rule reassigns it to a T2 agent).
 
+    // NTPJ (TPJ Maintenance) is its own team — route by PROJECT, not tier. NTPJ tickets
+    // are almost always tier "Customer Care", which would otherwise mis-route them to the
+    // CC pool and (with no cross-tier fallback) fail to assign. Matches n8n's hard switch.
+    if (project === 'NTPJ') return 'tpj';
+
     // int_setup label is a routing rule → TPJ
     if (ticket?.labels && ticket.labels.includes('int_setup')) return 'tpj';
 
@@ -1289,6 +1294,10 @@ export class AgentLoop {
     ticket: { issue_key: string; current_tier?: string | null; labels?: string | null },
     project: string,
   ): Pool | null {
+    // NTPJ (TPJ Maintenance) routes by PROJECT, not tier — NTPJ tickets are almost always
+    // tier "Customer Care" and would otherwise mis-route to CC and fail. Matches n8n.
+    if (project === 'NTPJ') return 'tpj';
+
     // int_setup label → TPJ pool (matches n8n routing)
     const labels = ticket.labels || '';
     if (labels.includes('int_setup')) return 'tpj';
