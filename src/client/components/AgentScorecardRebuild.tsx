@@ -18,47 +18,25 @@ const RAG: Record<string, string> = { green: '#10b981', amber: '#eab308', red: '
 const col = (rag?: string | null) => (rag ? RAG[rag] : '#e2e8f0');
 const num = (v: number | null) => (v == null ? '—' : String(v));
 
-type ViewPeriod = 'live' | 'week' | 'month';
-
 export function AgentScorecardRebuild() {
   const [rows, setRows] = useState<AgentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [period, setPeriod] = useState<ViewPeriod>('live');
 
   async function load() {
     setLoading(true);
     try {
-      if (period === 'live') {
-        const r = await fetch('/api/kpi-agent/live');
-        const j = await r.json();
-        if (j.ok) { setRows(j.data.agents ?? []); setLive(j.data.live ?? false); setError(null); }
-        else setError(j.error ?? 'Failed to load');
-      } else {
-        const r = await fetch(`/api/kpi-agent/period?period=${period}`);
-        const j = await r.json();
-        if (j.ok) {
-          setLive(false);
-          setRows((j.data.agents as Array<Record<string, unknown>>).map(a => ({
-            accountId: a.accountId as string, agentName: a.agentName as string, tierCode: a.tierCode as string, team: a.team as string,
-            open: a.open as number, overSla: a.overSla as number, noReply: a.noReply as number,
-            oldestDays: a.oldestDays as number, oldestKey: null,
-            solvedToday: a.solved as number, solvedWeek: a.days as number,
-            qaOverall: a.qaOverall as number | null, qaScored: 0, grOverall: null,
-            csatAvg: a.csatAvg as number | null, csatCount: 0,
-            slaCompliancePct: a.slaCompliancePct as number | null, ticketsPerHour: a.ticketsPerHour as number | null,
-            rag: a.rag as Record<string, string | null>,
-          })));
-          setError(null);
-        } else setError(j.error ?? 'Failed to load');
-      }
+      const r = await fetch('/api/kpi-agent/live');
+      const j = await r.json();
+      if (j.ok) { setRows(j.data.agents ?? []); setLive(j.data.live ?? false); setError(null); }
+      else setError(j.error ?? 'Failed to load');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runCapture() {
     setBusy(true);
@@ -90,28 +68,16 @@ export function AgentScorecardRebuild() {
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold">Agent KPIs <span className="text-sm font-normal text-slate-400">(Layer 3 — rebuild)</span></h1>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg overflow-hidden border border-white/10 text-sm">
-            {(['live', 'week', 'month'] as ViewPeriod[]).map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`px-3 py-1.5 ${period === p ? 'bg-blue-600 text-white' : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]'}`}>
-                {p === 'live' ? 'Today' : p === 'week' ? 'Week' : 'Month'}
-              </button>
-            ))}
-          </div>
-          {period === 'live' && (
-            <>
-              <button onClick={runCapture} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-                {busy ? 'Working…' : 'Run capture now'}
-              </button>
-              <button onClick={runBackfill} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
-                Backfill all
-              </button>
-            </>
-          )}
+          <button onClick={runCapture} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+            {busy ? 'Working…' : 'Run capture now'}
+          </button>
+          <button onClick={runBackfill} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
+            Backfill all
+          </button>
         </div>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        {period === 'live' ? (live ? 'Live (60s-cached)' : 'Latest stored snapshot') : `${period === 'week' ? 'Week-to-date' : 'Month-to-date'} — Solved summed, stocks/scores averaged`} · Roster: dbo.Agent
+        {live ? 'Live (60s-cached)' : 'Latest stored snapshot'} · Roster: dbo.Agent · history on the Daily History tab
       </p>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
@@ -123,7 +89,7 @@ export function AgentScorecardRebuild() {
             <thead className="bg-white/[0.03]">
               <tr>
                 <th className="px-3 py-2 text-[11px] uppercase tracking-wide text-slate-400 text-left">Agent</th>
-                {th('Open')}{th('Over SLA')}{th('No Reply')}{th('Oldest')}{th(period === 'live' ? 'Solved Today' : 'Solved')}{th(period === 'live' ? 'Solved Wk' : 'Days')}{th('QA')}{th('CSAT')}{th('SLA %')}{th('Tkts/hr')}
+                {th('Open')}{th('Over SLA')}{th('No Reply')}{th('Oldest')}{th('Solved Today')}{th('Solved Wk')}{th('QA')}{th('CSAT')}{th('SLA %')}{th('Tkts/hr')}
               </tr>
             </thead>
             <tbody>

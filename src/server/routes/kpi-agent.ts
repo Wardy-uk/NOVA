@@ -4,7 +4,7 @@ import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
-  captureAgentKpis, getAgentLiveSnapshot, getLatestDay, getDay, getAgentHistory, getAgentPeriod, backfillAgentFromLegacy,
+  captureAgentKpis, getAgentLiveSnapshot, getLatestDay, getDay, getAgentHistory, getAgentPeriod, getAgentHistoryGrid, backfillAgentFromLegacy,
 } from '../services/kpi-agent/index.js';
 import { getLegacyEarliest } from '../services/kpi-org/index.js';
 
@@ -50,6 +50,17 @@ export function createKpiAgentRoutes(deps: KpiAgentDeps): Router {
     const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     try {
       res.json({ ok: true, data: await getAgentPeriod(deps.settings, period, anchor) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Daily-history grid (agents × date columns) for one metric: /history-grid?from&to&metric
+  router.get('/history-grid', async (req, res) => {
+    const { from, to, metric } = req.query as { from?: string; to?: string; metric?: string };
+    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
+    try {
+      res.json({ ok: true, data: await getAgentHistoryGrid(from, to, metric || 'solvedToday') });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

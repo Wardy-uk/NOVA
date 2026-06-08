@@ -7,7 +7,7 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
   captureSupportNt, getDay, getLatest, getRange, setManualValue,
-  ORG_KPIS, getKpi, getOrgPeriod, startOrgBackfill, getLegacyEarliest, orgBackfillState,
+  ORG_KPIS, getKpi, getOrgPeriod, getOrgHistoryGrid, startOrgBackfill, getLegacyEarliest, orgBackfillState,
 } from '../services/kpi-org/index.js';
 
 function yesterday(): string { const d = new Date(); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); }
@@ -73,6 +73,17 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     try {
       res.json({ ok: true, data: await getOrgPeriod('Support', period, anchor) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Daily-history grid (KPIs × date columns): /support/history-grid?from=YYYY-MM-DD&to=YYYY-MM-DD
+  router.get('/support/history-grid', async (req, res) => {
+    const { from, to } = req.query as { from?: string; to?: string };
+    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
+    try {
+      res.json({ ok: true, data: await getOrgHistoryGrid('Support', from, to) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

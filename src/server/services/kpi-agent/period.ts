@@ -30,6 +30,30 @@ export interface AgentPeriodRow {
   rag: Record<string, Rag | null>;
 }
 
+// Daily-history grid: agent rows × date columns for one selected metric.
+const METRIC_RAG: Record<string, string | null> = {
+  solvedToday: null, solvedWeek: null, open: null, overSla: 'over2h', noReply: 'stale',
+  oldestDays: 'oldest', qaOverall: 'qa', csatAvg: 'csat', slaCompliancePct: 'sla', ticketsPerHour: 'productivity',
+};
+export interface AgentGridRow { accountId: string; agentName: string; tierCode: string; cells: Record<string, { value: number | null; rag: string | null }>; }
+
+export async function getAgentHistoryGrid(from: string, to: string, metric: string): Promise<{ dates: string[]; metric: string; rows: AgentGridRow[] }> {
+  const m = metric in METRIC_RAG ? metric : 'solvedToday';
+  const ragKey = METRIC_RAG[m];
+  const rows = await getAllInRange(from, to);
+  const dateSet = new Set<string>();
+  const byAgent = new Map<string, AgentGridRow>();
+  for (const r of rows) {
+    dateSet.add(r.date);
+    if (!byAgent.has(r.accountId)) byAgent.set(r.accountId, { accountId: r.accountId, agentName: r.agentName, tierCode: r.tierCode, cells: {} });
+    const v = (r as unknown as Record<string, unknown>)[m];
+    byAgent.get(r.accountId)!.cells[r.date] = { value: typeof v === 'number' ? v : null, rag: ragKey ? (r.rag?.[ragKey] ?? null) : null };
+  }
+  const dates = [...dateSet].sort();
+  const out = [...byAgent.values()].sort((a, b) => a.agentName.localeCompare(b.agentName));
+  return { dates, metric: m, rows: out };
+}
+
 export async function getAgentPeriod(settings: SettingsQueries, period: Period, anchor: string): Promise<{ period: Period; from: string; to: string; agents: AgentPeriodRow[] }> {
   const from = startOf(period, anchor);
   const rows = await getAllInRange(from, anchor);

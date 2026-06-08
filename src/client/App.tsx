@@ -29,6 +29,7 @@ const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
 const SupportKpiScorecard = lazy(() => import('./components/SupportKpiScorecard.js').then(m => ({ default: m.SupportKpiScorecard })));
 const AgentScorecardRebuild = lazy(() => import('./components/AgentScorecardRebuild.js').then(m => ({ default: m.AgentScorecardRebuild })));
+const KpiRebuildHistory = lazy(() => import('./components/KpiRebuildHistory.js').then(m => ({ default: m.KpiRebuildHistory })));
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
 const BackfillStatusView = lazy(() => import('./components/BackfillStatusView.js').then(m => ({ default: m.BackfillStatusView })));
 const SalesHotboxView = lazy(() => import('./components/SalesHotboxView.js').then(m => ({ default: m.SalesHotboxView })));
@@ -103,7 +104,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review' | 'wb-ricky'
-  | 'wbr-support' | 'wbr-breach' | 'wbr-cc' | 'wbr-tech-support' | 'wbr-breach-board' | 'kpi-rebuild-agents'
+  | 'wbr-support' | 'wbr-breach' | 'wbr-cc' | 'wbr-tech-support' | 'wbr-breach-board' | 'kpi-rebuild-agents' | 'kpi-rebuild-history'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -206,6 +207,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'kpi-rebuild-support', label: 'Support' },
       { view: 'kpi-rebuild-agents', label: 'Agents' },
+      { view: 'kpi-rebuild-history', label: 'Daily History' },
     ],
   },
   trends: {
@@ -330,7 +332,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'wbr-cc', 'wbr-tech-support', 'wbr-breach-board', 'kpi-rebuild-agents', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'wbr-cc', 'wbr-tech-support', 'wbr-breach-board', 'kpi-rebuild-agents', 'kpi-rebuild-history', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1104,6 +1106,9 @@ export function App() {
           )}
           {view === 'kpi-rebuild-agents' && (
             <AgentScorecardRebuild />
+          )}
+          {view === 'kpi-rebuild-history' && (
+            <KpiRebuildHistory />
           )}
 
           {/* Wallboards */}

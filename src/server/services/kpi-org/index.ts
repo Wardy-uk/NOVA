@@ -9,7 +9,7 @@ import { ensureOrgKpiTable, saveComputed } from './store.js';
 
 export { ensureOrgKpiTable, getDay, getLatest, getRange, setManualValue } from './store.js';
 export { ORG_KPIS, SUPPORT_NT_KPIS, getKpi } from './registry.js';
-export { getOrgPeriod, type Period } from './period.js';
+export { getOrgPeriod, getOrgHistoryGrid, type Period } from './period.js';
 export { backfillOrg, startOrgBackfill, getLegacyEarliest, orgBackfillState } from './backfill.js';
 
 /** UK-local calendar date (YYYY-MM-DD). */
