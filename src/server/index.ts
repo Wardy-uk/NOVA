@@ -3352,10 +3352,27 @@ ${cells}
     const rows = [...agents].sort((a, b) => b.overSla - a.overSla || b.noReply - a.noReply);
     const totalOver = agents.reduce((s, a) => s + a.overSla, 0);
     const breachedAgents = agents.filter(a => a.overSla > 0).length;
+    const totalNotUpdated = agents.reduce((s, a) => s + a.noReply, 0);
+    const worstOldest = agents.reduce((m, a) => Math.max(m, a.oldestDays), 0);
+
+    const statCard = (label: string, value: string, color: string) =>
+      `<div style="flex:1;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 22px">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:8px">${label}</div>
+        <div style="font-size:34px;font-weight:800;color:${color}">${value}</div>
+      </div>`;
+    const summary = `<div style="display:flex;gap:14px;margin-bottom:16px">
+      ${statCard('Tickets Over SLA', String(totalOver), totalOver > 0 ? '#ef4444' : '#10b981')}
+      ${statCard('Agents Breached', `${breachedAgents} / ${agents.length}`, breachedAgents > 0 ? '#eab308' : '#10b981')}
+      ${statCard('Tickets Not Updated', String(totalNotUpdated), totalNotUpdated > 0 ? '#eab308' : '#10b981')}
+      ${statCard('Worst Oldest (days)', String(worstOldest), worstOldest > 7 ? '#ef4444' : worstOldest > 3 ? '#eab308' : '#10b981')}
+    </div>`;
+
     const cell = (v: number | string, rag?: string | null) =>
-      `<td style="padding:8px 12px;text-align:center;font-size:20px;font-weight:700;color:${ragCellColor(rag)}">${v}</td>`;
+      `<td style="padding:8px 12px;text-align:center"><span style="display:inline-block;min-width:38px;padding:3px 10px;border-radius:8px;font-size:14px;font-weight:700;color:${ragCellColor(rag)};background:${rag ? ragCellColor(rag) + '22' : 'transparent'}">${v}</span></td>`;
+    const teamBadge = (t: string) => `<span style="font-size:10px;padding:2px 9px;border-radius:6px;background:rgba(255,255,255,.08);color:#94a3b8">${t || '—'}</span>`;
     const body = rows.map(a => `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
-      <td style="padding:8px 12px;font-size:15px;color:#e2e8f0">${a.agentName}<span style="font-size:10px;color:#64748b;margin-left:6px">${a.tierCode || ''}</span></td>
+      <td style="padding:8px 12px;font-size:15px;color:#e2e8f0">${a.agentName}</td>
+      <td style="padding:8px 12px;text-align:center">${teamBadge(a.tierCode)}</td>
       ${cell(a.open)}
       ${cell(a.overSla, a.rag.over2h)}
       ${cell(a.noReply, a.rag.stale)}
@@ -3366,16 +3383,17 @@ ${cells}
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SLA Breach Board (Rebuild)</title>
 ${wallboardRefreshScript('/wallboard/rebuild/breach-board')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0}.wrap{max-width:1400px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}th{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;text-align:center}th:first-child{text-align:left}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0}.wrap{max-width:1500px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}th{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;text-align:center}th:first-child{text-align:left}</style>
 </head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
   <div><h1 style="font-size:22px;font-weight:800">SLA Breach Board <span style="font-size:12px;color:#64748b">(Rebuild)</span></h1>
-  <div style="font-size:11px;color:#64748b;margin-top:2px">${breachedAgents} agents breached &middot; ${totalOver} tickets over SLA</div></div>
+  <div style="font-size:10px;color:#64748b;margin-top:2px">Live ticket health per agent</div></div>
   <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
+${summary}
 <table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.02);border-radius:12px;overflow:hidden">
-<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Open</th><th>Over SLA</th><th>No Reply</th><th>Oldest</th><th>Solved Today</th></tr></thead>
-<tbody>${body || '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
+<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Team</th><th>Open</th><th>Over SLA</th><th>Not Updated</th><th>Oldest (days)</th><th>Solved Today</th></tr></thead>
+<tbody>${body || '<tr><td colspan="7" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
 </table>
 <div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board (Rebuild) &middot; ${dateStr} &middot; Source: kpi-agent</div>
 </div></body></html>`;
