@@ -48,7 +48,12 @@ function parseDate(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function slaBreached(fieldsJson: string | null, field: string): boolean | null {
+// ongoingOnly=true matches Jira's `breached()` JQL: a ticket counts as breached
+// only if its CURRENT (ongoing) SLA cycle is breaching. Used for the live "Over
+// SLA" stock on open tickets — without it, a completed cycle that breached months
+// ago resurrects as a phantom breach. ongoingOnly=false (default) keeps the
+// completed-cycle read for resolved tickets, where the final cycle is the answer.
+function slaBreached(fieldsJson: string | null, field: string, ongoingOnly = false): boolean | null {
   if (!fieldsJson) return null;
   let sla: any;
   try { sla = JSON.parse(fieldsJson)?.[field]; } catch { return null; }
@@ -58,6 +63,8 @@ function slaBreached(fieldsJson: string | null, field: string): boolean | null {
     if (oc.breached === true) return true;
     if (oc.remainingTime?.millis != null) return oc.remainingTime.millis < 0;
   }
+  // No ongoing breach → not breaching right now.
+  if (ongoingOnly) return false;
   const completed = sla.completedCycles;
   if (Array.isArray(completed) && completed.length) {
     const last = completed[completed.length - 1];
@@ -147,7 +154,7 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
     const status = (t.status_name || '').toLowerCase();
     const actionable = !NOT_ACTIONABLE.has(status);
     // over-SLA (actionable): resolution SLA breached + actionable + due-date gate
-    if (actionable && slaBreached(t.fields_json, 'customfield_14048') === true) {
+    if (actionable && slaBreached(t.fields_json, 'customfield_14048', true) === true) {
       const dueOk = !t.due_date || new Date(t.due_date) <= endToday;
       if (dueOk) s.overSla++;
     }
