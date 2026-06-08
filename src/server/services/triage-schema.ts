@@ -128,6 +128,11 @@ export const TriageResultSchema = z.object({
     reasoning: flexString,
     suggested_kba: flexNullableString,
   }).optional().default({ type: 'none', confidence: 0, reasoning: '', suggested_kba: null }),
+  website_amend: z.object({
+    is_website_amend: flexBool,
+    confidence: flexConfidence,
+    reasoning: flexString,
+  }).optional().default({ is_website_amend: false, confidence: 0, reasoning: '' }),
 });
 
 export type TriageResult = z.infer<typeof TriageResultSchema>;

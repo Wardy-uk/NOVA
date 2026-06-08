@@ -141,6 +141,14 @@ Produce a JSON object with the following structure:
    - reasoning: One sentence explaining your classification.
    - suggested_kba: If type is "kba_match", the title of the matching KB article from above. Otherwise null.
 
+12. **website_amend** — Is this ticket UNAMBIGUOUSLY a request to amend an existing customer website? Nurtur's TPJ Maintenance team (Jira project NTPJ) handles website change/amend work, and NOVA routes these tickets to them automatically. Judge strictly — this only fires when there is no reasonable doubt.
+   - is_website_amend: true ONLY if the customer is clearly asking for a change to the content, copy, images, design, layout, pages, or styling of their live website (e.g. "please change the text on our homepage", "can you update the banner image on our website", "amend the wording on our about page", "add a new page to our site", "update our office address shown on the website"). The request must be a website edit, not a fault report.
+   - is_website_amend: false for ANY of: a bug or fault ("the website is down", "images aren't loading", "contact form errors"), anything about email/CRM/feeds/portals/integrations/reporting rather than the website itself, a question or request for information, a vague request where you'd need to ask "which website?" or "what change?", or anything you are not certain is a website amend. When in doubt, false.
+   - confidence: how certain you are that this IS an unambiguous website amend (0.0 to 1.0). Only set above 0.9 when the request is explicit and unmistakable. NOVA only routes to the TPJ team above a high confidence floor, so do not inflate this.
+   - reasoning: one sentence quoting or referencing the specific wording that makes (or fails to make) this an unambiguous website amend.
+
+   This is independent of recommended_action — when a ticket is flagged as a website amend, NOVA moves it to the TPJ team rather than following recommended_action, so still produce the rest of the assessment normally.
+
 11. **recommended_tier** — Which support tier should handle this ticket:
     - "customer_care": Standard enquiries, how-to questions, account queries, password resets
     - "tier_2": Technical investigation needed — feed issues, integration problems, data discrepancies, template/config changes

@@ -234,6 +234,7 @@ export class Reasoner {
         quick_win: triage.quick_win,
         recommended_tier: triage.recommended_tier,
         needs_customer_reply: triage.needs_customer_reply,
+        website_amend: triage.website_amend,
       },
       provider: result.provider,
       model: result.model,

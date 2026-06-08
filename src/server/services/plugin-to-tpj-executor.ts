@@ -17,11 +17,12 @@ export class PluginToTpjExecutor {
     this.settings = settings;
   }
 
-  async execute(match: HybridActionMatch): Promise<HybridActionResult> {
+  async execute(match: HybridActionMatch, opts?: { alwaysCreate?: boolean }): Promise<HybridActionResult> {
     const { ticketKey, summary, description } = match;
 
-    // On weekends and bank holidays, only close the original — don't create TPJ ticket
-    if (!isBusinessDay(new Date())) {
+    // On weekends and bank holidays, only close the original — don't create TPJ ticket.
+    // Callers that must always hand the work to TPJ (e.g. website amends) pass alwaysCreate.
+    if (!opts?.alwaysCreate && !isBusinessDay(new Date())) {
       console.log(`[plugin-to-tpj] Non-business day — closing ${ticketKey} without creating TPJ ticket`);
       try {
         const novaAccountId = this.settings.get('nova_ai_jira_account_id');

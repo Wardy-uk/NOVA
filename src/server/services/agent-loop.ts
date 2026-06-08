@@ -1538,6 +1538,50 @@ export class AgentLoop {
       return;
     }
 
+    // ── Website amend → TPJ Maintenance (NTPJ): AI-judged, routes the same way as plugin tickets ──
+    // When triage flags a ticket as an unambiguous website-amend request with high confidence,
+    // clone it into the TPJ project and close the original — reusing the plugin_to_tpj mechanism.
+    if (
+      decision.eventType === 'ticket_created'
+      && project === 'NT'
+      && this.settings.get('agent_website_amend_to_tpj_enabled') !== 'false'
+    ) {
+      const wa = decision.output.website_amend as { is_website_amend?: boolean; confidence?: number; reasoning?: string } | undefined;
+      const threshold = parseFloat(this.settings.get('agent_website_amend_tpj_confidence') || '0.9');
+      if (wa?.is_website_amend && (wa.confidence ?? 0) >= threshold) {
+        if (this.getShadowMode() === 'full_shadow') {
+          console.log(`[agent] [SHADOW] Would route ${decision.ticketKey} to TPJ — unambiguous website amend (conf ${(wa.confidence ?? 0).toFixed(2)}): ${wa.reasoning ?? ''}`);
+          await this.observer.logOutcome(decisionId, {
+            success: true, action: 'transition', ticketKey: decision.ticketKey,
+            detail: `[SHADOW] Would route to TPJ — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}).`,
+          });
+          this.ticketsProcessed++;
+          return;
+        }
+        try {
+          const result = await this.pluginExecutor.execute({
+            actionId: 'plugin_to_tpj',
+            ticketKey: decision.ticketKey,
+            ticketId: decision.ticketId,
+            summary: (decision.inputs.summary as string) ?? '',
+            description: (decision.inputs.description as string) ?? '',
+            parsedData: { source: 'website_amend_triage', confidence: wa.confidence, reasoning: wa.reasoning },
+            requiresApproval: false,
+          }, { alwaysCreate: true });
+          if (!result.success) throw new Error(result.error ? `${result.detail}: ${result.error}` : result.detail);
+          console.log(`[agent] Routed ${decision.ticketKey} to TPJ — unambiguous website amend (conf ${(wa.confidence ?? 0).toFixed(2)})`);
+          await this.observer.logOutcome(decisionId, {
+            success: true, action: 'transition', ticketKey: decision.ticketKey,
+            detail: `Routed to TPJ Maintenance — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}). ${result.detail}`,
+          });
+          this.ticketsProcessed++;
+          return;
+        } catch (err) {
+          console.error(`[agent] Website-amend TPJ routing failed for ${decision.ticketKey}, falling through to normal triage:`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
     // Lifecycle: transition to 'triaged' on new ticket triage
     if (decision.eventType === 'ticket_created' && decision.action !== 'no_action') {
       try {
