@@ -10,6 +10,7 @@ const QW_COMMENT_PREFIX = '[AI Agent — Auto-Close]';
 
 const CLOSE_COMMENTS: Record<string, string> = {
   spam: `${QW_COMMENT_PREFIX} This ticket was identified as spam or an automated submission and has been cancelled.`,
+  vendor_email: `${QW_COMMENT_PREFIX} This ticket was identified as an unsolicited vendor/marketing email rather than a support request and has been cancelled.`,
   thank_you: `${QW_COMMENT_PREFIX} Thanks for letting us know — glad we could help! Closing this ticket. If you need anything else, just raise a new request and we'll pick it up.`,
   stale_no_response: `${QW_COMMENT_PREFIX} We've followed up a few times but haven't heard back. Closing this ticket for now — if you still need help, just raise a new request or reply to this one and we'll reopen it.`,
   auto_resolved: `${QW_COMMENT_PREFIX} It looks like this issue has been resolved. Closing this ticket — if the problem returns, please raise a new request.`,
@@ -68,7 +69,7 @@ export class QuickWinExecutor {
       await prepareTicketForClose(this.jiraClient, this.settings, {
         ticketKey,
         classification: (decision.output.classification as { category?: string; ticket_type?: string }) ?? undefined,
-        requestTypeOverride: qw.type === 'spam' ? 'Emailed request' : undefined,
+        requestTypeOverride: (qw.type === 'spam' || qw.type === 'vendor_email') ? 'Emailed request' : undefined,
       });
 
       // Post comment (spam = internal only, others = public)
@@ -76,15 +77,15 @@ export class QuickWinExecutor {
         const kba = qw.suggested_kba || 'a relevant knowledge base article';
         const comment = `${QW_COMMENT_PREFIX} This question is covered by our knowledge base: ${kba}. Please take a look and let us know if you need further help. If we don't hear back within 5 working days, we'll close this ticket.`;
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
-      } else if (qw.type === 'spam') {
-        await this.jiraClient.addComment(ticketKey, CLOSE_COMMENTS.spam, { internal: true });
+      } else if (qw.type === 'spam' || qw.type === 'vendor_email') {
+        await this.jiraClient.addComment(ticketKey, CLOSE_COMMENTS[qw.type], { internal: true });
       } else {
         const comment = CLOSE_COMMENTS[qw.type] || `${QW_COMMENT_PREFIX} This ticket has been auto-closed.`;
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
       }
 
       // Find and execute transition — try primary name, then fallbacks
-      const targetTransition = qw.type === 'spam' ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
+      const targetTransition = (qw.type === 'spam' || qw.type === 'vendor_email') ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
       const transitionId = await this.findTransitionId(ticketKey, targetTransition)
         || (targetTransition !== 'resolve' ? await this.findTransitionId(ticketKey, 'resolve') : null);
 
@@ -100,7 +101,8 @@ export class QuickWinExecutor {
       // Set resolution type using configurable mapping
       const resMapRaw = this.settings.get('agent_resolution_type_map');
       let resMap: Record<string, string> = {
-        spam: 'Request Cancelled / Withdrawn', thank_you: 'No Fault Found', kba_match: 'Fix By Tech Services',
+        spam: 'Request Cancelled / Withdrawn', vendor_email: 'Request Cancelled / Withdrawn',
+        thank_you: 'No Fault Found', kba_match: 'Fix By Tech Services',
         stale_no_response: 'Request Cancelled / Withdrawn', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
       };
       try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
