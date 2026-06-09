@@ -3187,7 +3187,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         res.status(503).json({ ok: false, error: 'Assignment engine not available' });
         return;
       }
-      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills, projectKey);
+      // Explicit admin action — allowed to reassign even a human-owned ticket.
+      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills, projectKey, { allowHumanReassign: true });
       if (!result) {
         res.status(404).json({ ok: false, error: 'No available agents in pool' });
         return;

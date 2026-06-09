@@ -230,7 +230,41 @@ export class AssignmentEngine {
     return result;
   }
 
-  async assignToJira(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[], projectKey?: string): Promise<AssignmentResult | null> {
+  /**
+   * Live (not cache) check for an active human owner. Round-robin must NEVER steal a
+   * ticket a human is already working: the jira_issue_cache lags Jira by a sync interval,
+   * so a reopened ticket gets re-triaged (off the customer comment) before the cache
+   * reflects its current human owner — and the per-caller cache guards then see null and
+   * reassign it away (e.g. NT-20348/NT-20957: stolen from a human, round-robined onto
+   * another). This is the single authoritative guard; it queries Jira directly so it is
+   * immune to cache staleness. Returns the human's display name if owned by a human, else null.
+   * Fails open (returns null) on lookup error to preserve prior behaviour.
+   */
+  private async getLiveHumanOwner(ticketKey: string): Promise<string | null> {
+    try {
+      const issue = await this.jiraClient.getIssue(ticketKey, ['assignee']);
+      const assignee = (issue?.fields?.assignee ?? null) as { accountId?: string; displayName?: string } | null;
+      if (!assignee?.accountId) return null;
+      const novaAccountId = this.settingsQueries.get('nova_ai_jira_account_id') ?? '';
+      if (assignee.accountId === novaAccountId) return null;
+      return assignee.displayName ?? assignee.accountId;
+    } catch (err) {
+      console.warn(`[assignment] Live assignee check failed for ${ticketKey} — proceeding:`, err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  async assignToJira(ticketKey: string, pool: Pool = 'cc', preferredSkills?: string[], projectKey?: string, options?: { allowHumanReassign?: boolean }): Promise<AssignmentResult | null> {
+    // Central guard: never reassign a ticket that already has an active human owner.
+    // Bypassed only for explicit manual reassignment (admin "Assign" action).
+    if (!options?.allowHumanReassign) {
+      const humanOwner = await this.getLiveHumanOwner(ticketKey);
+      if (humanOwner) {
+        console.log(`[assignment] Skipping ${ticketKey} — already owned by human ${humanOwner}; round-robin will not reassign`);
+        return null;
+      }
+    }
+
     const result = await this.assign(ticketKey, pool, preferredSkills, projectKey);
     if (!result) return null;
 
@@ -255,6 +289,15 @@ export class AssignmentEngine {
   }
 
   async assignWithFallback(ticketKey: string, pool: Pool, project: string, preferredSkills?: string[]): Promise<AssignmentResult | null> {
+    // Central guard: bail before the retry/comment logic if a human already owns it.
+    // (Without this, assignToJira returns null and the loop below would treat a
+    // human-owned ticket as "no agents available" and queue a bogus retry + note.)
+    const humanOwner = await this.getLiveHumanOwner(ticketKey);
+    if (humanOwner) {
+      console.log(`[assignment] Skipping ${ticketKey} — already owned by human ${humanOwner}; not queuing retry`);
+      return null;
+    }
+
     // No cross-tier fallback: a ticket stays in its assigned pool. New tickets default
     // to CC; only a routing rule pushes to T2/TPJ. If the assigned pool has no available
     // agent we queue for retry rather than spilling to another tier — T2 must never fall
