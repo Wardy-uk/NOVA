@@ -477,7 +477,7 @@ export class AssignmentEngine {
              Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
-      WHERE Department IN ('NT', 'NTPJ')
+      WHERE Department IN ('NT', 'NTPJ', 'TPJ')
       ORDER BY Team, AgentName
     `);
 
@@ -919,11 +919,15 @@ export class AssignmentEngine {
 
   private isAgentEligibleForProject(agent: RosterAgent, project: string): boolean {
     const dept = (agent.department || '').trim().toUpperCase();
+    // TPJ-maintenance agents are stored in KPI dbo.Agent with Department = 'TPJ'
+    // (NOT 'NTPJ' — that's the Jira project key, a different namespace). Accept both so
+    // the tpj pool isn't empty and NTPJ tickets get assigned to TPJ agents, not NT agents.
+    const isTpjDept = dept === 'TPJ' || dept === 'NTPJ';
     if (project === 'NTPJ') {
-      return dept === 'NTPJ';
+      return isTpjDept;
     }
     if (project === 'NT') {
-      return dept !== 'NTPJ';
+      return !isTpjDept;
     }
     return true;
   }
