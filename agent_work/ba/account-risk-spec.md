@@ -152,6 +152,21 @@ it (no new workflow). Optional later: write a `Risk Level` select field or inter
 4. **Daily briefing** (Claude API) for Tier 3+.
 5. **Risk Intelligence dashboard page** + ticket-level risk panel (most effort, last).
 
+## Build status
+
+- **Chunk 1 (done, deployed-pending):** schema (5 tables), `customer-resolver.ts`, one-time dry-run
+  on startup → persists resolution-rate report to settings key `risk_resolver_dryrun_report`.
+- **Chunk 2 (done, deployed-pending):** `account-risk-engine.ts` — `runRollupAndRecon()`:
+  resolves + signal-scores every in-scope ticket (signals: formal_complaint 40, termination 40,
+  formal_escalation 35, refund 25, compensation 20, unacceptable 15, frustrated 10; + volume
+  10/20/30, cross-project 15; decay: resolved 0.25 / open>90d 0.5 / open 1.0), upserts
+  `agent_account_risk` (+ signals + tier-change history), and fills the `agent_risk_recon_days`
+  ledger (seals fully-resolved days). Run once on next deploy via guard `account_risk_backfill_v1`;
+  report persists to settings key `account_risk_rollup_report`.
+  - **TODO after first-run validation:** wire the nightly schedule (re-run `runRollupAndRecon`
+    each night so recon walks unsealed days + scores decay). Engine is idempotent, so this is a
+    timer hook. Reopen-detection signal also deferred.
+
 ## Definition of done
 
 - 5 tables created & validated; resolver hit-rate measured on live tickets.

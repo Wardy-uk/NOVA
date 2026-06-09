@@ -131,6 +131,7 @@ import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
 import { CustomerResolver } from './services/customer-resolver.js';
+import { AccountRiskEngine } from './services/account-risk-engine.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -1126,15 +1127,26 @@ async function main() {
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
 
-    // One-time account-risk customer-resolver dry-run (chunk 1). Seeds the domain map
-    // from bc_customers and logs the resolution rate over cached in-scope tickets, then
-    // never runs again. Read-only except for the additive seed. Non-blocking.
-    if (!settingsQueries.get('risk_resolver_dryrun_v1')) {
+    // One-time account-risk jobs (chunks 1-2). Run sequentially, non-blocking, each guarded
+    // so it runs once. Read-only dry-run first (resolution-rate report by source), then the
+    // rollup + reconciliation backfill (writes per-customer risk + recon ledger). Both persist
+    // their report into settings (risk_resolver_dryrun_report / account_risk_rollup_report).
+    {
       const RISK_SCOPE_PROJECTS = ['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'];
-      const resolver = new CustomerResolver(settingsQueries);
-      resolver.runDryRunReport(RISK_SCOPE_PROJECTS)
-        .then(() => settingsQueries.set('risk_resolver_dryrun_v1', 'true'))
-        .catch(err => console.warn('[risk-resolver] dry-run failed:', err instanceof Error ? err.message : err));
+      void (async () => {
+        try {
+          if (!settingsQueries.get('risk_resolver_dryrun_v1')) {
+            await new CustomerResolver(settingsQueries).runDryRunReport(RISK_SCOPE_PROJECTS);
+            settingsQueries.set('risk_resolver_dryrun_v1', 'true');
+          }
+        } catch (err) { console.warn('[risk-resolver] dry-run failed:', err instanceof Error ? err.message : err); }
+        try {
+          if (!settingsQueries.get('account_risk_backfill_v1')) {
+            await new AccountRiskEngine(settingsQueries).runRollupAndRecon(RISK_SCOPE_PROJECTS);
+            settingsQueries.set('account_risk_backfill_v1', 'true');
+          }
+        } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
+      })();
     }
 
     const availabilityService = new AgentAvailabilityService(settingsQueries);

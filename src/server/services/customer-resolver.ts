@@ -250,12 +250,14 @@ export class CustomerResolver {
         `SELECT 1 AS x FROM agent_customer_domains WHERE domain = ? AND domain_type = 'email'`, [domain],
       );
       if (existing) { skipped++; continue; }
-      await execute(
-        `INSERT INTO agent_customer_domains (customer_ref, customer_source, customer_name, domain, domain_type, confidence, is_verified, source_note)
-         VALUES (?, 'bc', ?, ?, 'email', 70, 0, 'seed:bc_customers')`,
-        [r.number, r.display_name, domain],
-      );
-      added++;
+      try {
+        await execute(
+          `INSERT INTO agent_customer_domains (customer_ref, customer_source, customer_name, domain, domain_type, confidence, is_verified, source_note)
+           VALUES (?, 'bc', ?, ?, 'email', 70, 0, 'seed:bc_customers')`,
+          [r.number, r.display_name, domain],
+        );
+        added++;
+      } catch { skipped++; /* unique-constraint race or duplicate — ignore */ }
     }
     return { added, skipped };
   }
