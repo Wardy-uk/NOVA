@@ -158,7 +158,9 @@ export class AccountRiskEngine {
       const aggMap = new Map<string, CommentAgg>(commentAggs.map(r => [r.issue_key, r]));
 
       for (const t of tickets) {
-      const dayKey = t.jira_created ? `${t.project_key}|${t.jira_created.slice(0, 10)}` : null;
+      // mssql returns DATETIME2 as a Date object (not a string), so normalise before slicing.
+      const createdDate = t.jira_created ? new Date(t.jira_created) : null;
+      const dayKey = createdDate ? `${t.project_key}|${createdDate.toISOString().slice(0, 10)}` : null;
       if (dayKey) reconTotal.set(dayKey, (reconTotal.get(dayKey) ?? 0) + 1);
 
       // Resolve customer.
@@ -197,7 +199,7 @@ export class AccountRiskEngine {
       }
       acc.projects.add(t.project_key);
       acc.totalTickets++;
-      const createdMs = t.jira_created ? new Date(t.jira_created).getTime() : null;
+      const createdMs = createdDate ? createdDate.getTime() : null;
       if (createdMs) {
         acc.firstTicket = acc.firstTicket === null ? createdMs : Math.min(acc.firstTicket, createdMs);
         acc.lastTicket = acc.lastTicket === null ? createdMs : Math.max(acc.lastTicket, createdMs);
