@@ -339,5 +339,25 @@ export class CustomerResolver {
     }
     console.log(`[risk-resolver] Unresolved samples: ${unresolvedSamples.join(', ') || '(none)'}`);
     console.log(`[risk-resolver] ===== done in ${Math.round((Date.now() - t0) / 1000)}s =====`);
+
+    // Persist a compact report so it's retrievable without log access (settings.json
+    // is read by the admin UI and survives restarts). This is the canonical result.
+    const report = {
+      generatedAt: new Date().toISOString(),
+      sinceIso,
+      seed,
+      indexSize: { domains: this.domainCache?.size ?? 0, orgs: this.orgCache?.size ?? 0, bcCustomers: this.bcNames?.size ?? 0 },
+      totalTickets: total,
+      resolved,
+      resolvedPct: total ? Math.round((resolved / total) * 1000) / 10 : 0,
+      bySource: Object.fromEntries(bySource),
+      byProject: projects.map(p => ({ project: p, resolved: byProjectResolved.get(p) ?? 0, total: byProjectTotal.get(p) ?? 0 })),
+      unresolvedSamples,
+    };
+    try {
+      this.settings.set('risk_resolver_dryrun_report', JSON.stringify(report));
+    } catch (err) {
+      console.warn('[risk-resolver] failed to persist report:', err instanceof Error ? err.message : err);
+    }
   }
 }
