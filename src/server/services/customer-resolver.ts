@@ -238,28 +238,30 @@ export class CustomerResolver {
    * domains are skipped. Returns the number of new rows added.
    */
   async seedFromBcCustomers(): Promise<{ added: number; skipped: number }> {
-    const rows = await query<{ number: string; display_name: string; email: string }>(
-      `SELECT number, display_name, email FROM bc_customers
-       WHERE email IS NOT NULL AND email <> '' AND number IS NOT NULL`,
+    // Single set-based INSERT (the per-row version was far too slow — a round-trip per
+    // bc_customer). Extracts the email domain in SQL, dedupes to one customer per domain,
+    // excludes generic/internal domains, and skips any domain already mapped.
+    const generics = [...GENERIC_DOMAINS, ...INTERNAL_DOMAINS].map(d => `'${d}'`).join(',');
+    const result = await execute(
+      `INSERT INTO agent_customer_domains (customer_ref, customer_source, customer_name, domain, domain_type, confidence, is_verified, source_note)
+       SELECT x.number, 'bc', x.display_name, x.domain, 'email', 70, 0, 'seed:bc_customers'
+       FROM (
+         SELECT bc.number, bc.display_name,
+                LOWER(SUBSTRING(bc.email, CHARINDEX('@', bc.email) + 1, 4000)) AS domain,
+                ROW_NUMBER() OVER (
+                  PARTITION BY LOWER(SUBSTRING(bc.email, CHARINDEX('@', bc.email) + 1, 4000))
+                  ORDER BY bc.number
+                ) AS rn
+         FROM bc_customers bc
+         WHERE bc.email LIKE '%@%.%' AND bc.number IS NOT NULL
+       ) x
+       WHERE x.rn = 1
+         AND x.domain NOT IN (${generics})
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_customer_domains d WHERE d.domain = x.domain AND d.domain_type = 'email'
+         )`,
     );
-    let added = 0, skipped = 0;
-    for (const r of rows) {
-      const domain = CustomerResolver.emailDomain(r.email);
-      if (!domain || GENERIC_DOMAINS.has(domain) || INTERNAL_DOMAINS.has(domain)) { skipped++; continue; }
-      const existing = await queryOne(
-        `SELECT 1 AS x FROM agent_customer_domains WHERE domain = ? AND domain_type = 'email'`, [domain],
-      );
-      if (existing) { skipped++; continue; }
-      try {
-        await execute(
-          `INSERT INTO agent_customer_domains (customer_ref, customer_source, customer_name, domain, domain_type, confidence, is_verified, source_note)
-           VALUES (?, 'bc', ?, ?, 'email', 70, 0, 'seed:bc_customers')`,
-          [r.number, r.display_name, domain],
-        );
-        added++;
-      } catch { skipped++; /* unique-constraint race or duplicate — ignore */ }
-    }
-    return { added, skipped };
+    return { added: result.rowsAffected, skipped: 0 };
   }
 
   /**

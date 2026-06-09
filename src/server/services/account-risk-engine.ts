@@ -97,8 +97,9 @@ export class AccountRiskEngine {
     const now = Date.now();
     console.log('[account-risk] Rollup + recon starting…');
 
-    await this.resolver.seedFromBcCustomers().catch(() => {});
+    const seed = await this.resolver.seedFromBcCustomers().catch(() => ({ added: 0, skipped: 0 }));
     await this.resolver.loadIndex();
+    console.log(`[account-risk] seed +${seed.added} domains; index loaded; scanning ${projects.length} projects…`);
 
     const customers = new Map<string, CustomerAccum>();
     const reconTotal = new Map<string, number>();     // `${project}|${yyyy-mm-dd}` -> count
@@ -179,6 +180,7 @@ export class AccountRiskEngine {
       }
       }  // end ticket loop
     }    // end project loop
+    console.log(`[account-risk] scanned ${totalTickets} tickets, ${resolvedCount} resolved, ${customers.size} with signals; writing…`);
 
     // Volume + cross-project signals, finalise score/tier, write.
     let written = 0, tierChanges = 0;
@@ -243,6 +245,8 @@ export class AccountRiskEngine {
       }
       written++;
     }
+
+    console.log(`[account-risk] wrote ${written} customers (${tierChanges} tier changes); reconciling…`);
 
     // Reconciliation ledger: upsert each project/day, seal fully-resolved days.
     let daysComplete = 0, daysPartial = 0;
