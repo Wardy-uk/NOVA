@@ -48,11 +48,15 @@ const REASON_LABELS: Record<string, string> = {
 interface Props {
   kpi?: string;
   agent?: string;
+  bucket?: string;
+  stat?: string;
+  cohort?: string;
+  accountId?: string;
   label: string;
   onClose: () => void;
 }
 
-export function WallboardDrillPanel({ kpi, agent, label, onClose }: Props) {
+export function WallboardDrillPanel({ kpi, agent, bucket, stat, cohort, accountId, label, onClose }: Props) {
   const [tickets, setTickets] = useState<DrillTicket[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -64,6 +68,10 @@ export function WallboardDrillPanel({ kpi, agent, label, onClose }: Props) {
       const params = new URLSearchParams();
       if (kpi) params.set('kpi', kpi);
       if (agent) params.set('agent', agent);
+      if (bucket) params.set('bucket', bucket);
+      if (stat) params.set('stat', stat);
+      if (cohort) params.set('cohort', cohort);
+      if (accountId) params.set('accountId', accountId);
       const res = await fetch(`/api/tasks/service-desk/wallboard/drill-down?${params}`);
       const json = await res.json();
       if (json.ok) {
@@ -77,7 +85,7 @@ export function WallboardDrillPanel({ kpi, agent, label, onClose }: Props) {
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
-  }, [kpi, agent]);
+  }, [kpi, agent, bucket, stat, cohort, accountId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

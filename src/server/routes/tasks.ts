@@ -7,6 +7,10 @@ import { TaskUpdateSchema } from '../../shared/types.js';
 import { evaluateAttention, getSlaRemainingMs } from '../services/jira-sla.js';
 import { getAllowedSources } from '../utils/source-filter.js';
 import { enrichTickets, buildKpiFilter, extractAssignee, extractTier, isSlaBoardTier } from '../services/wallboard-drill.js';
+import { resolveTierDrill, resolveKpiDrill } from '../services/kpi-org/drill-jql.js';
+import { isNoReplyIssue, NO_REPLY_FIELDS } from '../services/kpi-org/nt-compute.js';
+import type { Cohort, TierStatKind } from '../services/kpi-org/wallboard-tiers.js';
+import { query } from '../services/database.js';
 
 /** Check if Jira is enabled for this user (per-user first, admin falls back to global). */
 async function isJiraEnabled(
@@ -313,14 +317,18 @@ export function createTaskRoutes(
     try {
       const kpi = (req.query.kpi as string | undefined)?.trim();
       const agent = (req.query.agent as string | undefined)?.trim();
+      const bucket = (req.query.bucket as string | undefined)?.trim();
+      const stat = (req.query.stat as string | undefined)?.trim() as TierStatKind | undefined;
+      const cohort = ((req.query.cohort as string | undefined)?.trim() || 'all') as Cohort;
+      const accountId = (req.query.accountId as string | undefined)?.trim();
 
-      if (!kpi && !agent) {
-        res.status(400).json({ ok: false, error: 'Provide ?kpi= or ?agent= query param' });
+      if (!kpi && !agent && !bucket) {
+        res.status(400).json({ ok: false, error: 'Provide ?kpi=, ?agent= or ?bucket= query param' });
         return;
       }
 
       if (settingsQueries?.get('jira_ob_enabled') !== 'true') {
-        res.json({ ok: true, data: [], label: kpi || agent || '' });
+        res.json({ ok: true, data: [], label: kpi || agent || bucket || '' });
         return;
       }
 
@@ -328,6 +336,78 @@ export function createTaskRoutes(
       // so the drill set matches the live tile counts exactly.
       const tickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
       const now = new Date();
+
+      // Maps a set of matching Jira keys → drill rows, reusing the proven enrich
+      // mapping (SLA, attention, urgency) so only membership comes from the JQL.
+      const rowsForKeys = (keys: Set<string>, label: string) => {
+        const enriched = enrichTickets(tickets);
+        return enriched
+          .filter(({ ticket }) => keys.has(ticket.source_id))
+          .map(({ ticket: t, issue }) => {
+            const att = evaluateAttention(issue, now, t.priority ?? 50);
+            return {
+              key: t.source_id,
+              summary: t.title,
+              status: t.status,
+              priority: t.priority,
+              assignee: extractAssignee(t),
+              source_url: t.source_url,
+              urgency_score: att.urgencyScore,
+              sla_remaining_ms: getSlaRemainingMs(issue),
+              attention_reasons: att.reasons,
+              created: ((issue.fields as Record<string, unknown>)?.created ?? issue.created ?? null) as string | null,
+            };
+          })
+          .sort((a, b) => b.urgency_score - a.urgency_score);
+      };
+
+      // Resolve matching keys from a drill JQL (same JQL the rebuilt tile counts with).
+      const keysFromJql = async (jql: string, applyNoReply: boolean): Promise<Set<string>> => {
+        const fields = applyNoReply ? NO_REPLY_FIELDS : ['status'];
+        const raw = await aggregator.searchServiceDeskRaw(jql, fields, 500);
+        const filtered = applyNoReply ? raw.filter(iss => isNoReplyIssue(iss, now)) : raw;
+        return new Set(filtered.map(iss => iss.key));
+      };
+
+      // Tier-tile drill (Customer Care / Tech Support / Key Accounts / Customer Success).
+      if (bucket) {
+        const resolved = resolveTierDrill(bucket, (stat || 'active'), cohort);
+        if (!resolved) {
+          res.json({ ok: true, data: null, label: bucket, message: 'No drill-down available for this tile' });
+          return;
+        }
+        const keys = await keysFromJql(resolved.jql, resolved.applyNoReply);
+        res.json({ ok: true, data: rowsForKeys(keys, bucket), label: req.query.label as string || bucket });
+        return;
+      }
+
+      // KPI-registry drill (KPI Breach board) — falls back to legacy buildKpiFilter below.
+      if (kpi) {
+        const resolved = resolveKpiDrill(kpi, now);
+        if (resolved) {
+          if ('message' in resolved) {
+            res.json({ ok: true, data: null, label: kpi, message: resolved.message });
+            return;
+          }
+          const keys = await keysFromJql(resolved.jql, resolved.applyNoReply);
+          res.json({ ok: true, data: rowsForKeys(keys, kpi), label: kpi });
+          return;
+        }
+      }
+
+      // SLA Breach board agent drill — list the agent's open tickets from the SAME
+      // jira_issue_cache pass the kpi-agent engine counts (all tiers), so the list
+      // matches the row's Open count. Preferred over name matching when accountId known.
+      if (accountId) {
+        const cacheRows = await query<{ issue_key: string }>(
+          `SELECT issue_key FROM jira_issue_cache
+           WHERE project_key = 'NT' AND status_category <> 'Done' AND assignee_account_id = ?`,
+          [accountId],
+        );
+        const keys = new Set(cacheRows.map(r => r.issue_key));
+        res.json({ ok: true, data: rowsForKeys(keys, agent || accountId), label: (req.query.label as string) || agent || accountId });
+        return;
+      }
 
       // Agent drill-down: filter by assignee name. Scope to the four support tiers
       // (excludes Development) to match the SLA Breach board's per-agent counts.

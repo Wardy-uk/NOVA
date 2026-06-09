@@ -38,14 +38,22 @@ function parseDate(v: unknown): Date | null {
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
 
+/** Jira fields the isNoReply predicate needs — request these when fetching for a no-reply check. */
+export const NO_REPLY_FIELDS = ['status', 'created', 'customfield_14081', 'customfield_14185'];
+
+/** Apply the isNoReply predicate to a single raw Jira issue (fields must include NO_REPLY_FIELDS). */
+export function isNoReplyIssue(issue: { fields?: Record<string, unknown> }, now: Date): boolean {
+  const f = (issue.fields ?? {}) as Record<string, unknown>;
+  const status = (f.status as { name?: string } | undefined)?.name ?? null;
+  return isNoReply(status, parseDate(f.created), parseDate(f.customfield_14081), parseDate(f.customfield_14185), now);
+}
+
 /** Count open tickets matching `jql` that satisfy the isNoReply predicate. */
 export async function countNoReply(jira: JiraRestClient, jql: string, now: Date): Promise<number> {
-  const res = await jira.searchJqlAll(jql, ['status', 'created', 'customfield_14081', 'customfield_14185'], 2000);
+  const res = await jira.searchJqlAll(jql, NO_REPLY_FIELDS, 2000);
   let count = 0;
   for (const issue of res.issues) {
-    const f = issue.fields as Record<string, unknown>;
-    const status = (f.status as { name?: string } | undefined)?.name ?? null;
-    if (isNoReply(status, parseDate(f.created), parseDate(f.customfield_14081), parseDate(f.customfield_14185), now)) count++;
+    if (isNoReplyIssue(issue, now)) count++;
   }
   return count;
 }

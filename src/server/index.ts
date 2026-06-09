@@ -3043,6 +3043,148 @@ ${body}
   app.get('/wallboard/support', (_req, res) =>
     serveRebuildWb(res, '/wallboard/support', 'Support — KPIs', 'Live Support/NT KPIs', false));
 
+  // ── Public Dash — unauthenticated index of mini wallboards (summary cards). ──
+  // Each card shows a headline metric from the same live engines the full boards
+  // use; clicking opens the full board in a new tab. Public, like /wallboard/*.
+  interface DashCard { title: string; href: string; metric: string; metricLabel: string; sub: string; color: string }
+  app.get('/dash', async (_req, res) => {
+    const wbStart = Date.now();
+    try {
+      const settings = settingsQueries.getAll();
+      const kaEnabled = settings.wallboard_key_accounts_enabled !== 'false';
+      const csEnabled = settings.wallboard_cs_enabled !== 'false';
+      const jira = agentJiraClient;
+
+      const sumTier = (snap: TierSnapshot, buckets: string[]) => {
+        let active = 0, over = 0;
+        for (const b of buckets) { active += snap.tiers[b]?.active ?? 0; over += snap.tiers[b]?.overSla ?? 0; }
+        return { active, over };
+      };
+      const CC_B = ['cc_incidents', 'cc_service_requests', 'cc_tpj'];
+      const TS_B = ['production', 'tier2', 'development'];
+      const ALL_B = [...CC_B, ...TS_B];
+
+      // Each card computes independently; a failing board shows "—" rather than
+      // taking down the whole Dash.
+      const guard = async (title: string, href: string, fn: () => Promise<Omit<DashCard, 'title' | 'href'>>): Promise<DashCard> => {
+        try { return { title, href, ...(await fn()) }; }
+        catch { return { title, href, metric: '—', metricLabel: '', sub: 'unavailable', color: '#64748b' }; }
+      };
+
+      const jobs: Array<Promise<DashCard | null>> = [
+        guard('SLA Breach Board', '/wallboard/breached', async () => {
+          if (!jira) throw new Error('no jira');
+          const s = await getAgentLiveSnapshot(settingsQueries, jira);
+          const over = s.agents.reduce((a, x) => a + x.overSla, 0);
+          const breached = s.agents.filter(x => x.overSla > 0).length;
+          return { metric: String(over), metricLabel: 'over SLA', sub: `${breached} agents breached`, color: over > 0 ? '#ef4444' : '#10b981' };
+        }),
+        guard('KPI Breach Board', '/wallboard/team-kpis', async () => {
+          if (!jira) throw new Error('no jira');
+          const s = await getSupportLiveSnapshot(jira);
+          const red = s.items.filter(i => i.rag === 'red').length;
+          const amber = s.items.filter(i => i.rag === 'amber').length;
+          return { metric: String(red), metricLabel: 'KPIs red', sub: `${amber} amber`, color: red > 0 ? '#ef4444' : amber > 0 ? '#f59e0b' : '#10b981' };
+        }),
+        guard('Customer Care', '/wallboard/cc', async () => {
+          if (!jira) throw new Error('no jira');
+          const { active, over } = sumTier(await getTierSnapshot(jira, 'all'), CC_B);
+          return { metric: String(active), metricLabel: 'open', sub: `${over} over SLA`, color: over > 0 ? '#ef4444' : '#5ec1ca' };
+        }),
+        guard('Technical Support', '/wallboard/tech-support', async () => {
+          if (!jira) throw new Error('no jira');
+          const { active, over } = sumTier(await getTierSnapshot(jira, 'all'), TS_B);
+          return { metric: String(active), metricLabel: 'open', sub: `${over} over SLA`, color: over > 0 ? '#ef4444' : '#5ec1ca' };
+        }),
+        kaEnabled ? guard('Key Accounts', '/wallboard/key-accounts', async () => {
+          if (!jira) throw new Error('no jira');
+          const { active, over } = sumTier(await getTierSnapshot(jira, 'key_accounts'), ALL_B);
+          return { metric: String(active), metricLabel: 'open', sub: `${over} over SLA`, color: over > 0 ? '#ef4444' : '#5ec1ca' };
+        }) : Promise.resolve(null),
+        csEnabled ? guard('Customer Success', '/wallboard/customer-success', async () => {
+          if (!jira) throw new Error('no jira');
+          const { active, over } = sumTier(await getTierSnapshot(jira, 'customer_success'), ALL_B);
+          return { metric: String(active), metricLabel: 'open', sub: `${over} over SLA`, color: over > 0 ? '#ef4444' : '#5ec1ca' };
+        }) : Promise.resolve(null),
+        guard('Support KPIs', '/wallboard/support', async () => {
+          if (!jira) throw new Error('no jira');
+          const s = await getSupportLiveSnapshot(jira);
+          const total = s.items.length;
+          const green = s.items.filter(i => i.rag === 'green').length;
+          return { metric: `${green}/${total}`, metricLabel: 'KPIs green', sub: `${total - green} not green`, color: green === total ? '#10b981' : green >= total * 0.7 ? '#f59e0b' : '#ef4444' };
+        }),
+        guard('Dev Review', '/wallboard/dev-review', async () => {
+          const d = await devReviewQueries.getDashboard();
+          const breached = d.unpickedKpi.currentlyBreached;
+          return { metric: String(d.queue.total), metricLabel: 'in queue', sub: `${breached} breached`, color: breached > 0 ? '#ef4444' : '#9b6aed' };
+        }),
+        guard('Risk Board', '/wallboard/ricky', async () => {
+          const r = await query<{ on_fire: number; at_risk: number }>(`
+            SELECT SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS on_fire,
+                   SUM(CASE WHEN sla_breached = 0 AND sla_breach_time IS NOT NULL AND sla_breach_time > GETUTCDATE()
+                             AND sla_breach_time <= DATEADD(hour, 2, GETUTCDATE()) THEN 1 ELSE 0 END) AS at_risk
+            FROM jira_issue_cache WHERE status_category != 'Done' AND project_key = 'NT'
+              AND current_tier IN ('Production','Tier 2','Tier 3','Development','Escalations')`);
+          const onFire = r[0]?.on_fire ?? 0; const atRisk = r[0]?.at_risk ?? 0;
+          return { metric: String(onFire), metricLabel: 'on fire', sub: `${atRisk} at risk`, color: onFire > 0 ? '#ef4444' : atRisk > 0 ? '#f59e0b' : '#10b981' };
+        }),
+      ];
+
+      const cards = (await Promise.all(jobs)).filter((c): c is DashCard => c !== null);
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB');
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const cardHtml = cards.map(c => `
+        <a href="${c.href}" target="_blank" rel="noopener" class="card">
+          <div class="card-title">${c.title}</div>
+          <div class="card-metric" style="color:${c.color}">${c.metric}</div>
+          <div class="card-label">${c.metricLabel}</div>
+          <div class="card-sub">${c.sub}</div>
+          <div class="card-open">Open board ↗</div>
+        </a>`).join('');
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOVA — Wallboard Dash</title>
+<script>setTimeout(()=>location.reload(),60000);</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;min-height:100vh}
+.wrap{max-width:1500px;margin:0 auto;padding:24px 28px}
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
+.sub{font-size:11px;color:#64748b;margin-top:2px}
+.meta{font-size:11px;color:#64748b}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.card{display:flex;flex-direction:column;align-items:center;text-align:center;text-decoration:none;color:inherit;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:24px 20px;
+  transition:transform .12s,border-color .12s,box-shadow .12s}
+.card:hover{transform:translateY(-3px);border-color:rgba(94,193,202,.4);box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.card-title{font-size:13px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px}
+.card-metric{font-size:64px;font-weight:800;letter-spacing:-2px;line-height:1}
+.card-label{font-size:12px;color:#64748b;margin-top:6px;text-transform:uppercase;letter-spacing:.5px}
+.card-sub{font-size:13px;color:#cbd5e1;margin-top:10px}
+.card-open{font-size:11px;color:#5ec1ca;margin-top:14px;font-weight:600}
+.foot{text-align:center;margin-top:26px;font-size:11px;color:#475569}
+</style>
+</head><body><div class="wrap">
+<div class="head">
+  <div><h1>NOVA Wallboards</h1><div class="sub">Live support &amp; KPI boards — click any tile for the full board</div></div>
+  <div class="meta">Auto-refresh 60s · Updated ${timeStr}</div>
+</div>
+<div class="grid">${cardHtml}</div>
+<div class="foot">nurtur.tech · NOVA Wallboard Dash · ${dateStr}</div>
+</div></body></html>`);
+      logWallboard('/dash', 'info', 200, Date.now() - wbStart, `OK — ${cards.length} cards`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard('/dash', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
   // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
   const portalGate: import('express').RequestHandler = (_req, res, next) => {
     if (settingsQueries.get('portal_enabled') === 'true') return next();

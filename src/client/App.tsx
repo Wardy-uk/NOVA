@@ -96,15 +96,15 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'wallboards-rebuild' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
 type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
-  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-dev-review' | 'wb-ricky'
-  | 'wbr-support' | 'wbr-breach' | 'wbr-cc' | 'wbr-tech-support' | 'wbr-breach-board' | 'kpi-rebuild-agents' | 'kpi-rebuild-history'
+  | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
+  | 'kpi-rebuild-agents' | 'kpi-rebuild-history'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -235,19 +235,9 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'wb-tech-support', label: 'Technical Support' },
       { view: 'wb-key-accounts', label: 'Key Accounts' },
       { view: 'wb-customer-success', label: 'Customer Success' },
+      { view: 'wb-support', label: 'Support KPIs' },
       { view: 'wb-dev-review', label: 'Dev Review' },
       { view: 'wb-ricky', label: 'Risk Board' },
-    ],
-  },
-  'wallboards-rebuild': {
-    label: 'Wallboards (Rebuild)',
-    defaultView: 'wbr-cc',
-    tabs: [
-      { view: 'wbr-cc', label: 'Customer Care' },
-      { view: 'wbr-tech-support', label: 'Technical Support' },
-      { view: 'wbr-breach-board', label: 'SLA Breach Board' },
-      { view: 'wbr-support', label: 'Support (All KPIs)' },
-      { view: 'wbr-breach', label: 'KPI Breach' },
     ],
   },
   training: {
@@ -320,7 +310,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'wallboards-rebuild', 'training', 'devreview', 'board', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -332,7 +322,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wbr-support', 'wbr-breach', 'wbr-cc', 'wbr-tech-support', 'wbr-breach-board', 'kpi-rebuild-agents', 'kpi-rebuild-history', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-history', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -440,12 +430,12 @@ export function App() {
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Wallboard drill-down panel state (triggered by postMessage from wallboard iframes)
-  const [wbDrill, setWbDrill] = useState<{ kpi?: string; agent?: string; label: string } | null>(null);
+  const [wbDrill, setWbDrill] = useState<{ kpi?: string; agent?: string; bucket?: string; stat?: string; cohort?: string; accountId?: string; label: string } | null>(null);
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (!e.data || e.data.type !== 'wallboard-drill') return;
-      const { kpi, agent, label } = e.data;
-      if (kpi || agent) setWbDrill({ kpi, agent, label: label || kpi || agent });
+      const { kpi, agent, bucket, stat, cohort, accountId, label } = e.data;
+      if (kpi || agent || bucket) setWbDrill({ kpi, agent, bucket, stat, cohort, accountId, label: label || kpi || agent || bucket });
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -735,7 +725,6 @@ export function App() {
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
     if (area === 'kpi-rebuild') return true;
-    if (area === 'wallboards-rebuild') return true;
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -1169,40 +1158,11 @@ export function App() {
             />
           )}
 
-          {/* Wallboards (Rebuild) — Layer-1 org KPIs */}
-          {view === 'wbr-cc' && (
+          {view === 'wb-support' && (
             <iframe
-              src="/wallboard/rebuild/cc"
+              src="/wallboard/support"
               style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="Customer Care (Rebuild) Wallboard"
-            />
-          )}
-          {view === 'wbr-tech-support' && (
-            <iframe
-              src="/wallboard/rebuild/tech-support"
-              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="Technical Support (Rebuild) Wallboard"
-            />
-          )}
-          {view === 'wbr-breach-board' && (
-            <iframe
-              src="/wallboard/rebuild/breach-board"
-              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="SLA Breach Board (Rebuild) Wallboard"
-            />
-          )}
-          {view === 'wbr-support' && (
-            <iframe
-              src="/wallboard/rebuild/support"
-              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="Support KPIs (Rebuild) Wallboard"
-            />
-          )}
-          {view === 'wbr-breach' && (
-            <iframe
-              src="/wallboard/rebuild/breach"
-              style={{ width: '100%', height: 'calc(100vh - 120px)', border: 'none', borderRadius: '12px' }}
-              title="KPI Breach (Rebuild) Wallboard"
+              title="Support KPIs Wallboard"
             />
           )}
 
@@ -1415,6 +1375,10 @@ export function App() {
         <WallboardDrillPanel
           kpi={wbDrill.kpi}
           agent={wbDrill.agent}
+          bucket={wbDrill.bucket}
+          stat={wbDrill.stat}
+          cohort={wbDrill.cohort}
+          accountId={wbDrill.accountId}
           label={wbDrill.label}
           onClose={() => setWbDrill(null)}
         />
