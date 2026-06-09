@@ -1,6 +1,6 @@
 import { query, execute, queryOne } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import { CustomerResolver, FIELD } from './customer-resolver.js';
+import { CustomerResolver } from './customer-resolver.js';
 
 // Per-CUSTOMER risk rollup + nightly reconciliation. See agent_work/ba/account-risk-spec.md.
 //
@@ -50,32 +50,10 @@ function tierForScore(score: number): number {
   return 0;
 }
 
-// Monthly [startIso, endIso) windows from `sinceIso` to now, so each DB query stays
-// bounded and well under the 30s request timeout. First window starts at sinceIso.
-function monthWindows(sinceIso: string): [string, string][] {
-  const out: [string, string][] = [];
-  const start = new Date(sinceIso.length <= 10 ? sinceIso + 'T00:00:00Z' : sinceIso);
-  const now = new Date();
-  let cursor = start;
-  let monthStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
-  while (cursor < now) {
-    const next = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
-    out.push([cursor.toISOString(), next.toISOString()]);
-    cursor = next;
-    monthStart = next;
-  }
-  return out;
-}
-
 interface TicketRow {
   issue_key: string; project_key: string; summary: string | null; description_text: string | null;
   reporter_email: string | null; bc_account_number: string | null; organisation_name: string | null;
-  fields_json: string | null; status_category: string | null; jira_created: string | null;
-}
-
-interface CommentAgg {
-  issue_key: string;
-  [k: string]: string | number;  // has_<type> flags
+  status_category: string | null; jira_created: string | null;
 }
 
 interface CustomerAccum {
@@ -122,9 +100,6 @@ export class AccountRiskEngine {
     await this.resolver.seedFromBcCustomers().catch(() => {});
     await this.resolver.loadIndex();
 
-    const ph = projects.map(() => '?').join(',');
-    const aggSelect = SIGNALS.map(s => `MAX(CASE WHEN ${s.sql} THEN 1 ELSE 0 END) AS has_${s.type}`).join(',\n           ');
-
     const customers = new Map<string, CustomerAccum>();
     const reconTotal = new Map<string, number>();     // `${project}|${yyyy-mm-dd}` -> count
     const reconResolved = new Map<string, number>();
@@ -133,29 +108,19 @@ export class AccountRiskEngine {
     let totalTickets = 0;
     let resolvedCount = 0;
 
-    // Monthly windows keep each query bounded (the full-history scan timed out at 30s).
-    for (const [winStart, winEnd] of monthWindows(sinceIso)) {
+    // Per-project scan, no comment JOIN — keeps each query small enough for the 30s pool
+    // timeout (node-mssql/tedious has no per-request timeout override). Signals are detected
+    // from the ticket's own summary + description; escalation language appearing ONLY in
+    // comments is a known gap — follow-up: targeted per-customer comment scans after resolution.
+    for (const project of projects) {
       const tickets = await query<TicketRow>(
         `SELECT issue_key, project_key, summary, description_text, reporter_email,
-                bc_account_number, organisation_name, fields_json, status_category, jira_created
+                bc_account_number, organisation_name, status_category, jira_created
          FROM jira_issue_cache
-         WHERE project_key IN (${ph}) AND jira_created >= ? AND jira_created < ?`,
-        [...projects, winStart, winEnd],
+         WHERE project_key = ? AND jira_created >= ?`,
+        [project, sinceIso],
       );
-      if (!tickets.length) continue;
       totalTickets += tickets.length;
-
-      // Comment-derived signal flags for this window, one row per ticket, via JOIN.
-      const commentAggs = await query<CommentAgg>(
-        `SELECT c.issue_key,
-           ${aggSelect}
-         FROM jira_comment_cache c
-         JOIN jira_issue_cache j ON j.issue_key = c.issue_key
-         WHERE j.project_key IN (${ph}) AND j.jira_created >= ? AND j.jira_created < ? AND c.is_public = 1
-         GROUP BY c.issue_key`,
-        [...projects, winStart, winEnd],
-      );
-      const aggMap = new Map<string, CommentAgg>(commentAggs.map(r => [r.issue_key, r]));
 
       for (const t of tickets) {
       // mssql returns DATETIME2 as a Date object (not a string), so normalise before slicing.
@@ -164,17 +129,8 @@ export class AccountRiskEngine {
       if (dayKey) reconTotal.set(dayKey, (reconTotal.get(dayKey) ?? 0) + 1);
 
       // Resolve customer.
-      let instanceUrl: string | null = null, customerDomain: string | null = null, websiteUrl: string | null = null;
-      if (t.fields_json) {
-        try {
-          const f = JSON.parse(t.fields_json) as Record<string, unknown>;
-          instanceUrl = (f[FIELD.INSTANCE_URL] as string) ?? null;
-          customerDomain = (f[FIELD.CUSTOMER_DOMAIN] as string) ?? null;
-          websiteUrl = (f[FIELD.WEBSITE_URL] as string) ?? null;
-        } catch { /* ignore */ }
-      }
       const res = await this.resolver.resolveTicket({
-        bcAccountNumber: t.bc_account_number, instanceUrl, customerDomain, websiteUrl,
+        bcAccountNumber: t.bc_account_number,
         organizations: t.organisation_name ? [{ name: t.organisation_name }] : null,
         reporterEmail: t.reporter_email, summary: t.summary, description: t.description_text,
       });
@@ -210,22 +166,19 @@ export class AccountRiskEngine {
       const ageDays = createdMs ? (now - createdMs) / 86_400_000 : 0;
       const decay = this.decayFactor(resolved, ageDays);
       const haystack = `${t.summary ?? ''}\n${t.description_text ?? ''}`;
-      const agg = aggMap.get(t.issue_key);
 
       for (const sig of SIGNALS) {
-        const inComments = agg ? Number(agg[`has_${sig.type}`]) === 1 : false;
-        const inBody = sig.re.test(haystack);
-        if (!inComments && !inBody) continue;
+        if (!sig.re.test(haystack)) continue;
         acc.score += sig.weight * decay;
         acc.signalRows.push({
           ticketKey: t.issue_key, project: t.project_key, type: sig.type, weight: Math.round(sig.weight * decay),
-          isActive: !resolved, evidence: inBody ? haystack.slice(0, 200) : '(comment match)',
+          isActive: !resolved, evidence: haystack.slice(0, 200),
           ticketCreated: t.jira_created, ticketStatus: t.status_category,
         });
         if (sig.setsFlag && !resolved) acc.flags[sig.setsFlag] = true;
       }
       }  // end ticket loop
-    }    // end month-window loop
+    }    // end project loop
 
     // Volume + cross-project signals, finalise score/tier, write.
     let written = 0, tierChanges = 0;

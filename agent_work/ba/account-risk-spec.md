@@ -156,9 +156,14 @@ it (no new workflow). Optional later: write a `Risk Level` select field or inter
 
 - **Chunk 1 (done):** schema (5 tables), `customer-resolver.ts`. (The separate startup dry-run was
   removed — the chunk-2 backfill report now carries the resolution rate + by-source breakdown.)
-- **Timeout fix (09 Jun):** the first backfill deploy hit a 30s mssql request timeout on the
-  full-history scan. Fixed by processing in **monthly windows** (each ticket + comment-agg query is
-  now bounded). Re-run guard bumped to `account_risk_backfill_v2`.
+- **Timeout saga (09 Jun):** first deploy hit a 30s mssql request timeout on the full-history scan
+  (the comment-signal JOIN over `jira_comment_cache`). node-mssql/tedious has **no per-request
+  timeout override** (pool-level only). Resolved by: (a) scanning **per project** (small queries),
+  and (b) **dropping the comment JOIN** — signals now detected from each ticket's own
+  summary + description. **Known gap:** escalation language that appears only in *comments/replies*
+  isn't caught in the backfill — follow-up is targeted per-customer comment scans after resolution
+  (cheap: only the few hundred resolved customers' tickets). Guard `account_risk_backfill_v2`.
+  Also TODO: `seedFromBcCustomers` is per-row (slow); make it set-based.
 - **Chunk 2 (done, deployed-pending):** `account-risk-engine.ts` — `runRollupAndRecon()`:
   resolves + signal-scores every in-scope ticket (signals: formal_complaint 40, termination 40,
   formal_escalation 35, refund 25, compensation 20, unacceptable 15, frustrated 10; + volume
