@@ -50,6 +50,23 @@ function tierForScore(score: number): number {
   return 0;
 }
 
+// Monthly [startIso, endIso) windows from `sinceIso` to now, so each DB query stays
+// bounded and well under the 30s request timeout. First window starts at sinceIso.
+function monthWindows(sinceIso: string): [string, string][] {
+  const out: [string, string][] = [];
+  const start = new Date(sinceIso.length <= 10 ? sinceIso + 'T00:00:00Z' : sinceIso);
+  const now = new Date();
+  let cursor = start;
+  let monthStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  while (cursor < now) {
+    const next = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
+    out.push([cursor.toISOString(), next.toISOString()]);
+    cursor = next;
+    monthStart = next;
+  }
+  return out;
+}
+
 interface TicketRow {
   issue_key: string; project_key: string; summary: string | null; description_text: string | null;
   reporter_email: string | null; bc_account_number: string | null; organisation_name: string | null;
@@ -106,34 +123,41 @@ export class AccountRiskEngine {
     await this.resolver.loadIndex();
 
     const ph = projects.map(() => '?').join(',');
-    const tickets = await query<TicketRow>(
-      `SELECT issue_key, project_key, summary, description_text, reporter_email,
-              bc_account_number, organisation_name, fields_json, status_category, jira_created
-       FROM jira_issue_cache
-       WHERE project_key IN (${ph}) AND jira_created >= ?`,
-      [...projects, sinceIso],
-    );
-
-    // Comment-derived signal flags, one row per ticket, via JOIN (no huge IN list).
-    const aggSelect = SIGNALS.map(s => `MAX(CASE WHEN ${s.sql} THEN 1 ELSE 0 END) AS has_${s.type}`).join(',\n         ');
-    const commentAggs = await query<CommentAgg>(
-      `SELECT c.issue_key,
-         ${aggSelect}
-       FROM jira_comment_cache c
-       JOIN jira_issue_cache j ON j.issue_key = c.issue_key
-       WHERE j.project_key IN (${ph}) AND j.jira_created >= ? AND c.is_public = 1
-       GROUP BY c.issue_key`,
-      [...projects, sinceIso],
-    );
-    const aggMap = new Map<string, CommentAgg>(commentAggs.map(r => [r.issue_key, r]));
+    const aggSelect = SIGNALS.map(s => `MAX(CASE WHEN ${s.sql} THEN 1 ELSE 0 END) AS has_${s.type}`).join(',\n           ');
 
     const customers = new Map<string, CustomerAccum>();
-    // recon tallies keyed by `${project}|${yyyy-mm-dd}`
-    const reconTotal = new Map<string, number>();
+    const reconTotal = new Map<string, number>();     // `${project}|${yyyy-mm-dd}` -> count
     const reconResolved = new Map<string, number>();
+    const bySource = new Map<string, number>();
+    const unresolvedSamples: string[] = [];
+    let totalTickets = 0;
     let resolvedCount = 0;
 
-    for (const t of tickets) {
+    // Monthly windows keep each query bounded (the full-history scan timed out at 30s).
+    for (const [winStart, winEnd] of monthWindows(sinceIso)) {
+      const tickets = await query<TicketRow>(
+        `SELECT issue_key, project_key, summary, description_text, reporter_email,
+                bc_account_number, organisation_name, fields_json, status_category, jira_created
+         FROM jira_issue_cache
+         WHERE project_key IN (${ph}) AND jira_created >= ? AND jira_created < ?`,
+        [...projects, winStart, winEnd],
+      );
+      if (!tickets.length) continue;
+      totalTickets += tickets.length;
+
+      // Comment-derived signal flags for this window, one row per ticket, via JOIN.
+      const commentAggs = await query<CommentAgg>(
+        `SELECT c.issue_key,
+           ${aggSelect}
+         FROM jira_comment_cache c
+         JOIN jira_issue_cache j ON j.issue_key = c.issue_key
+         WHERE j.project_key IN (${ph}) AND j.jira_created >= ? AND j.jira_created < ? AND c.is_public = 1
+         GROUP BY c.issue_key`,
+        [...projects, winStart, winEnd],
+      );
+      const aggMap = new Map<string, CommentAgg>(commentAggs.map(r => [r.issue_key, r]));
+
+      for (const t of tickets) {
       const dayKey = t.jira_created ? `${t.project_key}|${t.jira_created.slice(0, 10)}` : null;
       if (dayKey) reconTotal.set(dayKey, (reconTotal.get(dayKey) ?? 0) + 1);
 
@@ -152,7 +176,11 @@ export class AccountRiskEngine {
         organizations: t.organisation_name ? [{ name: t.organisation_name }] : null,
         reporterEmail: t.reporter_email, summary: t.summary, description: t.description_text,
       });
-      if (!res.customerRef) continue;  // unresolved → counts toward recon total only
+      bySource.set(res.source, (bySource.get(res.source) ?? 0) + 1);
+      if (!res.customerRef) {  // unresolved → counts toward recon total only
+        if (unresolvedSamples.length < 20) unresolvedSamples.push(`${t.issue_key} <${t.reporter_email ?? 'no-email'}>`);
+        continue;
+      }
       resolvedCount++;
       if (dayKey) reconResolved.set(dayKey, (reconResolved.get(dayKey) ?? 0) + 1);
 
@@ -194,7 +222,8 @@ export class AccountRiskEngine {
         });
         if (sig.setsFlag && !resolved) acc.flags[sig.setsFlag] = true;
       }
-    }
+      }  // end ticket loop
+    }    // end month-window loop
 
     // Volume + cross-project signals, finalise score/tier, write.
     let written = 0, tierChanges = 0;
@@ -280,13 +309,15 @@ export class AccountRiskEngine {
 
     const summary = {
       generatedAt: new Date().toISOString(),
-      tickets: tickets.length,
+      tickets: totalTickets,
       resolved: resolvedCount,
-      resolvedPct: tickets.length ? Math.round((resolvedCount / tickets.length) * 1000) / 10 : 0,
+      resolvedPct: totalTickets ? Math.round((resolvedCount / totalTickets) * 1000) / 10 : 0,
+      bySource: Object.fromEntries(bySource),
       customersAtRisk: written,
       tierChanges,
       reconDaysComplete: daysComplete,
       reconDaysPartial: daysPartial,
+      unresolvedSamples,
       seconds: Math.round((Date.now() - t0) / 1000),
     };
     console.log('[account-risk] ===== ROLLUP REPORT =====');

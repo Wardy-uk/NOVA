@@ -109,8 +109,6 @@ import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
-import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from './services/wallboard-live-cache.js';
-import { enrichTickets, countForPanel, buildKpiFilter, extractAssignee, agentNameMatches, agentStatsForSubset, isSlaBoardTier } from './services/wallboard-drill.js';
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
@@ -130,7 +128,6 @@ import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
-import { CustomerResolver } from './services/customer-resolver.js';
 import { AccountRiskEngine } from './services/account-risk-engine.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
@@ -195,7 +192,7 @@ import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
-import { getTierSnapshot, type TierSnapshot } from './services/kpi-org/wallboard-tiers.js';
+import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { captureAgentKpis, getAgentLiveSnapshot, type AgentKpiRow } from './services/kpi-agent/index.js';
 import cookieParser from 'cookie-parser';
@@ -253,8 +250,6 @@ async function main() {
   }
   */
 
-  // Wallboard live cache — cohort-scoped stats from jira_issue_cache (5-min refresh)
-  startWallboardLiveCache().catch(err => console.warn('[wallboard-live-cache] startup failed:', err instanceof Error ? err.message : err));
   const ritualQueries = new RitualQueries();
   const deliveryQueries = new DeliveryQueries();
   // Auto-assign onboarding IDs to any entries missing them
@@ -1127,24 +1122,16 @@ async function main() {
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
 
-    // One-time account-risk jobs (chunks 1-2). Run sequentially, non-blocking, each guarded
-    // so it runs once. Read-only dry-run first (resolution-rate report by source), then the
-    // rollup + reconciliation backfill (writes per-customer risk + recon ledger). Both persist
-    // their report into settings (risk_resolver_dryrun_report / account_risk_rollup_report).
-    {
+    // One-time account-risk backfill (chunks 1-2), guarded + non-blocking. Resolves + scores
+    // every in-scope ticket since Day 1, fills agent_account_risk + the recon ledger, and
+    // persists a report (incl. resolution rate by source) to settings key
+    // 'account_risk_rollup_report'. Queries are monthly-windowed to stay under the 30s timeout.
+    if (!settingsQueries.get('account_risk_backfill_v2')) {
       const RISK_SCOPE_PROJECTS = ['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'];
       void (async () => {
         try {
-          if (!settingsQueries.get('risk_resolver_dryrun_v1')) {
-            await new CustomerResolver(settingsQueries).runDryRunReport(RISK_SCOPE_PROJECTS);
-            settingsQueries.set('risk_resolver_dryrun_v1', 'true');
-          }
-        } catch (err) { console.warn('[risk-resolver] dry-run failed:', err instanceof Error ? err.message : err); }
-        try {
-          if (!settingsQueries.get('account_risk_backfill_v1')) {
-            await new AccountRiskEngine(settingsQueries).runRollupAndRecon(RISK_SCOPE_PROJECTS);
-            settingsQueries.set('account_risk_backfill_v1', 'true');
-          }
+          await new AccountRiskEngine(settingsQueries).runRollupAndRecon(RISK_SCOPE_PROJECTS);
+          settingsQueries.set('account_risk_backfill_v2', 'true');
         } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
       })();
     }
@@ -2264,100 +2251,23 @@ async function main() {
   app.get('/wallboard/breached', async (_req, res) => {
     const wbStart = Date.now();
     try {
-      const settings = settingsQueries.getAll();
-      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-      if (!srv || !db || !usr || !pwd) {
-        logWallboard('/wallboard/breached', 'error', 500, Date.now() - wbStart, 'KPI SQL not configured');
-        res.status(500).send('KPI SQL not configured'); return;
+      if (!agentJiraClient) {
+        logWallboard('/wallboard/breached', 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+        res.status(503).send('Jira client not configured'); return;
       }
-      const sql = await import('mssql');
-      const pool = await new sql.default.ConnectionPool({
-        server: srv, database: db, user: usr, password: pwd,
-        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
-      }).connect();
-      const hasOldest = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketDays'`);
-      const oldestCol = hasOldest.recordset.length > 0 ? 'ISNULL(OldestTicketDays, 0)' : '0';
-      const hasOldestKey = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'OldestTicketKey'`);
-      const oldestKeyCol = hasOldestKey.recordset.length > 0 ? ', OldestTicketKey' : '';
-      const hasDept = await pool.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`);
-      const deptFilter = hasDept.recordset.length > 0 ? "AND Department IN ('NT', 'NOVA_AI')" : '';
-      const result = await pool.request().query(`
-        SELECT AgentName, AgentSurname, TierCode, Team, AccountId,
-               OpenTickets_Total, OpenTickets_Over2Hours, OpenTickets_NoUpdateToday,
-               ${oldestCol} AS OldestTicketDays${oldestKeyCol},
-               SolvedTickets_Today, TicketsSnapshotAt
-        FROM dbo.Agent WHERE IsActive = 1 ${deptFilter}
-        ORDER BY OpenTickets_Over2Hours DESC, AgentName
-      `);
-      const data = result.recordset;
-      await pool.close();
-
-      // Compute the per-agent stats LIVE so each row matches its agent drill-down
-      // (the agent roster still comes from dbo.Agent; only the numbers are live).
-      // Mirrors the n8n "Daily KPI Report v4" logic: open set + over-SLA (resolution
-      // SLA cycle), not-updated, oldest, and solved-today (status→Resolved/Closed today).
-      try {
-        const liveTickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
-        const nowLive = new Date();
-        // Scope to the four support tiers (excludes Development) so Open / Over SLA /
-        // Not Updated / Oldest match the Solved Today column and the n8n KPI report.
-        const enrichedLive = enrichTickets(liveTickets)
-          .filter(e => isSlaBoardTier(e.tier))
-          .map(e => ({ e, aLower: extractAssignee(e.ticket).toLowerCase() }));
-
-        // Solved today, by assignee accountId (n8n attributes solves by accountId).
-        const solvedRaw = await aggregator.searchServiceDeskRaw(
-          'project = NT AND status CHANGED TO (Resolved, Closed) AFTER startOfDay()',
-          ['assignee', 'customfield_12981', 'status'], 500,
-        );
-        const SOLVE_TIERS = new Set(['customer care', 'production', 'tier 2', 'tier 3']);
-        const solvedByAccount = new Map<string, number>();
-        for (const iss of solvedRaw) {
-          const tv = iss.fields?.customfield_12981 as { value?: string } | string | undefined;
-          const tier = (typeof tv === 'string' ? tv : tv?.value ?? '').toString().trim().toLowerCase();
-          if (!SOLVE_TIERS.has(tier)) continue;
-          const acc = (iss.fields?.assignee as { accountId?: string } | undefined)?.accountId;
-          if (!acc) continue;
-          solvedByAccount.set(acc, (solvedByAccount.get(acc) || 0) + 1);
-        }
-
-        // NOVA AI resolves tickets via the status transition but is not the assignee,
-        // so the assignee-based count above misses every NOVA solve. Credit NOVA for
-        // tickets it closed today (mirrors the n8n "Daily KPI Report v4" closed-by logic).
-        const novaAccountId = settings.nova_ai_jira_account_id || '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
-        if (novaAccountId) {
-          const novaClosedRaw = await aggregator.searchServiceDeskRaw(
-            `project = NT AND status CHANGED TO (Resolved, Closed) BY "${novaAccountId}" AFTER startOfDay() AND status in (Resolved, Closed)`,
-            ['assignee', 'customfield_12981', 'status'], 500,
-          );
-          let novaSolved = 0;
-          for (const iss of novaClosedRaw) {
-            const tv = iss.fields?.customfield_12981 as { value?: string } | string | undefined;
-            const tier = (typeof tv === 'string' ? tv : tv?.value ?? '').toString().trim().toLowerCase();
-            if (!SOLVE_TIERS.has(tier)) continue;
-            const acc = (iss.fields?.assignee as { accountId?: string } | undefined)?.accountId;
-            if (acc === novaAccountId) continue; // already counted via the assignee path
-            novaSolved++;
-          }
-          if (novaSolved > 0) solvedByAccount.set(novaAccountId, (solvedByAccount.get(novaAccountId) || 0) + novaSolved);
-        }
-
-        for (const a of data as any[]) {
-          const nameLower = (a.AgentSurname ? `${a.AgentName} ${a.AgentSurname}` : a.AgentName || '').toLowerCase();
-          const subset = enrichedLive.filter(x => agentNameMatches(x.aLower, nameLower)).map(x => x.e);
-          const stats = agentStatsForSubset(subset, nowLive);
-          a.OpenTickets_Total = stats.open;
-          a.OpenTickets_Over2Hours = stats.overSla;
-          a.OpenTickets_NoUpdateToday = stats.notUpdated;
-          a.OldestTicketDays = stats.oldestDays;
-          a.OldestTicketKey = stats.oldestKey || a.OldestTicketKey;
-          a.SolvedTickets_Today = a.AccountId ? (solvedByAccount.get(a.AccountId) || 0) : a.SolvedTickets_Today;
-          a.TicketsSnapshotAt = nowLive; // data is genuinely live now — suppress stale ⚠
-        }
-        data.sort((x: any, y: any) => (y.OpenTickets_Over2Hours || 0) - (x.OpenTickets_Over2Hours || 0));
-      } catch (e) {
-        console.warn('[wallboard/breached] live stat computation failed, using snapshot:', e instanceof Error ? e.message : e);
-      }
+      // Per-agent stats from the rebuilt kpi-agent engine (roster from dbo.Agent,
+      // tier-1 stocks from jira_issue_cache — same source as the agent drill-down,
+      // so every row matches its drill). Mapped to the legacy row shape so the
+      // table render below is untouched.
+      const snap = await getAgentLiveSnapshot(settingsQueries, agentJiraClient);
+      const nowLive = new Date();
+      const data = snap.agents.map(a => ({
+        AgentName: a.agentName, AgentSurname: '', TierCode: a.tierCode, Team: a.team, AccountId: a.accountId,
+        OpenTickets_Total: a.open, OpenTickets_Over2Hours: a.overSla, OpenTickets_NoUpdateToday: a.noReply,
+        OldestTicketDays: a.oldestDays, OldestTicketKey: a.oldestKey,
+        SolvedTickets_Today: a.solvedToday, TicketsSnapshotAt: nowLive,
+      }));
+      data.sort((x, y) => (y.OpenTickets_Over2Hours || 0) - (x.OpenTickets_Over2Hours || 0) || (x.AgentName || '').localeCompare(y.AgentName || ''));
 
       const TEAM_COLORS: Record<string, string> = { CC: '#3b82f6', 'Customer Care': '#3b82f6', Production: '#8b5cf6', 'Tier 2': '#f59e0b', 'Tier 3': '#ef4444', Development: '#10b981', NTL: '#3b82f6' };
       const totalOver = data.reduce((s: number, a: any) => s + (a.OpenTickets_Over2Hours || 0), 0);
@@ -2393,8 +2303,9 @@ async function main() {
         const isStale = snapshotAge > ONE_HOUR_MS;
         const tc = TEAM_COLORS[a.TierCode || a.Team] || '#64748b';
         const escapedName = name.replace(/'/g, "\\'");
+        const acct = (a.AccountId || '').replace(/'/g, "\\'");
         const staleIcon = isStale ? ' <span title="Data stale — pipeline not reaching this agent" style="color:#f59e0b;font-size:1.4vh">⚠</span>' : '';
-        return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',label:'${escapedName}'},'*')">
+        return `<tr style="cursor:pointer;${hasIssues ? 'background:rgba(239,68,68,.04)' : ''}" onclick="window.parent.postMessage({type:'wallboard-drill',agent:'${escapedName}',accountId:'${acct}',label:'${escapedName}'},'*')">
           <td><span style="font-weight:600;color:${hasIssues ? '#fca5a5' : '#e2e8f0'}">${name}${staleIcon}</span></td>
           <td><span style="display:inline-block;padding:.3vh .6vw;border-radius:4px;font-size:1.3vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:${tc}22;color:${tc};border:1px solid ${tc}33">${a.TierCode || a.Team || '—'}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${a.OpenTickets_Total ?? '—'}</td>
@@ -2441,7 +2352,7 @@ ${wallboardRefreshScript('/wallboard/breached')}
 <tbody>${rows}</tbody></table></div>
 <div style="text-align:center;padding-top:1vh;font-size:1.2vh;color:#475569">nurtur.tech &middot; SLA Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
-      logWallboard('/wallboard/breached', 'info', 200, Date.now() - wbStart, `OK — ${data.length} agents`, { sqlServer: srv });
+      logWallboard('/wallboard/breached', 'info', 200, Date.now() - wbStart, `OK — ${data.length} agents`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/breached', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
@@ -2452,83 +2363,34 @@ ${wallboardRefreshScript('/wallboard/breached')}
   // Wallboard — server-rendered Breached KPIs page for TV displays
   app.get('/wallboard/team-kpis', async (_req, res) => {
     const wbStart = Date.now();
+    const route = '/wallboard/team-kpis';
+    if (!agentJiraClient) {
+      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+      res.status(503).send('Jira client not configured'); return;
+    }
     try {
-      const settings = settingsQueries.getAll();
-      const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-      if (!srv || !db || !usr || !pwd) {
-        logWallboard('/wallboard/team-kpis', 'error', 500, Date.now() - wbStart, 'KPI SQL not configured');
-        res.status(500).send('KPI SQL not configured'); return;
-      }
-      const sql = await import('mssql');
-      const pool = await new sql.default.ConnectionPool({
-        server: srv, database: db, user: usr, password: pwd,
-        options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
-      }).connect();
-      const result = await pool.request().query(`
-        SELECT kpi AS KPI, kpiGroup AS KPIGroup, [count] AS [Count],
-               target AS KPITarget, direction AS KPIDirection, rag AS RAG, CreatedAt
-        FROM dbo.jira_kpi_daily
-        WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
-          AND (kpi LIKE '%over SLA%' OR kpi LIKE '%CSAT%' OR kpi LIKE '%No Reply%')
-        ORDER BY kpiGroup, kpi
-      `);
-      const allKpis = result.recordset as Array<{ KPI: string; KPIGroup: string; Count: number; KPITarget: number | null; KPIDirection: string | null; RAG: number | null; CreatedAt: string }>;
-      await pool.close();
-
-      // Override each ticket-based KPI's snapshot count with a LIVE count derived
-      // from the same filter as the drill-down, so every tile == what its drill lists.
-      // (RAG / which-KPIs-listed still come from the n8n snapshot.) CSAT/FRT etc.
-      // aren't ticket-drillable so they keep their snapshot count.
-      try {
-        const liveTickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
-        const enrichedLive = enrichTickets(liveTickets);
-        const nowLive = new Date();
-        for (const k of allKpis) {
-          const f = buildKpiFilter(k.KPI, nowLive);
-          if (f) {
-            k.Count = enrichedLive.filter(f).length;
-            // Recompute RAG from the LIVE count so a KPI that has dropped to/under
-            // target (e.g. 0 over SLA) turns green and falls off the breach board,
-            // instead of keeping the stale snapshot RAG that was red when n8n ran.
-            if (k.KPITarget !== null && k.KPIDirection) {
-              k.RAG = computeRag(k.Count, k.KPITarget, k.KPIDirection);
-            }
-          }
-        }
-
-        // CSAT: live from customfield_12802 ratings on tickets resolved today.
-        // Rule (per Nick): no CSAT responses today → 100%. Applies to any CSAT KPI
-        // (incl. "CSAT % (Derived)"), recomputing RAG so a 100% drops off the breach board.
-        const csatKpis = allKpis.filter(k => /csat/i.test(k.KPI));
-        if (csatKpis.length) {
-          const csatRaw = await aggregator.searchServiceDeskRaw(
-            'project = NT AND resolutiondate >= startOfDay()', ['customfield_12802', 'resolutiondate'], 500,
-          );
-          let sum = 0, count = 0;
-          for (const iss of csatRaw) {
-            const c = iss.fields?.customfield_12802 as { rating?: number } | undefined;
-            const r = Number(c?.rating);
-            if (!c || isNaN(r)) continue;
-            sum += r; count++;
-          }
-          const csatPct = count > 0 ? Math.round((sum / (count * 5)) * 1000) / 10 : 100;
-          const csatRag = csatPct >= 80 ? 1 : csatPct >= 60 ? 2 : 3;
-          for (const k of csatKpis) { k.Count = csatPct; k.RAG = csatRag; }
-        }
-      } catch (e) {
-        console.warn('[wallboard/team-kpis] live count override failed, using snapshot counts:', e instanceof Error ? e.message : e);
-      }
-
+      // Rebuilt 22-KPI registry, live from Jira (60s-cached). Breach board shows
+      // the amber/red items; each row drills the SAME registry JQL. No n8n snapshot.
+      const snap = await getSupportLiveSnapshot(agentJiraClient);
       const now = new Date();
       const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
       const timeStr = now.toLocaleTimeString('en-GB');
 
-      // Summary stats
-      const totalKpis = allKpis.length;
-      const greenCount = allKpis.filter(k => k.RAG === 1).length;
-      const amberCount = allKpis.filter(k => k.RAG === 2).length;
-      const redCount = allKpis.filter(k => k.RAG === 3).length;
-      const breachedKpis = allKpis.filter(k => k.RAG === 2 || k.RAG === 3);
+      const fmtVal = (unit: string, v: number | null): string => {
+        if (v == null) return '—';
+        if (unit === 'percent') return `${v}%`;
+        if (unit === 'days') return `${v}d`;
+        if (unit === 'minutes') return `${v}m`;
+        if (unit === 'currency') return `£${Math.round(v).toLocaleString('en-GB')}`;
+        return String(v);
+      };
+
+      const items = snap.items;
+      const totalKpis = items.length;
+      const greenCount = items.filter(k => k.rag === 'green').length;
+      const amberCount = items.filter(k => k.rag === 'amber').length;
+      const redCount = items.filter(k => k.rag === 'red').length;
+      const breachedKpis = items.filter(k => k.rag === 'amber' || k.rag === 'red');
       const greenPct = totalKpis > 0 ? Math.round((greenCount / totalKpis) * 100) : 0;
       const redPct = totalKpis > 0 ? Math.round((redCount / totalKpis) * 100) : 0;
 
@@ -2536,23 +2398,23 @@ ${wallboardRefreshScript('/wallboard/breached')}
         return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:1.2vh 1.5vw"><div style="font-size:1.3vh;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:.5vh">${label}</div><div style="font-size:3.2vh;font-weight:800;letter-spacing:-1px;color:${color}">${value}</div></div>`;
       }
 
-      // Build rows — red first, then amber
       const sorted = [...breachedKpis].sort((a, b) => {
-        if (a.RAG !== b.RAG) return (b.RAG ?? 0) - (a.RAG ?? 0); // red (3) before amber (2)
-        return a.KPI.localeCompare(b.KPI);
+        const rank = (r: string | null) => (r === 'red' ? 3 : r === 'amber' ? 2 : 0);
+        if (rank(a.rag) !== rank(b.rag)) return rank(b.rag) - rank(a.rag);
+        return a.label.localeCompare(b.label);
       });
 
       const rows = sorted.map(k => {
-        const isRed = k.RAG === 3;
+        const isRed = k.rag === 'red';
         const ragColors = isRed
           ? { bg: 'rgba(239,68,68,.15)', fg: '#ef4444', bd: 'rgba(239,68,68,.3)' }
           : { bg: 'rgba(245,158,11,.12)', fg: '#f59e0b', bd: 'rgba(245,158,11,.25)' };
         const rowBg = isRed ? 'background:rgba(239,68,68,.04)' : '';
-        const target = k.KPITarget !== null ? k.KPITarget : '—';
-        const escapedKpi = k.KPI.replace(/'/g, "\\'");
+        const target = k.target != null ? fmtVal(k.unit, k.target) : '—';
+        const escapedKpi = k.label.replace(/'/g, "\\'");
         return `<tr style="cursor:pointer;${rowBg}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escapedKpi}',label:'${escapedKpi}'},'*')">
-          <td><span style="font-weight:600;color:${isRed ? '#fca5a5' : '#fde68a'}">${k.KPI}</span></td>
-          <td class="c"><span style="display:inline-block;padding:.4vh .8vw;border-radius:7px;font-size:1.6vh;font-weight:700;min-width:3vw;text-align:center;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${k.Count}</span></td>
+          <td><span style="font-weight:600;color:${isRed ? '#fca5a5' : '#fde68a'}">${k.label}</span></td>
+          <td class="c"><span style="display:inline-block;padding:.4vh .8vw;border-radius:7px;font-size:1.6vh;font-weight:700;min-width:3vw;text-align:center;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${fmtVal(k.unit, k.value)}</span></td>
           <td class="c" style="color:#94a3b8;font-weight:600">${target}</td>
           <td class="c"><span style="display:inline-block;padding:.3vh .6vw;border-radius:5px;font-size:1.3vh;font-weight:700;text-transform:uppercase;background:${ragColors.bg};color:${ragColors.fg};border:1px solid ${ragColors.bd}">${isRed ? 'RED' : 'AMBER'}</span></td>
         </tr>`;
@@ -2565,11 +2427,11 @@ ${wallboardRefreshScript('/wallboard/breached')}
       res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KPI Breach Board</title>
-${wallboardRefreshScript('/wallboard/team-kpis')}
+${wallboardRefreshScript(route)}
 <style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow:hidden}.wrap{height:100vh;display:flex;flex-direction:column;padding:2vh 2.5vw}table{width:100%;border-collapse:collapse}th{padding:1.2vh 1vw;text-align:left;font-size:1.4vh;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:#64748b;background:#1e2228;border-bottom:1px solid #2f353d}th.c{text-align:center}td{padding:1.1vh 1vw;border-bottom:1px solid #2f353d;font-size:1.8vh}td.c{text-align:center}tr[onclick]:hover{background:rgba(94,193,202,.08)!important}.tbl-wrap{flex:1;min-height:0;overflow:hidden;border:1px solid #2f353d;border-radius:14px;background:rgba(255,255,255,.03)}</style>
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5vh">
-  <div><h1 style="font-size:2.8vh;font-weight:800;letter-spacing:-0.5px">KPI Breach Board</h1><div style="font-size:1.4vh;color:#64748b;margin-top:2px">Over SLA &middot; CSAT &middot; No Reply</div></div>
+  <div><h1 style="font-size:2.8vh;font-weight:800;letter-spacing:-0.5px">KPI Breach Board</h1><div style="font-size:1.4vh;color:#64748b;margin-top:2px">Support / NT &middot; live from Jira</div></div>
   <div style="font-size:1.4vh;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
 </div>
 <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1.2vh;margin-bottom:1.5vh">
@@ -2584,132 +2446,38 @@ ${wallboardRefreshScript('/wallboard/team-kpis')}
 <tbody>${emptyRow}${rows}</tbody></table></div>
 <div style="text-align:center;padding-top:1vh;font-size:1.2vh;color:#475569">nurtur.tech &middot; KPI Breach Board &middot; ${dateStr}</div>
 </div></body></html>`);
-      logWallboard('/wallboard/team-kpis', 'info', 200, Date.now() - wbStart, `OK — ${allKpis.length} KPIs, ${breachedKpis.length} breached`, { sqlServer: srv });
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${totalKpis} KPIs, ${breachedKpis.length} breached`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/wallboard/team-kpis', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg, { error: msg, stack: err instanceof Error ? err.stack : undefined });
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
 
-  // Wallboard — server-rendered stat panels (Grafana replacement)
-  async function renderStatWallboard(
-    settingsQueries: any,
+  // Tier wallboard (Customer Care / Tech Support). Counts come from the rebuilt
+  // kpi-org tier snapshot (live JQL); each tile's onclick drills the SAME JQL so
+  // the listed tickets always match the number. Big-tile legacy look preserved.
+  type TierPanel = { label: string; bucket: string; stat: TierStatKind };
+  function renderTierWallboard(
+    snap: TierSnapshot,
     title: string,
     subtitle: string,
-    panels: Array<{ label: string; kpi: string; altKpi?: string; sumKpis?: string[] }>,
+    panels: TierPanel[],
     cols: number,
     route: string,
-  ): Promise<string> {
-    const settings = settingsQueries.getAll();
-    const { kpi_sql_server: srv, kpi_sql_database: db, kpi_sql_user: usr, kpi_sql_password: pwd } = settings;
-    if (!srv || !db || !usr || !pwd) throw new Error('KPI SQL not configured');
-    const sql = await import('mssql');
-    const pool = await new sql.default.ConnectionPool({
-      server: srv, database: db, user: usr, password: pwd,
-      options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 30000,
-    }).connect();
-    const result = await pool.request().query(`
-      SELECT kpi AS KPI, [count] AS [Count], rag AS RAG
-      FROM dbo.jira_kpi_daily
-      WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
-    `);
-    await pool.close();
-    const kpis = new Map<string, { count: number; rag: number | null }>();
-    for (const r of result.recordset) kpis.set(r.KPI.toLowerCase(), { count: r.Count, rag: r.RAG });
-
+    cohort: Cohort,
+  ): string {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-GB');
     const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-    function lookupOne(kpi: string, altKpi?: string): { count: number; rag: number | null } {
-      const k = kpis.get(kpi.toLowerCase());
-      if (k) return k;
-      if (altKpi) {
-        const a = kpis.get(altKpi.toLowerCase());
-        if (a) return a;
-      }
-      return { count: 0, rag: null };
-    }
-
-    function lookup(p: { kpi: string; altKpi?: string; sumKpis?: string[] }): { count: number; rag: number | null } {
-      if (!p.sumKpis?.length) return lookupOne(p.kpi, p.altKpi);
-      let total = 0;
-      let worstRag: number | null = null;
-      for (const name of p.sumKpis) {
-        const v = kpis.get(name.toLowerCase());
-        if (v) {
-          total += v.count;
-          if (v.rag !== null && (worstRag === null || v.rag > worstRag)) worstRag = v.rag;
-        }
-      }
-      return { count: total, rag: worstRag };
-    }
-
-    function ragColor(rag: number | null): string {
-      if (rag === 1) return '#10b981';
-      if (rag === 2) return '#eab308';
-      if (rag === 3) return '#ef4444';
-      return '#94a3b8';
-    }
-
     const panelHtml = panels.map(p => {
-      const data = lookup(p);
-      const color = ragColor(data.rag);
-      const flashClass = data.rag === 3 ? ' flash-red' : '';
-      const escaped = p.kpi.replace(/'/g, "\\'");
-      return `<div class="${flashClass}" data-kpi="${p.kpi}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escaped}',label:'${p.label.replace(/'/g, "\\'")}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:transform .1s">
-        <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
-        <div style="font-size:96px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${data.count}</div>
-      </div>`;
-    }).join('');
-
-    return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
-${wallboardRefreshScript(route)}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}[data-kpi]:hover{transform:scale(1.02);filter:brightness(1.1)}</style>
-</head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${subtitle}</div></div>
-  <div style="font-size:10px;color:#64748b">Auto-refresh 30s &middot; Updated ${timeStr}</div>
-</div>
-<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:14px;flex:1">
-${panelHtml}
-</div>
-<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${title} &middot; ${dateStr}</div>
-</div></body></html>`;
-  }
-
-  // Live variant of renderStatWallboard. Counts are derived from the SAME live
-  // ticket set + filter logic as the drill-down panel (services/wallboard-drill),
-  // so each tile number always equals what the drill lists. No jira_kpi_daily.
-  async function renderLiveStatWallboard(
-    aggregator: TaskAggregator,
-    title: string,
-    subtitle: string,
-    panels: Array<{ label: string; kpi: string; altKpi?: string; sumKpis?: string[] }>,
-    cols: number,
-    route: string,
-  ): Promise<string> {
-    const tickets = await aggregator.fetchServiceDeskTickets('all', undefined, { includeAllTiers: true });
-    const now = new Date();
-    const enriched = enrichTickets(tickets);
-
-    const timeStr = now.toLocaleTimeString('en-GB');
-    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-
-    // "over SLA" / "No Reply" panels should be zero → red when breached.
-    // Volume panels ("Number of Tickets in …") are informational → neutral.
-    const isBreachKpi = (kpi: string) => /over SLA|No Reply/i.test(kpi);
-
-    const panelHtml = panels.map(p => {
-      const count = countForPanel(enriched, now, p) ?? 0;
-      const breach = isBreachKpi(p.kpi);
+      const count = snap.tiers[p.bucket]?.[p.stat] ?? 0;
+      const breach = p.stat !== 'active';
       const color = breach ? (count > 0 ? '#ef4444' : '#10b981') : '#5ec1ca';
       const flashClass = breach && count > 0 ? ' flash-red' : '';
-      const escaped = p.kpi.replace(/'/g, "\\'");
-      return `<div class="${flashClass}" data-kpi="${p.kpi}" onclick="window.parent.postMessage({type:'wallboard-drill',kpi:'${escaped}',label:'${p.label.replace(/'/g, "\\'")}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:transform .1s">
+      const lbl = p.label.replace(/'/g, "\\'");
+      return `<div class="${flashClass}" data-kpi="${p.bucket}:${p.stat}" onclick="window.parent.postMessage({type:'wallboard-drill',bucket:'${p.bucket}',stat:'${p.stat}',cohort:'${cohort}',label:'${lbl}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:transform .1s">
         <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${p.label}</div>
         <div style="font-size:96px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${count}</div>
       </div>`;
@@ -2732,65 +2500,44 @@ ${panelHtml}
 </div></body></html>`;
   }
 
-  type LivePanel = { label: string; queueKey: string; stat: 'active' | 'slaBreached' | 'noReply' | null };
-
-  const LIVE_PANELS: LivePanel[] = [
-    // CC row — Active
-    { label: 'CC Incidents', queueKey: 'cc_incidents', stat: 'active' },
-    { label: 'CC Service Requests', queueKey: 'cc_service_requests', stat: 'active' },
-    { label: 'Property Jungle', queueKey: 'cc_tpj', stat: 'active' },
-    // TS row — Active (Dev+T3 consolidated)
-    { label: 'Production Active', queueKey: 'production', stat: 'active' },
-    { label: 'Tier 2 Active', queueKey: 'tier2', stat: 'active' },
-    { label: 'Development — Active', queueKey: 'development+tier3', stat: 'active' },
-    // CC row — No Reply
-    { label: 'CC Incidents — No Update', queueKey: 'cc_incidents', stat: 'noReply' },
-    { label: 'CC SRs — No Update', queueKey: 'cc_service_requests', stat: 'noReply' },
-    { label: 'Property Jungle — No Update', queueKey: 'cc_tpj', stat: 'noReply' },
-    // TS row — No Reply (Dev+T3 consolidated)
-    { label: 'Production — No Reply', queueKey: 'production', stat: 'noReply' },
-    { label: 'Tier 2 — No Reply', queueKey: 'tier2', stat: 'noReply' },
-    { label: 'Development — No Reply', queueKey: 'development+tier3', stat: 'noReply' },
-    // CC row — Over SLA
-    { label: 'CC Incidents — Over SLA', queueKey: 'cc_incidents', stat: 'slaBreached' },
-    { label: 'CC SRs — Over SLA', queueKey: 'cc_service_requests', stat: 'slaBreached' },
-    { label: 'Property Jungle — Over SLA', queueKey: 'cc_tpj', stat: 'slaBreached' },
-    // TS row — Over SLA (Dev+T3 consolidated)
-    { label: 'Production — Over SLA', queueKey: 'production', stat: 'slaBreached' },
-    { label: 'Tier 2 — Over SLA', queueKey: 'tier2', stat: 'slaBreached' },
-    { label: 'Development — Over SLA', queueKey: 'development+tier3', stat: 'slaBreached' },
-  ];
-
-  function renderLiveWallboard(title: string, subtitle: string, snap: CohortSnapshot, route: string): string {
+  // Cohort wallboard (Key Accounts / Customer Success) — compact 6-wide legacy
+  // look. Same rebuilt tier snapshot, scoped to the cohort; drill posts the
+  // bucket/stat/cohort so the lists match.
+  function renderCohortWallboard(title: string, subtitle: string, snap: TierSnapshot, route: string, cohort: Cohort): string {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-GB');
     const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const staleMs = Date.now() - snap.updatedAt.getTime();
-    const neverLoaded = snap.updatedAt.getTime() === 0;
-    const staleBanner = neverLoaded
-      ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Cache not yet loaded — waiting for first refresh</div>`
-      : staleMs > 10 * 60 * 1000
-        ? `<div style="background:#78350f;color:#fbbf24;padding:6px 12px;border-radius:8px;font-size:11px;margin-bottom:10px;text-align:center">Data is ${Math.round(staleMs / 60000)}m old — cache may be stale</div>`
-        : '';
 
-    const queues = snap.queues as Record<string, { active: number; noReply: number; slaBreached: number }>;
+    const COHORT_PANELS: Array<{ label: string; bucket: string; stat: TierStatKind }> = [
+      { label: 'CC Incidents', bucket: 'cc_incidents', stat: 'active' },
+      { label: 'CC Service Requests', bucket: 'cc_service_requests', stat: 'active' },
+      { label: 'Property Jungle', bucket: 'cc_tpj', stat: 'active' },
+      { label: 'Production Active', bucket: 'production', stat: 'active' },
+      { label: 'Tier 2 Active', bucket: 'tier2', stat: 'active' },
+      { label: 'Development — Active', bucket: 'development', stat: 'active' },
+      { label: 'CC Incidents — No Update', bucket: 'cc_incidents', stat: 'noReply' },
+      { label: 'CC SRs — No Update', bucket: 'cc_service_requests', stat: 'noReply' },
+      { label: 'Property Jungle — No Update', bucket: 'cc_tpj', stat: 'noReply' },
+      { label: 'Production — No Reply', bucket: 'production', stat: 'noReply' },
+      { label: 'Tier 2 — No Reply', bucket: 'tier2', stat: 'noReply' },
+      { label: 'Development — No Reply', bucket: 'development', stat: 'noReply' },
+      { label: 'CC Incidents — Over SLA', bucket: 'cc_incidents', stat: 'overSla' },
+      { label: 'CC SRs — Over SLA', bucket: 'cc_service_requests', stat: 'overSla' },
+      { label: 'Property Jungle — Over SLA', bucket: 'cc_tpj', stat: 'overSla' },
+      { label: 'Production — Over SLA', bucket: 'production', stat: 'overSla' },
+      { label: 'Tier 2 — Over SLA', bucket: 'tier2', stat: 'overSla' },
+      { label: 'Development — Over SLA', bucket: 'development', stat: 'overSla' },
+    ];
 
-    function resolve(p: LivePanel): { value: string; color: string; flash: boolean } {
-      if (p.stat === null) return { value: '—', color: '#475569', flash: false };
-      const keys = p.queueKey.split('+');
-      let total = 0;
-      for (const k of keys) total += queues[k]?.[p.stat] ?? 0;
-      const isBreachStat = p.stat === 'slaBreached';
-      const color = isBreachStat ? (total > 0 ? '#ef4444' : '#10b981') : (total > 0 ? '#e2e8f0' : '#10b981');
-      return { value: String(total), color, flash: isBreachStat && total > 0 };
-    }
-
-    const panelHtml = LIVE_PANELS.map(p => {
-      const { value, color, flash } = resolve(p);
-      const flashClass = flash ? ' flash-red' : '';
-      return `<div class="${flashClass}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;align-items:center">
+    const panelHtml = COHORT_PANELS.map(p => {
+      const total = snap.tiers[p.bucket]?.[p.stat] ?? 0;
+      const isBreach = p.stat !== 'active';
+      const color = isBreach ? (total > 0 ? '#ef4444' : '#10b981') : (total > 0 ? '#e2e8f0' : '#10b981');
+      const flashClass = isBreach && total > 0 ? ' flash-red' : '';
+      const lbl = p.label.replace(/'/g, "\\'");
+      return `<div class="${flashClass}" onclick="window.parent.postMessage({type:'wallboard-drill',bucket:'${p.bucket}',stat:'${p.stat}',cohort:'${cohort}',label:'${lbl}'},'*')" style="cursor:pointer;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;align-items:center">
         <div style="font-size:10px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:6px;letter-spacing:.2px">${p.label}</div>
-        <div style="font-size:48px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${value}</div>
+        <div style="font-size:48px;font-weight:800;letter-spacing:-2px;line-height:1;color:${color}">${total}</div>
       </div>`;
     }).join('');
 
@@ -2802,9 +2549,8 @@ ${wallboardRefreshScript(route)}
 </head><body><div class="wrap">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
   <div><h1 style="font-size:18px;font-weight:800;letter-spacing:-0.5px">${title}</h1><div style="font-size:9px;color:#64748b;margin-top:1px">${subtitle}</div></div>
-  <div style="font-size:9px;color:#64748b">Live from cache &middot; Updated ${timeStr}</div>
+  <div style="font-size:9px;color:#64748b">Live &middot; Updated ${timeStr}</div>
 </div>
-${staleBanner}
 <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;flex:1">
 ${panelHtml}
 </div>
@@ -2812,65 +2558,69 @@ ${panelHtml}
 </div></body></html>`;
   }
 
-  // Customer Care wallboard
-  app.get('/wallboard/cc', async (_req, res) => {
+
+  // CC + TS tier-bucket panels, fed by the rebuilt kpi-org tier snapshot (live JQL).
+  const CC_TIER_PANELS: TierPanel[] = [
+    { label: 'CC Incidents', bucket: 'cc_incidents', stat: 'active' },
+    { label: 'CC Service Requests', bucket: 'cc_service_requests', stat: 'active' },
+    { label: 'Property Jungle', bucket: 'cc_tpj', stat: 'active' },
+    { label: 'CC Incidents — No Update', bucket: 'cc_incidents', stat: 'noReply' },
+    { label: 'CC Service Requests — No Update', bucket: 'cc_service_requests', stat: 'noReply' },
+    { label: 'Property Jungle — No Update', bucket: 'cc_tpj', stat: 'noReply' },
+    { label: 'CC Incidents — Over SLA', bucket: 'cc_incidents', stat: 'overSla' },
+    { label: 'CC Service Requests — Over SLA', bucket: 'cc_service_requests', stat: 'overSla' },
+    { label: 'Property Jungle — Over SLA', bucket: 'cc_tpj', stat: 'overSla' },
+  ];
+  const TS_TIER_PANELS: TierPanel[] = [
+    { label: 'Production Active Tickets', bucket: 'production', stat: 'active' },
+    { label: 'Tier 2 Active Tickets', bucket: 'tier2', stat: 'active' },
+    { label: 'Development — Active Tickets', bucket: 'development', stat: 'active' },
+    { label: 'Production — No Reply', bucket: 'production', stat: 'noReply' },
+    { label: 'Tier 2 — No Reply', bucket: 'tier2', stat: 'noReply' },
+    { label: 'Development — No Reply', bucket: 'development', stat: 'noReply' },
+    { label: 'Production — Over SLA', bucket: 'production', stat: 'overSla' },
+    { label: 'Tier 2 — Over SLA', bucket: 'tier2', stat: 'overSla' },
+    { label: 'Development — Over SLA', bucket: 'development', stat: 'overSla' },
+  ];
+
+  async function serveTierWallboard(res: import('express').Response, route: string, title: string, subtitle: string, panels: TierPanel[], cols: number, cohort: Cohort): Promise<void> {
     const wbStart = Date.now();
+    if (!agentJiraClient) {
+      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
+      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
+      return;
+    }
     try {
-      const html = await renderLiveStatWallboard(aggregator, 'Customer Care', 'Live queue metrics', [
-        { label: 'CC Incidents', kpi: 'Number of Tickets in CC (Incidents)' },
-        { label: 'CC Service Requests', kpi: 'Number of Tickets in CC (Service Requests)' },
-        { label: 'Property Jungle', kpi: 'Number of Tickets in CC (TPJ)' },
-        { label: 'CC Incidents — No Update', kpi: 'Number of Tickets With No Reply in CC (Incidents)' },
-        { label: 'CC Service Requests — No Update', kpi: 'Number of Tickets With No Reply in CC (Service Requests)' },
-        { label: 'Property Jungle — No Update', kpi: 'Number of Tickets With No Reply in CC (TPJ)' },
-        { label: 'CC Incidents — Over SLA', kpi: 'CC Incidents over SLA (actionable)' },
-        { label: 'CC Service Requests — Over SLA', kpi: 'CC Service Requests over SLA (actionable)' },
-        { label: 'Property Jungle — Over SLA', kpi: 'CC TPJ over SLA (actionable)', altKpi: 'CC (TPJ) over SLA (actionable)' },
-      ], 3, '/wallboard/cc');
-      res.send(html);
-      logWallboard('/wallboard/cc', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
+      const snap = await getTierSnapshot(agentJiraClient, cohort);
+      res.send(renderTierWallboard(snap, title, subtitle, panels, cols, route, cohort));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, 'OK');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/wallboard/cc', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
-  });
+  }
+
+  // Customer Care wallboard
+  app.get('/wallboard/cc', (_req, res) =>
+    serveTierWallboard(res, '/wallboard/cc', 'Customer Care', 'Live queue metrics', CC_TIER_PANELS, 3, 'all'));
 
   // Technical Support wallboard
-  app.get('/wallboard/tech-support', async (_req, res) => {
-    const wbStart = Date.now();
-    try {
-      const html = await renderLiveStatWallboard(aggregator, 'Technical Support', 'Live queue metrics', [
-        { label: 'Production Active Tickets', kpi: 'Number of Tickets in Production' },
-        { label: 'Tier 2 Active Tickets', kpi: 'Number of Tickets in Tier 2' },
-        { label: 'Development — Active Tickets', kpi: 'Number of Tickets in Development', sumKpis: ['Number of Tickets in Development', 'Number of Tickets in Tier 3'] },
-        { label: 'Production — No Reply', kpi: 'Number of Tickets With No Reply in Production' },
-        { label: 'Tier 2 — No Reply', kpi: 'Number of Tickets With No Reply in Tier 2' },
-        { label: 'Development — No Reply', kpi: 'Number of Tickets With No Reply in Tier 3', sumKpis: ['Number of Tickets With No Reply in Development', 'Number of Tickets With No Reply in Tier 3'] },
-        { label: 'Production — Over SLA', kpi: 'Production over SLA (actionable)' },
-        { label: 'Tier 2 — Over SLA', kpi: 'Tier 2 over SLA (actionable)' },
-        { label: 'Development — Over SLA', kpi: 'Development over SLA (actionable)', sumKpis: ['Development over SLA (actionable)', 'Tier 3 over SLA (actionable)'] },
-      ], 3, '/wallboard/tech-support');
-      res.send(html);
-      logWallboard('/wallboard/tech-support', 'info', 200, Date.now() - wbStart, 'OK', { sqlServer: settingsQueries.getAll().kpi_sql_server });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/wallboard/tech-support', 'error', 500, Date.now() - wbStart, msg, { sqlServer: settingsQueries.getAll().kpi_sql_server, error: msg, stack: err instanceof Error ? err.stack : undefined });
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
-    }
-  });
+  app.get('/wallboard/tech-support', (_req, res) =>
+    serveTierWallboard(res, '/wallboard/tech-support', 'Technical Support', 'Live queue metrics', TS_TIER_PANELS, 3, 'all'));
 
-  // Key Accounts wallboard — CC+TS panels scoped to Key_Account label
+  // Key Accounts wallboard — CC+TS panels scoped to Key_Account / Enterprise_Account label
   app.get('/wallboard/key-accounts', async (_req, res) => {
     const wbStart = Date.now();
+    const route = '/wallboard/key-accounts';
+    if (!agentJiraClient) { res.status(503).send('Jira client not configured'); return; }
     try {
-      const snap = getCohortSnapshot('key_accounts');
-      const html = renderLiveWallboard('Key Accounts', 'CC + TS queue metrics — Key Account customers only', snap, '/wallboard/key-accounts');
-      res.send(html);
-      logWallboard('/wallboard/key-accounts', 'info', 200, Date.now() - wbStart, `OK — cache age ${Math.round((Date.now() - snap.updatedAt.getTime()) / 1000)}s`);
+      const snap = await getTierSnapshot(agentJiraClient, 'key_accounts');
+      res.send(renderCohortWallboard('Key Accounts', 'CC + TS queue metrics — Key Account customers only', snap, route, 'key_accounts'));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, 'OK');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/wallboard/key-accounts', 'error', 500, Date.now() - wbStart, msg);
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
@@ -2878,14 +2628,15 @@ ${panelHtml}
   // Customer Success wallboard — CC+TS panels scoped to non-KA customers
   app.get('/wallboard/customer-success', async (_req, res) => {
     const wbStart = Date.now();
+    const route = '/wallboard/customer-success';
+    if (!agentJiraClient) { res.status(503).send('Jira client not configured'); return; }
     try {
-      const snap = getCohortSnapshot('customer_success');
-      const html = renderLiveWallboard('Customer Success', 'CC + TS queue metrics — Customer Success cohort (excludes Key Accounts)', snap, '/wallboard/customer-success');
-      res.send(html);
-      logWallboard('/wallboard/customer-success', 'info', 200, Date.now() - wbStart, `OK — cache age ${Math.round((Date.now() - snap.updatedAt.getTime()) / 1000)}s`);
+      const snap = await getTierSnapshot(agentJiraClient, 'customer_success');
+      res.send(renderCohortWallboard('Customer Success', 'CC + TS queue metrics — Customer Success cohort (excludes Key Accounts)', snap, route, 'customer_success'));
+      logWallboard(route, 'info', 200, Date.now() - wbStart, 'OK');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/wallboard/customer-success', 'error', 500, Date.now() - wbStart, msg);
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
@@ -3287,161 +3038,10 @@ ${body}
     }
   }
 
-  app.get('/wallboard/rebuild/support', (_req, res) =>
-    serveRebuildWb(res, '/wallboard/rebuild/support', 'Support — KPIs (Rebuild)', 'Live Support/NT KPIs', false));
-  app.get('/wallboard/rebuild/breach', (_req, res) =>
-    serveRebuildWb(res, '/wallboard/rebuild/breach', 'KPI Breach (Rebuild)', 'Support/NT KPIs currently in the red', true));
-
-  // Like-for-like rebuild boards — mirror the original Customer Care / Technical
-  // Support panels (legacy tier-slices) but computed by the new engine.
-  function renderRebuildTierWb(
-    snap: TierSnapshot,
-    opts: { title: string; subtitle: string; route: string; buckets: Array<{ key: string; label: string }> },
-  ): string {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-GB');
-    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const fmt = (v: number | null) => (v == null ? '—' : String(v));
-    const panel = (label: string, value: number | null, breach: boolean) => {
-      const color = breach ? ((value ?? 0) > 0 ? '#ef4444' : '#10b981') : '#5ec1ca';
-      const flash = breach && (value ?? 0) > 0 ? ' flash-red' : '';
-      return `<div class="${flash}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;align-items:center">
-        <div style="font-size:16px;color:#94a3b8;font-weight:600;text-align:center;margin-bottom:12px;letter-spacing:.3px">${label}</div>
-        <div style="font-size:84px;font-weight:800;letter-spacing:-3px;line-height:1;color:${color}">${fmt(value)}</div>
-      </div>`;
-    };
-    const cells = [
-      ...opts.buckets.map(b => panel(b.label, snap.tiers[b.key]?.active ?? null, false)),
-      ...opts.buckets.map(b => panel(`${b.label} — No Reply`, snap.tiers[b.key]?.noReply ?? null, true)),
-      ...opts.buckets.map(b => panel(`${b.label} — Over SLA`, snap.tiers[b.key]?.overSla ?? null, true)),
-    ].join('');
-    return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${opts.title}</title>
-${wallboardRefreshScript(opts.route)}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow-x:hidden}.wrap{max-width:1600px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}.flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}</style>
-</head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-  <div><h1 style="font-size:22px;font-weight:800;letter-spacing:-0.5px">${opts.title}</h1><div style="font-size:10px;color:#64748b;margin-top:1px">${opts.subtitle}</div></div>
-  <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
-</div>
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;flex:1">
-${cells}
-</div>
-<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; ${opts.title} &middot; ${dateStr} &middot; Source: kpi-org (NT)</div>
-</div></body></html>`;
-  }
-
-  async function serveRebuildTierWb(res: import('express').Response, route: string, title: string, subtitle: string, buckets: Array<{ key: string; label: string }>): Promise<void> {
-    const wbStart = Date.now();
-    if (!agentJiraClient) {
-      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
-      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
-      return;
-    }
-    try {
-      const snap = await getTierSnapshot(agentJiraClient);
-      res.send(renderRebuildTierWb(snap, { title, subtitle, route, buckets }));
-      logWallboard(route, 'info', 200, Date.now() - wbStart, 'OK');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
-    }
-  }
-
-  app.get('/wallboard/rebuild/cc', (_req, res) =>
-    serveRebuildTierWb(res, '/wallboard/rebuild/cc', 'Customer Care (Rebuild)', 'Live queue metrics — new engine', [
-      { key: 'cc_incidents', label: 'CC Incidents' },
-      { key: 'cc_service_requests', label: 'CC Service Requests' },
-      { key: 'cc_tpj', label: 'Property Jungle' },
-    ]));
-  app.get('/wallboard/rebuild/tech-support', (_req, res) =>
-    serveRebuildTierWb(res, '/wallboard/rebuild/tech-support', 'Technical Support (Rebuild)', 'Live queue metrics — new engine', [
-      { key: 'production', label: 'Production' },
-      { key: 'tier2', label: 'Tier 2' },
-      { key: 'development', label: 'Development' },
-    ]));
-
-  // SLA Breach Board (Rebuild) — per-agent table from the Layer-3 agent engine.
-  function ragCellColor(rag: string | null | undefined): string {
-    if (rag === 'green') return '#10b981';
-    if (rag === 'amber') return '#eab308';
-    if (rag === 'red') return '#ef4444';
-    return '#94a3b8';
-  }
-  function renderBreachBoardRebuild(agents: AgentKpiRow[]): string {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-GB');
-    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const rows = [...agents].sort((a, b) => b.overSla - a.overSla || b.noReply - a.noReply);
-    const totalOver = agents.reduce((s, a) => s + a.overSla, 0);
-    const breachedAgents = agents.filter(a => a.overSla > 0).length;
-    const totalNotUpdated = agents.reduce((s, a) => s + a.noReply, 0);
-    const worstOldest = agents.reduce((m, a) => Math.max(m, a.oldestDays), 0);
-
-    const statCard = (label: string, value: string, color: string) =>
-      `<div style="flex:1;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 22px">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:8px">${label}</div>
-        <div style="font-size:34px;font-weight:800;color:${color}">${value}</div>
-      </div>`;
-    const summary = `<div style="display:flex;gap:14px;margin-bottom:16px">
-      ${statCard('Tickets Over SLA', String(totalOver), totalOver > 0 ? '#ef4444' : '#10b981')}
-      ${statCard('Agents Breached', `${breachedAgents} / ${agents.length}`, breachedAgents > 0 ? '#eab308' : '#10b981')}
-      ${statCard('Tickets Not Updated', String(totalNotUpdated), totalNotUpdated > 0 ? '#eab308' : '#10b981')}
-      ${statCard('Worst Oldest (days)', String(worstOldest), worstOldest > 7 ? '#ef4444' : worstOldest > 3 ? '#eab308' : '#10b981')}
-    </div>`;
-
-    const cell = (v: number | string, rag?: string | null) =>
-      `<td style="padding:8px 12px;text-align:center"><span style="display:inline-block;min-width:38px;padding:3px 10px;border-radius:8px;font-size:14px;font-weight:700;color:${ragCellColor(rag)};background:${rag ? ragCellColor(rag) + '22' : 'transparent'}">${v}</span></td>`;
-    const teamBadge = (t: string) => `<span style="font-size:10px;padding:2px 9px;border-radius:6px;background:rgba(255,255,255,.08);color:#94a3b8">${t || '—'}</span>`;
-    const body = rows.map(a => `<tr style="border-bottom:1px solid rgba(255,255,255,.05)">
-      <td style="padding:8px 12px;font-size:15px;color:#e2e8f0">${a.agentName}</td>
-      <td style="padding:8px 12px;text-align:center">${teamBadge(a.tierCode)}</td>
-      ${cell(a.open)}
-      ${cell(a.overSla, a.rag.over2h)}
-      ${cell(a.noReply, a.rag.stale)}
-      ${cell(a.oldestSupportDays + 'd', a.rag.oldestSupport)}
-      ${cell(a.oldestDays + 'd', a.rag.oldest)}
-      ${cell(a.solvedToday)}
-    </tr>`).join('');
-    return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SLA Breach Board (Rebuild)</title>
-${wallboardRefreshScript('/wallboard/rebuild/breach-board')}
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0}.wrap{max-width:1500px;margin:0 auto;padding:20px 28px;min-height:100vh;display:flex;flex-direction:column}th{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;text-align:center}th:first-child{text-align:left}</style>
-</head><body><div class="wrap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-  <div><h1 style="font-size:22px;font-weight:800">SLA Breach Board <span style="font-size:12px;color:#64748b">(Rebuild)</span></h1>
-  <div style="font-size:10px;color:#64748b;margin-top:2px">Live ticket health per agent</div></div>
-  <div style="font-size:10px;color:#64748b">Live (rebuild) &middot; Auto-refresh 30s &middot; Updated ${timeStr}</div>
-</div>
-${summary}
-<table style="width:100%;border-collapse:collapse;background:rgba(255,255,255,.02);border-radius:12px;overflow:hidden">
-<thead><tr style="border-bottom:2px solid rgba(255,255,255,.08)"><th>Agent</th><th>Team</th><th>Open</th><th>Over SLA</th><th>Not Updated</th><th>Oldest Support</th><th>Oldest (days)</th><th>Solved Today</th></tr></thead>
-<tbody>${body || '<tr><td colspan="8" style="padding:30px;text-align:center;color:#64748b">No agents</td></tr>'}</tbody>
-</table>
-<div style="text-align:center;margin-top:14px;font-size:10px;color:#475569">nurtur.tech &middot; SLA Breach Board (Rebuild) &middot; ${dateStr} &middot; Source: kpi-agent</div>
-</div></body></html>`;
-  }
-  app.get('/wallboard/rebuild/breach-board', async (_req, res) => {
-    const wbStart = Date.now();
-    const route = '/wallboard/rebuild/breach-board';
-    if (!agentJiraClient) {
-      logWallboard(route, 'error', 503, Date.now() - wbStart, 'Jira client not configured');
-      res.status(503).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Jira client not configured</body></html>`);
-      return;
-    }
-    try {
-      const snap = await getAgentLiveSnapshot(settingsQueries, agentJiraClient);
-      res.send(renderBreachBoardRebuild(snap.agents));
-      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${snap.agents.length} agents`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard(route, 'error', 500, Date.now() - wbStart, msg);
-      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
-    }
-  });
+  // Support KPIs — full 22-KPI scorecard board (live from Jira). No legacy twin,
+  // so it keeps a permanent home here (the KPI-breach subset lives on /wallboard/team-kpis).
+  app.get('/wallboard/support', (_req, res) =>
+    serveRebuildWb(res, '/wallboard/support', 'Support — KPIs', 'Live Support/NT KPIs', false));
 
   // ── P6: Customer Portal routes (always wired, gated by portal_enabled setting) ──
   const portalGate: import('express').RequestHandler = (_req, res, next) => {

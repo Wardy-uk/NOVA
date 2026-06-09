@@ -154,8 +154,11 @@ it (no new workflow). Optional later: write a `Risk Level` select field or inter
 
 ## Build status
 
-- **Chunk 1 (done, deployed-pending):** schema (5 tables), `customer-resolver.ts`, one-time dry-run
-  on startup → persists resolution-rate report to settings key `risk_resolver_dryrun_report`.
+- **Chunk 1 (done):** schema (5 tables), `customer-resolver.ts`. (The separate startup dry-run was
+  removed — the chunk-2 backfill report now carries the resolution rate + by-source breakdown.)
+- **Timeout fix (09 Jun):** the first backfill deploy hit a 30s mssql request timeout on the
+  full-history scan. Fixed by processing in **monthly windows** (each ticket + comment-agg query is
+  now bounded). Re-run guard bumped to `account_risk_backfill_v2`.
 - **Chunk 2 (done, deployed-pending):** `account-risk-engine.ts` — `runRollupAndRecon()`:
   resolves + signal-scores every in-scope ticket (signals: formal_complaint 40, termination 40,
   formal_escalation 35, refund 25, compensation 20, unacceptable 15, frustrated 10; + volume
