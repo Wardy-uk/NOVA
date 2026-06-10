@@ -1109,6 +1109,20 @@ async function main() {
   app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
+  // Account-risk backfill (chunks 1-2). Runs UNCONDITIONALLY (does not depend on the agent
+  // Jira client — it uses its own resolver + DB), guarded so it runs once, non-blocking.
+  // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
+  // (assignment-engine setup) could abort before it was reached.
+  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v3') ?? '(unset)'}`);
+  if (!settingsQueries.get('account_risk_backfill_v3')) {
+    void (async () => {
+      try {
+        await new AccountRiskEngine(settingsQueries).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
+        settingsQueries.set('account_risk_backfill_v3', 'true');
+      } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
+    })();
+  }
+
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);
     agentLoop.getAutoRulesEngine().setOverrideQueries(autoRuleOverrideQueries);
@@ -1121,20 +1135,6 @@ async function main() {
     assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
-
-    // One-time account-risk backfill (chunks 1-2), guarded + non-blocking. Resolves + scores
-    // every in-scope ticket since Day 1, fills agent_account_risk + the recon ledger, and
-    // persists a report (incl. resolution rate by source) to settings key
-    // 'account_risk_rollup_report'. Queries are monthly-windowed to stay under the 30s timeout.
-    if (!settingsQueries.get('account_risk_backfill_v2')) {
-      const RISK_SCOPE_PROJECTS = ['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'];
-      void (async () => {
-        try {
-          await new AccountRiskEngine(settingsQueries).runRollupAndRecon(RISK_SCOPE_PROJECTS);
-          settingsQueries.set('account_risk_backfill_v2', 'true');
-        } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
-      })();
-    }
 
     const availabilityService = new AgentAvailabilityService(settingsQueries);
 
