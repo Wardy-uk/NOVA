@@ -3047,7 +3047,7 @@ ${body}
   // Each card shows a headline metric from the same live engines the full boards
   // use; clicking opens the full board in a new tab. Public, like /wallboard/*.
   interface DashCard { title: string; href: string; metric: string; metricLabel: string; sub: string; color: string }
-  app.get('/dash', async (_req, res) => {
+  app.get(['/wallboard/dash', '/dash'], async (_req, res) => {
     const wbStart = Date.now();
     try {
       const settings = settingsQueries.getAll();
@@ -3177,10 +3177,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 <div class="grid">${cardHtml}</div>
 <div class="foot">nurtur.tech · NOVA Wallboard Dash · ${dateStr}</div>
 </div></body></html>`);
-      logWallboard('/dash', 'info', 200, Date.now() - wbStart, `OK — ${cards.length} cards`);
+      logWallboard('/wallboard/dash', 'info', 200, Date.now() - wbStart, `OK — ${cards.length} cards`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      logWallboard('/dash', 'error', 500, Date.now() - wbStart, msg);
+      logWallboard('/wallboard/dash', 'error', 500, Date.now() - wbStart, msg);
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
