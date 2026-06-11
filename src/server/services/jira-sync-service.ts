@@ -517,19 +517,27 @@ export class JiraSyncService {
     return 'http://localhost:5173';
   }
 
-  /** Post the CSAT survey link as a customer-visible JSM comment.
-   *  Gated behind the `csat_comment_enabled` setting; comment text is
-   *  configurable via `csat_comment_template` using a `{link}` placeholder. */
+  /** Post the CSAT survey link as a JSM comment on the resolved ticket.
+   *  Controlled by `csat_comment_mode`:
+   *    - 'internal' (default / test mode): private internal note, not seen by the customer
+   *    - 'public': customer-visible comment (go-live)
+   *    - 'off': post nothing
+   *  Comment text is configurable via `csat_comment_template` ({link} placeholder). */
   private async postCsatComment(issueKey: string, token: string): Promise<void> {
-    if (this.settings.get('csat_comment_enabled') !== 'true') return;
+    const mode = (this.settings.get('csat_comment_mode') || 'internal').toLowerCase();
+    if (mode === 'off') return;
+    const internal = mode !== 'public';
 
     const link = `${this.getPublicBaseUrl()}/portal/csat/${token}`;
     const template =
       this.settings.get('csat_comment_template') ||
       "Thanks for your patience while we worked on this. We'd love your feedback — it only takes 30 seconds to let us know how we did: {link}";
 
+    // In test mode, prefix the internal note so it's obvious it's not customer-facing yet.
+    const text = internal ? `[CSAT test — internal only] ${template}` : template;
+
     // Build an ADF paragraph, turning the {link} placeholder into a clickable link.
-    const parts = template.split('{link}');
+    const parts = text.split('{link}');
     const content: Array<Record<string, unknown>> = [];
     parts.forEach((part, i) => {
       if (part) content.push({ type: 'text', text: part });
@@ -550,8 +558,8 @@ export class JiraSyncService {
     };
 
     try {
-      await this.jiraClient.addCommentAdf(issueKey, body, { internal: false });
-      console.log(`[csat] Posted survey comment on ${issueKey}`);
+      await this.jiraClient.addCommentAdf(issueKey, body, { internal });
+      console.log(`[csat] Posted ${internal ? 'internal' : 'public'} survey comment on ${issueKey}`);
     } catch (err) {
       console.warn(`[jira-sync] CSAT comment post failed for ${issueKey}:`, err);
     }
