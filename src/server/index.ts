@@ -3157,7 +3157,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 .sub{font-size:11px;color:#64748b;margin-top:2px}
 .meta{font-size:11px;color:#64748b}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}}
 .card{display:flex;flex-direction:column;align-items:center;text-align:center;text-decoration:none;color:inherit;
   background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:24px 20px;
   transition:transform .12s,border-color .12s,box-shadow .12s}
