@@ -56,10 +56,12 @@ export class PluginToTpjExecutor {
     }
 
     try {
-      // 1. Get labels and description (ADF) from original ticket
-      const original = await this.jiraClient.getIssue(ticketKey, ['labels', 'description']);
+      // 1. Get labels, description (ADF) and reporter from original ticket
+      const original = await this.jiraClient.getIssue(ticketKey, ['labels', 'description', 'reporter']);
       const labels: string[] = (original?.fields?.labels as string[]) ?? [];
       const originalDescription = original?.fields?.description;
+      // Preserve the original requestor so the cloned ticket isn't reported by NOVA
+      const reporterAccountId = (original?.fields?.reporter as { accountId?: string } | undefined)?.accountId;
 
       // 2. Create ticket in TPJ — preserve original ADF formatting
       const adfDescription = originalDescription && typeof originalDescription === 'object'
@@ -76,6 +78,7 @@ export class PluginToTpjExecutor {
           description: adfDescription,
           issuetype: { name: 'Support' },
           ...(labels.length > 0 ? { labels } : {}),
+          ...(reporterAccountId ? { reporter: { accountId: reporterAccountId } } : {}),
         },
       });
 
@@ -84,6 +87,16 @@ export class PluginToTpjExecutor {
         return { success: false, actionId: 'plugin_to_tpj', ticketKey, detail: 'Failed to create TPJ ticket — no key returned' };
       }
       console.log(`[plugin-to-tpj] Created ${newKey} from ${ticketKey}`);
+
+      // Enforce reporter post-create — some JSM create screens ignore the reporter field,
+      // leaving NOVA as the requestor. Re-set it explicitly so the original raiser sticks.
+      if (reporterAccountId) {
+        try {
+          await this.jiraClient.updateFields(newKey, { reporter: { accountId: reporterAccountId } });
+        } catch (err) {
+          console.warn(`[plugin-to-tpj] Failed to set reporter on ${newKey}:`, err instanceof Error ? err.message : err);
+        }
+      }
 
       // 3. Copy comments from original to new ticket
       try {
