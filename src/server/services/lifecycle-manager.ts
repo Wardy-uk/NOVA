@@ -1,5 +1,6 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { ApprovalQueries } from '../db/queries.js';
+import { AssignmentRetryQueries } from '../db/queries.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import type { AlertService } from './alert-service.js';
@@ -39,6 +40,7 @@ export class LifecycleManager {
   private observer: Observer;
   private llmService: LlmService | null;
   private assignmentEngine: AssignmentEngine | null = null;
+  private retryQueries = new AssignmentRetryQueries();
 
   constructor(
     settings: SettingsQueries,
@@ -610,10 +612,33 @@ export class LifecycleManager {
       const hoursSinceLastAction = (Date.now() - lastAction.getTime()) / (1000 * 60 * 60);
       if (hoursSinceLastAction >= timeoutHours) {
         try {
+          // The timeout must ASSIGN the ticket, not just relabel it. Transitioning to
+          // handed_off alone leaves it sitting on NOVA until a server restart's one-shot
+          // cold-start scan happens to sweep it up (observed on NT-21135: ~2h extra delay).
+          const assigneeName = await this.handoffTimedOutTicket(ticket.ticketId);
           await this.ticketState.transition(ticket.ticketId, 'handed_off', {
+            assigneeName: assigneeName ?? undefined,
             lastAgentActionAt: new Date().toISOString(),
           });
-          console.log(`[lifecycle] AI conversation timeout on ${ticket.ticketId} — ${hoursSinceLastAction.toFixed(1)}h since last AI reply, triggering handoff`);
+          if (assigneeName) {
+            console.log(`[lifecycle] AI conversation timeout on ${ticket.ticketId} — ${hoursSinceLastAction.toFixed(1)}h since last AI reply, handed off to ${assigneeName}`);
+          } else {
+            // No agent assignable right now — queue for the 5-min retry-sweep so we don't
+            // depend on a restart. poolForTier returns null for Development (never
+            // auto-assign), so skip queueing in that case.
+            const project = this.assignmentEngine?.resolveProjectFromTicketKey(ticket.ticketId) ?? 'NT';
+            const rows = await query<{ current_tier: string | null; labels: string | null }>(
+              `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
+              [ticket.ticketId],
+            );
+            const pool = this.poolForTier(project, rows[0]?.current_tier ?? null, rows[0]?.labels ?? null);
+            if (pool) {
+              await this.retryQueries.insert(ticket.ticketId, pool, project, 'ai-conversation-timeout');
+              console.log(`[lifecycle] AI conversation timeout on ${ticket.ticketId} — ${hoursSinceLastAction.toFixed(1)}h, no agent available, queued for retry-sweep`);
+            } else {
+              console.log(`[lifecycle] AI conversation timeout on ${ticket.ticketId} — ${hoursSinceLastAction.toFixed(1)}h, handed off (tier not auto-assignable)`);
+            }
+          }
           timedOut++;
         } catch (err) {
           console.warn(`[lifecycle] Failed to timeout AI conversation for ${ticket.ticketId}:`, err instanceof Error ? err.message : err);
