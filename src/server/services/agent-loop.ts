@@ -1794,6 +1794,9 @@ export class AgentLoop {
             } catch { /* best effort */ }
           }
 
+          // First public reply just posted — set Agent Next Update to 24h out.
+          if (!decision.shadowMode) await this.setAgentNextUpdate(decision.ticketKey);
+
           const needsReply = !!(decision.output.needs_customer_reply ?? true);
           // NOVA keeps the ticket assigned to itself and works it — it does NOT
           // round-robin to a human here. If it asked a question → ai_conversation
@@ -1878,6 +1881,64 @@ export class AgentLoop {
   }
 
   /**
+   * Due Date sweep — set the Jira Due Date to the resolution-SLA breach date for
+   * every OPEN ticket currently in Customer Care or Tier 2 that has an SLA breach
+   * time but no due date yet.
+   *
+   * Rules:
+   *  - Only fills a BLANK due date — never overwrites one that's already set.
+   *  - Scoped to Customer Care + Tier 2 (T3/Development get a separate rule).
+   *  - Jira's `duedate` is date-only, so we store the breach DATE in the server's
+   *    local (UK) timezone; the precise breach time stays on the SLA field.
+   */
+  async sweepDueDates(): Promise<{ scanned: number; updated: number }> {
+    const rows = await query<{ issue_key: string; sla_breach_time: string | Date }>(
+      `SELECT issue_key, sla_breach_time
+         FROM jira_issue_cache
+        WHERE status_category != 'Done'
+          AND current_tier IN ('Customer Care', 'Tier 2')
+          AND due_date IS NULL
+          AND sla_breach_time IS NOT NULL`,
+    );
+
+    let updated = 0;
+    for (const row of rows) {
+      const breach = new Date(row.sla_breach_time as string | number);
+      if (isNaN(breach.getTime())) continue;
+      const dueDate = `${breach.getFullYear()}-${String(breach.getMonth() + 1).padStart(2, '0')}-${String(breach.getDate()).padStart(2, '0')}`;
+      try {
+        await this.jiraClient.updateFields(row.issue_key, { duedate: dueDate });
+        // Mirror into the cache so we don't re-attempt before the next Jira sync.
+        try { await execute(`UPDATE jira_issue_cache SET due_date = ? WHERE issue_key = ?`, [dueDate, row.issue_key]); } catch { /* best effort */ }
+        updated++;
+        console.log(`[due-date-sweep] Set Due Date ${dueDate} on ${row.issue_key}`);
+      } catch (err) {
+        console.warn(`[due-date-sweep] Failed to set Due Date on ${row.issue_key}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    if (rows.length) console.log(`[due-date-sweep] Scanned ${rows.length} CC/Tier 2 ticket(s) without a due date — updated ${updated}`);
+    return { scanned: rows.length, updated };
+  }
+
+  /**
+   * Set "Agent Next Update" (customfield_14185, a datetime field) to N hours from
+   * now. Called immediately after NOVA posts its first public reply, so the value
+   * is 24h after that first response — the SLA-overdue sweep then leaves the
+   * ticket alone until the deadline passes.
+   */
+  private async setAgentNextUpdate(ticketKey: string, hoursFromNow = 24): Promise<void> {
+    const next = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000);
+    const jiraDateTime = next.toISOString().replace('Z', '+0000'); // Jira datetime picker format
+    try {
+      await this.jiraClient.updateFields(ticketKey, { customfield_14185: jiraDateTime });
+      console.log(`[agent] Set Agent Next Update to ${jiraDateTime} on ${ticketKey}`);
+    } catch (err) {
+      console.warn(`[agent] Failed to set Agent Next Update on ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  /**
    * Execute the full handoff sequence: round-robin → generic first reply (if needed) → handoff summary → public handoff message → request type update.
    */
   private async executeHandoff(
@@ -1940,6 +2001,8 @@ export class AgentLoop {
         const replyResult = await this.actor.postPublicReply(decision.ticketKey, genericReply);
         if (replyResult.success) {
           console.log(`[agent] Generic first reply posted on ${decision.ticketKey}`);
+          // First public reply just posted — set Agent Next Update to 24h out.
+          if (!decision.shadowMode) await this.setAgentNextUpdate(decision.ticketKey);
         }
       } catch (err) {
         console.warn(`[agent] Generic first reply failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);

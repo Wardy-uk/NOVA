@@ -1840,6 +1840,12 @@ async function main() {
       }
     }, 30 * 60 * 1000);
 
+    // Due Date sweep — every 15 min, fill blank Due Date = SLA breach date for open CC/Tier 2 tickets
+    jobRegistry.register('due-date-sweep', 'Due Date sweep (CC + Tier 2)', async () => {
+      if (!agentLoop) return;
+      await agentLoop.sweepDueDates();
+    }, 15 * 60 * 1000);
+
     // Assignment retry sweep — every 5 min during working hours, max 10 per sweep
     jobRegistry.register('assignment-retry-sweep', 'Assignment retry sweep (5 min, working hours)', async () => {
       if (!assignmentEngine.isWorkingTime()) return;
