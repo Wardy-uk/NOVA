@@ -2832,7 +2832,7 @@ ${wallboardRefreshScript('/wallboard/dev-review')}
           COUNT(*) AS active
         FROM jira_issue_cache
         WHERE status_category != 'Done' AND project_key = 'NT'
-          AND current_tier IN ('Production','Tier 2','Tier 3','Development','Escalations')
+          AND current_tier IN ('Customer Care','Production','Tier 2','Tier 3','Development','Escalations')
         GROUP BY current_tier
       `);
       const tierMap = new Map<string, TierAgg>();
@@ -2842,20 +2842,23 @@ ${wallboardRefreshScript('/wallboard/dev-review')}
         e.on_fire += r.on_fire; e.at_risk += r.at_risk; e.stale += r.stale; e.active += r.active;
         tierMap.set(name, e);
       }
-      const TIERS = ['Production', 'Tier 2', 'Tier 3', 'Development'];
+      const TIERS = ['Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development'];
       const tiers = TIERS.map(t => ({ tier: t, ...(tierMap.get(t) ?? { on_fire: 0, at_risk: 0, stale: 0, active: 0 }) }));
       const totalFire = tiers.reduce((s, t) => s + t.on_fire, 0);
       const totalRisk = tiers.reduce((s, t) => s + t.at_risk, 0);
       const totalStale = tiers.reduce((s, t) => s + t.stale, 0);
 
-      // 2. Open problem tickets (NT) — fire signal.
-      let openProblems = 0;
+      // 2. Flagged tickets (NOVA AI risk alerting) — matches the AI Dashboard count
+      //    (getFlaggedSummary: status 'pending', ticket not done).
+      let flaggedTickets = 0;
       try {
-        const p = await queryOne<{ c: number }>(
-          `SELECT COUNT(*) AS c FROM problem_ticket_alerts WHERE resolved_at IS NULL AND project_key = 'NT'`,
+        const f = await queryOne<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM agent_flagged_tickets f
+           JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+           WHERE f.status = 'pending' AND j.status_category != 'done'`,
         );
-        openProblems = p?.c ?? 0;
-      } catch { /* table may be empty pre-first-scan */ }
+        flaggedTickets = f?.c ?? 0;
+      } catch { /* risk scorer optional */ }
 
       // 3. Dev Review breached + unpicked today.
       let devBreached = 0, devUnpickedToday = 0;
@@ -2864,28 +2867,6 @@ ${wallboardRefreshScript('/wallboard/dev-review')}
         devBreached = dd.unpickedKpi.currentlyBreached;
         devUnpickedToday = dd.unpickedKpi.today;
       } catch { /* non-fatal */ }
-
-      // 4. KPIs red/amber today (guarded — separate KPI pool).
-      let kpiRed = 0, kpiAmber = 0, kpiOk = false;
-      try {
-        const s = settingsQueries.getAll();
-        if (s.kpi_sql_server && s.kpi_sql_database && s.kpi_sql_user && s.kpi_sql_password) {
-          const sql = await import('mssql');
-          const pool = await new sql.default.ConnectionPool({
-            server: s.kpi_sql_server, database: s.kpi_sql_database, user: s.kpi_sql_user, password: s.kpi_sql_password,
-            options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 20000,
-          }).connect();
-          const r = await pool.request().query(`
-            SELECT SUM(CASE WHEN rag = 3 THEN 1 ELSE 0 END) AS red,
-                   SUM(CASE WHEN rag = 2 THEN 1 ELSE 0 END) AS amber
-            FROM dbo.jira_kpi_daily
-            WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)`);
-          await pool.close();
-          kpiRed = r.recordset[0]?.red ?? 0;
-          kpiAmber = r.recordset[0]?.amber ?? 0;
-          kpiOk = true;
-        }
-      } catch { /* KPI pool optional */ }
 
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-GB');
@@ -2912,13 +2893,11 @@ ${wallboardRefreshScript('/wallboard/dev-review')}
 
       const fireTiers = tiers.map(t => fireTile(t.tier, t.on_fire, 'SLA breached')).join('');
       const fireExtra = [
-        fireTile('KPIs Red', kpiOk ? kpiRed : '—', kpiOk ? 'breaching target today' : 'KPI source offline'),
+        fireTile('Flagged Tickets', flaggedTickets, 'NOVA AI risk alerts'),
         fireTile('Dev Review Breached', devBreached, 'unpicked > 8h'),
-        fireTile('Open Problems', openProblems, 'active problem tickets'),
       ].join('');
       const riskTiers = tiers.map(t => riskTile(t.tier, t.at_risk, `breaching < ${AT_RISK_HOURS}h`)).join('');
       const riskExtra = [
-        riskTile('KPIs Amber', kpiOk ? kpiAmber : '—', kpiOk ? 'approaching target' : 'KPI source offline'),
         riskTile('No Reply', totalStale, 'awaiting first/next update'),
         riskTile('Dev Unpicked Today', devUnpickedToday, 'no dev action yet'),
       ].join('');
@@ -2933,8 +2912,8 @@ ${wallboardRefreshScript('/wallboard/ricky')}
 .zone-fire{background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.18)}
 .zone-risk{background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.18)}
 .zone-head{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
-.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;flex:2}
-.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:1}
+.grid4{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;flex:2}
+.grid3{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;flex:1}
 .flash-red{animation:flash 1s ease-in-out infinite}@keyframes flash{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(239,68,68,.35);border-color:rgba(239,68,68,.8);box-shadow:0 0 24px rgba(239,68,68,.5)}}
 .pulse-amber{animation:pulseA 1.8s ease-in-out infinite}@keyframes pulseA{0%,100%{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}50%{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55)}}</style>
 </head><body><div class="wrap">
