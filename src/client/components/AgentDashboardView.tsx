@@ -421,7 +421,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
   if (error) return <div className="text-sm text-red-400 py-8 text-center">{error}</div>;
 
   return (
-    <div className="space-y-4 max-w-6xl mx-auto">
+    <div className="space-y-4 w-full">
       {/* Header + Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
