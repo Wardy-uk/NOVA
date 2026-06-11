@@ -114,14 +114,15 @@ export async function generateCsatSurvey(
   jiraIssueKey: string,
   reporterEmail: string | null,
 ): Promise<string | null> {
-  if (!reporterEmail) return null;
-
-  // Find portal user by email
-  const user = await queryOne<{ id: number; org_id: number }>(
-    `SELECT id, org_id FROM portal_users WHERE email = ?`,
-    [reporterEmail],
-  );
-  if (!user) return null;
+  // Link to a portal user if one happens to exist for this reporter, but don't
+  // require it — the survey link is posted on the ticket itself, so it works for
+  // any resolved ticket regardless of whether the reporter uses the portal.
+  const user = reporterEmail
+    ? await queryOne<{ id: number; org_id: number }>(
+        `SELECT id, org_id FROM portal_users WHERE email = ?`,
+        [reporterEmail],
+      )
+    : null;
 
   // Check if a survey already exists for this ticket
   const existing = await queryOne<{ id: number }>(
@@ -136,7 +137,7 @@ export async function generateCsatSurvey(
   await execute(
     `INSERT INTO portal_csat_surveys (token, jira_issue_key, portal_user_id, org_id, expires_at)
      VALUES (?, ?, ?, ?, ?)`,
-    [token, jiraIssueKey, user.id, user.org_id, expiresAt],
+    [token, jiraIssueKey, user?.id ?? null, user?.org_id ?? null, expiresAt],
   );
 
   console.log(`[csat] Survey generated for ${jiraIssueKey} → /portal/csat/${token}`);
