@@ -201,4 +201,12 @@ export interface AdobeSignAgreement {
   synced_at: string | null;
   created_at: string;
   updated_at: string;
+  // Contract-approval hold (custom-terms workflow). Null for normally-sent agreements.
+  approval_status?: string | null;
+  approval_terms_text?: string | null;
+  approval_requested_by?: string | null;
+  approval_requested_at?: string | null;
+  approval_decided_by?: string | null;
+  approval_decided_at?: string | null;
+  approval_note?: string | null;
 }

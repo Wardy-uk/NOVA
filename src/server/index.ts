@@ -112,6 +112,7 @@ import { startWallboardLiveCache, getCohortSnapshot, type CohortSnapshot } from 
 import { createContractsRoutes } from './routes/contracts.js';
 import { createAdobeSignRoutes } from './routes/adobe-sign.js';
 import { createContractTermsRoutes } from './routes/contract-terms.js';
+import { createContractApprovalRoutes, createContractApprovalCallbackHandler } from './routes/contract-approvals.js';
 import { AdobeSignClient, buildAdobeSignClient } from './services/adobe-sign-client.js';
 import { BcSubscriptionImportClient, buildBcSubscriptionImportClient } from './services/bc-subscription-import-client.js';
 import { BcSubscriptionImportService } from './services/bc-subscription-import-service.js';
@@ -874,6 +875,17 @@ async function main() {
     }
   });
 
+  // Contract Approvals callback — public (Power Automate / Teams approval flow POSTs the
+  // decision back here, no NOVA JWT). Auth is the unguessable approval token plus an
+  // optional X-Nova-Secret shared-secret header. Must be before the JWT gate.
+  app.post('/api/public/contract-approvals/callback', express.json(), createContractApprovalCallbackHandler({
+    getClient: () => adobeSignClient,
+    agreementQueries: adobeSignAgreementQueries,
+    fieldValueQueries: agreementFieldValueQueries,
+    counterQueries,
+    settingsQueries,
+  }));
+
   // Calyx portal — public + portal-JWT auth (no NOVA auth)
   if (calyxDb) {
     app.use('/api/calyx/portal', createCalyxPortalRoutes(calyxDb, settingsQueries));
@@ -964,6 +976,13 @@ async function main() {
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, agreementFieldValueQueries, counterQueries, templateFieldOverrideQueries, bcSubscriptionImportService, settingsQueries));
   app.use('/api/contract-terms', createContractTermsRoutes(contractTermsQueries));
+  app.use('/api/contract-approvals', createContractApprovalRoutes({
+    getClient: () => adobeSignClient,
+    agreementQueries: adobeSignAgreementQueries,
+    fieldValueQueries: agreementFieldValueQueries,
+    counterQueries,
+    settingsQueries,
+  }));
   app.use('/api/surveys', createSurveyRoutes(settingsQueries, userQueries, teamQueries));
   app.use('/api/approvals', createApprovalRoutes(approvalQueries, settingsQueries, buildOnboardingJiraClient() ?? undefined, async (action, ticketKey, approvalId, editedResponse, decidedBy) => {
     if (!agentLoop) throw new Error('Agent loop not available');

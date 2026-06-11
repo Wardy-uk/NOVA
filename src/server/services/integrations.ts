@@ -230,7 +230,7 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     fields: [
       { key: 'contract_approvals_webhook_url', label: 'Approval Webhook URL', type: 'url', placeholder: 'https://prod-XX.westeurope.logic.azure.com/workflows/... (Power Automate / Teams trigger)', required: false },
       { key: 'contract_approvals_webhook_secret', label: 'Shared Secret (optional)', type: 'password', placeholder: 'Used to sign webhook payloads and verify callbacks', required: false },
-      { key: 'contract_approvals_callback_url', label: 'NOVA Callback URL (info only)', type: 'text', placeholder: 'https://nova.nurtur.tech/api/contract-approvals/callback — configure this URL in your Power Automate flow', required: false },
+      { key: 'contract_approvals_callback_url', label: 'NOVA Callback URL (info only)', type: 'text', placeholder: 'https://nova.nurtur.tech/api/public/contract-approvals/callback — configure this URL in your Power Automate flow', required: false },
     ],
   },
   {

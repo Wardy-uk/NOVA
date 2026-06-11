@@ -154,6 +154,11 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
   const [expirationDays, setExpirationDays] = useState('');
   const [sending, setSending] = useState(false);
   const [sentId, setSentId] = useState<string | null>(null);
+  // When a contract with custom terms is held for approval, the send returns
+  // pending_approval instead of an agreement id. webhookError is set if the
+  // approval webhook itself failed to fire (the hold is still recorded).
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
 
   // Pre-approved contract terms
@@ -548,7 +553,13 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       });
       const json = await res.json();
       if (json.ok) {
-        setSentId(json.data.agreement_id);
+        if (json.data?.pending_approval) {
+          setPendingApproval(true);
+          setWebhookError(json.data.webhook_error ?? null);
+          setSentId('pending-approval');
+        } else {
+          setSentId(json.data.agreement_id);
+        }
       } else {
         alert(json.error ?? 'Failed to send agreement');
       }
@@ -566,6 +577,8 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
 
   const resetWizard = () => {
     setSentId(null);
+    setPendingApproval(false);
+    setWebhookError(null);
     setStep('template');
     setSelectedTemplates([]);
     setTemplateFields(new Map());
@@ -590,16 +603,40 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center space-y-4">
-          <div className="w-16 h-16 mx-auto rounded-full bg-green-900/30 border border-green-800 flex items-center justify-center">
-            <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-[16px] font-semibold text-neutral-100">Agreement Sent</h2>
-          <p className="text-[12px] text-neutral-400 max-w-sm">
-            Your agreement has been sent for signature via Adobe Sign. Track its status in the Adobe Sign tab.
-          </p>
-          <p className="text-[10px] text-neutral-600 font-mono">{sentId}</p>
+          {pendingApproval ? (
+            <>
+              <div className="w-16 h-16 mx-auto rounded-full bg-amber-900/30 border border-amber-800 flex items-center justify-center">
+                <svg className="w-8 h-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h2 className="text-[16px] font-semibold text-neutral-100">Sent for Approval</h2>
+              <p className="text-[12px] text-neutral-400 max-w-sm">
+                This contract contains custom terms, so it's been held for approval. An approver will be
+                notified; once they sign off, it's released to Adobe Sign automatically. Track it as
+                <span className="text-amber-400"> Out for Approval</span> in the Adobe Sign tab.
+              </p>
+              {webhookError && (
+                <p className="text-[11px] text-red-400 max-w-sm">
+                  Note: the approval notification failed to send ({webhookError}). The request is recorded —
+                  an admin may need to re-trigger or check the Contract Approvals webhook configuration.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="w-16 h-16 mx-auto rounded-full bg-green-900/30 border border-green-800 flex items-center justify-center">
+                <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-[16px] font-semibold text-neutral-100">Agreement Sent</h2>
+              <p className="text-[12px] text-neutral-400 max-w-sm">
+                Your agreement has been sent for signature via Adobe Sign. Track its status in the Adobe Sign tab.
+              </p>
+              <p className="text-[10px] text-neutral-600 font-mono">{sentId}</p>
+            </>
+          )}
           <div className="flex justify-center gap-3 pt-2">
             <button onClick={onNavigateToAgreements} className={btnPrimary}>
               View Agreements
