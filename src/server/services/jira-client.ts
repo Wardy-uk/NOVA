@@ -373,6 +373,20 @@ export class JiraRestClient {
     return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
   }
 
+  /** Add a comment using a pre-built ADF document body (e.g. with link marks).
+   *  `internal: false` marks it as a customer-visible JSM comment. */
+  async addCommentAdf(
+    issueKey: string,
+    body: object,
+    options?: { internal?: boolean }
+  ): Promise<unknown> {
+    const payload: Record<string, unknown> = { body };
+    if (options?.internal !== undefined) {
+      payload.properties = [{ key: 'sd.public.comment', value: { internal: options.internal } }];
+    }
+    return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
+  }
+
   /** Update fields on an existing issue */
   async updateFields(issueKey: string, fields: Record<string, unknown>): Promise<void> {
     await this.request<void>('PUT', `issue/${issueKey}`, { fields });

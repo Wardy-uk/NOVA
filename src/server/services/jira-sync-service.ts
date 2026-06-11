@@ -492,15 +492,68 @@ export class JiraSyncService {
       }
 
       // CSAT trigger: if status changed to a resolved state, generate survey
+      // and (if enabled) post the survey link as a public JSM comment.
       if (oldRow && oldRow.status_name !== statusName) {
         const resolvedStates = ['Closed', 'Resolved', 'Done'];
         if (statusName && resolvedStates.includes(statusName)) {
           const reporterEmail = reporter?.emailAddress as string | null;
-          generateCsatSurvey(issue.key, reporterEmail).catch(err => {
-            console.warn(`[jira-sync] CSAT survey generation failed for ${issue.key}:`, err);
-          });
+          generateCsatSurvey(issue.key, reporterEmail)
+            .then(token => (token ? this.postCsatComment(issue.key, token) : undefined))
+            .catch(err => {
+              console.warn(`[jira-sync] CSAT survey generation failed for ${issue.key}:`, err);
+            });
         }
       }
+    }
+  }
+
+  /** Resolve the public-facing base URL for portal links. */
+  private getPublicBaseUrl(): string {
+    const appBase = this.settings.get('app_base_url');
+    if (appBase) return appBase.replace(/\/+$/, '');
+    const ssoBase = this.settings.get('sso_base_url');
+    if (ssoBase) return ssoBase.replace(/\/+$/, '');
+    if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/+$/, '');
+    return 'http://localhost:5173';
+  }
+
+  /** Post the CSAT survey link as a customer-visible JSM comment.
+   *  Gated behind the `csat_comment_enabled` setting; comment text is
+   *  configurable via `csat_comment_template` using a `{link}` placeholder. */
+  private async postCsatComment(issueKey: string, token: string): Promise<void> {
+    if (this.settings.get('csat_comment_enabled') !== 'true') return;
+
+    const link = `${this.getPublicBaseUrl()}/portal/csat/${token}`;
+    const template =
+      this.settings.get('csat_comment_template') ||
+      "Thanks for your patience while we worked on this. We'd love your feedback — it only takes 30 seconds to let us know how we did: {link}";
+
+    // Build an ADF paragraph, turning the {link} placeholder into a clickable link.
+    const parts = template.split('{link}');
+    const content: Array<Record<string, unknown>> = [];
+    parts.forEach((part, i) => {
+      if (part) content.push({ type: 'text', text: part });
+      if (i < parts.length - 1) {
+        content.push({
+          type: 'text',
+          text: link,
+          marks: [{ type: 'link', attrs: { href: link } }],
+        });
+      }
+    });
+    if (content.length === 0) content.push({ type: 'text', text: link });
+
+    const body = {
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content }],
+    };
+
+    try {
+      await this.jiraClient.addCommentAdf(issueKey, body, { internal: false });
+      console.log(`[csat] Posted survey comment on ${issueKey}`);
+    } catch (err) {
+      console.warn(`[jira-sync] CSAT comment post failed for ${issueKey}:`, err);
     }
   }
 
