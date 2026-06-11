@@ -514,7 +514,9 @@ export class JiraSyncService {
     const ssoBase = this.settings.get('sso_base_url');
     if (ssoBase) return ssoBase.replace(/\/+$/, '');
     if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/+$/, '');
-    return 'http://localhost:5173';
+    // Prod settings are typically blank; fall back to the stable live host rather
+    // than localhost so survey links work even before app_base_url is configured.
+    return 'https://nova.nurtur.tech';
   }
 
   /** Post the CSAT survey link as a JSM comment on the resolved ticket.
