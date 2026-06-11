@@ -1771,6 +1771,10 @@ export class AgentLoop {
           await ticketState.transition(decision.ticketKey, 'ai_conversation', {
             lastAgentActionAt: new Date().toISOString(),
           });
+          // Replied with a follow-up question → set Jira status to Waiting On Requestor.
+          if (!decision.shadowMode) {
+            await this.setWaitingOnRequestor(decision.ticketKey, decision.inputs.status as string | undefined);
+          }
         }
       }
       this.ticketsProcessed++;
@@ -1830,6 +1834,11 @@ export class AgentLoop {
               await this.updateRequestTypeAfterAssign(decision);
             } catch (err) {
               console.warn(`[agent] Request type update failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+            }
+
+            // NOVA asked the customer a question → set Jira status to Waiting On Requestor.
+            if (needsReply && !decision.shadowMode) {
+              await this.setWaitingOnRequestor(decision.ticketKey, decision.inputs.status as string | undefined);
             }
           } else {
             // Assignment failed — fall back to human handoff so ticket doesn't sit unassigned
@@ -1935,6 +1944,52 @@ export class AgentLoop {
       console.log(`[agent] Set Agent Next Update to ${jiraDateTime} on ${ticketKey}`);
     } catch (err) {
       console.warn(`[agent] Failed to set Agent Next Update on ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  /**
+   * When NOVA asks the customer a question, move the Jira ticket to "Waiting On
+   * Requestor". If the ticket is still "Open", Jira may not offer that transition
+   * directly — step through "Work In Progress" first, then re-resolve. Transition
+   * IDs are resolved dynamically by target status name (they differ per project/
+   * workflow), so this stays correct if the workflow is re-numbered.
+   */
+  private async setWaitingOnRequestor(ticketKey: string, currentStatus?: string): Promise<void> {
+    const TARGET = 'waiting on requestor';
+    const INTERMEDIATE = 'work in progress';
+    if ((currentStatus ?? '').toLowerCase() === TARGET) return;
+
+    type Trans = { id: string; name: string; to?: { name?: string } };
+    const findTo = (transitions: Trans[], statusName: string) =>
+      transitions.find(t => (t?.to?.name ?? '').toLowerCase() === statusName);
+
+    try {
+      let res = await this.jiraClient.getTransitionsWithFields(ticketKey);
+      let transitions = ((res as { transitions?: Trans[] })?.transitions ?? []);
+      let target = findTo(transitions, TARGET);
+
+      // Not directly available (e.g. from Open) — step through Work In Progress first.
+      if (!target) {
+        const wip = findTo(transitions, INTERMEDIATE);
+        if (wip) {
+          await this.jiraClient.transitionIssue(ticketKey, wip.id);
+          console.log(`[agent] ${ticketKey}: transitioned to Work In Progress en route to Waiting On Requestor`);
+          res = await this.jiraClient.getTransitionsWithFields(ticketKey);
+          transitions = ((res as { transitions?: Trans[] })?.transitions ?? []);
+          target = findTo(transitions, TARGET);
+        }
+      }
+
+      if (!target) {
+        const names = transitions.map(t => `${t.to?.name ?? '?'} (${t.id})`).join(', ');
+        console.warn(`[agent] ${ticketKey}: no transition to Waiting On Requestor available. Transitions: ${names}`);
+        return;
+      }
+
+      await this.jiraClient.transitionIssue(ticketKey, target.id);
+      console.log(`[agent] ${ticketKey}: set status to Waiting On Requestor`);
+    } catch (err) {
+      console.warn(`[agent] Failed to set Waiting On Requestor on ${ticketKey}:`, err instanceof Error ? err.message : err);
     }
   }
 
