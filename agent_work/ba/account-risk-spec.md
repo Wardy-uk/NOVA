@@ -175,6 +175,24 @@ it (no new workflow). Optional later: write a `Risk Level` select field or inter
     each night so recon walks unsealed days + scores decay). Engine is idempotent, so this is a
     timer hook. Reopen-detection signal also deferred.
 
+## Build status — chunks 3 + 9 (12 Jun)
+
+- **Backfill confirmed run on prod** (DB flag `account_risk_backfill_v3=true`; settings are
+  DB-backed, not the file). Root cause of earlier no-ops: the block was nested in
+  `if (agentJiraClient)` and an earlier throw in that block skipped it — now relocated to run
+  **unconditionally**. Also: timeout fixed (per-project, no comment JOIN); jira_created Date fix;
+  set-based seed; phase logging.
+- **Triage enrichment (chunk 3) — done:** `account-risk-queries.ts#getTicketCustomerRisk` +
+  `formatRiskLine`; every internal AI ticket comment now leads with a "⚠️ Customer Risk: <tier>"
+  line when the customer resolves to Watch+ tier (best-effort, never blocks the comment).
+- **Read API + dashboard (chunk 9) — done:** `routes/risk.ts` (`/api/risk/{summary,accounts,
+  account/:ref,ticket/:key,tiers}`) + `RiskIntelligenceView.tsx` under KPIs → "Risk Intelligence"
+  (tier cards, last-backfill summary incl. resolution rate, at-risk table, per-account drill-down).
+- **Nightly refresh — done:** unconditional 24h `setInterval` re-runs the rollup so risk stays
+  current for triage + dashboard.
+- **Still open:** comment-based signal detection (currently summary/description only); manual
+  risk-register xlsx import (awaiting Nick's file); reopen-detection signal.
+
 ## Definition of done
 
 - 5 tables created & validated; resolver hit-rate measured on live tickets.
