@@ -12,6 +12,11 @@ import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
 import { executeAndGetId, query } from './database.js';
+import {
+  detectCancellationIntent,
+  isCancellationGuardrailEnabled,
+  buildCancellationHoldingResponse,
+} from './cancellation-guardrail.js';
 
 const CONFIDENCE_HIGH = 0.8;
 const CONFIDENCE_LOW = 0.4;
@@ -259,6 +264,9 @@ export class Reasoner {
 
     await this.trackLearningCitations(triage.reasoning_trace, learningsCtx.learnings);
 
+    // Cancellation guardrail runs last so it has the final say over the action.
+    this.applyCancellationGuardrail(decision, `${event.summary}\n${event.description ?? ''}`);
+
     return decision;
   }
 
@@ -320,6 +328,29 @@ export class Reasoner {
       console.warn('[reasoner] Confluence search error:', err instanceof Error ? err.message : err);
       return 'Confluence search failed.';
     }
+  }
+
+  // Cancellation / termination guardrail. NOVA must never accept or handle a cancellation
+  // itself — it posts a warm holding acknowledgement and hands the ticket to a human in
+  // Customer Care. Forces escalate, swaps in the holding response, and clears anything that
+  // could auto-close or auto-route the ticket. Deterministic — does not rely on the LLM.
+  private applyCancellationGuardrail(decision: AgentDecision, scanText: string): boolean {
+    if (!isCancellationGuardrailEnabled(this.settings)) return false;
+    const hit = detectCancellationIntent(scanText, this.settings);
+    if (!hit.matched) return false;
+
+    console.log(`[reasoner] Cancellation guardrail fired on ${decision.ticketKey} (matched: "${hit.phrase}") — forcing escalate to Customer Care`);
+
+    decision.action = 'escalate';
+    decision.output.recommended_action = 'escalate';
+    decision.output.draft_response = buildCancellationHoldingResponse(decision.ticketKey, this.settings);
+    decision.output.needs_customer_reply = false;
+    // Nothing may auto-close or re-route a possible cancellation.
+    decision.output.quick_win = { type: 'none', confidence: 0, reasoning: 'Cancellation guardrail — human review required.' };
+    decision.output.website_amend = { is_website_amend: false, confidence: 0, reasoning: 'Cancellation guardrail — not a website amend.' };
+    decision.approvalRequired = true;
+    decision.reasoning += `\n[Guardrail: possible cancellation/termination intent ("${hit.phrase}") — NOVA must not handle this; escalated to Customer Care with a holding acknowledgement]`;
+    return true;
   }
 
   private hasUnreadableCriticalAttachments(event: TicketEvent): boolean {
@@ -460,6 +491,11 @@ export class Reasoner {
     decision.approvalRequired = await this.needsRespondApproval(respond, decision);
 
     await this.trackLearningCitations(respond.reasoning_trace, learningsCtx.learnings);
+
+    // Cancellation guardrail — scan the customer-visible thread (latest reply may be the
+    // cancellation). Runs last so it has the final say over the action.
+    const commentScanText = `${event.summary}\n${publicComments.map(c => c.body).join('\n')}`;
+    this.applyCancellationGuardrail(decision, commentScanText);
 
     return decision;
   }
