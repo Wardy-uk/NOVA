@@ -143,7 +143,7 @@ import { TfsDocsSyncProvider } from './services/kb-tfs-docs-sync.js';
 import { ConfluenceSyncProvider } from './services/kb-confluence-sync.js';
 import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
-import { KpiPipeline, computeRag } from './services/kpi-pipeline.js';
+import { KpiPipeline, computeRag, getKpiPool } from './services/kpi-pipeline.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
 import { CoachingEngine } from './services/coach.js';
@@ -3153,6 +3153,11 @@ ${body}
           const onFire = r[0]?.on_fire ?? 0; const atRisk = r[0]?.at_risk ?? 0;
           return { metric: String(onFire), metricLabel: 'on fire', sub: `${atRisk} at risk`, color: onFire > 0 ? '#ef4444' : atRisk > 0 ? '#f59e0b' : '#10b981' };
         }),
+        guard('Strategic (SLT)', '/wallboard/strategic', async () => {
+          const r = await query<{ hi: number }>(`SELECT COUNT(*) AS hi FROM agent_account_risk WHERE risk_tier >= 3`);
+          const hi = r[0]?.hi ?? 0;
+          return { metric: String(hi), metricLabel: 'high-risk accounts', sub: 'End-of-day SLT view', color: hi > 0 ? '#f59e0b' : '#10b981' };
+        }),
       ];
 
       const cards = (await Promise.all(jobs)).filter((c): c is DashCard => c !== null);
@@ -3293,6 +3298,298 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       logWallboard('/wallboard/dash', 'error', 500, Date.now() - wbStart, msg);
+      res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
+    }
+  });
+
+  // ── Strategic Dashboard (SLT) — calm, leadership-facing wallboard. ──
+  // Unlike /wallboard/dash (live intraday), this shows END-OF-DAY outcomes for
+  // the last 5 completed business days so a red tile at 10am doesn't read as a
+  // systemic failure. Left = 8 grouped KPI metrics (5-day RAG + trend); right =
+  // key-account risks (top) + Jira commitments past normal SLA (bottom); a
+  // collapsed roll-up bar expands to the 20 granular per-queue metrics.
+  // Open-access, no auth, like every /wallboard/* route.
+  app.get(['/wallboard/strategic', '/wallboard/slt'], async (_req, res) => {
+    const wbStart = Date.now();
+    const route = '/wallboard/strategic';
+    const esc = (s: unknown) => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    try {
+      const now = new Date();
+      const jiraBase = (settingsQueries.get('jira_ob_url') || 'https://nurturtech.atlassian.net').replace(/\/$/, '');
+
+      // ── LEFT: 5-day end-of-day KPI snapshots from jira_kpi_daily (NOVA-populated) ──
+      const pool = await getKpiPool(settingsQueries);
+      const snapRows = (await pool.request().query(`
+        SELECT kpi, [count] AS cnt, rag, CAST(CreatedAt AS DATE) AS d
+        FROM dbo.jira_kpi_daily
+        WHERE CAST(CreatedAt AS DATE) >= DATEADD(day, -14, CAST(GETDATE() AS DATE))
+          AND CAST(CreatedAt AS DATE) < CAST(GETDATE() AS DATE)
+      `)).recordset as Array<{ kpi: string; cnt: number; rag: number | null; d: Date | string }>;
+
+      // Index by day → kpiName(lower) → {count, rag}
+      const toDayKey = (d: Date | string) => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
+      const isWeekday = (key: string) => { const wd = new Date(key + 'T00:00:00Z').getUTCDay(); return wd !== 0 && wd !== 6; };
+      const byDay = new Map<string, Map<string, { count: number; rag: number | null }>>();
+      for (const r of snapRows) {
+        const key = toDayKey(r.d);
+        if (!byDay.has(key)) byDay.set(key, new Map());
+        byDay.get(key)!.set(String(r.kpi).toLowerCase().trim(), { count: Number(r.cnt) || 0, rag: r.rag == null ? null : Number(r.rag) });
+      }
+      const days = [...byDay.keys()].filter(isWeekday).sort().slice(-5);
+
+      // Fragments to locate a stored KPI name for a queue. `noreply` names keep
+      // the parenthesised tier; `bare` names (over-SLA / oldest) strip parens.
+      const FRAG: Record<string, { noreply: string; bare: string }> = {
+        'CC (Incidents)': { noreply: 'cc (incidents)', bare: 'cc incidents' },
+        'CC (Service Requests)': { noreply: 'cc (service requests)', bare: 'cc service requests' },
+        'CC (TPJ)': { noreply: 'cc (tpj)', bare: 'cc (tpj)' },
+        'Production': { noreply: 'production', bare: 'production' },
+        'Tier 2': { noreply: 'tier 2', bare: 'tier 2' },
+        'Tier 3': { noreply: 'tier 3', bare: 'tier 3' },
+        'Development': { noreply: 'development', bare: 'development' },
+      };
+      type Kind = 'newvol' | 'noreply' | 'oversla' | 'oldest';
+      const matches = (name: string, kind: Kind, queue?: string) => {
+        if (kind === 'newvol') return name.includes('new tickets');
+        const f = queue ? FRAG[queue] : null; if (!f) return false;
+        if (kind === 'noreply') return name.includes('no reply') && name.includes(f.noreply);
+        if (kind === 'oversla') return name.includes('over sla') && name.includes('actionable') && name.includes(f.bare);
+        return name.includes('oldest actionable') && name.includes(f.bare); // oldest
+      };
+      const getCell = (dm: Map<string, { count: number; rag: number | null }>, kind: Kind, queue?: string): { num: number; rag: number | null } | null => {
+        for (const [name, v] of dm) if (matches(name, kind, queue)) return { num: v.count, rag: v.rag };
+        return null;
+      };
+      const groupCell = (dm: Map<string, { count: number; rag: number | null }>, kind: Kind, queues: string[]): { num: number; rag: number | null } | null => {
+        const parts = queues.map(q => getCell(dm, kind, q)).filter((p): p is { num: number; rag: number | null } => p !== null);
+        if (!parts.length) return null;
+        const rag = Math.max(...parts.map(p => p.rag ?? 1));            // worst child RAG
+        const num = kind === 'oldest' ? Math.max(...parts.map(p => p.num)) : parts.reduce((s, p) => s + p.num, 0);
+        return { num, rag };
+      };
+
+      const ragColor = (rag: number | null) => rag === 1 ? '#10b981' : rag === 2 ? '#f59e0b' : rag === 3 ? '#ef4444' : '#475569';
+      const ragBg = (rag: number | null) => rag === 1 ? 'rgba(16,185,129,.12)' : rag === 2 ? 'rgba(245,158,11,.12)' : rag === 3 ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.03)';
+      type DayVal = { num: number; rag: number | null; display: string } | null;
+      const cellHtml = (v: DayVal) => {
+        if (!v) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
+        const c = ragColor(v.rag), bg = ragBg(v.rag);
+        return `<div class="cell"><span class="pill" style="background:${bg};color:${c};border:1px solid ${c}44">${v.display}</span></div>`;
+      };
+      const trendHtml = (vals: DayVal[], neutral?: boolean) => {
+        const present = vals.filter((v): v is NonNullable<DayVal> => v !== null);
+        if (present.length < 2) return `<span style="color:#475569">▬</span>`;
+        const first = present[0].num, last = present[present.length - 1].num;
+        if (neutral || first === last) return `<span style="color:#64748b">${first === last ? '▬' : last > first ? '▲' : '▼'}</span>`;
+        // every strategic metric here is lower-is-better
+        return last < first ? `<span style="color:#10b981">▼</span>` : `<span style="color:#ef4444">▲</span>`;
+      };
+      const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean }): string => {
+        const vals: DayVal[] = days.map(d => {
+          const c = get(byDay.get(d)!);
+          if (!c) return null;
+          return { num: c.num, rag: c.rag, display: kind === 'oldest' ? `${c.num}d` : String(c.num) };
+        });
+        return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts?.neutral)}</div></div>`;
+      };
+      const dayHeadHtml = days.map(d => {
+        const dt = new Date(d + 'T00:00:00Z');
+        const wd = dt.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+        return `<div class="cell dh">${wd}<br><span class="dh-n">${dt.getUTCDate()}</span></div>`;
+      }).join('');
+
+      const SUPPORT = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2'];
+      const DEV = ['Tier 3', 'Development'];
+      const leftHtml = [
+        { header: 'Intake', rows: [metricRow('New ticket volume', dm => getCell(dm, 'newvol'), 'newvol', { neutral: true })] },
+        { header: 'Support &middot; CC + Tier 2 + TPJ', rows: [
+          metricRow('Tickets with no reply', dm => groupCell(dm, 'noreply', SUPPORT), 'noreply', { sub: true }),
+          metricRow('Over SLA (actionable)', dm => groupCell(dm, 'oversla', SUPPORT), 'oversla', { sub: true }),
+          metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', SUPPORT), 'oldest', { sub: true }),
+        ] },
+        { header: 'Development &middot; Tier 3 + Dev', rows: [
+          metricRow('Tickets with no reply', dm => groupCell(dm, 'noreply', DEV), 'noreply', { sub: true }),
+          metricRow('Over SLA (actionable)', dm => groupCell(dm, 'oversla', DEV), 'oversla', { sub: true }),
+          metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', DEV), 'oldest', { sub: true }),
+        ] },
+        { header: 'Production', rows: [metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', ['Production']), 'oldest', { sub: true })] },
+      ].map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.rows.join('')}</div>`).join('');
+
+      // ── Roll-up: 20 granular per-queue metrics ──
+      const Q6 = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2', 'Tier 3', 'Development'];
+      const Q7 = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Production', 'Tier 2', 'Tier 3', 'Development'];
+      const shortQ = (q: string) => q.replace('CC (Incidents)', 'CC Incidents').replace('CC (Service Requests)', 'CC Service Req').replace('CC (TPJ)', 'CC TPJ');
+      const rollSection = (title: string, kind: Kind, queues: string[]) =>
+        `<div class="grp"><div class="grp-h">${title}</div>${queues.map(q => metricRow(shortQ(q), dm => getCell(dm, kind, q), kind, { sub: true })).join('')}</div>`;
+      const rollupHtml = [
+        `<div class="grp"><div class="grp-h">Intake</div>${metricRow('New ticket volume', dm => getCell(dm, 'newvol'), 'newvol', { neutral: true, sub: true })}</div>`,
+        rollSection('Tickets with no reply', 'noreply', Q6),
+        rollSection('Over SLA (actionable)', 'oversla', Q6),
+        rollSection('Oldest actionable (days)', 'oldest', Q7),
+      ].join('');
+
+      // ── RIGHT TOP: Key Account Risks (agent_account_risk, Watch+ tiers) ──
+      let riskRows = '';
+      try {
+        const risks = await query<{ customer_name: string | null; bc_number: string | null; risk_score: number; risk_tier: number; total_ticket_count: number; last_ticket_date: Date | string | null }>(
+          `SELECT TOP 6 customer_name, bc_number, risk_score, risk_tier, total_ticket_count, last_ticket_date
+           FROM agent_account_risk WHERE risk_tier >= 2 ORDER BY risk_score DESC, total_ticket_count DESC`);
+        if (!risks.length) {
+          riskRows = `<div class="empty">No accounts currently flagged</div>`;
+        } else {
+          riskRows = risks.map(a => {
+            const high = a.risk_tier >= 3;
+            const name = a.customer_name || 'Unknown account';
+            const since = a.last_ticket_date ? Math.max(0, Math.floor((now.getTime() - new Date(a.last_ticket_date).getTime()) / 86400000)) : null;
+            const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
+            return `<a class="rrow" href="${jiraBase}/issues/?jql=${jql}" target="_blank">
+              <div class="rname">${esc(name)}</div>
+              <div class="rmeta">${a.total_ticket_count} open${since != null ? ` &middot; ${since}d since update` : ''}</div>
+              <div class="rbadge" style="background:${high ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'};color:${high ? '#ef4444' : '#f59e0b'};border:1px solid ${high ? '#ef444455' : '#f59e0b55'}">${high ? 'HIGH' : 'MEDIUM'}</div>
+            </a>`;
+          }).join('');
+        }
+      } catch {
+        riskRows = `<div class="empty">Risk data unavailable</div>`;
+      }
+
+      // ── RIGHT BOTTOM: Key Commitments — Jira tickets with a future due date ──
+      // Due dates are not auto-set by SLA, so any future due date is a conscious
+      // commitment. We split on the 60-day-from-creation line (the real signal).
+      let commitRows = '';
+      try {
+        const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
+        const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
+        if (agentJiraClient && projs) {
+          const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981'], 40);
+          const issues = r.issues || [];
+          if (!issues.length) {
+            commitRows = `<div class="empty">No tickets with future commitments</div>`;
+          } else {
+            commitRows = issues.map(iss => {
+              const f = iss.fields as Record<string, any>;
+              const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
+              const created = f.created ? new Date(f.created) : null;
+              const daysRem = due ? Math.ceil((due.getTime() - now.getTime()) / 86400000) : null;
+              const cycle = due && created ? Math.round((due.getTime() - created.getTime()) / 86400000) : null;
+              const over60 = cycle != null && cycle > 60;
+              const tier = (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—';
+              const summary = String(f.summary || '');
+              const trunc = summary.length > 58 ? summary.slice(0, 57) + '…' : summary;
+              const dueStr = due ? due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—';
+              const rowCls = daysRem != null && daysRem < 0 ? ' c-red' : daysRem != null && daysRem <= 7 ? ' c-amber' : '';
+              const remLbl = daysRem == null ? '—' : daysRem < 0 ? `${-daysRem}d overdue` : `${daysRem}d`;
+              return `<a class="crow${rowCls}" href="${jiraBase}/browse/${iss.key}" target="_blank">
+                <div class="ckey">${esc(iss.key)}</div>
+                <div class="csum">${esc(trunc)}<span class="ctier">${esc(tier)}</span></div>
+                <div class="cdue"><span class="cbadge" style="${over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${dueStr}</span><span class="crem">${remLbl}</span></div>
+              </a>`;
+            }).join('');
+          }
+        } else {
+          commitRows = `<div class="empty">Jira not configured</div>`;
+        }
+      } catch {
+        commitRows = `<div class="empty">Commitments unavailable</div>`;
+      }
+
+      const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="300">
+<title>NOVA — Strategic Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
+body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow:hidden}
+.page{height:100vh;display:flex;flex-direction:column;padding:1.8vh 1.8vw;gap:1.2vh}
+.head{display:flex;justify-content:space-between;align-items:flex-end;flex:0 0 auto}
+.head h1{font-size:2.4vh;font-weight:800;letter-spacing:-.5px}
+.head .sub{font-size:1.2vh;color:#64748b;margin-top:2px}
+.head .meta{font-size:1.2vh;color:#64748b;text-align:right}
+.cols{display:grid;grid-template-columns:60% 40%;gap:1.2vw;flex:1 1 auto;min-height:0}
+.panel{background:rgba(255,255,255,.025);border:1px solid #2f353d;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.panel-h{font-size:1.3vh;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#94a3b8;padding:1vh 1.1vw;border-bottom:1px solid #2f353d;flex:0 0 auto}
+.panel-body{flex:1 1 auto;min-height:0;overflow:auto;padding:.6vh .8vw}
+.right{display:grid;grid-template-rows:1fr 1.5fr;gap:1.2vh;min-height:0}
+/* metric rows */
+.grp{margin-bottom:.8vh}
+.grp-h{font-size:1.15vh;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#5ec1ca;padding:.5vh .3vw .3vh;opacity:.85}
+.mrow{display:grid;grid-template-columns:minmax(0,1fr) 46% 3vw;align-items:center;gap:.6vw;padding:.35vh .3vw}
+.mrow.sub .mlabel{color:#cbd5e1;font-size:1.5vh}
+.mlabel{font-size:1.6vh;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcells{display:grid;grid-template-columns:repeat(5,1fr);gap:.4vw}
+.cell{display:flex;justify-content:center}
+.pill{display:inline-block;min-width:2.6vw;text-align:center;padding:.35vh .4vw;border-radius:7px;font-size:1.5vh;font-weight:700}
+.cell.dh{flex-direction:column;color:#64748b;font-size:1vh;font-weight:700;text-transform:uppercase;letter-spacing:.4px;line-height:1.25}
+.dh-n{color:#94a3b8;font-size:1.2vh}
+.mtrend{text-align:center;font-size:1.8vh}
+.mhead{padding-bottom:.4vh;border-bottom:1px solid #2f353d;margin-bottom:.4vh}
+/* risk rows */
+.rrow{display:grid;grid-template-columns:1fr auto;grid-template-areas:"name badge" "meta badge";align-items:center;gap:.2vh .6vw;text-decoration:none;color:inherit;padding:.9vh .7vw;border-radius:10px;margin-bottom:.5vh;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+.rrow:hover{border-color:rgba(94,193,202,.4);background:rgba(94,193,202,.06)}
+.rname{grid-area:name;font-size:1.7vh;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rmeta{grid-area:meta;font-size:1.25vh;color:#94a3b8}
+.rbadge{grid-area:badge;font-size:1.25vh;font-weight:800;letter-spacing:.5px;padding:.5vh .8vw;border-radius:7px}
+/* commitment rows */
+.crow{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:.7vw;text-decoration:none;color:inherit;padding:.75vh .7vw;border-radius:9px;margin-bottom:.4vh;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+.crow:hover{border-color:rgba(94,193,202,.4);background:rgba(94,193,202,.06)}
+.crow.c-amber{border-color:#f59e0b55;background:rgba(245,158,11,.06)}
+.crow.c-red{border-color:#ef444466;background:rgba(239,68,68,.08)}
+.ckey{font-size:1.35vh;font-weight:700;color:#5ec1ca;font-variant-numeric:tabular-nums}
+.csum{font-size:1.5vh;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctier{display:inline-block;margin-left:.5vw;font-size:1.15vh;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.cdue{display:flex;align-items:center;gap:.5vw;white-space:nowrap}
+.cbadge{font-size:1.1vh;font-weight:700;padding:.3vh .5vw;border-radius:5px}
+.cdate{font-size:1.4vh;color:#cbd5e1;font-weight:600}
+.crem{font-size:1.2vh;color:#94a3b8;min-width:4vw;text-align:right}
+.empty{padding:2vh 1vw;text-align:center;color:#64748b;font-size:1.5vh}
+/* rollup */
+.rollup{flex:0 0 auto;border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.025);overflow:hidden}
+.rollup>summary{list-style:none;cursor:pointer;padding:1vh 1.2vw;font-size:1.4vh;font-weight:700;color:#94a3b8;display:flex;justify-content:space-between;align-items:center}
+.rollup>summary::-webkit-details-marker{display:none}
+.rollup>summary .chev{transition:transform .2s;color:#5ec1ca}
+.rollup[open]>summary .chev{transform:rotate(90deg)}
+.rollup-body{padding:.6vh 1.2vw 1vh;border-top:1px solid #2f353d;display:grid;grid-template-columns:repeat(2,1fr);gap:0 2vw;max-height:38vh;overflow:auto}
+.foot{flex:0 0 auto;text-align:center;font-size:1.1vh;color:#475569;padding-top:.3vh}
+</style>
+</head><body><div class="page">
+<div class="head">
+  <div><h1>Strategic Dashboard</h1><div class="sub">End-of-day outcomes &middot; last 5 business days &middot; not intraday</div></div>
+  <div class="meta">Last updated ${timeStr}<br>${dateStr}</div>
+</div>
+<div class="cols">
+  <div class="panel left">
+    <div class="panel-h">KPI Outcomes</div>
+    <div class="panel-body">
+      <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
+      ${leftHtml}
+    </div>
+  </div>
+  <div class="right">
+    <div class="panel">
+      <div class="panel-h">Key Account Risks</div>
+      <div class="panel-body">${riskRows}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-h">Key Commitments &middot; Due Dates</div>
+      <div class="panel-body">${commitRows}</div>
+    </div>
+  </div>
+</div>
+<details class="rollup">
+  <summary><span>Full KPI breakdown &middot; 20 granular queue metrics</span><span class="chev">▸</span></summary>
+  <div class="rollup-body">${rollupHtml}</div>
+</details>
+<div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min</div>
+</div></body></html>`);
+      logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${days.length} days, ${snapRows.length} kpi rows`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      logWallboard(route, 'error', 500, Date.now() - wbStart, msg, { error: msg, stack: err instanceof Error ? err.stack : undefined });
       res.status(500).send(`<html><body style="background:#1a1f26;color:#ef4444;padding:40px;font-family:system-ui">Error: ${msg}</body></html>`);
     }
   });
