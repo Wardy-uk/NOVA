@@ -2411,13 +2411,15 @@ export interface ContractTerm {
   body: string;
   active: number;
   sort_order: number;
+  // Exact Adobe form-field name this term merges into. NULL = use the prefix fallback.
+  target_field: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export class ContractTermsQueries {
   async getAll(filters?: { activeOnly?: boolean }): Promise<ContractTerm[]> {
-    let sql = `SELECT id, label, body, active, sort_order, created_at, updated_at FROM contract_terms`;
+    let sql = `SELECT id, label, body, active, sort_order, target_field, created_at, updated_at FROM contract_terms`;
     if (filters?.activeOnly) sql += ` WHERE active = 1`;
     sql += ` ORDER BY sort_order ASC, label ASC`;
     return query<ContractTerm>(sql, []);
@@ -2427,20 +2429,21 @@ export class ContractTermsQueries {
     return (await queryOne<ContractTerm>(`SELECT * FROM contract_terms WHERE id = ?`, [id])) ?? null;
   }
 
-  async create(t: { label: string; body: string; active?: number; sort_order?: number }): Promise<number> {
+  async create(t: { label: string; body: string; active?: number; sort_order?: number; target_field?: string | null }): Promise<number> {
     return executeAndGetId(
-      `INSERT INTO contract_terms (label, body, active, sort_order) VALUES (?, ?, ?, ?)`,
-      [t.label, t.body, t.active ?? 1, t.sort_order ?? 0]
+      `INSERT INTO contract_terms (label, body, active, sort_order, target_field) VALUES (?, ?, ?, ?, ?)`,
+      [t.label, t.body, t.active ?? 1, t.sort_order ?? 0, t.target_field ?? null]
     );
   }
 
-  async update(id: number, t: Partial<Pick<ContractTerm, 'label' | 'body' | 'active' | 'sort_order'>>): Promise<boolean> {
+  async update(id: number, t: Partial<Pick<ContractTerm, 'label' | 'body' | 'active' | 'sort_order' | 'target_field'>>): Promise<boolean> {
     const existing = await this.getById(id);
     if (!existing) return false;
     await execute(
-      `UPDATE contract_terms SET label=?, body=?, active=?, sort_order=?, updated_at=GETUTCDATE() WHERE id=?`,
+      `UPDATE contract_terms SET label=?, body=?, active=?, sort_order=?, target_field=?, updated_at=GETUTCDATE() WHERE id=?`,
       [t.label ?? existing.label, t.body ?? existing.body,
-       t.active ?? existing.active, t.sort_order ?? existing.sort_order, id]
+       t.active ?? existing.active, t.sort_order ?? existing.sort_order,
+       t.target_field !== undefined ? t.target_field : existing.target_field, id]
     );
     return true;
   }
@@ -2567,14 +2570,24 @@ export interface AdobeSignAgreement {
   adobe_created_date: string | null; adobe_expiration_date: string | null;
   signed_document_url: string | null; raw_data: string | null;
   synced_at: string | null; created_at: string; updated_at: string;
+  // Contract-approval hold (custom-terms workflow). NULL for normally-sent agreements.
+  approval_token: string | null; approval_status: string | null;
+  approval_payload: string | null; approval_terms_text: string | null;
+  approval_requested_by: string | null; approval_requested_at: string | null;
+  approval_decided_by: string | null; approval_decided_at: string | null;
+  approval_note: string | null;
 }
 
-// Subset used for upsert from the wizard / sync job. The signed_* and bc_imported_*
-// columns are never written via upsert — they're set via markSigned() / markBcImported
-// /markBcImportError, so they aren't overwritten when the 5-min sync just refreshes status.
+// Subset used for upsert from the wizard / sync job. The signed_*, bc_imported_*, and
+// approval_* columns are never written via upsert — they're set via dedicated methods
+// (markSigned / markBcImported / createApprovalHold / releaseApproval / …) so the 5-min
+// sync just refreshing status can't overwrite them.
 export type AdobeSignAgreementUpsert = Omit<AdobeSignAgreement,
   'id' | 'created_at' | 'updated_at' | 'signed_form_data' | 'signed_pdf_path' | 'signed_at'
-  | 'bc_imported_at' | 'bc_import_error'>;
+  | 'bc_imported_at' | 'bc_import_error'
+  | 'approval_token' | 'approval_status' | 'approval_payload' | 'approval_terms_text'
+  | 'approval_requested_by' | 'approval_requested_at' | 'approval_decided_by'
+  | 'approval_decided_at' | 'approval_note'>;
 
 export class AdobeSignAgreementQueries {
   async getAll(filters?: { contract_id?: number; status?: string; search?: string }): Promise<AdobeSignAgreement[]> {
@@ -2663,6 +2676,87 @@ export class AdobeSignAgreementQueries {
            updated_at      = GETUTCDATE()
        WHERE agreement_id = ?`,
       [error.slice(0, 4000), agreementId]
+    );
+  }
+
+  // ── Contract-approval holds (custom-terms workflow) ──
+
+  // Write a held agreement awaiting approval. agreementId is a synthetic 'PENDING-…'
+  // placeholder (no Adobe agreement exists yet); approvalToken is the capability used
+  // in the webhook + callback. The full intended create-agreement request is stored as
+  // JSON in approval_payload so the callback can replay it verbatim on approval.
+  async createApprovalHold(h: {
+    agreementId: string;
+    approvalToken: string;
+    contractId: number | null;
+    bcCustomerId: string | null;
+    name: string;
+    signerEmails: string;      // JSON array
+    filledFields: string | null;  // JSON merge fields, for display in the list
+    payload: string;           // JSON of the full create-agreement request
+    termsText: string | null;  // the custom terms that triggered approval
+    requestedBy: string | null;
+  }): Promise<void> {
+    await execute(
+      `INSERT INTO adobe_sign_agreements
+         (agreement_id, contract_id, bc_customer_id, name, status, signer_emails, filled_fields,
+          created_via_nova, adobe_created_date, synced_at,
+          approval_token, approval_status, approval_payload, approval_terms_text,
+          approval_requested_by, approval_requested_at)
+       VALUES (?, ?, ?, ?, 'OUT_FOR_APPROVAL', ?, ?, 1, GETUTCDATE(), GETUTCDATE(),
+               ?, 'PENDING', ?, ?, ?, GETUTCDATE())`,
+      [h.agreementId, h.contractId ?? null, h.bcCustomerId ?? null, h.name, h.signerEmails,
+       h.filledFields ?? null, h.approvalToken, h.payload, h.termsText ?? null, h.requestedBy ?? null]
+    );
+  }
+
+  async getByApprovalToken(token: string): Promise<AdobeSignAgreement | null> {
+    return (await queryOne<AdobeSignAgreement>(
+      `SELECT * FROM adobe_sign_agreements WHERE approval_token = ?`, [token])) ?? null;
+  }
+
+  // All agreements that went through (or are going through) the approval workflow.
+  // Optionally filter by approval_status ('PENDING' | 'APPROVED' | 'REJECTED').
+  async listApprovalHolds(approvalStatus?: string): Promise<AdobeSignAgreement[]> {
+    let sql = `SELECT * FROM adobe_sign_agreements WHERE approval_token IS NOT NULL`;
+    const params: string[] = [];
+    if (approvalStatus) { sql += ` AND approval_status = ?`; params.push(approvalStatus); }
+    sql += ` ORDER BY approval_requested_at DESC`;
+    return query<AdobeSignAgreement>(sql, params);
+  }
+
+  // Approver said yes: the agreement has now been created in Adobe. Rewrite the held
+  // row's synthetic agreement_id to the real Adobe id, flip it live, and stamp the
+  // decision. Keyed on approval_token so it's safe regardless of the id swap.
+  async releaseApproval(token: string, d: {
+    realAgreementId: string;
+    subscriptionContractNo: string;
+    filledFields: string | null;
+    rawData: string | null;
+    approver: string | null;
+    note: string | null;
+  }): Promise<void> {
+    await execute(
+      `UPDATE adobe_sign_agreements
+       SET agreement_id = ?, status = 'OUT_FOR_SIGNATURE', subscription_contract_no = ?,
+           filled_fields = ?, raw_data = ?, adobe_created_date = GETUTCDATE(), synced_at = GETUTCDATE(),
+           approval_status = 'APPROVED', approval_decided_by = ?, approval_note = ?,
+           approval_decided_at = GETUTCDATE(), updated_at = GETUTCDATE()
+       WHERE approval_token = ?`,
+      [d.realAgreementId, d.subscriptionContractNo, d.filledFields ?? null, d.rawData ?? null,
+       d.approver ?? null, d.note ?? null, token]
+    );
+  }
+
+  // Approver said no: park the held row. Nothing is sent to Adobe.
+  async markApprovalRejected(token: string, d: { approver: string | null; note: string | null }): Promise<void> {
+    await execute(
+      `UPDATE adobe_sign_agreements
+       SET status = 'APPROVAL_REJECTED', approval_status = 'REJECTED',
+           approval_decided_by = ?, approval_note = ?, approval_decided_at = GETUTCDATE(),
+           updated_at = GETUTCDATE()
+       WHERE approval_token = ?`,
+      [d.approver ?? null, d.note ?? null, token]
     );
   }
 

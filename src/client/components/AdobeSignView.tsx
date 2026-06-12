@@ -10,12 +10,14 @@ const STATUS_COLOURS: Record<string, string> = {
   CANCELLED: 'bg-red-900/40 text-red-400 border border-red-800',
   EXPIRED: 'bg-red-900/40 text-red-400 border border-red-800',
   OUT_FOR_APPROVAL: 'bg-amber-900/40 text-amber-400 border border-amber-800',
+  APPROVAL_REJECTED: 'bg-red-900/40 text-red-400 border border-red-800',
 };
 
 const STATUS_LABELS: Record<string, string> = {
   OUT_FOR_SIGNATURE: 'Out for Signature',
   WAITING_FOR_MY_SIGNATURE: 'Awaiting My Signature',
   OUT_FOR_APPROVAL: 'Out for Approval',
+  APPROVAL_REJECTED: 'Approval Rejected',
   SIGNED: 'Signed',
   APPROVED: 'Approved',
   DRAFT: 'Draft',
@@ -23,7 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
   EXPIRED: 'Expired',
 };
 
-const FILTER_OPTIONS = ['All', 'OUT_FOR_SIGNATURE', 'WAITING_FOR_MY_SIGNATURE', 'SIGNED', 'DRAFT', 'CANCELLED', 'EXPIRED'] as const;
+const FILTER_OPTIONS = ['All', 'OUT_FOR_APPROVAL', 'OUT_FOR_SIGNATURE', 'WAITING_FOR_MY_SIGNATURE', 'SIGNED', 'APPROVAL_REJECTED', 'DRAFT', 'CANCELLED', 'EXPIRED'] as const;
 
 function fmtDate(d: string | null) {
   if (!d) return '\u2014';

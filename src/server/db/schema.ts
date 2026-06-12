@@ -2024,6 +2024,13 @@ async function runMigrations(): Promise<void> {
        updated_at DATETIME2 DEFAULT GETUTCDATE()
      );`,
 
+    // Per-term target field: the exact Adobe form-field name this term should merge
+    // into (e.g. 'Contract Terms BYM'). Lets different pre-approved terms land in
+    // different fields. NULL = fall back to the prefix behaviour (any field starting
+    // with the configured terms prefix), preserving the original single-blob model.
+    `IF COL_LENGTH('contract_terms', 'target_field') IS NULL
+     ALTER TABLE contract_terms ADD target_field NVARCHAR(300) NULL;`,
+
     // Extra BC customer fields used to pre-populate Adobe Sign contract templates
     // (REG NO, address line 2, postcode, county/state, primary contact name).
     `IF COL_LENGTH('bc_customers', 'address_line_2') IS NULL
@@ -2072,6 +2079,37 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE adobe_sign_agreements ADD bc_imported_at DATETIME2 NULL;`,
     `IF COL_LENGTH('adobe_sign_agreements', 'bc_import_error') IS NULL
      ALTER TABLE adobe_sign_agreements ADD bc_import_error NVARCHAR(MAX) NULL;`,
+
+    // Contract-approval hold columns. When a sender types CUSTOM contract terms
+    // (free text into a 'contract terms…' field, as opposed to picking pre-approved
+    // terms) and the Contract Approvals integration is enabled, the agreement is NOT
+    // sent to Adobe immediately. Instead a held row is written here with a synthetic
+    // agreement_id ('PENDING-…'), status 'OUT_FOR_APPROVAL', and the full intended
+    // create-agreement payload in approval_payload. A webhook fires to Power Automate;
+    // the callback releases (→ Adobe, agreement_id rewritten to the real id, status
+    // 'OUT_FOR_SIGNATURE', approval_status 'APPROVED') or rejects (status
+    // 'APPROVAL_REJECTED'). approval_token is the unguessable capability used in the
+    // webhook + callback. All NULL for normally-sent agreements.
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_token') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_token NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_status') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_status NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_payload') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_payload NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_terms_text') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_terms_text NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_requested_by') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_requested_by NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_requested_at') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_requested_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_decided_by') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_decided_by NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_decided_at') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_decided_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('adobe_sign_agreements', 'approval_note') IS NULL
+     ALTER TABLE adobe_sign_agreements ADD approval_note NVARCHAR(MAX) NULL;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_adobe_sign_agreements_approval_token')
+     CREATE INDEX IX_adobe_sign_agreements_approval_token ON adobe_sign_agreements(approval_token) WHERE approval_token IS NOT NULL;`,
 
     // Atomic counters for NOVA-generated sequence numbers (e.g. subscription
     // contract numbers). Use BCQueries.nextCounterValue to increment + read in

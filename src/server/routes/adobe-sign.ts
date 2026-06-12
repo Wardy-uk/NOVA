@@ -1,16 +1,23 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { AdobeSignApiError, type AdobeSignClient } from '../services/adobe-sign-client.js';
 import type { AdobeSignAgreementQueries, AgreementFieldValueQueries, CounterQueries, TemplateFieldOverrideQueries } from '../db/queries.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { BcSubscriptionImportService } from '../services/bc-subscription-import-service.js';
-
-const SUBSCRIPTION_CONTRACT_COUNTER = 'subscription_contract_no';
-const SUBSCRIPTION_CONTRACT_PREFIX = 'NOVA-';
-const SUBSCRIPTION_CONTRACT_PAD = 10;
-
-function formatSubscriptionContractNo(n: number): string {
-  return SUBSCRIPTION_CONTRACT_PREFIX + n.toString().padStart(SUBSCRIPTION_CONTRACT_PAD, '0');
-}
+import {
+  SUBSCRIPTION_CONTRACT_COUNTER,
+  DEFAULT_TERMS_FIELD_PREFIX,
+  formatSubscriptionContractNo,
+  fieldMatchesPrefix,
+  createAdobeAgreement,
+  type CreateAgreementInput,
+  type MergeField,
+} from '../services/adobe-agreement-sender.js';
+import {
+  readApprovalConfig,
+  isApprovalsEnabled,
+  fireApprovalWebhook,
+} from '../services/contract-approval-service.js';
 
 // Signer-only field types — these are filled at signing time, never by the sender.
 // Anything NOT in this set is shown as a sender-fillable input in the wizard.
@@ -25,20 +32,6 @@ const SIGNER_ONLY_FIELD_TYPES = new Set([
   'HYPERLINK_FIELD',
   'HYPERLINK',
 ]);
-
-const DEFAULT_TERMS_FIELD_PREFIX = 'contract terms';
-
-// Case- and separator-agnostic prefix match.
-// Matches "contract terms bym", "contract_terms_bym", "ContractTermsBYM", etc.
-function normaliseFieldName(s: string): string {
-  return (s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
-}
-
-function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
-  const n = normaliseFieldName(fieldName);
-  const p = normaliseFieldName(prefix);
-  return p.length > 0 && n.startsWith(p);
-}
 
 function adobeError(err: unknown): { status: number; error: string; retryAfter?: number } {
   if (err instanceof AdobeSignApiError) {
@@ -190,7 +183,7 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { library_document_ids, contract_id, bc_customer_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text } = req.body;
+    const { library_document_ids, contract_id, bc_customer_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text, contract_terms_targeted } = req.body;
     if (!Array.isArray(library_document_ids) || library_document_ids.length === 0) {
       res.status(400).json({ ok: false, error: 'library_document_ids must be a non-empty array' });
       return;
@@ -204,46 +197,96 @@ export function createAdobeSignRoutes(
     if (!name?.trim()) { res.status(400).json({ ok: false, error: 'name is required' }); return; }
     if (!signer_emails?.length) { res.status(400).json({ ok: false, error: 'At least one signer email is required' }); return; }
 
-    // Auto-detect terms fields on each template and inject the concatenated terms text.
-    // Field names matching the configured prefix (default 'contract terms') receive the same value.
-    const allMergeFields: Array<{ fieldName: string; defaultValue: string }> = Array.isArray(merge_fields)
+    const settings = settingsQueries.getAll();
+    const normalisedBcCustomerId = typeof bc_customer_id === 'string' && bc_customer_id.trim() ? bc_customer_id.trim() : null;
+
+    // Sender-provided merge fields (the values typed into the wizard's field inputs).
+    // Pre-approved terms are NOT here — they travel as contract_terms_text and get
+    // auto-injected server-side. So a 'contract terms…' field appearing here with a
+    // value means the sender TYPED custom terms — that's what triggers approval.
+    const clientMergeFields: MergeField[] = Array.isArray(merge_fields)
       ? merge_fields.filter((m: { fieldName?: unknown }) => typeof m?.fieldName === 'string')
       : [];
-    let termsFieldsPopulated: Array<{ fieldName: string; libraryDocumentId: string }> = [];
-    const termsText = typeof contract_terms_text === 'string' ? contract_terms_text.trim() : '';
+    const termsPrefix = (settings.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
+    const customTermsFields = clientMergeFields.filter(
+      m => fieldMatchesPrefix(m.fieldName, termsPrefix) && (m.defaultValue ?? '').trim().length > 0
+    );
 
-    if (termsText) {
-      const settings = settingsQueries.getAll();
-      const prefix = (settings.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
-      const explicitlyProvided = new Set(allMergeFields.map(f => f.fieldName));
-      const populated = new Set<string>();
-      for (const docId of cleanIds) {
-        try {
-          const fields = await client.getLibraryDocumentFormFields(docId);
-          for (const f of fields) {
-            if (!fieldMatchesPrefix(f.name, prefix)) continue;
-            if (explicitlyProvided.has(f.name)) continue;
-            if (populated.has(f.name)) continue;
-            allMergeFields.push({ fieldName: f.name, defaultValue: termsText });
-            populated.add(f.name);
-            termsFieldsPopulated.push({ fieldName: f.name, libraryDocumentId: docId });
-          }
-        } catch (err) {
-          console.warn(`[Adobe Sign] Could not fetch form fields for ${docId} (terms auto-detect):`, err instanceof Error ? err.message : err);
-        }
+    const sendInput: CreateAgreementInput = {
+      library_document_ids: cleanIds,
+      name,
+      signer_emails,
+      cc_emails,
+      message,
+      merge_fields: clientMergeFields,
+      expiration_days,
+      contract_terms_text,
+      contract_terms_targeted: Array.isArray(contract_terms_targeted) ? contract_terms_targeted : undefined,
+    };
+
+    // ── Approval gate ──
+    // If the sender typed custom terms AND the Contract Approvals workflow is enabled,
+    // do NOT send to Adobe yet. Hold the agreement, fire the approval webhook, and let
+    // the callback release it. When approvals are enabled but no webhook is configured,
+    // we block the send (there's no way to get the sign-off). When the workflow is
+    // disabled entirely, custom terms send straight through as before.
+    if (customTermsFields.length > 0 && isApprovalsEnabled(settings)) {
+      const cfg = readApprovalConfig(settings);
+      if (!cfg.webhookUrl) {
+        res.status(400).json({ ok: false, error: 'This contract contains custom terms, which require approval, but no Approval Webhook URL is configured. Set it in Admin → Integrations → Contract Approvals (or remove the custom terms).' });
+        return;
       }
+
+      const approvalToken = crypto.randomBytes(24).toString('hex');
+      const syntheticId = 'PENDING-' + crypto.randomBytes(12).toString('hex');
+      const termsText = customTermsFields.map(f => f.defaultValue.trim()).join('\n\n');
+      const requestedBy = (req as { user?: { username?: string } }).user?.username ?? null;
+
+      try {
+        await agreementQueries.createApprovalHold({
+          agreementId: syntheticId,
+          approvalToken,
+          contractId: contract_id ?? null,
+          bcCustomerId: normalisedBcCustomerId,
+          name,
+          signerEmails: JSON.stringify(signer_emails),
+          filledFields: clientMergeFields.length > 0 ? JSON.stringify(clientMergeFields) : null,
+          payload: JSON.stringify(sendInput),
+          termsText,
+          requestedBy,
+        });
+      } catch (err) {
+        console.error('[Contract Approvals] Failed to persist hold:', err);
+        res.status(500).json({ ok: false, error: 'Failed to hold contract for approval.' });
+        return;
+      }
+
+      // Fire the webhook. If it fails, keep the hold (it's already persisted as PENDING)
+      // and surface the error — an admin can re-fire later rather than losing the request.
+      try {
+        await fireApprovalWebhook(cfg, {
+          token: approvalToken,
+          contract_name: name,
+          bc_customer_id: normalisedBcCustomerId,
+          signer_emails,
+          terms_text: termsText,
+          requested_by: requestedBy,
+          callback_url: cfg.callbackUrl,
+          requested_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[Contract Approvals] Webhook fire failed:', err);
+        res.json({ ok: true, data: { pending_approval: true, approval_token: approvalToken, webhook_error: err instanceof Error ? err.message : 'Webhook failed' } });
+        return;
+      }
+
+      res.json({ ok: true, data: { pending_approval: true, approval_token: approvalToken } });
+      return;
     }
 
+    // ── Normal send (no custom terms, or approvals disabled) ──
     try {
-      const result = await client.createAgreement({
-        name,
-        signerEmails: signer_emails,
-        ccEmails: cc_emails,
-        message,
-        libraryDocumentIds: cleanIds,
-        mergeFields: allMergeFields.length > 0 ? allMergeFields : undefined,
-        expirationDays: expiration_days,
-      });
+      const out = await createAdobeAgreement(client, settings, sendInput);
 
       // Allocate the NOVA-NNNNNNNNNN subscription contract number now so it's stored
       // on the agreement alongside the Adobe agreement id. Post-sign handler reads
@@ -252,32 +295,32 @@ export function createAdobeSignRoutes(
       const subscriptionContractNo = formatSubscriptionContractNo(counterValue);
 
       await agreementQueries.upsert({
-        agreement_id: result.id,
+        agreement_id: out.agreementId,
         contract_id: contract_id ?? null,
-        bc_customer_id: typeof bc_customer_id === 'string' && bc_customer_id.trim() ? bc_customer_id.trim() : null,
+        bc_customer_id: normalisedBcCustomerId,
         subscription_contract_no: subscriptionContractNo,
         name,
         status: 'OUT_FOR_SIGNATURE',
         sender_email: null,
         signer_emails: JSON.stringify(signer_emails),
-        filled_fields: allMergeFields.length > 0 ? JSON.stringify(allMergeFields) : null,
+        filled_fields: out.mergeFields.length > 0 ? JSON.stringify(out.mergeFields) : null,
         created_via_nova: 1,
         adobe_created_date: new Date().toISOString(),
         adobe_expiration_date: null,
         signed_document_url: null,
-        raw_data: JSON.stringify(result),
+        raw_data: JSON.stringify({ id: out.agreementId }),
         synced_at: new Date().toISOString(),
       });
 
       // Capture every sender-filled merge field into agreement_field_values so the
       // post-sign handler doesn't have to refetch from Adobe. Signer can't modify
       // anything per current Adobe template policy, so SENDER is the only source.
-      if (allMergeFields.length > 0) {
-        await fieldValueQueries.bulkInsert(result.id, 'SENDER',
-          allMergeFields.map(m => ({ field_name: m.fieldName, field_value: m.defaultValue ?? null })));
+      if (out.mergeFields.length > 0) {
+        await fieldValueQueries.bulkInsert(out.agreementId, 'SENDER',
+          out.mergeFields.map(m => ({ field_name: m.fieldName, field_value: m.defaultValue ?? null })));
       }
 
-      res.json({ ok: true, data: { agreement_id: result.id, subscription_contract_no: subscriptionContractNo, terms_fields_populated: termsFieldsPopulated } });
+      res.json({ ok: true, data: { agreement_id: out.agreementId, subscription_contract_no: subscriptionContractNo, terms_fields_populated: out.termsFieldsPopulated } });
     } catch (err) {
       console.error('[Adobe Sign] Create agreement error:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create agreement' });
