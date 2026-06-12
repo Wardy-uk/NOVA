@@ -22,13 +22,15 @@ export interface ApprovalWebhookConfig {
   callbackUrl: string;
 }
 
+// All scalar fields are non-null strings — Power Automate's generated trigger schema
+// expects strings and rejects null. Callers coerce nullable values to '' before sending.
 export interface ApprovalWebhookPayload {
   token: string;
   contract_name: string;
-  bc_customer_id: string | null;
+  bc_customer_id: string;
   signer_emails: string[];
   terms_text: string;
-  requested_by: string | null;
+  requested_by: string;
   callback_url: string;
   requested_at: string;
 }

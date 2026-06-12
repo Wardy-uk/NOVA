@@ -267,10 +267,12 @@ export function createAdobeSignRoutes(
         await fireApprovalWebhook(cfg, {
           token: approvalToken,
           contract_name: name,
-          bc_customer_id: normalisedBcCustomerId,
+          // Coerce nullable fields to '' — Power Automate's generated trigger schema
+          // expects strings and rejects null with a TriggerInputSchemaMismatch.
+          bc_customer_id: normalisedBcCustomerId ?? '',
           signer_emails,
           terms_text: termsText,
-          requested_by: requestedBy,
+          requested_by: requestedBy ?? '',
           callback_url: cfg.callbackUrl,
           requested_at: new Date().toISOString(),
         });
