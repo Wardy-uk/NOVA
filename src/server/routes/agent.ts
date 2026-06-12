@@ -654,7 +654,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   // ── Quick Win Settings & Stats ──
 
-  const QW_TYPES = ['spam', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved'] as const;
+  const QW_TYPES = ['spam', 'vendor_email', 'survey_feedback', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved'] as const;
 
   router.get('/quick-win/settings', (_req, res) => {
     const sq = deps?.settingsQueries;

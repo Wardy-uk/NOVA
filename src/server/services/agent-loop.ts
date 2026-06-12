@@ -1706,7 +1706,7 @@ export class AgentLoop {
 
     // Quick-win auto-close (only reached in non-shadow mode)
     const qw = decision.output.quick_win as { type?: string; confidence?: number; reasoning?: string } | undefined;
-    const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
+    const closableQwTypes = ['spam', 'vendor_email', 'survey_feedback', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
     const alwaysAutoCloseTypes = ['auto_reply', 'out_of_office'];
     if (qw?.type && qw.type !== 'none') {
       const isAlwaysClose = alwaysAutoCloseTypes.includes(qw.type) && (qw.confidence ?? 0) >= 0.85;
@@ -2546,7 +2546,7 @@ export class AgentLoop {
       if (responseText && quickWinType !== 'spam') {
         try {
           const closableActions = ['close', 'quick_win_close', 'resolve', 'transition'];
-          const closableQwTypesForComment = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
+          const closableQwTypesForComment = ['spam', 'vendor_email', 'survey_feedback', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
           const isCloseAction = (actionType && closableActions.includes(actionType))
             || (quickWinType && closableQwTypesForComment.includes(quickWinType));
           // Close/resolve: customer-facing message goes PUBLIC, reasoning goes as separate internal note
@@ -2625,7 +2625,7 @@ export class AgentLoop {
 
       // Close/resolve actions: transition the Jira ticket (runs even if comment was blocked/skipped)
       // Also trigger for quick-win types (spam, auto_reply, etc.) even if the LLM recommended 'respond'
-      const closableQwTypes = ['spam', 'vendor_email', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
+      const closableQwTypes = ['spam', 'vendor_email', 'survey_feedback', 'thank_you', 'stale_no_response', 'auto_resolved', 'duplicate', 'auto_reply', 'out_of_office'];
       const shouldTransition = (actionType && ['close', 'quick_win_close', 'resolve', 'transition'].includes(actionType))
         || (quickWinType && closableQwTypes.includes(quickWinType));
       if (shouldTransition) {

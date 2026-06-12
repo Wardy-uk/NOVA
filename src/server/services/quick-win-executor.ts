@@ -8,14 +8,23 @@ import { prepareTicketForClose } from './close-ticket-helper.js';
 
 const QW_COMMENT_PREFIX = '[AI Agent — Auto-Close]';
 
+// Customer-facing close messages — posted as public JSM comments, so no internal agent prefix.
 const CLOSE_COMMENTS: Record<string, string> = {
+  thank_you: `Thanks for letting us know — glad we could help! We're closing this ticket now. If you need anything else, just raise a new request and we'll pick it up.`,
+  stale_no_response: `We've followed up a few times but haven't heard back, so we're closing this ticket for now. If you still need help, just raise a new request or reply here and we'll reopen it.`,
+  auto_resolved: `It looks like this issue has now been resolved, so we're closing this ticket. If the problem returns, please raise a new request and we'll be happy to help.`,
+  duplicate: `This request looks like a duplicate of another ticket (referenced below), so we're closing it to keep everything in one place. If you think this is a separate issue, please raise a new request.`,
+};
+
+// Internal-only close notes — team-visible, so they keep the agent marker.
+const INTERNAL_CLOSE_COMMENTS: Record<string, string> = {
   spam: `${QW_COMMENT_PREFIX} This ticket was identified as spam or an automated submission and has been cancelled.`,
   vendor_email: `${QW_COMMENT_PREFIX} This ticket was identified as an unsolicited vendor/marketing email rather than a support request and has been cancelled.`,
-  thank_you: `${QW_COMMENT_PREFIX} Thanks for letting us know — glad we could help! Closing this ticket. If you need anything else, just raise a new request and we'll pick it up.`,
-  stale_no_response: `${QW_COMMENT_PREFIX} We've followed up a few times but haven't heard back. Closing this ticket for now — if you still need help, just raise a new request or reply to this one and we'll reopen it.`,
-  auto_resolved: `${QW_COMMENT_PREFIX} It looks like this issue has been resolved. Closing this ticket — if the problem returns, please raise a new request.`,
-  duplicate: `${QW_COMMENT_PREFIX} This ticket appears to be a duplicate. Please see the original ticket referenced below. Closing to avoid duplication — if this is a separate issue, please raise a new request.`,
+  survey_feedback: `${QW_COMMENT_PREFIX} This ticket was identified as an automated survey/feedback-request email rather than a support request and has been cancelled.`,
 };
+
+// Quick-win types that close silently: internal note only (no customer email) + `cancel` transition.
+const SILENT_CANCEL_TYPES = new Set(['spam', 'vendor_email', 'survey_feedback']);
 
 interface QuickWin {
   type: string;
@@ -69,23 +78,25 @@ export class QuickWinExecutor {
       await prepareTicketForClose(this.jiraClient, this.settings, {
         ticketKey,
         classification: (decision.output.classification as { category?: string; ticket_type?: string }) ?? undefined,
-        requestTypeOverride: (qw.type === 'spam' || qw.type === 'vendor_email') ? 'Emailed request' : undefined,
+        requestTypeOverride: SILENT_CANCEL_TYPES.has(qw.type) ? 'Emailed request' : undefined,
       });
 
-      // Post comment (spam = internal only, others = public)
+      // Post the close comment ONCE here. The transition below intentionally does
+      // not carry a comment, otherwise the same text would be posted twice.
+      // spam/vendor = internal team note; everything else = public customer comment.
       if (qw.type === 'kba_match') {
         const kba = qw.suggested_kba || 'a relevant knowledge base article';
-        const comment = `${QW_COMMENT_PREFIX} This question is covered by our knowledge base: ${kba}. Please take a look and let us know if you need further help. If we don't hear back within 5 working days, we'll close this ticket.`;
+        const comment = `This question is covered by our knowledge base: ${kba}. Please take a look and let us know if you need further help. If we don't hear back within 5 working days, we'll close this ticket.`;
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
-      } else if (qw.type === 'spam' || qw.type === 'vendor_email') {
-        await this.jiraClient.addComment(ticketKey, CLOSE_COMMENTS[qw.type], { internal: true });
+      } else if (SILENT_CANCEL_TYPES.has(qw.type)) {
+        await this.jiraClient.addComment(ticketKey, INTERNAL_CLOSE_COMMENTS[qw.type], { internal: true });
       } else {
-        const comment = CLOSE_COMMENTS[qw.type] || `${QW_COMMENT_PREFIX} This ticket has been auto-closed.`;
+        const comment = CLOSE_COMMENTS[qw.type] || `This ticket has been closed. If you still need help, please raise a new request.`;
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
       }
 
       // Find and execute transition — try primary name, then fallbacks
-      const targetTransition = (qw.type === 'spam' || qw.type === 'vendor_email') ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
+      const targetTransition = SILENT_CANCEL_TYPES.has(qw.type) ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
       const transitionId = await this.findTransitionId(ticketKey, targetTransition)
         || (targetTransition !== 'resolve' ? await this.findTransitionId(ticketKey, 'resolve') : null);
 
@@ -101,7 +112,7 @@ export class QuickWinExecutor {
       // Set resolution type using configurable mapping
       const resMapRaw = this.settings.get('agent_resolution_type_map');
       let resMap: Record<string, string> = {
-        spam: 'Request Cancelled / Withdrawn', vendor_email: 'Request Cancelled / Withdrawn',
+        spam: 'Request Cancelled / Withdrawn', vendor_email: 'Request Cancelled / Withdrawn', survey_feedback: 'Request Cancelled / Withdrawn',
         thank_you: 'No Fault Found', kba_match: 'Fix By Tech Services',
         stale_no_response: 'Request Cancelled / Withdrawn', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
       };
@@ -110,12 +121,14 @@ export class QuickWinExecutor {
       if (['resolve', 'cancel'].includes(targetTransition)) {
         try {
           const resolution = resMap[qw.type] || 'No Fault Found';
-          const { fields, comment: resolveComment } = buildResolveFields({
+          // Comment was already posted above — only set the resolution fields here,
+          // do NOT pass a comment or it would be duplicated on the ticket.
+          const { fields } = buildResolveFields({
             tldr: `Quick win auto-close: ${qw.type}`,
             resolution,
-            comment: CLOSE_COMMENTS[qw.type] || 'Auto-closed by NOVA quick win detection.',
+            comment: '',
           });
-          await this.jiraClient.transitionIssue(ticketKey, transitionId, { fields, comment: resolveComment });
+          await this.jiraClient.transitionIssue(ticketKey, transitionId, { fields });
         } catch (err) {
           console.warn(`[quick-win] Failed to set resolve fields on ${ticketKey}:`, err instanceof Error ? err.message : err);
           await this.jiraClient.transitionIssue(ticketKey, transitionId, {

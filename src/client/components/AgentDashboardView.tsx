@@ -268,6 +268,8 @@ function timeAgo(iso: string): string {
 
 const QW_BADGE: Record<string, { bg: string; text: string; label: string }> = {
   spam: { bg: 'bg-red-600/20', text: 'text-red-400', label: 'Spam' },
+  vendor_email: { bg: 'bg-pink-600/20', text: 'text-pink-400', label: 'Vendor Email' },
+  survey_feedback: { bg: 'bg-purple-600/20', text: 'text-purple-400', label: 'Survey / Feedback' },
   thank_you: { bg: 'bg-green-600/20', text: 'text-green-400', label: 'Thank You' },
   kba_match: { bg: 'bg-blue-600/20', text: 'text-blue-400', label: 'KBA Match' },
   stale_no_response: { bg: 'bg-orange-600/20', text: 'text-orange-400', label: 'Stale' },
@@ -2312,7 +2314,7 @@ function AutonomyTab({ rules, onRefresh, isSuperAdmin = false }: { rules: Autono
 
 function QuickWinSettingsPanel() {
   const QW_LABELS: Record<string, string> = {
-    spam: 'Spam', thank_you: 'Thank You', kba_match: 'KBA Match',
+    spam: 'Spam', vendor_email: 'Vendor Email', survey_feedback: 'Survey / Feedback', thank_you: 'Thank You', kba_match: 'KBA Match',
     stale_no_response: 'Stale / No Response', duplicate: 'Duplicate', auto_resolved: 'Auto Resolved',
   };
   const QW_TYPES = Object.keys(QW_LABELS);
