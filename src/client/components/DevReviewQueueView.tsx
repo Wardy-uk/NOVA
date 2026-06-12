@@ -398,7 +398,7 @@ export function DevReviewQueueView() {
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
   const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [acceptError, setAcceptError] = useState<string | null>(null);
-  const [acceptedWorkItem, setAcceptedWorkItem] = useState<{ key: string; sourceKey: string } | null>(null);
+  const [acceptedWorkItem, setAcceptedWorkItem] = useState<{ key: string; sourceKey: string; linked?: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -556,6 +556,7 @@ export function DevReviewQueueView() {
     setAcceptTldr(adfToText(detail.fields.customfield_13184));
     setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
     setAcceptNote('');
+    setAcceptWorkItemComment('');
     setLinkExistingKey('');
     setAcceptError(null);
     setShowLinkExistingModal(true);
@@ -569,16 +570,16 @@ export function DevReviewQueueView() {
     try {
       const json = await apiFull(`/ticket/${selectedKey}/link-existing`, {
         method: 'POST',
-        body: JSON.stringify({ workItemKey: linkExistingKey.trim(), note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails }),
+        body: JSON.stringify({ workItemKey: linkExistingKey.trim(), note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment }),
       });
       if (json.ok) {
         setItems(prev => prev.map(i => i.key === selectedKey
           ? { ...i, state: { ...i.state!, status: 'accepted' as const, accepted_at: new Date().toISOString(), work_item_key: json.workItemKey ?? null } }
           : i));
         setShowLinkExistingModal(false);
-        if (json.workItemKey) setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey });
+        if (json.workItemKey) setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey, linked: true });
         // Clear the form only after a successful link — never on failure.
-        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setLinkExistingKey('');
+        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setLinkExistingKey(''); setAcceptWorkItemComment('');
       } else {
         setAcceptError(json.error || 'Link failed — please try again.');
       }
@@ -802,9 +803,13 @@ export function DevReviewQueueView() {
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Development Details</label>
             <textarea value={acceptDevDetails} onChange={e => setAcceptDevDetails(e.target.value)} placeholder="Technical context, suspected cause, queries…" rows={6} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono" style={{ background: 'rgba(255,255,255,0.06)' }} />
           </div>
-          <div className="mb-5">
+          <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Internal note (optional)</label>
             <textarea value={acceptNote} onChange={e => setAcceptNote(e.target.value)} placeholder="Optional context for the dev team…" rows={2} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600" style={{ background: 'rgba(255,255,255,0.06)' }} />
+          </div>
+          <div className="mb-5">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Work item comment (optional)</label>
+            <textarea value={acceptWorkItemComment} onChange={e => setAcceptWorkItemComment(e.target.value)} placeholder="Anything to add to the linked work item?" rows={3} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600" style={{ background: 'rgba(255,255,255,0.06)' }} />
           </div>
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5">
             <div className="text-[10px] text-neutral-500">{acceptError ? <span className="text-red-400">{acceptError}</span> : linkExistingKey.trim() && /^[A-Z]+-\d+$/.test(linkExistingKey.trim()) && acceptTldr.trim() ? <span className="text-blue-400">✓ Ready to link</span> : <span className="text-red-400">{!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim()) ? 'Valid work item key required' : 'TL;DR required'}</span>}</div>
@@ -820,7 +825,7 @@ export function DevReviewQueueView() {
         <Modal onClose={() => { setAcceptedWorkItem(null); setCopied(false); }}>
           <div className="text-center">
             <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.15)' }}><span className="text-3xl">✓</span></div>
-            <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>Work item created</h3>
+            <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>{acceptedWorkItem.linked ? 'Work item linked' : 'Work item created'}</h3>
             <p className="text-[12px] text-neutral-400 mb-5">{acceptedWorkItem.sourceKey} has been escalated to development</p>
             <div className="flex items-center justify-center gap-3 mx-auto px-5 py-3 rounded-xl mb-5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
               <span className="text-xl font-bold font-mono text-[#5ec1ca]">{acceptedWorkItem.key}</span>

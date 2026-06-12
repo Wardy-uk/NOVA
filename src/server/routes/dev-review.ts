@@ -150,6 +150,45 @@ function adfDoc(text: string): object {
   return { type: 'doc', version: 1, content: paragraphs };
 }
 
+/** Build the support-ticket brief used for the dev work item — shared by
+ *  Accept (new Bug description) and Link Existing (comment on the existing
+ *  item) so a developer gets the SAME context either way. Returns the plain
+ *  text plus the support ticket's summary and Nurtur Product for the caller. */
+async function buildWorkItemBrief(
+  client: JiraRestClient,
+  ntKey: string,
+  tldr: string,
+  developmentDetails: string,
+  workItemComment: string,
+): Promise<{ text: string; summary: string; nurturProduct: string | null }> {
+  const issue = await client.getIssue(ntKey, [
+    'summary', 'reporter', 'priority',
+    CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
+    CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
+  ]);
+  const f = (issue?.fields || {}) as Record<string, unknown>;
+  const reporterName = (f.reporter as { displayName?: string } | null)?.displayName || 'Unknown';
+  const priorityName = (f.priority as { name?: string } | null)?.name || 'Unknown';
+  const summary = (f.summary as string) || '(no summary)';
+  const briefAgentSummary = adfToPlainText(f[CF_AGENT_SUMMARY]) || 'None';
+  const briefTroubleshooting = adfToPlainText(f[CF_TROUBLESHOOTING]) || 'None';
+  const briefExpectedOutcome = adfToPlainText(f[CF_EXPECTED_OUTCOME]) || 'None';
+  const briefEnvironment = adfToPlainText(f[CF_ISSUE_ENVIRONMENT]) || 'None';
+  const nurturProduct = (f[CF_NURTUR_PRODUCT] as { value?: string } | null)?.value || null;
+  const text =
+    `Support Ticket: ${ntKey}\n` +
+    `Customer: ${reporterName}\n` +
+    `Priority: ${priorityName}\n\n` +
+    `── TL;DR ──\n${tldr}\n\n` +
+    `── Development Details ──\n${developmentDetails}\n\n` +
+    `── Agent Summary ──\n${briefAgentSummary}\n\n` +
+    `── Troubleshooting Performed ──\n${briefTroubleshooting}\n\n` +
+    `── Expected Outcome ──\n${briefExpectedOutcome}\n\n` +
+    `── Environment ──\n${briefEnvironment}\n\n` +
+    `── Developer Comment ──\n${workItemComment || 'None'}`;
+  return { text, summary, nurturProduct };
+}
+
 export function createDevReviewRoutes(
   devQueries: DevReviewQueries,
   settingsQueries: SettingsQueries,
@@ -868,43 +907,16 @@ export function createDevReviewRoutes(
       warnings.push('No Jira project key configured for your team — work item not created');
     } else {
       try {
-        // Fetch the full issue fields for the Bug description
-        const issueForBug = await client.getIssue(key, [
-          'summary', 'reporter', 'priority',
-          CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
-          CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
-        ]);
-        const issueFields = (issueForBug?.fields || {}) as Record<string, unknown>;
-        const reporterName = (issueFields.reporter as { displayName?: string } | null)?.displayName || 'Unknown';
-        const priorityName = (issueFields.priority as { name?: string } | null)?.name || 'Unknown';
-        const issueSummary = (issueFields.summary as string) || '(no summary)';
-
-        const briefTldr = adfToPlainText(issueFields[CF_TLDR]) || tldr || '(none)';
-        const briefAgentSummary = adfToPlainText(issueFields[CF_AGENT_SUMMARY]) || 'None';
-        const briefTroubleshooting = adfToPlainText(issueFields[CF_TROUBLESHOOTING]) || 'None';
-        const briefExpectedOutcome = adfToPlainText(issueFields[CF_EXPECTED_OUTCOME]) || 'None';
-        const briefEnvironment = adfToPlainText(issueFields[CF_ISSUE_ENVIRONMENT]) || 'None';
-
-        // Copy the Nurtur Product select value from the support ticket onto the Bug
-        const nurturProduct = (issueFields[CF_NURTUR_PRODUCT] as { value?: string } | null)?.value || null;
-
-        const descriptionText =
-          `Support Ticket: ${key}\n` +
-          `Customer: ${reporterName}\n` +
-          `Priority: ${priorityName}\n\n` +
-          `── TL;DR ──\n${tldr}\n\n` +
-          `── Development Details ──\n${developmentDetails}\n\n` +
-          `── Agent Summary ──\n${briefAgentSummary}\n\n` +
-          `── Troubleshooting Performed ──\n${briefTroubleshooting}\n\n` +
-          `── Expected Outcome ──\n${briefExpectedOutcome}\n\n` +
-          `── Environment ──\n${briefEnvironment}\n\n` +
-          `── Developer Comment ──\n${workItemComment || 'None'}`;
+        // Build the same brief Link Existing posts to its work item, so both
+        // paths give the developer identical context.
+        const brief = await buildWorkItemBrief(client, key, tldr, developmentDetails, workItemComment);
+        const nurturProduct = brief.nurturProduct;
 
         const baseFields = {
           project: { key: targetProjectKey },
           issuetype: { name: 'Bug' },
-          summary: `[Support] ${issueSummary}`,
-          description: adfDoc(descriptionText),
+          summary: `[Support] ${brief.summary}`,
+          description: adfDoc(brief.text),
           customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
         };
         // Mirror the support ticket's Nurtur Product onto the Bug when set.
@@ -984,6 +996,7 @@ export function createDevReviewRoutes(
     const note = String(req.body?.note || '').trim();
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
+    const workItemComment = String(req.body?.workItemComment || '').trim();
     const display = await userDisplay(req);
 
     if (!workItemKey || !/^[A-Z]+-\d+$/.test(workItemKey)) {
@@ -1150,6 +1163,20 @@ export function createDevReviewRoutes(
       const msg = linkErr instanceof Error ? linkErr.message : 'Link creation failed';
       console.error(`[DevReview/link-existing] Issue link failed for ${key} → ${workItemKey}: ${msg}`);
       warnings.push(`Link creation failed: ${msg}`);
+    }
+
+    // Step 4b — post the support-ticket brief onto the existing work item.
+    // Accept embeds this in a NEW Bug's description; here we can't overwrite an
+    // existing item's description, so we post the same brief as a comment so
+    // the developer has identical context. Non-fatal on failure.
+    try {
+      const brief = await buildWorkItemBrief(client, key, tldr, developmentDetails, workItemComment);
+      const workItemBrief = `🔗 Linked from support ticket ${key} by ${display}\n\n${brief.text}`;
+      await client.addComment(workItemKey, workItemBrief);
+    } catch (briefErr) {
+      const msg = briefErr instanceof Error ? briefErr.message : 'Work item brief failed';
+      console.error(`[DevReview/link-existing] Failed to post brief to ${workItemKey}: ${msg}`);
+      warnings.push(`Linked ${workItemKey} but couldn't post the support brief to it: ${msg}`);
     }
 
     // Step 5 — customer-facing comment
