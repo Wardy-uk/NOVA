@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import type { UserQueries } from '../db/queries.js';
+import type { UserQueries, UserTeamQueries, TeamQueries } from '../db/queries.js';
 import { authMiddleware, type AuthPayload } from '../middleware/auth.js';
 import type { EntraSsoService } from '../services/entra-sso.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -119,8 +119,18 @@ export function createAuthRoutes(
   settingsQueries: FileSettingsQueries,
   jiraOAuthService?: JiraOAuthService,
   userSettingsQueries?: UserSettingsQueries,
+  userTeamQueries?: UserTeamQueries,
+  teamQueries?: TeamQueries,
 ): Router {
   const router = Router();
+
+  // Resolve the team names a user belongs to (for client-side gating). Best-effort.
+  async function teamNamesFor(userId: number): Promise<string[]> {
+    if (!userTeamQueries || !teamQueries) return [];
+    try {
+      return (await userTeamQueries.getTeamsForUser(userId, teamQueries)).map(t => t.name);
+    } catch { return []; }
+  }
 
   // POST /api/auth/login
   router.post('/login', async (req, res) => {
@@ -302,7 +312,8 @@ export function createAuthRoutes(
     if (userSettingsQueries) {
       preferences.homepage = await userSettingsQueries.get(req.user!.id, 'homepage');
     }
-    res.json({ ok: true, data: { user: safeUser(user), preferences } });
+    const teams = await teamNamesFor(req.user!.id);
+    res.json({ ok: true, data: { user: { ...safeUser(user), teams }, preferences } });
   });
 
   // GET /api/auth/preferences — user preferences

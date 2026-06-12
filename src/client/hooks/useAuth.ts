@@ -8,6 +8,7 @@ export interface AuthUser {
   role: string;
   auth_provider: string;
   team_id: number | null;
+  teams?: string[];
 }
 
 interface AuthState {

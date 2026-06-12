@@ -52,7 +52,7 @@ import { SalesQueries } from './db/sales-queries.js';
 import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
 import { JiraRestClient } from './services/jira-client.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
-import { authMiddleware, createAreaAccessGuard, requireRole } from './middleware/auth.js';
+import { authMiddleware, createAreaAccessGuard, requireRole, requireRoleAndTeam } from './middleware/auth.js';
 import type { CustomRole } from './middleware/auth.js';
 import { isAdmin } from './utils/role-helpers.js';
 import crypto from 'crypto';
@@ -606,7 +606,7 @@ async function main() {
   // Public API routes (no auth required)
   app.post('/api/auth/login', loginLimiter);
   app.post('/api/auth/register', loginLimiter);
-  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries, jiraOAuthService, userSettingsQueries));
+  app.use('/api/auth', createAuthRoutes(userQueries, jwtSecret, ssoService, settingsQueries, jiraOAuthService, userSettingsQueries, userTeamQueries, teamQueries));
 
   // Customer setup portal — public routes (token-validated, no NOVA auth)
   const portalLimiter = rateLimit({
@@ -1112,7 +1112,9 @@ async function main() {
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
   // ── TPJ Maintenance (NTPJ) dashboard — Lucy's team, scoped to the NTPJ project ──
-  app.use('/api/tpj-maintenance', requireAreaAccess(['kpis'], 'view'),
+  // Access: super_admin, OR the KPI role AND membership of the TPJ team.
+  app.use('/api/tpj-maintenance',
+    requireRoleAndTeam('kpi', 'TPJ', (uid) => userTeamQueries.getTeamsForUser(uid, teamQueries).then(ts => ts.map(t => t.name))),
     createTpjMaintenanceRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
   // ── Risk Intelligence (account-level) — read API for the dashboard + ticket sidebar ──

@@ -751,6 +751,13 @@ export function App() {
       if (gateArea && (areaAccess[gateArea] || 'hidden') === 'hidden') return false;
       const flag = FEATURE_FLAG_TABS[t.view];
       if (flag && featureFlags[flag] === false) return false;
+      // TPJ Maintenance: super_admin, OR the KPI role AND membership of the TPJ team.
+      if (t.view === 'tpj-maintenance') {
+        const roles = (auth.user?.role ?? '').split(',').map(r => r.trim());
+        const isSuper = roles.includes('super_admin');
+        const inTpj = (auth.user?.teams ?? []).some(tm => tm.toLowerCase() === 'tpj');
+        if (!(isSuper || (roles.includes('kpi') && inTpj))) return false;
+      }
       return true;
     });
   };

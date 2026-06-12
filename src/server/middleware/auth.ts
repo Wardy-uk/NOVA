@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { parseRoles, isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
+import { parseRoles, isAdmin, isSuperAdmin, hasRole } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 
 // Default access for areas not explicitly set in saved custom roles.
@@ -128,6 +128,36 @@ export function createAreaAccessGuard(getRoles: () => CustomRole[]) {
 }
 
 export type AreaAccessGuard = ReturnType<typeof createAreaAccessGuard>;
+
+/**
+ * Stricter guard than requireAreaAccess: passes ONLY for super_admin, or for a user
+ * who has the given role AND belongs to a team with the given name. Note this does NOT
+ * let plain `admin` through (unlike area guards) — by design, per the TPJ requirement.
+ * Team membership is resolved fresh from the DB via the injected resolver so role/team
+ * changes take effect without re-login.
+ */
+export function requireRoleAndTeam(
+  roleId: string,
+  teamName: string,
+  getUserTeamNames: (userId: number) => Promise<string[]>,
+) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ ok: false, error: 'Not authenticated' });
+      return;
+    }
+    if (isSuperAdmin(req.user.role)) { next(); return; }
+    if (hasRole(req.user.role, roleId)) {
+      try {
+        const teams = await getUserTeamNames(req.user.id);
+        if (teams.some(t => (t || '').toLowerCase() === teamName.toLowerCase())) { next(); return; }
+      } catch (err) {
+        ssoLogger.error('role_team_access', `team lookup failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    res.status(403).json({ ok: false, error: `Requires the ${roleId.toUpperCase()} role and ${teamName} team` });
+  };
+}
 
 export function authMiddleware(secret: string, getUserRole?: (id: number) => Promise<string | undefined>) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
