@@ -32,6 +32,7 @@ const F = {
 const EXEMPT_STATUSES = ['Waiting On Requestor', 'Waiting On Partner'];
 const EXEMPT_JQL = EXEMPT_STATUSES.map((s) => `"${s}"`).join(', ');
 
+const PROJECT_YOMDEL = 'YO'; // Yomdel Support service desk (the "SUPPORT Chat" space)
 const PSP_TARGET = 180; // per agent / month
 const PLUGIN_FAILED_LABEL = 'plugin-failed-update';
 const FRT_GOAL_MS = 24 * 60 * 60 * 1000;
@@ -498,4 +499,67 @@ export async function getSloTrendWeekly(client: JiraRestClient) {
     });
   }
   return { target: 85, weeks: out };
+}
+
+// ── Daily KPIs scorecard (TPJ / Yomdel) ──
+// A smaller daily snapshot mirroring the team's spreadsheet. "Daily" = current
+// values (open queue) + today's created/solved. Metrics that live outside Jira
+// (WP plugins, feeds, cost per chat, CSAT, lead delivery time) are returned as
+// not-available so the UI can show "—" with a label rather than a wrong number.
+
+export interface DailyMetric { label: string; value: string | number | null; available: boolean; note?: string }
+
+/** Count open tickets whose First Response Time SLA is breached (no JQL SLA operator without the add-on). */
+async function countOverSla(client: JiraRestClient, project: string): Promise<number | null> {
+  try {
+    const res = await client.searchJqlAll(`project = ${project} AND statusCategory != Done`, [F.frtSla], 3000);
+    return res.issues.filter(i => frtStatus(i) === 'exceeded').length;
+  } catch { return null; }
+}
+
+export async function getDailyKpis(client: JiraRestClient): Promise<{ tpj: DailyMetric[]; yomdel: DailyMetric[] }> {
+  const na = (label: string, note: string): DailyMetric => ({ label, value: null, available: false, note });
+  const count = async (label: string, jql: string): Promise<DailyMetric> => {
+    const c = await client.jqlCount(jql);
+    return { label, value: c < 0 ? null : c, available: c >= 0 };
+  };
+  const P = PROJECT;        // NTPJ
+  const Y = PROJECT_YOMDEL; // YO
+
+  // ── TPJ (NTPJ — "SUPPORT WEB - UK") ──
+  const [
+    totalTickets, over6w, crUntagged, supportTickets, createdToday, solvedToday, tpjOverSla, oldestRes,
+  ] = await Promise.all([
+    count('Total Ticket figure', `project = ${P} AND statusCategory != Done`),
+    count('Total tickets over 6 weeks', `project = ${P} AND statusCategory != Done AND created <= -42d`),
+    count('Total CR / Not tagged Tickets unclosed', `project = ${P} AND statusCategory != Done AND "TPJ Ticket Type" is EMPTY`),
+    count('Total Support Tickets', `project = ${P} AND statusCategory != Done AND "TPJ Ticket Type" in ("Support Ticket", "Support Question")`),
+    count('Tickets Created per day', `project = ${P} AND created >= startOfDay()`),
+    count('Tickets Solved per day', `project = ${P} AND resolutiondate >= startOfDay()`),
+    countOverSla(client, P),
+    client.searchJqlAll(`project = ${P} AND statusCategory != Done ORDER BY created ASC`, ['created'], 1).catch(() => null),
+  ]);
+  const oldestCreated = oldestRes?.issues?.[0]?.fields?.created as string | undefined;
+  const tpj: DailyMetric[] = [
+    totalTickets, over6w, crUntagged, supportTickets, createdToday, solvedToday,
+    { label: 'Tickets over SLA', value: tpjOverSla, available: tpjOverSla !== null },
+    na('WP Plugins out of date', 'Not in Jira — external source'),
+    { label: 'Oldest Ticket date', value: oldestCreated ? iso(new Date(oldestCreated)) : null, available: !!oldestCreated },
+    na('Total Feeds', 'Not in Jira — external source'),
+  ];
+
+  // ── Yomdel (YO — "SUPPORT Chat") — only what Jira can supply ──
+  const [yomBacklog, yomOverSla] = await Promise.all([
+    count('Ticket Backlog', `project = ${Y} AND statusCategory != Done`),
+    countOverSla(client, Y),
+  ]);
+  const yomdel: DailyMetric[] = [
+    yomBacklog,
+    { label: 'Tickets over SLA', value: yomOverSla, available: yomOverSla !== null },
+    na('Cost per chat', 'Not in Jira — external/manual'),
+    na('Sibs Csat', 'Not in Jira — external/manual'),
+    na('Lead delivery time', 'Not in Jira — external/manual'),
+  ];
+
+  return { tpj, yomdel };
 }

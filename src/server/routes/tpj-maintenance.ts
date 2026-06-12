@@ -7,7 +7,7 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
   getDashboardSnapshot, getRaisedVsSolvedDaily, getSlaStatus, getSlaMetVsExceededDaily,
-  getBacklogByStatusDaily, getKpiMetrics, getPspMonthlyByAgent, getSloTrendWeekly,
+  getBacklogByStatusDaily, getKpiMetrics, getPspMonthlyByAgent, getSloTrendWeekly, getDailyKpis,
 } from '../services/tpj-maintenance.js';
 
 export interface TpjMaintenanceDeps {
@@ -50,6 +50,7 @@ export function createTpjMaintenanceRoutes(deps: TpjMaintenanceDeps): Router {
   router.get('/psp-monthly', withJira((c, f, t) => getPspMonthlyByAgent(c, f, t)));
   router.get('/slo-trend', withJira((c) => getSloTrendWeekly(c)));
   router.get('/metrics', withJira((c, f, t) => getKpiMetrics(c, deps.settings, f, t)));
+  router.get('/daily-kpis', withJira((c) => getDailyKpis(c)));
 
   // Backlog-by-status reads the KPI DB snapshot, not Jira.
   router.get('/backlog-daily', async (req, res) => {

@@ -23,7 +23,7 @@ const iso = (d: Date) => d.toLocaleDateString('en-CA');
 const mondayOf = (d: Date) => { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; };
 const ddmm = (s: string) => { const p = s.split('-'); return `${p[2]}/${p[1]}`; };
 
-type SubTab = 'dashboard' | 'metrics';
+type SubTab = 'dashboard' | 'metrics' | 'daily';
 
 export function TpjMaintenanceView() {
   const today = new Date();
@@ -55,10 +55,10 @@ export function TpjMaintenanceView() {
           <h1 className="text-2xl font-bold">TPJ Maintenance</h1>
           <p className="text-xs" style={{ color: C.text3 }}>NTPJ · Lucy's team</p>
         </div>
-        <div className="flex items-center gap-2">{tab('dashboard', 'Dashboard')}{tab('metrics', 'KPI metrics')}</div>
+        <div className="flex items-center gap-2">{tab('dashboard', 'Dashboard')}{tab('metrics', 'KPI metrics')}{tab('daily', 'Daily KPIs')}</div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-5">
+      <div className={`flex-wrap items-center gap-2 mb-5 ${subTab === 'daily' ? 'hidden' : 'flex'}`}>
         <label className="text-xs" style={{ color: C.text2 }}>From</label>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="px-2 py-1 text-sm rounded bg-black/30 border border-white/10" />
         <label className="text-xs" style={{ color: C.text2 }}>To</label>
@@ -69,7 +69,51 @@ export function TpjMaintenanceView() {
         <button onClick={() => quick('last30')} className={qbtn}>Last 30 Days</button>
       </div>
 
-      {subTab === 'dashboard' ? <DashboardPage from={from} to={to} /> : <MetricsPage from={from} to={to} />}
+      {subTab === 'dashboard' && <DashboardPage from={from} to={to} />}
+      {subTab === 'metrics' && <MetricsPage from={from} to={to} />}
+      {subTab === 'daily' && <DailyKpisPage />}
+    </div>
+  );
+}
+
+// ── Page 3: Daily KPIs (TPJ / Yomdel scorecard) ──
+
+interface DailyMetric { label: string; value: string | number | null; available: boolean; note?: string }
+
+function DailyKpisPage() {
+  const { data, loading, error } = useJson<{ tpj: DailyMetric[]; yomdel: DailyMetric[] }>('/api/tpj-maintenance/daily-kpis');
+  return (
+    <div className="space-y-5">
+      {error && <ErrBox msg={error} />}
+      <p className="text-xs" style={{ color: C.text3 }}>Live snapshot of today's figures. Metrics sourced outside Jira show “—”.</p>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+        <ScoreCard title="TPJ — SUPPORT WEB - UK" accent={C.purple} rows={data?.tpj} loading={loading} />
+        <ScoreCard title="Yomdel — SUPPORT Chat" accent={C.green} rows={data?.yomdel} loading={loading} />
+      </div>
+    </div>
+  );
+}
+
+function ScoreCard({ title, accent, rows, loading }: { title: string; accent: string; rows?: DailyMetric[]; loading: boolean }) {
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: C.glass, border: `1px solid ${C.border}` }}>
+      <div className="px-4 py-2.5 text-sm font-semibold" style={{ color: C.text1, borderLeft: `3px solid ${accent}`, background: 'rgba(255,255,255,0.02)' }}>{title}</div>
+      {loading && !rows && <div className="px-4 py-4 text-xs" style={{ color: C.text3 }}>Loading…</div>}
+      <table className="w-full text-sm">
+        <tbody>
+          {(rows ?? []).map((m, i) => (
+            <tr key={m.label} style={{ borderTop: i ? `1px solid ${C.border}` : undefined }}>
+              <td className="px-4 py-2.5" style={{ color: m.available ? C.text2 : C.text3, borderTop: `1px solid ${C.border}` }}>
+                {m.label}
+                {!m.available && m.note && <span className="ml-2 text-[10px]" style={{ color: C.text3 }}>· {m.note}</span>}
+              </td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: m.available ? C.text1 : C.text3, borderTop: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                {m.available ? (m.value ?? '0') : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
