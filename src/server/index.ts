@@ -194,6 +194,7 @@ import { captureSupportNt } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
+import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, type AgentKpiRow } from './services/kpi-agent/index.js';
 import cookieParser from 'cookie-parser';
@@ -1109,6 +1110,10 @@ async function main() {
   // ── Agent KPIs (Layer 3 rebuild) — per-agent scorecard + SLA Breach Board ──
   app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
+
+  // ── TPJ Maintenance (NTPJ) dashboard — Lucy's team, scoped to the NTPJ project ──
+  app.use('/api/tpj-maintenance', requireAreaAccess(['kpis'], 'view'),
+    createTpjMaintenanceRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
   // ── Risk Intelligence (account-level) — read API for the dashboard + ticket sidebar ──
   app.use('/api/risk', requireAreaAccess(['servicedesk', 'kpis'], 'view'),
