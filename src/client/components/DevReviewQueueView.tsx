@@ -245,7 +245,7 @@ function DevReviewDetail({
   onClaim: () => void;
   onUnclaim: () => void;
   onFastTrack: (on: boolean) => void;
-  onComment: (text: string) => void;
+  onComment: (text: string) => Promise<{ ok: boolean; error?: string }>;
   onAcceptClick: () => void;
   onReturnClick: () => void;
   onLinkExistingClick: () => void;
@@ -257,6 +257,7 @@ function DevReviewDetail({
   const terminal = state?.status === 'accepted' || state?.status === 'returned';
   const claimedByDisplay = detail.claimed_by_display || item?.claimed_by_display || null;
   const [commentDraft, setCommentDraft] = useState('');
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   const issueWithoutStatus = useMemo(() => {
     const { status: _s, ...rest } = fields as Record<string, unknown>;
@@ -327,9 +328,15 @@ function DevReviewDetail({
             className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2"
             style={drTheme.input}
           />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3">
+            {commentError && <span className="text-[10px] text-red-400">{commentError}</span>}
             <button
-              onClick={() => { onComment(commentDraft); setCommentDraft(''); }}
+              onClick={async () => {
+                setCommentError(null);
+                const r = await onComment(commentDraft);
+                if (r.ok) setCommentDraft('');
+                else setCommentError(r.error || 'Comment failed to post to Jira');
+              }}
               disabled={busy || !commentDraft.trim()}
               className="px-3 py-1.5 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #5ec1ca, #9b6aed)', boxShadow: '0 4px 12px rgba(94,193,202,0.3)' }}
@@ -382,6 +389,7 @@ export function DevReviewQueueView() {
   const [queueMeta, setQueueMeta] = useState<{ userTeamFilterActive: boolean; userTeamName: string | null; showingAll: boolean } | null>(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnDraft, setReturnDraft] = useState('');
+  const [returnError, setReturnError] = useState<string | null>(null);
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [showLinkExistingModal, setShowLinkExistingModal] = useState(false);
   const [linkExistingKey, setLinkExistingKey] = useState('');
@@ -488,17 +496,19 @@ export function DevReviewQueueView() {
   const onUnclaim = () => doAction(`/ticket/${selectedKey}/unclaim`, { method: 'POST' });
   const onFastTrack = (on: boolean) => doAction(`/ticket/${selectedKey}/fast-track`, { method: 'POST', body: JSON.stringify({ on }) });
 
-  const onComment = async (text: string) => {
-    if (!text.trim() || !selectedKey) return;
+  const onComment = async (text: string): Promise<{ ok: boolean; error?: string }> => {
+    if (!text.trim() || !selectedKey) return { ok: false };
     setBusy(true);
     try {
-      await fetch(`/api/dev-review/ticket/${selectedKey}/comment`, {
+      const json = await apiFull(`/ticket/${selectedKey}/comment`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: text }),
       });
       await Promise.all([loadQueue(), loadDetail(selectedKey)]);
-    } catch { /* silent */ } finally {
+      return json.ok ? { ok: true } : { ok: false, error: json.error || 'Comment failed to post to Jira' };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Comment failed to post to Jira' };
+    } finally {
       setBusy(false);
     }
   };
@@ -582,15 +592,20 @@ export function DevReviewQueueView() {
   const onReturn = async () => {
     if (returnDraft.trim().length < 10 || !selectedKey) return;
     setBusy(true);
+    setReturnError(null);
     try {
       await api(`/ticket/${selectedKey}/return`, { method: 'POST', body: JSON.stringify({ nextSteps: returnDraft }) });
+      // Success — drop the ticket and close the modal.
       setItems(prev => prev.filter(i => i.key !== selectedKey));
       setSelectedKey(null);
       setDetail(null);
-    } catch { /* silent */ } finally {
-      setBusy(false);
       setReturnDraft('');
       setShowReturnModal(false);
+    } catch (e) {
+      // Keep the modal open and the next-steps text intact so the dev can retry.
+      setReturnError(e instanceof Error ? e.message : 'Return failed — please try again.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -826,9 +841,10 @@ export function DevReviewQueueView() {
           <textarea value={returnDraft} onChange={e => setReturnDraft(e.target.value)} placeholder="Clear next steps for the agent…" rows={6} className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2" style={drTheme.input} autoFocus />
           <div className="flex items-center justify-between mb-4">
             <div className="text-[10px] text-neutral-600">{returnDraft.length} chars (min 10)</div>
+            {returnError && <div className="text-[10px] text-red-400">{returnError}</div>}
           </div>
           <div className="flex justify-end gap-2">
-            <button onClick={() => setShowReturnModal(false)} className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5">Cancel</button>
+            <button onClick={() => { setShowReturnModal(false); setReturnError(null); }} className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5">Cancel</button>
             <button onClick={onReturn} disabled={busy || returnDraft.trim().length < 10} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}>{busy ? 'Returning…' : 'Return with next steps'}</button>
           </div>
         </Modal>

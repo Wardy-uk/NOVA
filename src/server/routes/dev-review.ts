@@ -588,21 +588,14 @@ export function createDevReviewRoutes(
     res.json({ ok: true });
   });
 
-  // ── Comment (single-shot Waiting On Assignee transition with internal note) ──
+  // ── Comment (plain internal Jira comment, no status change) ───────────
   //
-  // The "Waiting On Assignee" transition in Jira has a mandatory internal
-  // comment field on its transition screen PLUS a handful of other required
-  // fields (TL;DR, Nurtur Product, Sub Category, Priority, Due date, Agent
-  // Next Update). A standalone addComment followed by an unadorned transition
-  // fails the workflow validator.
-  //
-  // Single-shot approach:
-  //   1. Discover the transition + its required fields via getTransitionsWithFields
-  //   2. Fetch current values of those required fields from the issue
-  //   3. Normalise each value for write-back shape
-  //   4. POST the transition with fields + internal comment in one call
-  //   5. Fetch the newest comment afterwards and store its Jira ID so the
-  //      watcher doesn't re-import it as an external reply
+  // A developer comment is just a comment: it posts to the Jira ticket as an
+  // internal note tagged with the dev's name, and changes nothing else.
+  // Status transitions are the job of Accept / Return — commenting must not
+  // silently flip the ticket. The comment is stored in the local thread first
+  // (so it always appears in NOVA), then pushed to Jira; on failure we mark
+  // the thread entry failed and enqueue an outbox retry (op='comment').
 
   router.post('/ticket/:key/comment', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
@@ -612,6 +605,7 @@ export function createDevReviewRoutes(
 
     const key = String(req.params.key);
     const display = await userDisplay(req);
+    const prefixed = `🛠️ Developer comment — ${display}\n\n${body}`;
     const threadId = await devQueries.addThreadEntry({
       jira_key: key,
       user_id: req.user.id,
@@ -624,215 +618,29 @@ export function createDevReviewRoutes(
     const client = getJiraClient();
     if (!client) {
       await devQueries.markThreadSyncFailed(threadId, 'Jira not configured');
+      await devQueries.addOutbox({ jira_key: key, op: 'comment', payload: { body: prefixed } });
       res.status(503).json({ ok: false, error: 'Jira not configured' });
       return;
     }
 
-    const prefixed = `🛠️ Developer comment — ${display}\n\n${body}`;
-
     try {
-      // Step 1: discover transitions + field schemas
-      const meta = await client.getTransitionsWithFields(key) as {
-        transitions?: Array<{
-          id: string;
-          name?: string;
-          fields?: Record<string, {
-            required?: boolean;
-            schema?: { type?: string; custom?: string; items?: string };
-          }>;
-        }>;
-      };
-      const transitions = meta.transitions || [];
-      const settingOverride = settingsQueries.getAll().dev_review_wait_transition_id;
-      let waitTransition = settingOverride
-        ? transitions.find((t) => t.id === String(settingOverride))
-        : transitions.find((t) => /waiting on assignee/i.test(t.name || ''));
-      if (!waitTransition) waitTransition = transitions.find((t) => /waiting/i.test(t.name || ''));
-
-      if (!waitTransition) {
-        // No transition available — post a standalone internal comment so the
-        // dev's note isn't lost, and warn the caller.
-        try {
-          const r = await client.addComment(key, prefixed, { internal: true });
-          await devQueries.markThreadSynced(threadId, (r as { id?: string } | null)?.id ?? null);
-        } catch (e) {
-          await devQueries.markThreadSyncFailed(threadId, e instanceof Error ? e.message : 'comment failed');
-        }
-        res.json({ ok: true, waitingSet: false, warning: 'Waiting On Assignee transition not found — comment posted but status not changed' });
-        return;
-      }
-
-      // Include EVERY writeable field on the transition screen. Jira's
-      // workflow validators can run on any field on the screen, so we
-      // round-trip current values rather than trusting the `required` flag.
-      //
-      // Excluded:
-      //  - "comment" pseudo-field (we handle that via update.comment)
-      //  - sd-* schema types: these are Service Desk display-only pseudo-
-      //    fields (Request Type, SLAs etc.) that live on many JSM workflow
-      //    screens for display but are not writeable via REST. Writing them
-      //    back returns "Operation value must be a string" and blows up the
-      //    transition. Strip them before we even try.
-      const fieldMetas = waitTransition.fields || {};
-      const isSdPseudoField = (fieldId: string): boolean => {
-        const t = fieldMetas[fieldId]?.schema?.type || '';
-        return t.startsWith('sd-');
-      };
-      const screenFieldIds = Object.keys(fieldMetas)
-        .filter((id) => id !== 'comment')
-        .filter((id) => !isSdPseudoField(id));
-
-      // Step 2: fetch current values of those screen fields and normalise
-      // for write-back using the schema from the transitions response.
-      // Different Jira field types need different write shapes:
-      //   string          → plain string OR ADF doc object (for textareas)
-      //   option/priority → { id }
-      //   user            → { accountId }
-      //   date/datetime   → ISO string
-      //   number          → number
-      //   array           → pass through as-is
-      const passFields: Record<string, unknown> = {};
-      if (screenFieldIds.length > 0) {
-        const issue = await client.getIssue(key, screenFieldIds);
-        const currentFields = (issue?.fields || {}) as Record<string, unknown>;
-        const fieldMetas = waitTransition.fields || {};
-
-        for (const fieldId of screenFieldIds) {
-          const val = currentFields[fieldId];
-          if (val === null || val === undefined) continue;
-          const schemaType = fieldMetas[fieldId]?.schema?.type;
-
-          // Detect an ADF doc — some textareas return rich-text as a doc
-          const isAdfDoc = typeof val === 'object' && val !== null && !Array.isArray(val)
-            && (val as { type?: string }).type === 'doc';
-
-          switch (schemaType) {
-            case 'string':
-              // Textarea fields send ADF back in; simple text fields want a
-              // plain string. Preserve whichever format we read.
-              if (isAdfDoc) {
-                passFields[fieldId] = val;
-              } else if (typeof val === 'string') {
-                passFields[fieldId] = val;
-              } else {
-                passFields[fieldId] = String(val);
-              }
-              break;
-            case 'option':
-            case 'priority':
-            case 'issuetype':
-            case 'resolution':
-            case 'securitylevel':
-              if (typeof val === 'object' && val !== null) {
-                const obj = val as Record<string, unknown>;
-                if ('id' in obj && obj.id != null) passFields[fieldId] = { id: String(obj.id) };
-                else if ('value' in obj) passFields[fieldId] = { value: obj.value };
-                else if ('name' in obj) passFields[fieldId] = { name: obj.name };
-              }
-              break;
-            case 'user':
-              if (typeof val === 'object' && val !== null) {
-                const obj = val as Record<string, unknown>;
-                if ('accountId' in obj) passFields[fieldId] = { accountId: obj.accountId };
-              }
-              break;
-            case 'date':
-            case 'datetime':
-            case 'number':
-              passFields[fieldId] = val;
-              break;
-            case 'array':
-              if (Array.isArray(val)) passFields[fieldId] = val;
-              break;
-            case 'any':
-            default:
-              // Unknown schema — pass through as-is, but if it's a plain
-              // object-with-id that looks like an option, wrap it to be safe.
-              if (typeof val === 'object' && val !== null && !Array.isArray(val) && !isAdfDoc) {
-                const obj = val as Record<string, unknown>;
-                if ('id' in obj && obj.id != null) {
-                  passFields[fieldId] = { id: String(obj.id) };
-                  break;
-                }
-                if ('value' in obj) {
-                  passFields[fieldId] = { value: obj.value };
-                  break;
-                }
-              }
-              passFields[fieldId] = val;
-              break;
-          }
-        }
-      }
-
-      // Admin-configurable escape hatch — comma-separated field IDs to drop
-      // before the call. Useful if a future NT workflow adds another awkward
-      // field and we need to skip it without a code change.
-      const excludeRaw = String(settingsQueries.getAll().dev_review_wait_field_exclude || '');
-      const excludeSet = new Set(excludeRaw.split(',').map((s) => s.trim()).filter(Boolean));
-      for (const id of excludeSet) delete passFields[id];
-
-      console.log(`[DevReview/comment] ${key} → transition ${waitTransition.id} (${waitTransition.name})`);
-      console.log(`[DevReview/comment] fields: ${Object.keys(passFields).join(', ') || '(none)'}`);
-
-      // Step 3: single-shot transition + internal comment
-      await client.transitionIssue(key, waitTransition.id, {
-        fields: passFields,
-        comment: { body: adfDoc(prefixed), internal: true },
-      });
-
-      await devQueries.setStatus(key, 'waiting_on_assignee');
-
-      // Step 4: find the comment we just added so the watcher doesn't
-      // re-import it as an external reply (matches by body prefix).
-      let newCommentId: string | null = null;
-      try {
-        const recent = await client.getComments(key, 5);
-        const mine = recent.find((c) => {
-          const walk = (n: unknown): string => {
-            if (!n) return '';
-            if (typeof n === 'string') return n;
-            const node = n as { text?: string; content?: unknown[] };
-            if (node.text) return node.text;
-            if (Array.isArray(node.content)) return node.content.map(walk).join('');
-            return '';
-          };
-          const text = walk(c.body);
-          return text.startsWith(`🛠️ Developer comment — ${display}`);
-        });
-        if (mine) newCommentId = mine.id;
-      } catch { /* non-fatal */ }
-
+      // Post as a standalone internal comment, preserving line breaks via ADF.
+      // addCommentAdf returns the created comment, whose id we store so the
+      // Jira→NOVA import loop doesn't re-import it as an external reply.
+      const r = await client.addCommentAdf(key, adfDoc(prefixed), { internal: true });
+      const newCommentId = (r as { id?: string } | null)?.id ?? null;
       await devQueries.markThreadSynced(threadId, newCommentId);
       // Purge any stale failed entries from earlier attempts so the
       // Activity panel shows a clean history.
       const purged = await devQueries.purgeFailedThreadEntries(key, threadId);
       if (purged > 0) console.log(`[DevReview/comment] Purged ${purged} stale failed entries for ${key}`);
-      res.json({ ok: true, waitingSet: true });
+      res.json({ ok: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Transition failed';
-      console.error(`[DevReview/comment] Transition failed for ${String(req.params.key)}: ${msg}`);
-
-      // Fallback: post the internal comment standalone so the dev's note
-      // isn't lost. The status won't flip, but the comment will be visible
-      // in Jira (and on the next Jira→NOVA comment sync). We ignore errors
-      // from this fallback because we still want to surface the original
-      // transition error to the UI.
-      let fallbackId: string | null = null;
-      try {
-        const r = await client.addComment(String(req.params.key), prefixed, { internal: true });
-        fallbackId = (r as { id?: string } | null)?.id ?? null;
-        await devQueries.markThreadSynced(threadId, fallbackId);
-      } catch (fallbackErr) {
-        await devQueries.markThreadSyncFailed(threadId, msg);
-        console.error(`[DevReview/comment] Fallback comment also failed: ${fallbackErr instanceof Error ? fallbackErr.message : fallbackErr}`);
-      }
-
-      res.status(502).json({
-        ok: false,
-        error: `Transition to Waiting On Assignee failed: ${msg}`,
-        commentPosted: fallbackId !== null,
-      });
+      const msg = e instanceof Error ? e.message : 'Comment failed';
+      console.error(`[DevReview/comment] Failed to post comment for ${key}: ${msg}`);
+      await devQueries.markThreadSyncFailed(threadId, msg);
+      await devQueries.addOutbox({ jira_key: key, op: 'comment', payload: { body: prefixed } });
+      res.status(502).json({ ok: false, error: msg });
     }
   });
 
