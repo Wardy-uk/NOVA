@@ -68,9 +68,10 @@ export interface CreateAgreementOutput {
 
 /**
  * Creates and sends an Adobe Sign agreement. Auto-detects 'contract terms…' fields on
- * each template and injects the concatenated pre-approved terms text into any not
- * explicitly provided by the sender. Returns the Adobe agreement id and the final
- * merge field set. Throws on Adobe API failure — callers surface the error.
+ * each template and injects pre-approved terms (targeted by exact field name, or by the
+ * prefix sweep). Where a sender also typed custom text into the same field, the two are
+ * combined (pre-approved first, custom appended). Returns the Adobe agreement id and the
+ * final merge field set. Throws on Adobe API failure — callers surface the error.
  */
 export async function createAdobeAgreement(
   client: AdobeSignClient,
@@ -93,9 +94,6 @@ export async function createAdobeAgreement(
 
   if (termsText || targetedTerms.length > 0) {
     const prefix = (settings.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
-    // Fields a sender already filled (don't overwrite) and ones we've populated (don't double-fill).
-    const explicitlyProvided = new Set(allMergeFields.map(f => f.fieldName));
-    const populated = new Set<string>();        // tracks actual Adobe field names
 
     // Fetch each template's fields once.
     const fieldCache = new Map<string, Array<{ name: string }>>();
@@ -112,31 +110,44 @@ export async function createAdobeAgreement(
       }
     };
 
-    const inject = (fieldName: string, text: string, docId: string) => {
-      if (explicitlyProvided.has(fieldName) || populated.has(fieldName)) return;
-      allMergeFields.push({ fieldName, defaultValue: text });
-      populated.add(fieldName);
-      termsFieldsPopulated.push({ fieldName, libraryDocumentId: docId });
-    };
+    // Resolve which ACTUAL Adobe field each pre-approved source maps to.
+    // Targeted terms (exact, case/separator-insensitive match) win over the
+    // untargeted prefix sweep for the same field.
+    const preApproved = new Map<string, { text: string; docId: string }>();
 
-    // 1. Targeted terms first — exact (case/separator-insensitive) field-name match.
-    //    These take priority so an explicitly-named field wins over the prefix sweep.
     for (const tt of targetedTerms) {
       const wanted = normaliseFieldName(tt.field_name);
       for (const docId of cleanIds) {
         for (const f of await getFields(docId)) {
-          if (normaliseFieldName(f.name) === wanted) inject(f.name, tt.text.trim(), docId);
+          if (normaliseFieldName(f.name) === wanted && !preApproved.has(f.name)) {
+            preApproved.set(f.name, { text: tt.text.trim(), docId });
+          }
         }
       }
     }
 
-    // 2. Untargeted blob — any remaining field whose name starts with the prefix.
     if (termsText) {
       for (const docId of cleanIds) {
         for (const f of await getFields(docId)) {
-          if (fieldMatchesPrefix(f.name, prefix)) inject(f.name, termsText, docId);
+          if (fieldMatchesPrefix(f.name, prefix) && !preApproved.has(f.name)) {
+            preApproved.set(f.name, { text: termsText, docId });
+          }
         }
       }
+    }
+
+    // Merge pre-approved text with any sender-typed value for the same field.
+    // Order: pre-approved first, then the sender's custom text appended below.
+    // (When a sender both types custom terms AND ticks a pre-approved term for the
+    // same field, the contract carries both — and the custom text still triggers
+    // the approval gate upstream.)
+    for (const [fieldName, { text, docId }] of preApproved) {
+      const existing = allMergeFields.find(m => m.fieldName === fieldName);
+      const senderVal = existing?.defaultValue?.trim();
+      const combined = senderVal ? `${text}\n\n${senderVal}` : text;
+      if (existing) existing.defaultValue = combined;
+      else allMergeFields.push({ fieldName, defaultValue: combined });
+      termsFieldsPopulated.push({ fieldName, libraryDocumentId: docId });
     }
   }
 
