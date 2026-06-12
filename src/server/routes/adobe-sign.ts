@@ -183,7 +183,7 @@ export function createAdobeSignRoutes(
       return;
     }
 
-    const { library_document_ids, contract_id, bc_customer_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text } = req.body;
+    const { library_document_ids, contract_id, bc_customer_id, name, signer_emails, cc_emails, message, merge_fields, expiration_days, contract_terms_text, contract_terms_targeted } = req.body;
     if (!Array.isArray(library_document_ids) || library_document_ids.length === 0) {
       res.status(400).json({ ok: false, error: 'library_document_ids must be a non-empty array' });
       return;
@@ -221,6 +221,7 @@ export function createAdobeSignRoutes(
       merge_fields: clientMergeFields,
       expiration_days,
       contract_terms_text,
+      contract_terms_targeted: Array.isArray(contract_terms_targeted) ? contract_terms_targeted : undefined,
     };
 
     // ── Approval gate ──

@@ -419,25 +419,53 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
     // Don't wipe field values — sender may have edited them after auto-fill.
   }, []);
 
-  // Concatenated terms text — selected terms joined by blank lines, in catalog order
-  const concatenatedTerms = useMemo(() => {
-    const selected = allTerms.filter(t => selectedTermIds.has(t.id));
-    return selected.map(t => t.body.trim()).filter(b => b.length > 0).join('\n\n');
-  }, [allTerms, selectedTermIds]);
+  const selectedTerms = useMemo(
+    () => allTerms.filter(t => selectedTermIds.has(t.id)),
+    [allTerms, selectedTermIds]
+  );
 
-  // Which fields across the selected templates will receive the terms
-  const termsTargetFields = useMemo<Array<{ templateName: string; fieldName: string }>>(() => {
-    const out: Array<{ templateName: string; fieldName: string }> = [];
-    for (const t of selectedTemplates) {
-      const fields = templateFields.get(t.id) ?? [];
-      for (const f of fields) {
-        if (fieldMatchesPrefix(f.name, termsFieldPrefix)) {
-          out.push({ templateName: t.name, fieldName: f.name });
-        }
-      }
+  // Untargeted terms (no target_field) — concatenated, routed to prefix fields server-side.
+  const untargetedTermsText = useMemo(() => {
+    return selectedTerms
+      .filter(t => !t.target_field || !t.target_field.trim())
+      .map(t => t.body.trim()).filter(b => b.length > 0).join('\n\n');
+  }, [selectedTerms]);
+
+  // Targeted terms grouped by their target field — each field gets its terms concatenated.
+  const targetedTermsPayload = useMemo<Array<{ field_name: string; text: string }>>(() => {
+    const byField = new Map<string, string[]>();
+    for (const t of selectedTerms) {
+      const target = t.target_field?.trim();
+      if (!target) continue;
+      const body = t.body.trim();
+      if (!body) continue;
+      if (!byField.has(target)) byField.set(target, []);
+      byField.get(target)!.push(body);
     }
-    return out;
-  }, [selectedTemplates, templateFields, termsFieldPrefix]);
+    return [...byField.entries()].map(([field_name, bodies]) => ({ field_name, text: bodies.join('\n\n') }));
+  }, [selectedTerms]);
+
+  // All field names present across the selected templates (normalised) — for validating targets.
+  const availableFieldNorms = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of selectedTemplates) {
+      for (const f of templateFields.get(t.id) ?? []) s.add(normaliseFieldName(f.name));
+    }
+    return s;
+  }, [selectedTemplates, templateFields]);
+
+  // Per-term routing diagnostic: where each selected term lands + whether the field exists.
+  const termRouting = useMemo<Array<{ label: string; target: string; isPrefix: boolean; matched: boolean }>>(() => {
+    return selectedTerms.map(t => {
+      const target = t.target_field?.trim();
+      if (target) {
+        return { label: t.label, target, isPrefix: false, matched: availableFieldNorms.has(normaliseFieldName(target)) };
+      }
+      // Untargeted → matches if any selected-template field starts with the prefix.
+      const anyPrefix = [...availableFieldNorms].some(n => fieldMatchesPrefix(n, termsFieldPrefix));
+      return { label: t.label, target: `${termsFieldPrefix} (default)`, isPrefix: true, matched: anyPrefix };
+    });
+  }, [selectedTerms, availableFieldNorms, termsFieldPrefix]);
 
   const filteredTemplates = templates.filter((t) =>
     !templateSearch.trim() ||
@@ -548,7 +576,8 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           message: message || undefined,
           merge_fields: mergeFields,
           expiration_days: expirationDays ? parseInt(expirationDays, 10) : undefined,
-          contract_terms_text: concatenatedTerms || undefined,
+          contract_terms_text: untargetedTermsText || undefined,
+          contract_terms_targeted: targetedTermsPayload.length > 0 ? targetedTermsPayload : undefined,
         }),
       });
       const json = await res.json();
@@ -1032,7 +1061,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           <div className="max-w-2xl">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Contract Terms</h2>
             <p className="text-[11px] text-neutral-500 mb-4">
-              Tick pre-approved terms to include in the contract. Selected terms get concatenated and inserted into any field on your selected template(s) whose name starts with <code className="text-neutral-300">{termsFieldPrefix}</code>.
+              Tick pre-approved terms to include. Each term is inserted into the Adobe field it's configured to merge into; terms without a specific field fall back to any field starting with <code className="text-neutral-300">{termsFieldPrefix}</code>.
             </p>
 
             {allTerms.length === 0 ? (
@@ -1043,6 +1072,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               <div className="space-y-2 mb-5">
                 {allTerms.map((t) => {
                   const isChecked = selectedTermIds.has(t.id);
+                  const target = t.target_field?.trim();
                   return (
                     <label
                       key={t.id}
@@ -1058,7 +1088,12 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
                           className="accent-[#5ec1ca] mt-0.5 flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-[12px] font-medium text-neutral-200 mb-1">{t.label}</div>
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-[12px] font-medium text-neutral-200">{t.label}</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#272C33] text-neutral-500 border border-[#3a424d]">
+                              → {target || `${termsFieldPrefix} (default)`}
+                            </span>
+                          </div>
                           <div className="text-[10px] text-neutral-500 whitespace-pre-wrap line-clamp-3">{t.body}</div>
                         </div>
                       </div>
@@ -1068,28 +1103,25 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               </div>
             )}
 
-            {/* Live target diagnostic */}
+            {/* Per-term routing diagnostic */}
             {selectedTermIds.size > 0 && (
               <div className="rounded-lg border border-[#3a424d] bg-[#1e2228] p-3 mb-3">
-                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Target fields</div>
-                {termsTargetFields.length === 0 ? (
-                  <div className="text-[11px] text-amber-400">
-                    None of your selected templates have a field starting with <code>{termsFieldPrefix}</code>. The selected terms won't appear in the signed contract.
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">Where these terms land</div>
+                <ul className="text-[11px] space-y-1">
+                  {termRouting.map((r, i) => (
+                    <li key={i} className="flex items-baseline gap-2">
+                      <span className="text-neutral-300 truncate">{r.label}</span>
+                      <span className="text-neutral-600">→</span>
+                      <code className={r.matched ? 'text-[#5ec1ca]' : 'text-amber-400'}>{r.target}</code>
+                      {!r.matched && <span className="text-[9px] text-amber-400 ml-auto">no matching field — won't appear</span>}
+                    </li>
+                  ))}
+                </ul>
+                {termRouting.some(r => !r.matched) && (
+                  <div className="text-[10px] text-amber-400/80 mt-2">
+                    Terms in amber have no matching field on the selected template(s) and won't appear in the signed contract. Add the field in Adobe, or set the term's "Merge into field" to an existing field.
                   </div>
-                ) : (
-                  <ul className="text-[11px] text-neutral-300 space-y-0.5">
-                    {termsTargetFields.map((t, i) => (
-                      <li key={i}><span className="text-neutral-500">{t.templateName} →</span> <code className="text-[#5ec1ca]">{t.fieldName}</code></li>
-                    ))}
-                  </ul>
                 )}
-              </div>
-            )}
-
-            {selectedTermIds.size > 0 && termsTargetFields.length > 0 && (
-              <div className="rounded-lg border border-[#3a424d] bg-[#272C33] p-3">
-                <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Preview</div>
-                <pre className="text-[11px] text-neutral-300 whitespace-pre-wrap font-sans">{concatenatedTerms}</pre>
               </div>
             )}
           </div>
@@ -1223,14 +1255,14 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
               {selectedTermIds.size > 0 && (
                 <div>
                   <span className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">
-                    Contract Terms ({selectedTermIds.size} selected → {termsTargetFields.length} {termsTargetFields.length === 1 ? 'field' : 'fields'})
+                    Contract Terms ({selectedTermIds.size} selected)
                   </span>
                   <div className="text-[11px] text-neutral-300">
-                    {allTerms.filter(t => selectedTermIds.has(t.id)).map(t => t.label).join(', ')}
+                    {selectedTerms.map(t => t.label).join(', ')}
                   </div>
-                  {termsTargetFields.length === 0 && (
+                  {termRouting.some(r => !r.matched) && (
                     <div className="text-[10px] text-amber-400 mt-1">
-                      ⚠ No matching merge field on the selected templates — these terms won't appear in the signed contract.
+                      ⚠ {termRouting.filter(r => !r.matched).length} term(s) have no matching merge field on the selected templates and won't appear in the signed contract.
                     </div>
                   )}
                 </div>

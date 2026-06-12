@@ -36,7 +36,7 @@ export function AdminContractTermsView() {
       .catch(() => { /* default */ });
   }, [fetchAll]);
 
-  const handleSave = async (form: { id?: number; label: string; body: string; active: boolean; sort_order: number }) => {
+  const handleSave = async (form: { id?: number; label: string; body: string; active: boolean; sort_order: number; target_field: string | null }) => {
     const url = form.id ? `/api/contract-terms/${form.id}` : '/api/contract-terms';
     const method = form.id ? 'PUT' : 'POST';
     const res = await fetch(url, {
@@ -47,6 +47,7 @@ export function AdminContractTermsView() {
         body: form.body,
         active: form.active,
         sort_order: form.sort_order,
+        target_field: form.target_field,
       }),
     });
     const json = await res.json();
@@ -109,9 +110,12 @@ export function AdminContractTermsView() {
               }`}>
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-[12px] font-medium text-neutral-200">{t.label}</span>
                       {!t.active && <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500 uppercase">Inactive</span>}
+                      {t.target_field
+                        ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#5ec1ca]/10 text-[#5ec1ca] border border-[#5ec1ca]/30">→ {t.target_field}</span>
+                        : <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500" title={`Falls back to any field starting with "${prefix}"`}>→ {prefix} (default)</span>}
                       <span className="text-[9px] text-neutral-600">order {t.sort_order}</span>
                     </div>
                     <pre className="text-[10px] text-neutral-400 whitespace-pre-wrap font-sans line-clamp-4">{t.body}</pre>
@@ -140,6 +144,7 @@ export function AdminContractTermsView() {
       {showForm && (
         <TermFormModal
           term={editing}
+          prefix={prefix}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSave={handleSave}
         />
@@ -150,17 +155,20 @@ export function AdminContractTermsView() {
 
 function TermFormModal({
   term,
+  prefix,
   onClose,
   onSave,
 }: {
   term: ContractTerm | null;
+  prefix: string;
   onClose: () => void;
-  onSave: (form: { id?: number; label: string; body: string; active: boolean; sort_order: number }) => void;
+  onSave: (form: { id?: number; label: string; body: string; active: boolean; sort_order: number; target_field: string | null }) => void;
 }) {
   const [label, setLabel] = useState(term?.label ?? '');
   const [body, setBody] = useState(term?.body ?? '');
   const [active, setActive] = useState(term ? Boolean(term.active) : true);
   const [sortOrder, setSortOrder] = useState(term?.sort_order ?? 0);
+  const [targetField, setTargetField] = useState(term?.target_field ?? '');
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async () => {
@@ -172,6 +180,7 @@ function TermFormModal({
       body: body.trim(),
       active,
       sort_order: sortOrder,
+      target_field: targetField.trim() || null,
     });
     setSaving(false);
   };
@@ -202,7 +211,20 @@ function TermFormModal({
               placeholder="The actual term text that will be inserted into the contract field"
             />
             <div className="text-[10px] text-neutral-600 mt-1">
-              This text will be concatenated with other selected terms (blank line between each).
+              Terms targeting the same field are concatenated (blank line between each), in sort order.
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Merge into field</label>
+            <input
+              className={inputCls}
+              value={targetField}
+              onChange={(e) => setTargetField(e.target.value)}
+              placeholder={`Exact Adobe field name, e.g. "Contract Terms BYM"`}
+            />
+            <div className="text-[10px] text-neutral-600 mt-1">
+              The Adobe template field this term merges into (case/spacing-insensitive). Leave blank to fall back to any field starting with <code className="text-neutral-400">{prefix}</code>.
             </div>
           </div>
 

@@ -169,6 +169,8 @@ export interface ContractTerm {
   body: string;
   active: number;
   sort_order: number;
+  // Exact Adobe form-field name this term merges into. null = prefix fallback.
+  target_field: string | null;
   created_at: string;
   updated_at: string;
 }

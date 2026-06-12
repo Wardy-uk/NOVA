@@ -38,6 +38,9 @@ export function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
 
 export interface MergeField { fieldName: string; defaultValue: string }
 
+// A pre-approved term (or concatenation of terms) routed to a specific Adobe field.
+export interface TargetedTerm { field_name: string; text: string }
+
 // The intended create-agreement request, in the snake_case shape the wizard POSTs.
 // Stored verbatim as JSON in approval_payload so the approval callback can replay it.
 export interface CreateAgreementInput {
@@ -48,7 +51,10 @@ export interface CreateAgreementInput {
   message?: string;
   merge_fields?: MergeField[];
   expiration_days?: number;
+  // Untargeted pre-approved terms — injected into any field starting with the prefix.
   contract_terms_text?: string;
+  // Targeted pre-approved terms — each injected into its named field specifically.
+  contract_terms_targeted?: TargetedTerm[];
 }
 
 export interface CreateAgreementOutput {
@@ -78,24 +84,56 @@ export async function createAdobeAgreement(
 
   const termsFieldsPopulated: Array<{ fieldName: string; libraryDocumentId: string }> = [];
   const termsText = typeof input.contract_terms_text === 'string' ? input.contract_terms_text.trim() : '';
+  const targetedTerms: TargetedTerm[] = Array.isArray(input.contract_terms_targeted)
+    ? input.contract_terms_targeted.filter((t): t is TargetedTerm =>
+        typeof t?.field_name === 'string' && typeof t?.text === 'string' && t.text.trim().length > 0)
+    : [];
 
-  if (termsText) {
+  if (termsText || targetedTerms.length > 0) {
     const prefix = (settings.adobe_sign_terms_field_prefix || DEFAULT_TERMS_FIELD_PREFIX).trim();
+    // Fields a sender already filled (don't overwrite) and ones we've populated (don't double-fill).
     const explicitlyProvided = new Set(allMergeFields.map(f => f.fieldName));
-    const populated = new Set<string>();
-    for (const docId of cleanIds) {
+    const populated = new Set<string>();        // tracks actual Adobe field names
+
+    // Fetch each template's fields once.
+    const fieldCache = new Map<string, Array<{ name: string }>>();
+    const getFields = async (docId: string): Promise<Array<{ name: string }>> => {
+      if (fieldCache.has(docId)) return fieldCache.get(docId)!;
       try {
-        const fields = await client.getLibraryDocumentFormFields(docId);
-        for (const f of fields) {
-          if (!fieldMatchesPrefix(f.name, prefix)) continue;
-          if (explicitlyProvided.has(f.name)) continue;
-          if (populated.has(f.name)) continue;
-          allMergeFields.push({ fieldName: f.name, defaultValue: termsText });
-          populated.add(f.name);
-          termsFieldsPopulated.push({ fieldName: f.name, libraryDocumentId: docId });
-        }
+        const f = await client.getLibraryDocumentFormFields(docId);
+        fieldCache.set(docId, f);
+        return f;
       } catch (err) {
-        console.warn(`[Adobe Sign] Could not fetch form fields for ${docId} (terms auto-detect):`, err instanceof Error ? err.message : err);
+        console.warn(`[Adobe Sign] Could not fetch form fields for ${docId} (terms inject):`, err instanceof Error ? err.message : err);
+        fieldCache.set(docId, []);
+        return [];
+      }
+    };
+
+    const inject = (fieldName: string, text: string, docId: string) => {
+      if (explicitlyProvided.has(fieldName) || populated.has(fieldName)) return;
+      allMergeFields.push({ fieldName, defaultValue: text });
+      populated.add(fieldName);
+      termsFieldsPopulated.push({ fieldName, libraryDocumentId: docId });
+    };
+
+    // 1. Targeted terms first — exact (case/separator-insensitive) field-name match.
+    //    These take priority so an explicitly-named field wins over the prefix sweep.
+    for (const tt of targetedTerms) {
+      const wanted = normaliseFieldName(tt.field_name);
+      for (const docId of cleanIds) {
+        for (const f of await getFields(docId)) {
+          if (normaliseFieldName(f.name) === wanted) inject(f.name, tt.text.trim(), docId);
+        }
+      }
+    }
+
+    // 2. Untargeted blob — any remaining field whose name starts with the prefix.
+    if (termsText) {
+      for (const docId of cleanIds) {
+        for (const f of await getFields(docId)) {
+          if (fieldMatchesPrefix(f.name, prefix)) inject(f.name, termsText, docId);
+        }
       }
     }
   }

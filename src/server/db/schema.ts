@@ -1787,6 +1787,13 @@ async function runMigrations(): Promise<void> {
        updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
 
+    // Per-term target field: the exact Adobe form-field name this term should merge
+    // into (e.g. 'Contract Terms BYM'). Lets different pre-approved terms land in
+    // different fields. NULL = fall back to the prefix behaviour (any field starting
+    // with the configured terms prefix), preserving the original single-blob model.
+    `IF COL_LENGTH('contract_terms', 'target_field') IS NULL
+     ALTER TABLE contract_terms ADD target_field NVARCHAR(300) NULL;`,
+
     // Extra BC customer fields used to pre-populate Adobe Sign contract templates
     // (REG NO, address line 2, postcode, county/state, primary contact name).
     `IF COL_LENGTH('bc_customers', 'address_line_2') IS NULL
