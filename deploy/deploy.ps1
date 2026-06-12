@@ -97,7 +97,7 @@ try {
     # existence: a failed `vite build` leaves the PREVIOUS dist in place, so a stale
     # bundle gets shipped while the deploy reports success (this happened 2026-06-12,
     # stranding prod on an old build for hours). Instead, require BOTH outputs to be
-    # freshly written AFTER this build started — that catches a failed vite (stale
+    # freshly written AFTER this build started - that catches a failed vite (stale
     # dist/client) and a failed tsc emit (stale dist/server) without false-failing on
     # harmless type errors.
     $outputs = @(
@@ -108,7 +108,7 @@ try {
         if (-not (Test-Path $out)) { throw "Build failed: $out not found" }
         $written = (Get-Item $out).LastWriteTime
         if ($written -lt $buildStart) {
-            throw "Build failed: $out is stale (last written $written, before build started $buildStart). The build errored without producing fresh output — check the npm run build log above."
+            throw "Build failed: $out is stale (last written $written, before build started $buildStart). The build errored without producing fresh output - check the npm run build log above."
         }
     }
     Write-Host "Build output verified (fresh): client + server" -ForegroundColor Green
