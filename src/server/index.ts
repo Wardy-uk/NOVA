@@ -194,6 +194,7 @@ import { captureSupportNt } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
+import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, type AgentKpiRow } from './services/kpi-agent/index.js';
 import cookieParser from 'cookie-parser';
 
@@ -1109,6 +1110,10 @@ async function main() {
   app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
+  // ── Risk Intelligence (account-level) — read API for the dashboard + ticket sidebar ──
+  app.use('/api/risk', requireAreaAccess(['servicedesk', 'kpis'], 'view'),
+    createRiskRoutes({ settings: settingsQueries }));
+
   // Account-risk backfill (chunks 1-2). Runs UNCONDITIONALLY (does not depend on the agent
   // Jira client — it uses its own resolver + DB), guarded so it runs once, non-blocking.
   // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
@@ -1122,6 +1127,14 @@ async function main() {
       } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
     })();
   }
+
+  // Nightly refresh (every 24h from boot) so account risk stays current for triage enrichment
+  // + the dashboard. Idempotent (upserts). Unconditional — must not be gated by the agent block.
+  setInterval(() => {
+    void new AccountRiskEngine(settingsQueries)
+      .runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'])
+      .catch(err => console.warn('[account-risk] nightly refresh failed:', err instanceof Error ? err.message : err));
+  }, 24 * 60 * 60 * 1000);
 
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);

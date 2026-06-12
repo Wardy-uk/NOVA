@@ -20,6 +20,7 @@ import { AlertService } from './alert-service.js';
 import { TicketClassifier } from './ticket-classifier.js';
 import { CoachingEngine } from './coach.js';
 import { RiskScorer } from './risk-scorer.js';
+import { getTicketCustomerRisk, formatRiskLine } from './account-risk-queries.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
@@ -1621,8 +1622,17 @@ export class AgentLoop {
       const willPostFirstReply = decision.eventType === 'ticket_created' && hasDraft && draftText && !looksLikeStructuredPayload(draftText);
       const skipDraft = willPostFirstReply && (decision.confidence >= frThreshold || hasDraft);
       try {
-        await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft }), { internal: true });
-        console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}`);
+        // Annotate with the customer's account-level risk (churn/complaint/termination)
+        // when the customer is resolvable and at Watch+ tier.
+        let riskLine: string | null = null;
+        try {
+          const risk = await getTicketCustomerRisk(decision.ticketKey, this.settings);
+          if (risk) riskLine = formatRiskLine(risk);
+        } catch (err) {
+          console.warn(`[agent] customer-risk lookup failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+        await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft, riskLine }), { internal: true });
+        console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}${riskLine ? ' (+risk)' : ''}`);
       } catch (err) {
         console.warn(`[agent] Failed to post internal note on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
       }
@@ -2277,7 +2287,7 @@ export class AgentLoop {
     }
   }
 
-  private formatInternalNote(decision: AgentDecision, opts?: { skipDraftResponse?: boolean }): string {
+  private formatInternalNote(decision: AgentDecision, opts?: { skipDraftResponse?: boolean; riskLine?: string | null }): string {
     const classification = decision.output.classification as { ticket_type?: string; category?: string; sub_category?: string; confidence?: number; impact?: string; urgency?: string; priority_matrix?: string } | undefined;
     const priorityAssessment = decision.output.priority_assessment as { suggested_priority?: number; reasoning?: string } | undefined;
     const rawNote = decision.output.internal_note;
@@ -2306,11 +2316,9 @@ export class AgentLoop {
       ? { summary: rawNote, actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } }
       : (rawNote as StructuredNote) ?? { summary: '', actions_issues: [], private_comment: { diagnosis: '', severity: '', probable_causes: [] }, next_steps: { tier: '', steps: [] }, escalation_guidance: { current_tier_appropriate: '', escalate_if: [], do_not_escalate_if: null } };
 
-    const lines = [
-      `\u{1F916} AI ${triggerLabel}${shadowTag}`,
-      ``,
-      note.summary,
-    ];
+    const lines = [`\u{1F916} AI ${triggerLabel}${shadowTag}`];
+    if (opts?.riskLine) lines.push(``, opts.riskLine);
+    lines.push(``, note.summary);
 
     if (note.actions_issues.length > 0) {
       lines.push(``, `**Actions / Issues:**`);
