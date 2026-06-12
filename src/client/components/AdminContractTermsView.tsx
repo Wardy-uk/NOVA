@@ -85,7 +85,7 @@ export function AdminContractTermsView() {
         <div>
           <h1 className="text-[14px] font-semibold text-neutral-100">Contract Terms</h1>
           <p className="text-[11px] text-neutral-500 mt-0.5">
-            Pre-approved terms that senders can tick to include in Adobe Sign agreements. Inserted into any template field whose name starts with <code className="text-neutral-300">{prefix}</code>.
+            Pre-approved terms that senders can tick to include in Adobe Sign agreements. Inserted into any template field whose name contains <code className="text-neutral-300">{prefix}</code>.
           </p>
         </div>
         <button onClick={() => { setEditing(null); setShowForm(true); }} className={btnPrimary}>
@@ -115,7 +115,7 @@ export function AdminContractTermsView() {
                       {!t.active && <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500 uppercase">Inactive</span>}
                       {t.target_field
                         ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#5ec1ca]/10 text-[#5ec1ca] border border-[#5ec1ca]/30">→ {t.target_field}</span>
-                        : <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500" title={`Falls back to any field starting with "${prefix}"`}>→ {prefix} (default)</span>}
+                        : <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500" title={`Falls back to any field whose name contains "${prefix}"`}>→ {prefix} (default)</span>}
                       <span className="text-[9px] text-neutral-600">order {t.sort_order}</span>
                     </div>
                     <pre className="text-[10px] text-neutral-400 whitespace-pre-wrap font-sans line-clamp-4">{t.body}</pre>
@@ -224,7 +224,7 @@ function TermFormModal({
               placeholder={`Exact Adobe field name, e.g. "Contract Terms BYM"`}
             />
             <div className="text-[10px] text-neutral-600 mt-1">
-              The Adobe template field this term merges into (case/spacing-insensitive). Leave blank to fall back to any field starting with <code className="text-neutral-400">{prefix}</code>.
+              The Adobe template field this term merges into (case/spacing-insensitive). Leave blank to fall back to any field whose name contains <code className="text-neutral-400">{prefix}</code>.
             </div>
           </div>
 

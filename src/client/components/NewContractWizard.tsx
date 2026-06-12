@@ -18,10 +18,13 @@ const STEPS: { key: Step; label: string }[] = [
 function normaliseFieldName(s: string | undefined): string {
   return (s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
 }
+// Substring match (case/separator-insensitive): a field "matches" if its name CONTAINS
+// the configured terms phrase. So "BYM Contract Terms", "Contract Terms Yomdel", and
+// "Contract Terms" all match the phrase "contract terms".
 function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
   const n = normaliseFieldName(fieldName);
   const p = normaliseFieldName(prefix);
-  return p.length > 0 && n.startsWith(p);
+  return p.length > 0 && n.includes(p);
 }
 
 const inputCls = 'bg-[#272C33] text-neutral-200 text-[11px] rounded px-2.5 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-full placeholder:text-neutral-600';
@@ -461,7 +464,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
       if (target) {
         return { label: t.label, target, isPrefix: false, matched: availableFieldNorms.has(normaliseFieldName(target)) };
       }
-      // Untargeted → matches if any selected-template field starts with the prefix.
+      // Untargeted → matches if any selected-template field name contains the terms phrase.
       const anyPrefix = [...availableFieldNorms].some(n => fieldMatchesPrefix(n, termsFieldPrefix));
       return { label: t.label, target: `${termsFieldPrefix} (default)`, isPrefix: true, matched: anyPrefix };
     });
@@ -1061,7 +1064,7 @@ export function NewContractWizard({ onNavigateToAgreements }: Props) {
           <div className="max-w-2xl">
             <h2 className="text-[14px] font-semibold text-neutral-100 mb-1">Contract Terms</h2>
             <p className="text-[11px] text-neutral-500 mb-4">
-              Tick pre-approved terms to include. Each term is inserted into the Adobe field it's configured to merge into; terms without a specific field fall back to any field starting with <code className="text-neutral-300">{termsFieldPrefix}</code>.
+              Tick pre-approved terms to include. Each term is inserted into the Adobe field it's configured to merge into; terms without a specific field fall back to any field whose name contains <code className="text-neutral-300">{termsFieldPrefix}</code>.
             </p>
 
             {allTerms.length === 0 ? (

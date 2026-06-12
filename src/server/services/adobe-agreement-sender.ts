@@ -24,16 +24,18 @@ export function formatSubscriptionContractNo(n: number): string {
 
 export const DEFAULT_TERMS_FIELD_PREFIX = 'contract terms';
 
-// Case- and separator-agnostic prefix match.
-// Matches "contract terms bym", "contract_terms_bym", "ContractTermsBYM", etc.
+// Case- and separator-agnostic normalisation. "BYM Contract Terms" -> "bym contract terms".
 export function normaliseFieldName(s: string): string {
   return (s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
 }
 
+// Substring match: a field "matches" the terms phrase if its name CONTAINS it anywhere.
+// So "BYM Contract Terms", "Contract Terms Yomdel", "contract_terms_bym" all match the
+// phrase "contract terms" — accommodates brand-prefixed names, not just leading prefixes.
 export function fieldMatchesPrefix(fieldName: string, prefix: string): boolean {
   const n = normaliseFieldName(fieldName);
   const p = normaliseFieldName(prefix);
-  return p.length > 0 && n.startsWith(p);
+  return p.length > 0 && n.includes(p);
 }
 
 export interface MergeField { fieldName: string; defaultValue: string }
