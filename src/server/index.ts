@@ -3135,18 +3135,18 @@ ${body}
       const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
       const cardHtml = cards.map(c => `
-        <a href="${c.href}" target="_blank" rel="noopener" class="card">
+        <div class="card" role="link" tabindex="0" data-href="${c.href}" data-title="${c.title}" data-color="${c.color}">
           <div class="card-title">${c.title}</div>
           <div class="card-metric" style="color:${c.color}">${c.metric}</div>
           <div class="card-label">${c.metricLabel}</div>
           <div class="card-sub">${c.sub}</div>
-          <div class="card-open">Open board ↗</div>
-        </a>`).join('');
+          <div class="card-open">Expand board ⤢</div>
+        </div>`).join('');
 
       res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NOVA — Wallboard Dash</title>
-<script>setTimeout(()=>location.reload(),60000);</script>
+<script>setInterval(()=>{if(!document.body.classList.contains('wb-expanded'))location.reload();},60000);</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;min-height:100vh}
@@ -3157,16 +3157,48 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 .meta{font-size:11px;color:#64748b}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 @media(max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}}
-.card{display:flex;flex-direction:column;align-items:center;text-align:center;text-decoration:none;color:inherit;
+.card{display:flex;flex-direction:column;align-items:center;text-align:center;text-decoration:none;color:inherit;cursor:pointer;
   background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:24px 20px;
-  transition:transform .12s,border-color .12s,box-shadow .12s}
-.card:hover{transform:translateY(-3px);border-color:rgba(94,193,202,.4);box-shadow:0 8px 28px rgba(0,0,0,.35)}
+  transition:transform .16s cubic-bezier(.2,.8,.2,1),border-color .16s,box-shadow .16s}
+.card:hover,.card:focus-visible{transform:translateY(-4px) scale(1.015);border-color:rgba(94,193,202,.45);box-shadow:0 10px 32px rgba(0,0,0,.4);outline:none}
+.card:active{transform:scale(.98)}
+.card.lifting{transform:scale(1.04);box-shadow:0 0 0 1px rgba(94,193,202,.6),0 0 40px rgba(94,193,202,.35)}
 .card-title{font-size:13px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px}
 .card-metric{font-size:64px;font-weight:800;letter-spacing:-2px;line-height:1}
 .card-label{font-size:12px;color:#64748b;margin-top:6px;text-transform:uppercase;letter-spacing:.5px}
 .card-sub{font-size:13px;color:#cbd5e1;margin-top:10px}
 .card-open{font-size:11px;color:#5ec1ca;margin-top:14px;font-weight:600}
 .foot{text-align:center;margin-top:26px;font-size:11px;color:#475569}
+
+/* ── Expand-to-fullscreen overlay ── */
+.wb-overlay{position:fixed;inset:0;z-index:1000;display:none}
+.wb-overlay.show{display:block}
+.wb-backdrop{position:absolute;inset:0;background:rgba(8,11,15,0);backdrop-filter:blur(0px);
+  transition:background .4s ease,backdrop-filter .4s ease}
+.wb-overlay.open .wb-backdrop{background:rgba(8,11,15,.8);backdrop-filter:blur(6px)}
+.wb-panel{position:fixed;overflow:hidden;background:#1a1f26;will-change:left,top,width,height;
+  box-shadow:0 0 0 1px var(--glow,#5ec1ca),0 0 90px -10px var(--glow,#5ec1ca),0 30px 80px rgba(0,0,0,.6);
+  transition:left .46s cubic-bezier(.16,1,.3,1),top .46s cubic-bezier(.16,1,.3,1),
+    width .46s cubic-bezier(.16,1,.3,1),height .46s cubic-bezier(.16,1,.3,1),border-radius .46s ease}
+.wb-frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#1a1f26;opacity:0;transition:opacity .3s ease .18s}
+.wb-overlay.open .wb-frame{opacity:1}
+.wb-overlay.closing .wb-frame{opacity:0;transition:opacity .14s ease}
+.wb-pulse{position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(circle at 50% 45%,var(--glow,#5ec1ca) 0%,transparent 60%)}
+.wb-overlay.open .wb-pulse{animation:wbpulse .6s ease-out}
+@keyframes wbpulse{0%{opacity:.5}100%{opacity:0}}
+.wb-close{position:absolute;top:16px;right:16px;z-index:3;display:flex;align-items:center;gap:8px;
+  font:600 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:.4px;color:#e2e8f0;cursor:pointer;
+  background:rgba(20,25,32,.7);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:9px 14px;
+  backdrop-filter:blur(8px);opacity:0;transform:translateY(-6px);transition:opacity .3s ease .25s,transform .3s ease .25s,background .15s,border-color .15s}
+.wb-overlay.open .wb-close{opacity:1;transform:none}
+.wb-overlay.closing .wb-close{opacity:0;transition:opacity .12s}
+.wb-close:hover{background:rgba(239,68,68,.9);border-color:rgba(239,68,68,.9)}
+.wb-close .x{font-size:14px;line-height:1}
+@media(prefers-reduced-motion:reduce){
+  .wb-panel,.wb-frame,.wb-close,.wb-backdrop{transition-duration:.01s}
+  .card{transition-duration:.01s}
+}
 </style>
 </head><body><div class="wrap">
 <div class="head">
@@ -3175,7 +3207,61 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 </div>
 <div class="grid">${cardHtml}</div>
 <div class="foot">nurtur.tech · NOVA Wallboard Dash · ${dateStr}</div>
-</div></body></html>`);
+</div>
+<div class="wb-overlay" id="wb-overlay">
+  <div class="wb-backdrop"></div>
+  <div class="wb-panel" id="wb-panel">
+    <div class="wb-pulse"></div>
+    <iframe class="wb-frame" id="wb-frame" title="Wallboard"></iframe>
+    <button class="wb-close" id="wb-close" aria-label="Close board"><span class="x">✕</span><span id="wb-otitle"></span></button>
+  </div>
+</div>
+<script>
+(function(){
+  var ov=document.getElementById('wb-overlay'),panel=document.getElementById('wb-panel'),
+      frame=document.getElementById('wb-frame'),otitle=document.getElementById('wb-otitle'),
+      closeBtn=document.getElementById('wb-close'),origin=null,busy=false;
+  function once(prop,cb){
+    function h(e){ if(e.target===panel&&e.propertyName===prop){panel.removeEventListener('transitionend',h);cb();} }
+    panel.addEventListener('transitionend',h);
+  }
+  function expand(card){
+    if(busy||ov.classList.contains('show'))return; busy=true;
+    var href=card.dataset.href,color=card.dataset.color||'#5ec1ca',r=card.getBoundingClientRect();
+    origin=r; document.body.classList.add('wb-expanded');
+    ov.style.setProperty('--glow',color); otitle.textContent=card.dataset.title||'';
+    card.classList.add('lifting'); setTimeout(function(){card.classList.remove('lifting');},400);
+    panel.style.transition='none';
+    panel.style.left=r.left+'px';panel.style.top=r.top+'px';
+    panel.style.width=r.width+'px';panel.style.height=r.height+'px';panel.style.borderRadius='16px';
+    ov.classList.add('show'); void panel.offsetWidth; panel.style.transition='';
+    requestAnimationFrame(function(){
+      ov.classList.add('open');
+      panel.style.left='0px';panel.style.top='0px';
+      panel.style.width='100vw';panel.style.height='100vh';panel.style.borderRadius='0px';
+    });
+    setTimeout(function(){ if(frame.getAttribute('src')!==href)frame.setAttribute('src',href); },260);
+    once('width',function(){busy=false;});
+  }
+  function collapse(){
+    if(busy||!ov.classList.contains('open')||!origin)return; busy=true;
+    var r=origin; ov.classList.add('closing'); ov.classList.remove('open');
+    panel.style.left=r.left+'px';panel.style.top=r.top+'px';
+    panel.style.width=r.width+'px';panel.style.height=r.height+'px';panel.style.borderRadius='16px';
+    once('width',function(){
+      ov.classList.remove('show'); ov.classList.remove('closing');
+      frame.setAttribute('src','about:blank'); document.body.classList.remove('wb-expanded'); busy=false;
+    });
+  }
+  document.querySelectorAll('.card').forEach(function(card){
+    card.addEventListener('click',function(){expand(card);});
+    card.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();expand(card);} });
+  });
+  closeBtn.addEventListener('click',collapse);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape')collapse(); });
+})();
+</script>
+</body></html>`);
       logWallboard('/wallboard/dash', 'info', 200, Date.now() - wbStart, `OK — ${cards.length} cards`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
