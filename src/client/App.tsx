@@ -45,6 +45,7 @@ import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
 const EscalationReportView = lazy(() => import('./components/EscalationReportView.js').then(m => ({ default: m.EscalationReportView })));
+const RiskIntelligenceView = lazy(() => import('./components/RiskIntelligenceView.js').then(m => ({ default: m.RiskIntelligenceView })));
 const TrainingMatrixView = lazy(() => import('./components/TrainingMatrixView.js').then(m => ({ default: m.TrainingMatrixView })));
 const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.js').then(m => ({ default: m.TrainingSummaryView })));
 const BoardMiView = lazy(() => import('./components/BoardMiView.js').then(m => ({ default: m.BoardMiView })));
@@ -101,7 +102,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'agent-kpis' | 'qa'
+  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
   | 'kpi-rebuild-agents' | 'kpi-rebuild-history'
@@ -198,6 +199,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-breached', label: 'Agent Breaches' },
       { view: 'kpi-team-breached', label: 'Team Breaches' },
       { view: 'kpi-escalations', label: 'Escalations' },
+      { view: 'risk-intelligence', label: 'Risk Intelligence' },
       { view: 'agent-kpis', label: 'Agent KPIs' },
     ],
   },
@@ -1071,6 +1073,9 @@ export function App() {
           )}
           {view === 'kpi-escalations' && (
             <EscalationReportView />
+          )}
+          {view === 'risk-intelligence' && (
+            <RiskIntelligenceView />
           )}
           {view === 'qa' && (
             <QAView />
