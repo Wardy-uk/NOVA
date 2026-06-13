@@ -3657,7 +3657,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .right{display:grid;grid-template-rows:2fr 1fr;gap:1.2vh;min-height:0}
 /* metric rows */
 .grp{margin-bottom:.8vh}
-.grp-sep{border-top:1px dotted rgba(255,255,255,.22);margin-top:.5vh;padding-top:.4vh}
+.grp-sep{border-top:1px dotted rgba(255,255,255,.22);margin-top:.3vh;padding-top:.2vh}
 .grp-h{font-size:1.15vh;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#5ec1ca;padding:.5vh .3vw .3vh;opacity:.85}
 .mrow{display:grid;grid-template-columns:minmax(0,1fr) 46% 3vw;align-items:center;gap:.6vw;padding:.35vh .3vw}
 .mrow.sub .mlabel{color:#cbd5e1;font-size:1.5vh}
@@ -3738,21 +3738,21 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .ov.closing .ov-body{opacity:0;transition:opacity .12s}
 @media(prefers-reduced-motion:reduce){.ov-card,.ov-back,.ov-body,.exp{transition-duration:.01s}}
 /* Strategic KPIs panel — split top (daily) / bottom (weekly breach counts) */
-.left .panel-body{display:flex;flex-direction:column;gap:.7vh;overflow:hidden;padding:.8vh 1.2vw}
+.left .panel-body{display:flex;flex-direction:column;gap:.4vh;overflow:hidden;padding:.5vh 1.2vw}
 .kblock{flex:1;min-height:0;display:flex;flex-direction:column}
-.kblock-h{font-size:1.1vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.2vh .3vw .3vh;border-bottom:1px solid #2f353d;margin-bottom:.25vh}
+.kblock-h{font-size:1.05vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.15vh .3vw .25vh;border-bottom:1px solid #2f353d;margin-bottom:.15vh}
 .kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
 .mcells.mcellsw{grid-template-columns:repeat(4,1fr)}
 .left .mhead{margin-bottom:.1vh}
 .left .grp{margin-bottom:0}
-.left .grp-h{font-size:1.1vh;padding:.25vh .3vw .15vh}
-.left .mrow{padding:.3vh .3vw}
-.left .mlabel{font-size:1.55vh}
-.left .mrow.sub .mlabel{font-size:1.45vh}
-.left .pill{font-size:1.55vh;min-width:2.7vw;padding:.3vh .45vw;border-radius:7px}
-.left .mtrend{font-size:1.75vh}
-.left .cell.dh{font-size:1.05vh}
-.left .dh-n{font-size:1.3vh}
+.left .grp-h{font-size:1.05vh;padding:.15vh .3vw .1vh}
+.left .mrow{padding:.18vh .3vw}
+.left .mlabel{font-size:1.4vh}
+.left .mrow.sub .mlabel{font-size:1.3vh}
+.left .pill{font-size:1.4vh;min-width:2.5vw;padding:.22vh .4vw;border-radius:6px}
+.left .mtrend{font-size:1.55vh}
+.left .cell.dh{font-size:.95vh}
+.left .dh-n{font-size:1.15vh}
 /* Risk panel now 2/3 height — give rows room to fill it */
 .right .rrow{padding:1.3vh .8vw;margin-bottom:.6vh}
 .right .rrow .rname{font-size:1.95vh}
