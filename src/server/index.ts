@@ -3597,7 +3597,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .panel{background:rgba(255,255,255,.025);border:1px solid #2f353d;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
 .panel-h{font-size:1.3vh;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#94a3b8;padding:1vh 1.1vw;border-bottom:1px solid #2f353d;flex:0 0 auto}
 .panel-body{flex:1 1 auto;min-height:0;overflow:auto;padding:.6vh .8vw}
-.right{display:grid;grid-template-rows:1fr 1.5fr;gap:1.2vh;min-height:0}
+.right{display:grid;grid-template-rows:2fr 1fr;gap:1.2vh;min-height:0}
 /* metric rows */
 .grp{margin-bottom:.8vh}
 .grp-h{font-size:1.15vh;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#5ec1ca;padding:.5vh .3vw .3vh;opacity:.85}
@@ -3638,13 +3638,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .exp-hint{font-size:1.05vh;color:#5ec1ca;font-weight:700;letter-spacing:.4px;opacity:.8}
 .detail-src{display:none}
 /* commitment bucket dashboard */
-.bk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8vh .8vw;padding:.5vh .2vw}
-.bk{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:1.1vh .5vw;text-align:center}
-.bk-n{font-size:3.4vh;font-weight:800;letter-spacing:-1.5px;line-height:1}
-.bk-l{font-size:1.1vh;color:#94a3b8;margin-top:.5vh;text-transform:uppercase;letter-spacing:.4px}
+.bk-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.6vh .6vw;padding:.4vh .2vw}
+.bk{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:.9vh .4vw;text-align:center}
+.bk-n{font-size:3vh;font-weight:800;letter-spacing:-1.5px;line-height:1}
+.bk-l{font-size:1vh;color:#94a3b8;margin-top:.4vh;text-transform:uppercase;letter-spacing:.3px}
 .bk.b-red .bk-n{color:#ef4444}.bk.b-amber .bk-n{color:#f59e0b}.bk.b-cyan .bk-n{color:#5ec1ca}
 .bk.bk-0 .bk-n{color:#475569}.bk.bk-0{opacity:.6}
-.bk-total{text-align:center;font-size:1.3vh;color:#64748b;margin-top:.9vh;font-weight:600}
+.bk-total{text-align:center;font-size:1.3vh;color:#64748b;margin-top:.7vh;font-weight:600}
 .cpast{font-size:1.1vh;color:#94a3b8;min-width:5.5vw;text-align:right}
 /* risk "why" detail */
 .why{border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.02);padding:1.4vh 1.4vw;margin-bottom:1.2vh}
@@ -3679,6 +3679,22 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .ov.open .ov-body{opacity:1}
 .ov.closing .ov-body{opacity:0;transition:opacity .12s}
 @media(prefers-reduced-motion:reduce){.ov-card,.ov-back,.ov-body,.exp{transition-duration:.01s}}
+/* Strategic KPIs panel — enlarge content to fill the whole tile */
+.left .panel-body{display:flex;flex-direction:column;justify-content:space-between;overflow:auto;padding:1vh 1.2vw}
+.left .mhead{margin-bottom:.3vh}
+.left .grp{margin-bottom:0}
+.left .grp-h{font-size:1.55vh;padding:.8vh .3vw .5vh}
+.left .mrow{padding:.75vh .3vw}
+.left .mlabel{font-size:2.3vh}
+.left .mrow.sub .mlabel{font-size:2.1vh}
+.left .pill{font-size:2.2vh;min-width:3.6vw;padding:.6vh .6vw;border-radius:9px}
+.left .mtrend{font-size:2.7vh}
+.left .cell.dh{font-size:1.3vh}
+.left .dh-n{font-size:1.7vh}
+/* Risk panel now 2/3 height — give rows room to fill it */
+.right .rrow{padding:1.3vh .8vw;margin-bottom:.6vh}
+.right .rrow .rname{font-size:1.95vh}
+.right .rrow .rmeta{font-size:1.4vh}
 </style>
 </head><body><div class="page">
 <div class="head">
