@@ -3724,21 +3724,21 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .ov.closing .ov-body{opacity:0;transition:opacity .12s}
 @media(prefers-reduced-motion:reduce){.ov-card,.ov-back,.ov-body,.exp{transition-duration:.01s}}
 /* Strategic KPIs panel — split top (daily) / bottom (weekly breach counts) */
-.left .panel-body{display:flex;flex-direction:column;gap:1vh;overflow:hidden;padding:1vh 1.2vw}
+.left .panel-body{display:flex;flex-direction:column;gap:.7vh;overflow:hidden;padding:.8vh 1.2vw}
 .kblock{flex:1;min-height:0;display:flex;flex-direction:column}
-.kblock-h{font-size:1.25vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.3vh .3vw .5vh;border-bottom:1px solid #2f353d;margin-bottom:.4vh}
-.kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:auto}
+.kblock-h{font-size:1.1vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.2vh .3vw .3vh;border-bottom:1px solid #2f353d;margin-bottom:.25vh}
+.kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
 .mcells.mcells3{grid-template-columns:repeat(3,1fr)}
-.left .mhead{margin-bottom:.2vh}
+.left .mhead{margin-bottom:.1vh}
 .left .grp{margin-bottom:0}
-.left .grp-h{font-size:1.3vh;padding:.45vh .3vw .3vh}
-.left .mrow{padding:.5vh .3vw}
-.left .mlabel{font-size:1.85vh}
-.left .mrow.sub .mlabel{font-size:1.7vh}
-.left .pill{font-size:1.85vh;min-width:3vw;padding:.45vh .5vw;border-radius:8px}
-.left .mtrend{font-size:2.1vh}
-.left .cell.dh{font-size:1.15vh}
-.left .dh-n{font-size:1.45vh}
+.left .grp-h{font-size:1.1vh;padding:.25vh .3vw .15vh}
+.left .mrow{padding:.3vh .3vw}
+.left .mlabel{font-size:1.55vh}
+.left .mrow.sub .mlabel{font-size:1.45vh}
+.left .pill{font-size:1.55vh;min-width:2.7vw;padding:.3vh .45vw;border-radius:7px}
+.left .mtrend{font-size:1.75vh}
+.left .cell.dh{font-size:1.05vh}
+.left .dh-n{font-size:1.3vh}
 /* Risk panel now 2/3 height — give rows room to fill it */
 .right .rrow{padding:1.3vh .8vw;margin-bottom:.6vh}
 .right .rrow .rname{font-size:1.95vh}
