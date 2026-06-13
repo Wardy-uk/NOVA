@@ -1146,12 +1146,12 @@ async function main() {
   // Jira client — it uses its own resolver + DB), guarded so it runs once, non-blocking.
   // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
   // (assignment-engine setup) could abort before it was reached.
-  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v3') ?? '(unset)'}`);
-  if (!settingsQueries.get('account_risk_backfill_v3')) {
+  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v4') ?? '(unset)'}`);
+  if (!settingsQueries.get('account_risk_backfill_v4')) {
     void (async () => {
       try {
         await new AccountRiskEngine(settingsQueries).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
-        settingsQueries.set('account_risk_backfill_v3', 'true');
+        settingsQueries.set('account_risk_backfill_v4', 'true');
       } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
     })();
   }

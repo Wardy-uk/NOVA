@@ -14,8 +14,16 @@ interface SignalDef {
   weight: number;
   re: RegExp;            // matched against summary + description (JS)
   sql: string;           // matched against public comment bodies (SQL)
+  exclude?: RegExp;      // if it ALSO matches this, the signal does NOT count (false positive)
   setsFlag?: 'has_formal_complaint' | 'has_termination' | 'has_active_refund' | 'has_open_escalation';
 }
+
+// Network/franchise accounts (Guild, Fine & Country, PFG, EweMove) raise tickets ABOUT their
+// own members terminating membership — "Guild Member Terminating - Smith & Co". That is THEIR
+// churn, not the network churning from Nurtur, so it must not count as a termination signal.
+// Also strip technical "terminate the feed/connection" noise.
+const TERMINATION_FALSE_POSITIVE =
+  /\b(member|customer|client|landlord|tenant|applicant|agent|branch|office)s?\b[\s\S]{0,60}\bterminat|\bterminat\w*[\s\S]{0,60}\b(member|membership|customer|client|their (?:account|contract|membership))\b|\bterminate (?:the |a |their )?(feed|connection|session|integration|sync|account on)\b/i;
 
 // Ordered high → low. SQL uses lower-cased LIKE; keep patterns lower-case.
 const SIGNALS: SignalDef[] = [
@@ -24,6 +32,7 @@ const SIGNALS: SignalDef[] = [
     sql: "body_text LIKE '%formal complaint%' OR body_text LIKE '%complaints procedure%'" },
   { type: 'termination', weight: 40, setsFlag: 'has_termination',
     re: /\b(terminat\w*|notice to terminate|cancel(?:ling|lation)? (?:our|the|my) (?:contract|account|membership|subscription)|leaving nurtur)\b/i,
+    exclude: TERMINATION_FALSE_POSITIVE,
     sql: "body_text LIKE '%terminat%' OR body_text LIKE '%notice to terminate%' OR body_text LIKE '%cancelling our contract%' OR body_text LIKE '%cancel our contract%'" },
   { type: 'formal_escalation', weight: 35, setsFlag: 'has_open_escalation',
     re: /\b(formal escalation|escalate this formally|formally escalat\w*)\b/i,
@@ -170,6 +179,7 @@ export class AccountRiskEngine {
 
       for (const sig of SIGNALS) {
         if (!sig.re.test(haystack)) continue;
+        if (sig.exclude && sig.exclude.test(haystack)) continue;  // false positive (e.g. member termination)
         acc.score += sig.weight * decay;
         acc.signalRows.push({
           ticketKey: t.issue_key, project: t.project_key, type: sig.type, weight: Math.round(sig.weight * decay),
@@ -184,6 +194,7 @@ export class AccountRiskEngine {
 
     // Volume + cross-project signals, finalise score/tier, write.
     let written = 0, tierChanges = 0;
+    const writtenRefs: string[] = [];
     for (const acc of customers.values()) {
       if (acc.recentTickets >= 50) acc.score += 30;
       else if (acc.recentTickets >= 20) acc.score += 20;
@@ -244,6 +255,18 @@ export class AccountRiskEngine {
         );
       }
       written++;
+      writtenRefs.push(acc.customerRef);
+    }
+
+    // Remove stale rows for customers no longer at risk (e.g. dropped out after a
+    // signal-logic change like the member-termination fix). These tables are exclusively ours.
+    if (writtenRefs.length) {
+      const refPh = writtenRefs.map(() => '?').join(',');
+      await execute(`DELETE FROM agent_account_risk_signals WHERE customer_ref NOT IN (${refPh})`, writtenRefs);
+      await execute(`DELETE FROM agent_account_risk WHERE customer_ref NOT IN (${refPh})`, writtenRefs);
+    } else {
+      await execute(`DELETE FROM agent_account_risk_signals`);
+      await execute(`DELETE FROM agent_account_risk`);
     }
 
     console.log(`[account-risk] wrote ${written} customers (${tierChanges} tier changes); reconciling…`);
