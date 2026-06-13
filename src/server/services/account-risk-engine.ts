@@ -124,7 +124,13 @@ export class AccountRiskEngine {
       bc_account_number: (f.customfield_14626 as string) ?? null,
       organisation_name: org,
       status_category: f.status?.statusCategory?.key ?? null,  // 'new' | 'indeterminate' | 'done'
-      jira_created: f.created ?? null,
+      // Jira returns e.g. "2026-06-13T13:05:53.167+0100" (offset w/o colon) which MSSQL
+      // DATETIME2 won't convert — normalise to standard ISO (…Z).
+      jira_created: (() => {
+        if (!f.created) return null;
+        const d = new Date(f.created as string);
+        return Number.isNaN(d.getTime()) ? null : d.toISOString();
+      })(),
     };
   }
 
