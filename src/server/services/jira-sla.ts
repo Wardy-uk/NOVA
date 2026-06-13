@@ -210,6 +210,55 @@ export function getSlaRemainingMs(issue: Record<string, unknown>): number | null
 }
 
 /**
+ * Absolute timestamp by which the resolution SLA says the ticket should be
+ * completed — Jira's own computed target (it already factors in priority and the
+ * UK business-hours calendar). Prefers the ongoing/paused cycle's `breachTime`;
+ * falls back to the most recent completed cycle's `breachTime` so a parked ticket
+ * (whose live cycle may be gone) still reports its original target. Returns null
+ * when the SLA field carries no usable target.
+ *
+ * Used to decide whether a manually-set due date defers resolution *beyond* SLA:
+ * due date later than this target = a conscious commitment past the SLA.
+ *
+ * breachTime shapes handled: { epochMillis: number }, { iso8601: string }, or a
+ * bare ISO string.
+ */
+export function getResolutionSlaTarget(issue: Record<string, unknown>): Date | null {
+  const raw = field(issue, 'customfield_14048');
+  if (!raw) return null;
+  const slaList: Array<Record<string, unknown>> = Array.isArray(raw) ? raw : [raw];
+
+  const readBreach = (cycle: unknown): Date | null => {
+    if (!cycle || typeof cycle !== 'object') return null;
+    const bt = (cycle as Record<string, unknown>).breachTime;
+    if (!bt) return null;
+    if (typeof bt === 'string') return toDate(bt);
+    const o = bt as Record<string, unknown>;
+    if (typeof o.epochMillis === 'number') return toDate(o.epochMillis);
+    return toDate(o.iso8601 as string | undefined);
+  };
+
+  // Live (ongoing or paused) cycle is the authoritative current target.
+  for (const sla of slaList) {
+    if (!sla || typeof sla !== 'object') continue;
+    const t = readBreach(sla.ongoingCycle);
+    if (t) return t;
+  }
+  // Otherwise the latest completed cycle's breachTime (original target).
+  let latest: Date | null = null;
+  for (const sla of slaList) {
+    if (!sla || typeof sla !== 'object') continue;
+    const completed = sla.completedCycles as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(completed)) continue;
+    for (const c of completed) {
+      const t = readBreach(c);
+      if (t && (!latest || t.getTime() > latest.getTime())) latest = t;
+    }
+  }
+  return latest;
+}
+
+/**
  * Returns true when the SLA is approaching breach (positive remaining < 2 hours).
  */
 export function isSlaNearBreach(issue: Record<string, unknown>): boolean {

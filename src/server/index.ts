@@ -144,6 +144,7 @@ import { ConfluenceSyncProvider } from './services/kb-confluence-sync.js';
 import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline, computeRag, getKpiPool } from './services/kpi-pipeline.js';
+import { getResolutionSlaTarget } from './services/jira-sla.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
 import { CoachingEngine } from './services/coach.js';
@@ -3454,40 +3455,47 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         riskRows = `<div class="empty">Risk data unavailable</div>`;
       }
 
-      // ── RIGHT BOTTOM: Key Commitments — Jira tickets with a future due date ──
-      // Due dates are not auto-set by SLA, so any future due date is a conscious
-      // commitment. We split on the 60-day-from-creation line (the real signal).
+      // ── RIGHT BOTTOM: Key Commitments — future due dates that defer past SLA ──
+      // Only surface tickets where a CONSCIOUS commitment was made beyond the SLA:
+      // the manually-set due date is later than Jira's computed resolution target
+      // (customfield_14048 breachTime — already factors in priority + business
+      // hours). Tickets within SLA are normal and excluded; tickets with no SLA
+      // data can't be judged, so they're skipped. Within/over-60-day-from-creation
+      // gives a second read on how far past the dev cycle the commitment runs.
       let commitRows = '';
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
         if (agentJiraClient && projs) {
           const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981'], 40);
-          const issues = r.issues || [];
-          if (!issues.length) {
-            commitRows = `<div class="empty">No tickets with future commitments</div>`;
-          } else {
-            commitRows = issues.map(iss => {
-              const f = iss.fields as Record<string, any>;
-              const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
-              const created = f.created ? new Date(f.created) : null;
-              const daysRem = due ? Math.ceil((due.getTime() - now.getTime()) / 86400000) : null;
-              const cycle = due && created ? Math.round((due.getTime() - created.getTime()) / 86400000) : null;
-              const over60 = cycle != null && cycle > 60;
-              const tier = (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—';
-              const summary = String(f.summary || '');
-              const trunc = summary.length > 58 ? summary.slice(0, 57) + '…' : summary;
-              const dueStr = due ? due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—';
-              const rowCls = daysRem != null && daysRem < 0 ? ' c-red' : daysRem != null && daysRem <= 7 ? ' c-amber' : '';
-              const remLbl = daysRem == null ? '—' : daysRem < 0 ? `${-daysRem}d overdue` : `${daysRem}d`;
-              return `<a class="crow${rowCls}" href="${jiraBase}/browse/${iss.key}" target="_blank">
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_14048'], 100);
+          const dayMs = 86400000;
+          const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+          const flagged = (r.issues || []).map(iss => {
+            const f = iss.fields as Record<string, any>;
+            const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
+            if (!due) return null;
+            const slaTarget = getResolutionSlaTarget(iss as unknown as Record<string, unknown>);
+            // Beyond SLA only: due day strictly later than the SLA target day.
+            if (!slaTarget || dateOnly(due) <= dateOnly(slaTarget)) return null;
+            const created = f.created ? new Date(f.created) : null;
+            const daysRem = Math.ceil((due.getTime() - now.getTime()) / dayMs);
+            const pastSla = Math.round((dateOnly(due) - dateOnly(slaTarget)) / dayMs);
+            const cycle = created ? Math.round((due.getTime() - created.getTime()) / dayMs) : null;
+            const over60 = cycle != null && cycle > 60;
+            const tier = (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—';
+            const summary = String(f.summary || '');
+            const trunc = summary.length > 54 ? summary.slice(0, 53) + '…' : summary;
+            const dueStr = due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+            const rowCls = daysRem < 0 ? ' c-red' : daysRem <= 7 ? ' c-amber' : '';
+            const remLbl = daysRem < 0 ? `${-daysRem}d overdue` : `${daysRem}d`;
+            return `<a class="crow${rowCls}" href="${jiraBase}/browse/${iss.key}" target="_blank">
                 <div class="ckey">${esc(iss.key)}</div>
                 <div class="csum">${esc(trunc)}<span class="ctier">${esc(tier)}</span></div>
-                <div class="cdue"><span class="cbadge" style="${over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${dueStr}</span><span class="crem">${remLbl}</span></div>
+                <div class="cdue"><span class="cbadge" style="${over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate" title="${pastSla}d past SLA">${dueStr}</span><span class="crem">${remLbl}</span></div>
               </a>`;
-            }).join('');
-          }
+          }).filter((row): row is string => row !== null);
+          commitRows = flagged.length ? flagged.join('') : `<div class="empty">No commitments beyond SLA</div>`;
         } else {
           commitRows = `<div class="empty">Jira not configured</div>`;
         }
