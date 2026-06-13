@@ -3581,6 +3581,13 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 <style>
 *{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
 body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2e8f0;overflow:hidden}
+/* subtle thin scrollbars (wallboard is a standalone page) */
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
 .page{height:100vh;display:flex;flex-direction:column;padding:1.8vh 1.8vw;gap:1.2vh}
 .head{display:flex;justify-content:space-between;align-items:flex-end;flex:0 0 auto}
 .head h1{font-size:2.4vh;font-weight:800;letter-spacing:-.5px}
