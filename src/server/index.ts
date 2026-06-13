@@ -145,6 +145,7 @@ import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline, computeRag, getKpiPool } from './services/kpi-pipeline.js';
 import { getResolutionSlaTarget } from './services/jira-sla.js';
+import { runKpiMigrations } from './services/kpi-migrations.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
 import { CoachingEngine } from './services/coach.js';
@@ -3986,6 +3987,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
       console.log(`[N.O.V.A] Frontend dev server: http://localhost:5173`);
     }
   });
+
+  // One-time KPI data migrations (each guarded by a settings flag → runs once).
+  // Fire-and-forget so a slow/failed Azure SQL call never blocks boot.
+  void runKpiMigrations(settingsQueries);
 
   // 7. Auto-sync: per-source timers with individual intervals
   const syncTimers = new Map<string, ReturnType<typeof setInterval>>();
