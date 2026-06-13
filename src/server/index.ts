@@ -3432,6 +3432,37 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         }
       } catch { /* QA optional — agent table may be absent */ }
 
+      // Rolling 7-day org CSAT, injected per day under a sentinel key. Resolved-today
+      // CSAT is too spiky for SLT (mostly no-survey dashes + the odd lone red), so
+      // each day shows the trailing-7-day, volume-weighted average instead.
+      try {
+        const CSAT_ROLL_DAYS = 7;
+        const csatRows = (await pool.request().query(`
+          SELECT CAST(ReportDate AS DATE) AS d, SUM(CSATAverage * CSATCount) AS s, SUM(CSATCount) AS n
+          FROM dbo.jira_agent_kpi_daily
+          WHERE ReportDate >= DATEADD(day, -42, CAST(GETDATE() AS DATE))
+            AND ReportDate < CAST(GETDATE() AS DATE)
+            AND CSATAverage IS NOT NULL AND CSATCount > 0
+          GROUP BY CAST(ReportDate AS DATE)
+        `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
+        const csatDaily = new Map<string, { s: number; n: number }>();
+        for (const r of csatRows) csatDaily.set(toDayKey(r.d), { s: Number(r.s) || 0, n: Number(r.n) || 0 });
+        for (const dayKey of byDay.keys()) {
+          const end = new Date(dayKey + 'T00:00:00Z');
+          let s = 0, n = 0;
+          for (let i = 0; i < CSAT_ROLL_DAYS; i++) {
+            const dk = new Date(end); dk.setUTCDate(dk.getUTCDate() - i);
+            const v = csatDaily.get(dk.toISOString().slice(0, 10));
+            if (v) { s += v.s; n += v.n; }
+          }
+          if (n > 0) {
+            const pct = Math.round((s / n) * 20);                 // 1–5 avg → %
+            const rag = pct >= 80 ? 1 : pct >= 64 ? 2 : 3;         // CSAT % target 80
+            byDay.get(dayKey)!.set('__csat_roll__', { count: pct, rag });
+          }
+        }
+      } catch { /* CSAT rolling optional */ }
+
       const days = [...byDay.keys()].filter(isWeekday).sort().slice(-5);
 
       // Fragments to locate a stored KPI name for a queue. `noreply` names keep
@@ -3477,12 +3508,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const c = getCell(dm, 'newvol');
         return c ? { num: c.num, rag: newvolRag(c.num) } : null;
       };
-      // CSAT 0% means no surveys returned that day (any real rating is ≥20%), so
-      // treat 0 as no-data → renders as a grey dash, excluded from trend/weekly.
-      const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
-        const c = getNamed(dm, n => n.includes('csat') && !n.includes('derived'));
-        return c && c.num > 0 ? c : null;
-      };
+      // CSAT = rolling 7-day average (injected above). No surveys in the trailing
+      // week → not injected → grey dash, excluded from trend/weekly.
+      const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null =>
+        getNamed(dm, n => n === '__csat_roll__');
 
       // Muted RAG palette — calm "attention" tones, not alarm, for the SLT board.
       const ragColor = (rag: number | null) => rag === 1 ? '#4ca88a' : rag === 2 ? '#c99a3f' : rag === 3 ? '#c2554f' : '#475569';
@@ -3540,7 +3569,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
-          { label: 'CSAT', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
+          { label: 'CSAT (7d)', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
           { label: 'QA score (/10)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
         ] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
@@ -3601,8 +3630,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          // Cell RAG by green-day count: 4–5 green, 3 amber, ≤2 red. Oldest stays neutral.
-          const rag = muted ? null : (s.green >= 4 ? 1 : s.green === 3 ? 2 : 3);
+          // Cell RAG by PROPORTION of available days green (fair to short/holiday
+          // weeks): ≥80% green, ≥60% amber, else red. Oldest stays neutral.
+          const ratio = s.green / s.total;
+          const rag = muted ? null : (ratio >= 0.8 ? 1 : ratio >= 0.6 ? 2 : 3);
           const col = ragColor(rag), bg = ragBg(rag);
           return `<div class="cell"><span class="pill" title="${s.green} of ${s.total} days green" style="background:${bg};color:${col};border:1px solid ${col}44">${s.green}</span></div>`;
         }).join('');
