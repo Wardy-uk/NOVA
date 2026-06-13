@@ -3453,11 +3453,11 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           let breached = 0, total = 0;
           for (const dk of dks) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
           if (total === 0) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          // RAG by clean (non-breached) days: 4–5 clean = green, 3 = amber, ≤2 = red.
+          // Show clean (non-breached) days. RAG: 4–5 clean = green, 3 = amber, ≤2 = red.
           const clean = total - breached;
           const rag = clean >= 4 ? 1 : clean === 3 ? 2 : 3;
           const col = ragColor(rag), bg = ragBg(rag);
-          return `<div class="cell"><span class="pill" title="${breached} of ${total} days breached" style="background:${bg};color:${col};border:1px solid ${col}44">${breached}</span></div>`;
+          return `<div class="cell"><span class="pill" title="${clean} of ${total} days clean (${breached} breached)" style="background:${bg};color:${col};border:1px solid ${col}44">${clean}</span></div>`;
         }).join('');
         return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend"></div></div>`;
       };
@@ -3763,7 +3763,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
         </div>
       </div>
       <div class="kblock">
-        <div class="kblock-h">Days breached per week &middot; last 3 weeks</div>
+        <div class="kblock-h">Clean (green) days per week &middot; last 4 weeks</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
           ${weeklyHtml}
