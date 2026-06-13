@@ -3430,29 +3430,73 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         rollSection('Oldest actionable (days)', 'oldest', Q7),
       ].join('');
 
-      // ── RIGHT TOP: Key Account Risks (agent_account_risk, Watch+ tiers) ──
-      let riskRows = '';
+      // ── RIGHT TOP: Key Account Risks (agent_account_risk, top 5 Watch+ tiers) ──
+      // In-panel = compact top-5; expanded = the WHY (active risk signals from
+      // agent_account_risk_signals: complaints, terminations, refunds, escalations).
+      let riskSummaryHtml = '', riskDetailHtml = '';
+      const badgeStyle = (high: boolean) => `background:${high ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'};color:${high ? '#ef4444' : '#f59e0b'};border:1px solid ${high ? '#ef444455' : '#f59e0b55'}`;
+      const SIGNAL_LABELS: Record<string, string> = {
+        formal_complaint: 'Formal complaint', termination: 'Termination / cancellation',
+        formal_escalation: 'Formal escalation', refund: 'Refund request', compensation: 'Compensation request',
+      };
+      const sigLabel = (t: string) => SIGNAL_LABELS[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       try {
-        const risks = await query<{ customer_name: string | null; bc_number: string | null; risk_score: number; risk_tier: number; total_ticket_count: number; last_ticket_date: Date | string | null }>(
-          `SELECT TOP 6 customer_name, bc_number, risk_score, risk_tier, total_ticket_count, last_ticket_date
+        const risks = await query<{ customer_ref: string; customer_name: string | null; bc_number: string | null; risk_score: number; risk_tier: number; total_ticket_count: number; last_ticket_date: Date | string | null; has_formal_complaint: number; has_termination: number; has_active_refund: number; has_open_escalation: number }>(
+          `SELECT TOP 5 customer_ref, customer_name, bc_number, risk_score, risk_tier, total_ticket_count, last_ticket_date,
+                  has_formal_complaint, has_termination, has_active_refund, has_open_escalation
            FROM agent_account_risk WHERE risk_tier >= 2 ORDER BY risk_score DESC, total_ticket_count DESC`);
         if (!risks.length) {
-          riskRows = `<div class="empty">No accounts currently flagged</div>`;
+          riskSummaryHtml = `<div class="empty">No accounts currently flagged</div>`;
+          riskDetailHtml = riskSummaryHtml;
         } else {
-          riskRows = risks.map(a => {
-            const high = a.risk_tier >= 3;
-            const name = a.customer_name || 'Unknown account';
+          const refs = risks.map(r => r.customer_ref).filter(Boolean);
+          const sigByRef = new Map<string, Array<{ ticket_key: string; signal_type: string; evidence_text: string | null }>>();
+          if (refs.length) {
+            const ph = refs.map(() => '?').join(',');
+            const sigs = await query<{ customer_ref: string; ticket_key: string; signal_type: string; evidence_text: string | null }>(
+              `SELECT customer_ref, ticket_key, signal_type, evidence_text FROM agent_account_risk_signals
+               WHERE is_active = 1 AND customer_ref IN (${ph}) ORDER BY signal_weight DESC`, refs);
+            for (const s of sigs) {
+              if (!sigByRef.has(s.customer_ref)) sigByRef.set(s.customer_ref, []);
+              sigByRef.get(s.customer_ref)!.push(s);
+            }
+          }
+          const meta = (a: typeof risks[number]) => {
             const since = a.last_ticket_date ? Math.max(0, Math.floor((now.getTime() - new Date(a.last_ticket_date).getTime()) / 86400000)) : null;
+            return `${a.total_ticket_count} open${since != null ? ` &middot; ${since}d since update` : ''}`;
+          };
+          riskSummaryHtml = risks.map(a => {
+            const high = a.risk_tier >= 3;
+            return `<div class="rrow">
+              <div class="rname">${esc(a.customer_name || 'Unknown account')}</div>
+              <div class="rmeta">${meta(a)}</div>
+              <div class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</div>
+            </div>`;
+          }).join('');
+          riskDetailHtml = risks.map(a => {
+            const high = a.risk_tier >= 3;
+            const flags = [
+              a.has_formal_complaint ? 'Complaint' : null, a.has_termination ? 'Termination' : null,
+              a.has_active_refund ? 'Refund' : null, a.has_open_escalation ? 'Escalation' : null,
+            ].filter(Boolean).map(f => `<span class="chip">${f}</span>`).join('');
+            const sigs = sigByRef.get(a.customer_ref) || [];
+            const sigHtml = sigs.length ? sigs.map(s => `<a class="sig" href="${jiraBase}/browse/${esc(s.ticket_key)}" target="_blank">
+                <span class="sig-t">${esc(sigLabel(s.signal_type))}</span>
+                <span class="sig-k">${esc(s.ticket_key)}</span>
+                ${s.evidence_text ? `<span class="sig-e">&ldquo;${esc(s.evidence_text.length > 160 ? s.evidence_text.slice(0, 159) + '…' : s.evidence_text)}&rdquo;</span>` : ''}
+              </a>`).join('') : `<div class="muted">No active signals recorded — risk driven by ticket volume / SLA.</div>`;
+            const name = a.customer_name || 'Unknown account';
             const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
-            return `<a class="rrow" href="${jiraBase}/issues/?jql=${jql}" target="_blank">
-              <div class="rname">${esc(name)}</div>
-              <div class="rmeta">${a.total_ticket_count} open${since != null ? ` &middot; ${since}d since update` : ''}</div>
-              <div class="rbadge" style="background:${high ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'};color:${high ? '#ef4444' : '#f59e0b'};border:1px solid ${high ? '#ef444455' : '#f59e0b55'}">${high ? 'HIGH' : 'MEDIUM'}</div>
-            </a>`;
+            return `<div class="why">
+              <div class="why-h"><span class="why-name">${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(a)} &middot; score ${a.risk_score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
+              ${flags ? `<div class="why-flags">${flags}</div>` : ''}
+              <div class="why-sigs">${sigHtml}</div>
+            </div>`;
           }).join('');
         }
       } catch {
-        riskRows = `<div class="empty">Risk data unavailable</div>`;
+        riskSummaryHtml = `<div class="empty">Risk data unavailable</div>`;
+        riskDetailHtml = riskSummaryHtml;
       }
 
       // ── RIGHT BOTTOM: Key Commitments — future due dates that defer past SLA ──
@@ -3462,7 +3506,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // hours). Tickets within SLA are normal and excluded; tickets with no SLA
       // data can't be judged, so they're skipped. Within/over-60-day-from-creation
       // gives a second read on how far past the dev cycle the commitment runs.
-      let commitRows = '';
+      // In-panel = count dashboard bucketed by time-to-due; expanded = full list.
+      let commitSummaryHtml = '', commitDetailHtml = '';
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
@@ -3471,36 +3516,60 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_14048'], 100);
           const dayMs = 86400000;
           const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-          const flagged = (r.issues || []).map(iss => {
+          type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
+          const items: Commit[] = [];
+          for (const iss of (r.issues || [])) {
             const f = iss.fields as Record<string, any>;
             const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
-            if (!due) return null;
+            if (!due) continue;
             const slaTarget = getResolutionSlaTarget(iss as unknown as Record<string, unknown>);
             // Beyond SLA only: due day strictly later than the SLA target day.
-            if (!slaTarget || dateOnly(due) <= dateOnly(slaTarget)) return null;
+            if (!slaTarget || dateOnly(due) <= dateOnly(slaTarget)) continue;
             const created = f.created ? new Date(f.created) : null;
-            const daysRem = Math.ceil((due.getTime() - now.getTime()) / dayMs);
-            const pastSla = Math.round((dateOnly(due) - dateOnly(slaTarget)) / dayMs);
             const cycle = created ? Math.round((due.getTime() - created.getTime()) / dayMs) : null;
-            const over60 = cycle != null && cycle > 60;
-            const tier = (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—';
             const summary = String(f.summary || '');
-            const trunc = summary.length > 54 ? summary.slice(0, 53) + '…' : summary;
-            const dueStr = due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-            const rowCls = daysRem < 0 ? ' c-red' : daysRem <= 7 ? ' c-amber' : '';
-            const remLbl = daysRem < 0 ? `${-daysRem}d overdue` : `${daysRem}d`;
-            return `<a class="crow${rowCls}" href="${jiraBase}/browse/${iss.key}" target="_blank">
-                <div class="ckey">${esc(iss.key)}</div>
-                <div class="csum">${esc(trunc)}<span class="ctier">${esc(tier)}</span></div>
-                <div class="cdue"><span class="cbadge" style="${over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate" title="${pastSla}d past SLA">${dueStr}</span><span class="crem">${remLbl}</span></div>
+            items.push({
+              key: iss.key,
+              trunc: summary.length > 60 ? summary.slice(0, 59) + '…' : summary,
+              tier: (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—',
+              dueStr: due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+              daysRem: Math.ceil((due.getTime() - now.getTime()) / dayMs),
+              pastSla: Math.round((dateOnly(due) - dateOnly(slaTarget)) / dayMs),
+              over60: cycle != null && cycle > 60,
+            });
+          }
+          if (!items.length) {
+            commitSummaryHtml = `<div class="empty">No commitments beyond SLA</div>`;
+            commitDetailHtml = commitSummaryHtml;
+          } else {
+            const buckets: Array<{ label: string; cls: string; test: (d: number) => boolean }> = [
+              { label: 'Overdue', cls: 'b-red', test: d => d < 0 },
+              { label: 'Due ≤7d', cls: 'b-amber', test: d => d >= 0 && d <= 7 },
+              { label: '8–30d', cls: 'b-cyan', test: d => d > 7 && d <= 30 },
+              { label: '31–60d', cls: 'b-cyan', test: d => d > 30 && d <= 60 },
+              { label: '60d+', cls: 'b-amber', test: d => d > 60 },
+            ];
+            commitSummaryHtml = `<div class="bk-grid">${buckets.map(b => {
+              const n = items.filter(i => b.test(i.daysRem)).length;
+              return `<div class="bk ${b.cls}${n === 0 ? ' bk-0' : ''}"><div class="bk-n">${n}</div><div class="bk-l">${b.label}</div></div>`;
+            }).join('')}</div><div class="bk-total">${items.length} commitment${items.length === 1 ? '' : 's'} beyond SLA</div>`;
+            commitDetailHtml = items.map(i => {
+              const rowCls = i.daysRem < 0 ? ' c-red' : i.daysRem <= 7 ? ' c-amber' : '';
+              const remLbl = i.daysRem < 0 ? `${-i.daysRem}d overdue` : `${i.daysRem}d`;
+              return `<a class="crow${rowCls}" href="${jiraBase}/browse/${esc(i.key)}" target="_blank">
+                <div class="ckey">${esc(i.key)}</div>
+                <div class="csum">${esc(i.trunc)}<span class="ctier">${esc(i.tier)}</span></div>
+                <div class="cdue"><span class="cbadge" style="${i.over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${i.over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${i.dueStr}</span><span class="cpast">${i.pastSla}d past SLA</span><span class="crem">${remLbl}</span></div>
               </a>`;
-          }).filter((row): row is string => row !== null);
-          commitRows = flagged.length ? flagged.join('') : `<div class="empty">No commitments beyond SLA</div>`;
+            }).join('');
+          }
         } else {
-          commitRows = `<div class="empty">Jira not configured</div>`;
+          commitSummaryHtml = `<div class="empty">Jira not configured</div>`;
+          commitDetailHtml = commitSummaryHtml;
         }
       } catch {
-        commitRows = `<div class="empty">Commitments unavailable</div>`;
+        commitSummaryHtml = `<div class="empty">Commitments unavailable</div>`;
+        commitDetailHtml = commitSummaryHtml;
       }
 
       const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -3508,7 +3577,6 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 
       res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="300">
 <title>NOVA — Strategic Dashboard</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
@@ -3555,14 +3623,58 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .cdate{font-size:1.4vh;color:#cbd5e1;font-weight:600}
 .crem{font-size:1.2vh;color:#94a3b8;min-width:4vw;text-align:right}
 .empty{padding:2vh 1vw;text-align:center;color:#64748b;font-size:1.5vh}
-/* rollup */
-.rollup{flex:0 0 auto;border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.025);overflow:hidden}
-.rollup>summary{list-style:none;cursor:pointer;padding:1vh 1.2vw;font-size:1.4vh;font-weight:700;color:#94a3b8;display:flex;justify-content:space-between;align-items:center}
-.rollup>summary::-webkit-details-marker{display:none}
-.rollup>summary .chev{transition:transform .2s;color:#5ec1ca}
-.rollup[open]>summary .chev{transform:rotate(90deg)}
-.rollup-body{padding:.6vh 1.2vw 1vh;border-top:1px solid #2f353d;display:grid;grid-template-columns:repeat(2,1fr);gap:0 2vw;max-height:38vh;overflow:auto}
+/* rollup bar (click to expand fullscreen) */
+.rollup{flex:0 0 auto;border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.025);padding:1.1vh 1.4vw;font-size:1.4vh;font-weight:700;color:#94a3b8;display:flex;justify-content:space-between;align-items:center}
+.rollup .chev{color:#5ec1ca;font-size:1.7vh}
 .foot{flex:0 0 auto;text-align:center;font-size:1.1vh;color:#475569;padding-top:.3vh}
+/* expandable panels */
+.exp{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.exp:hover,.exp:focus-visible{border-color:rgba(94,193,202,.45);box-shadow:0 6px 24px rgba(0,0,0,.3);outline:none}
+.exp .panel-h{display:flex;justify-content:space-between;align-items:center}
+.exp-hint{font-size:1.05vh;color:#5ec1ca;font-weight:700;letter-spacing:.4px;opacity:.8}
+.detail-src{display:none}
+/* commitment bucket dashboard */
+.bk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8vh .8vw;padding:.5vh .2vw}
+.bk{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:1.1vh .5vw;text-align:center}
+.bk-n{font-size:3.4vh;font-weight:800;letter-spacing:-1.5px;line-height:1}
+.bk-l{font-size:1.1vh;color:#94a3b8;margin-top:.5vh;text-transform:uppercase;letter-spacing:.4px}
+.bk.b-red .bk-n{color:#ef4444}.bk.b-amber .bk-n{color:#f59e0b}.bk.b-cyan .bk-n{color:#5ec1ca}
+.bk.bk-0 .bk-n{color:#475569}.bk.bk-0{opacity:.6}
+.bk-total{text-align:center;font-size:1.3vh;color:#64748b;margin-top:.9vh;font-weight:600}
+.cpast{font-size:1.1vh;color:#94a3b8;min-width:5.5vw;text-align:right}
+/* risk "why" detail */
+.why{border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.02);padding:1.4vh 1.4vw;margin-bottom:1.2vh}
+.why-h{display:flex;align-items:center;gap:1vw;flex-wrap:wrap}
+.why-name{font-size:2.1vh;font-weight:800}
+.why-meta{font-size:1.4vh;color:#94a3b8}
+.why-jira{margin-left:auto;font-size:1.3vh;color:#5ec1ca;text-decoration:none;font-weight:600}
+.why-jira:hover{text-decoration:underline}
+.why-flags{margin:1vh 0 .4vh;display:flex;gap:.5vw;flex-wrap:wrap}
+.chip{font-size:1.2vh;font-weight:700;color:#fca5a5;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:.4vh .7vw;text-transform:uppercase;letter-spacing:.4px}
+.why-sigs{margin-top:.8vh;display:flex;flex-direction:column;gap:.6vh}
+.sig{display:flex;align-items:baseline;gap:.7vw;flex-wrap:wrap;text-decoration:none;color:inherit;padding:.7vh .9vw;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+.sig:hover{border-color:rgba(94,193,202,.4);background:rgba(94,193,202,.06)}
+.sig-t{font-size:1.5vh;font-weight:700;color:#fde68a}
+.sig-k{font-size:1.3vh;font-weight:700;color:#5ec1ca;font-variant-numeric:tabular-nums}
+.sig-e{font-size:1.4vh;color:#cbd5e1;font-style:italic}
+.muted{font-size:1.4vh;color:#64748b;padding:.4vh 0}
+/* fullscreen overlay */
+.kpi-detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 3vw}
+.ov{position:fixed;inset:0;z-index:1000;display:none}
+.ov.show{display:block}
+.ov-back{position:absolute;inset:0;background:rgba(8,11,15,0);backdrop-filter:blur(0);transition:background .42s ease,backdrop-filter .42s ease}
+.ov.open .ov-back{background:rgba(8,11,15,.82);backdrop-filter:blur(6px)}
+.ov-card{position:fixed;overflow:hidden;display:flex;flex-direction:column;background:#1a1f26;border:1px solid #2f353d;
+  box-shadow:0 0 0 1px rgba(94,193,202,.5),0 30px 90px rgba(0,0,0,.6);
+  transition:left .44s cubic-bezier(.16,1,.3,1),top .44s cubic-bezier(.16,1,.3,1),width .44s cubic-bezier(.16,1,.3,1),height .44s cubic-bezier(.16,1,.3,1),border-radius .44s ease}
+.ov-bar{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:1.6vh 2vw;border-bottom:1px solid #2f353d}
+.ovt{font-size:2.1vh;font-weight:800;letter-spacing:-.3px}
+.ov-min{cursor:pointer;display:flex;align-items:center;gap:.5vw;font:700 1.4vh system-ui,-apple-system,sans-serif;color:#e2e8f0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:.9vh 1.5vw}
+.ov-min:hover{background:rgba(94,193,202,.18);border-color:rgba(94,193,202,.5)}
+.ov-body{flex:1 1 auto;overflow:auto;padding:1.8vh 2vw;opacity:0;transition:opacity .3s ease .16s}
+.ov.open .ov-body{opacity:1}
+.ov.closing .ov-body{opacity:0;transition:opacity .12s}
+@media(prefers-reduced-motion:reduce){.ov-card,.ov-back,.ov-body,.exp{transition-duration:.01s}}
 </style>
 </head><body><div class="page">
 <div class="head">
@@ -3578,21 +3690,77 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     </div>
   </div>
   <div class="right">
-    <div class="panel">
-      <div class="panel-h">Key Account Risks</div>
-      <div class="panel-body">${riskRows}</div>
+    <div class="panel exp" data-expand="src-risk" data-title="Key Account Risks — why each is flagged" tabindex="0" role="button">
+      <div class="panel-h"><span>Key Account Risks</span><span class="exp-hint">Expand ⤢</span></div>
+      <div class="panel-body">${riskSummaryHtml}</div>
     </div>
-    <div class="panel">
-      <div class="panel-h">Key Commitments &middot; Due Dates</div>
-      <div class="panel-body">${commitRows}</div>
+    <div class="panel exp" data-expand="src-commit" data-title="Key Commitments — tickets due beyond SLA" tabindex="0" role="button">
+      <div class="panel-h"><span>Key Commitments &middot; Due Dates</span><span class="exp-hint">Expand ⤢</span></div>
+      <div class="panel-body">${commitSummaryHtml}</div>
     </div>
   </div>
 </div>
-<details class="rollup">
-  <summary><span>Full KPI breakdown &middot; 20 granular queue metrics</span><span class="chev">▸</span></summary>
-  <div class="rollup-body">${rollupHtml}</div>
-</details>
-<div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min</div>
+<div class="rollup exp" data-expand="src-kpi" data-title="Full KPI breakdown — 20 granular queue metrics" tabindex="0" role="button">
+  <span>Full KPI breakdown &middot; 20 granular queue metrics</span><span class="chev">⤢</span>
+</div>
+<div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min &middot; click any panel to expand</div>
+
+<!-- hidden detail bodies, injected into the overlay on expand -->
+<div class="detail-src" id="src-kpi">
+  <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
+  <div class="kpi-detail-grid">${rollupHtml}</div>
+</div>
+<div class="detail-src" id="src-commit">${commitDetailHtml}</div>
+<div class="detail-src" id="src-risk">${riskDetailHtml}</div>
+
+<div class="ov" id="ov">
+  <div class="ov-back"></div>
+  <div class="ov-card" id="ovcard">
+    <div class="ov-bar"><span class="ovt" id="ovt"></span><button class="ov-min" id="ovmin" type="button"><span style="font-size:1.7vh;line-height:1">⤡</span> Minimise</button></div>
+    <div class="ov-body" id="ovbody"></div>
+  </div>
+</div>
+<script>
+(function(){
+  function byId(i){return document.getElementById(i);}
+  var ov=byId('ov'),card=byId('ovcard'),body=byId('ovbody'),title=byId('ovt'),min=byId('ovmin'),last=null,busy=false;
+  function expand(src){
+    if(busy||ov.classList.contains('show'))return; busy=true;
+    var detail=document.getElementById(src.getAttribute('data-expand'));
+    body.innerHTML=detail?detail.innerHTML:'';
+    title.textContent=src.getAttribute('data-title')||'';
+    var r=src.getBoundingClientRect(); last=r;
+    card.style.transition='none';
+    card.style.left=r.left+'px'; card.style.top=r.top+'px';
+    card.style.width=r.width+'px'; card.style.height=r.height+'px'; card.style.borderRadius='14px';
+    ov.classList.add('show'); void card.offsetWidth; card.style.transition='';
+    requestAnimationFrame(function(){
+      ov.classList.add('open');
+      card.style.left='2vw'; card.style.top='2vh'; card.style.width='96vw'; card.style.height='96vh'; card.style.borderRadius='16px';
+    });
+    setTimeout(function(){busy=false;},460);
+  }
+  function minimise(){
+    if(busy||!ov.classList.contains('open')||!last)return; busy=true;
+    var r=last; ov.classList.add('closing'); ov.classList.remove('open');
+    card.style.left=r.left+'px'; card.style.top=r.top+'px';
+    card.style.width=r.width+'px'; card.style.height=r.height+'px'; card.style.borderRadius='14px';
+    setTimeout(function(){ ov.classList.remove('show'); ov.classList.remove('closing'); body.innerHTML=''; busy=false; },460);
+  }
+  var els=document.querySelectorAll('[data-expand]');
+  for(var i=0;i<els.length;i++){
+    (function(el){
+      el.addEventListener('click',function(){expand(el);});
+      el.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();expand(el);} });
+    })(els[i]);
+  }
+  min.addEventListener('click',minimise);
+  ov.querySelector('.ov-back').addEventListener('click',minimise);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape')minimise(); });
+  // 5-min auto-refresh, but never while a panel is expanded
+  setInterval(function(){ if(!ov.classList.contains('show'))location.reload(); },300000);
+})();
+</script>
 </div></body></html>`);
       logWallboard(route, 'info', 200, Date.now() - wbStart, `OK — ${days.length} days, ${snapRows.length} kpi rows`);
     } catch (err) {
