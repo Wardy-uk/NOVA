@@ -3630,9 +3630,6 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .cdate{font-size:1.4vh;color:#cbd5e1;font-weight:600}
 .crem{font-size:1.2vh;color:#94a3b8;min-width:4vw;text-align:right}
 .empty{padding:2vh 1vw;text-align:center;color:#64748b;font-size:1.5vh}
-/* rollup bar (click to expand fullscreen) */
-.rollup{flex:0 0 auto;border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.025);padding:1.1vh 1.4vw;font-size:1.4vh;font-weight:700;color:#94a3b8;display:flex;justify-content:space-between;align-items:center}
-.rollup .chev{color:#5ec1ca;font-size:1.7vh}
 .foot{flex:0 0 auto;text-align:center;font-size:1.1vh;color:#475569;padding-top:.3vh}
 /* expandable panels */
 .exp{cursor:pointer;transition:border-color .15s,box-shadow .15s}
@@ -3689,8 +3686,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   <div class="meta">Last updated ${timeStr}<br>${dateStr}</div>
 </div>
 <div class="cols">
-  <div class="panel left">
-    <div class="panel-h">KPI Outcomes</div>
+  <div class="panel left exp" data-expand="src-kpi" data-title="Strategic KPIs — full granular breakdown" tabindex="0" role="button">
+    <div class="panel-h"><span>Strategic KPIs</span><span class="exp-hint">Expand ⤢</span></div>
     <div class="panel-body">
       <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
       ${leftHtml}
@@ -3706,9 +3703,6 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
       <div class="panel-body">${commitSummaryHtml}</div>
     </div>
   </div>
-</div>
-<div class="rollup exp" data-expand="src-kpi" data-title="Full KPI breakdown — 20 granular queue metrics" tabindex="0" role="button">
-  <span>Full KPI breakdown &middot; 20 granular queue metrics</span><span class="chev">⤢</span>
 </div>
 <div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min &middot; click any panel to expand</div>
 
