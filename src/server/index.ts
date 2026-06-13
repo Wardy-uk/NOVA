@@ -3338,6 +3338,29 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         if (!byDay.has(key)) byDay.set(key, new Map());
         byDay.get(key)!.set(String(r.kpi).toLowerCase().trim(), { count: Number(r.cnt) || 0, rag: r.rag == null ? null : Number(r.rag) });
       }
+
+      // Org QA score has no single jira_kpi_daily row — derive a per-day,
+      // tickets-weighted average from the per-agent table (0–5; ≥4 green, ≥3 amber,
+      // else red, matching the agent-level QA RAG) and inject under a sentinel key.
+      try {
+        const qaRows = (await pool.request().query(`
+          SELECT CAST(ReportDate AS DATE) AS d, SUM(QAOverallAvg * QATicketsScored) AS s, SUM(QATicketsScored) AS n
+          FROM dbo.jira_agent_kpi_daily
+          WHERE ReportDate >= DATEADD(day, -35, CAST(GETDATE() AS DATE))
+            AND ReportDate < CAST(GETDATE() AS DATE)
+            AND QAOverallAvg IS NOT NULL AND QATicketsScored > 0
+          GROUP BY CAST(ReportDate AS DATE)
+        `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
+        for (const r of qaRows) {
+          const n = Number(r.n) || 0; if (!n) continue;
+          const avg = Math.round((Number(r.s) / n) * 10) / 10;          // 1dp, 0–5
+          const rag = avg >= 4 ? 1 : avg >= 3 ? 2 : 3;
+          const key = toDayKey(r.d);
+          if (!byDay.has(key)) byDay.set(key, new Map());
+          byDay.get(key)!.set('__org_qa__', { count: avg, rag });
+        }
+      } catch { /* QA optional — agent table may be absent */ }
+
       const days = [...byDay.keys()].filter(isWeekday).sort().slice(-5);
 
       // Fragments to locate a stored KPI name for a queue. `noreply` names keep
@@ -3351,7 +3374,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         'Tier 3': { noreply: 'tier 3', bare: 'tier 3' },
         'Development': { noreply: 'development', bare: 'development' },
       };
-      type Kind = 'newvol' | 'noreply' | 'oversla' | 'oldest';
+      type Kind = 'newvol' | 'noreply' | 'oversla' | 'oldest' | 'csat' | 'qa';
       const matches = (name: string, kind: Kind, queue?: string) => {
         if (kind === 'newvol') return name.includes('new tickets');
         const f = queue ? FRAG[queue] : null; if (!f) return false;
@@ -3370,6 +3393,11 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const num = kind === 'oldest' ? Math.max(...parts.map(p => p.num)) : parts.reduce((s, p) => s + p.num, 0);
         return { num, rag };
       };
+      // Find a single named org KPI (CSAT, injected QA) by name predicate.
+      const getNamed = (dm: Map<string, { count: number; rag: number | null }>, pred: (name: string) => boolean): { num: number; rag: number | null } | null => {
+        for (const [name, v] of dm) if (pred(name)) return { num: v.count, rag: v.rag };
+        return null;
+      };
 
       const ragColor = (rag: number | null) => rag === 1 ? '#10b981' : rag === 2 ? '#f59e0b' : rag === 3 ? '#ef4444' : '#475569';
       const ragBg = (rag: number | null) => rag === 1 ? 'rgba(16,185,129,.12)' : rag === 2 ? 'rgba(245,158,11,.12)' : rag === 3 ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.03)';
@@ -3379,24 +3407,27 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const c = ragColor(v.rag), bg = ragBg(v.rag);
         return `<div class="cell"><span class="pill" style="background:${bg};color:${c};border:1px solid ${c}44">${v.display}</span></div>`;
       };
-      const trendHtml = (vals: DayVal[], neutral?: boolean) => {
+      const trendHtml = (vals: DayVal[], opts?: { neutral?: boolean; higher?: boolean }) => {
         const present = vals.filter((v): v is NonNullable<DayVal> => v !== null);
         if (present.length < 2) return `<span style="color:#475569">▬</span>`;
         const first = present[0].num, last = present[present.length - 1].num;
-        if (neutral || first === last) return `<span style="color:#64748b">${first === last ? '▬' : last > first ? '▲' : '▼'}</span>`;
-        // every strategic metric here is lower-is-better
+        if (opts?.neutral || first === last) return `<span style="color:#64748b">${first === last ? '▬' : last > first ? '▲' : '▼'}</span>`;
+        if (opts?.higher) return last > first ? `<span style="color:#10b981">▲</span>` : `<span style="color:#ef4444">▼</span>`;
+        // default: lower-is-better
         return last < first ? `<span style="color:#10b981">▼</span>` : `<span style="color:#ef4444">▲</span>`;
       };
-      const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean }): string => {
+      const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean; higher?: boolean }): string => {
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
-          // Value-based RAG for the "bad things" metrics: 0 green, 1–4 amber, 5+ red.
-          // New ticket volume is throughput (not good/bad) so it keeps its stored RAG.
-          const valueRag = kind === 'newvol' ? c.rag : (c.num === 0 ? 1 : c.num <= 4 ? 2 : 3);
-          return { num: c.num, rag: valueRag, display: kind === 'oldest' ? `${c.num}d` : String(c.num) };
+          // Value-based RAG for the count "bad things" metrics: 0 green, 1–4 amber, 5+ red.
+          // Higher-is-better metrics (volume, CSAT, QA) keep their stored/derived RAG.
+          const useStored = kind === 'newvol' || kind === 'csat' || kind === 'qa';
+          const valueRag = useStored ? c.rag : (c.num === 0 ? 1 : c.num <= 4 ? 2 : 3);
+          const display = kind === 'oldest' ? `${c.num}d` : kind === 'csat' ? `${c.num}%` : String(c.num);
+          return { num: c.num, rag: valueRag, display };
         });
-        return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts?.neutral)}</div></div>`;
+        return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts)}</div></div>`;
       };
       const dayHeadHtml = days.map(d => {
         const dt = new Date(d + 'T00:00:00Z');
@@ -3409,9 +3440,13 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // The 8 grouped metrics declared once, so the daily (top) and the weekly
       // days-breached (bottom) views render from the same getters.
       type Getter = (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null;
-      type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean } };
+      type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean; higher?: boolean } };
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: dm => getCell(dm, 'newvol'), kind: 'newvol', opts: { neutral: true } }] },
+        { header: 'Quality &middot; CSAT + QA', metrics: [
+          { label: 'CSAT', get: dm => getNamed(dm, n => n.includes('csat') && !n.includes('derived')), kind: 'csat', opts: { sub: true, higher: true } },
+          { label: 'QA score (/5)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
+        ] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
           { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
           { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', SUPPORT), kind: 'oversla', opts: { sub: true } },
@@ -3742,7 +3777,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .left .panel-body{display:flex;flex-direction:column;gap:.4vh;overflow:hidden;padding:.5vh 1.2vw}
 .kblock{flex:1;min-height:0;display:flex;flex-direction:column}
 .kblock-h{font-size:1.05vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.15vh .3vw .25vh;border-bottom:1px solid #2f353d;margin-bottom:.15vh}
-.kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:auto}
 .mcells.mcellsw{grid-template-columns:repeat(4,1fr)}
 .left .mhead{margin-bottom:.1vh}
 .left .grp{margin-bottom:0}
