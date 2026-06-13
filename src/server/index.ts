@@ -3411,8 +3411,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       }
 
       // Org QA score has no single jira_kpi_daily row — derive a per-day,
-      // tickets-weighted average from the per-agent table (0–5; ≥4 green, ≥3 amber,
-      // else red, matching the agent-level QA RAG) and inject under a sentinel key.
+      // tickets-weighted average from the per-agent table (QAOverallAvg is 0–10:
+      // ≥8 green, ≥6 amber, else red) and inject under a sentinel key.
       try {
         const qaRows = (await pool.request().query(`
           SELECT CAST(ReportDate AS DATE) AS d, SUM(QAOverallAvg * QATicketsScored) AS s, SUM(QATicketsScored) AS n
@@ -3424,8 +3424,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
         for (const r of qaRows) {
           const n = Number(r.n) || 0; if (!n) continue;
-          const avg = Math.round((Number(r.s) / n) * 10) / 10;          // 1dp, 0–5
-          const rag = avg >= 4 ? 1 : avg >= 3 ? 2 : 3;
+          const avg = Math.round((Number(r.s) / n) * 10) / 10;          // 1dp, 0–10
+          const rag = avg >= 8 ? 1 : avg >= 6 ? 2 : 3;  // QAOverallAvg is 0–10
           const key = toDayKey(r.d);
           if (!byDay.has(key)) byDay.set(key, new Map());
           byDay.get(key)!.set('__org_qa__', { count: avg, rag });
@@ -3469,10 +3469,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         for (const [name, v] of dm) if (pred(name)) return { num: v.count, rag: v.rag };
         return null;
       };
-      // New ticket volume RAG is a fixed business band: <90 green, 90–110 amber,
-      // >110 red. Computed here from the value (not the stored rag) so the displayed
-      // history is correct immediately, regardless of what was stored historically.
-      const newvolRag = (v: number) => v < 90 ? 1 : v <= 110 ? 2 : 3;
+      // New ticket volume RAG is a fixed business band: <120 green, 120–150 amber,
+      // >150 red (calibrated to real intake ~95–135/day). Computed here from the
+      // value (not the stored rag) so the displayed history is correct immediately.
+      const newvolRag = (v: number) => v < 120 ? 1 : v <= 150 ? 2 : 3;
       const newvolCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
         const c = getCell(dm, 'newvol');
         return c ? { num: c.num, rag: newvolRag(c.num) } : null;
@@ -3484,8 +3484,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return c && c.num > 0 ? c : null;
       };
 
-      const ragColor = (rag: number | null) => rag === 1 ? '#10b981' : rag === 2 ? '#f59e0b' : rag === 3 ? '#ef4444' : '#475569';
-      const ragBg = (rag: number | null) => rag === 1 ? 'rgba(16,185,129,.12)' : rag === 2 ? 'rgba(245,158,11,.12)' : rag === 3 ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.03)';
+      // Muted RAG palette — calm "attention" tones, not alarm, for the SLT board.
+      const ragColor = (rag: number | null) => rag === 1 ? '#4ca88a' : rag === 2 ? '#c99a3f' : rag === 3 ? '#c2554f' : '#475569';
+      const ragBg = (rag: number | null) => rag === 1 ? 'rgba(76,168,138,.10)' : rag === 2 ? 'rgba(201,154,63,.10)' : rag === 3 ? 'rgba(194,85,79,.12)' : 'rgba(255,255,255,.03)';
+      const TREND_UP = '#4ca88a', TREND_DOWN = '#c2554f';  // muted green/red for arrows
       type DayVal = { num: number; rag: number | null; display: string } | null;
       const cellHtml = (v: DayVal) => {
         if (!v) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
@@ -3497,24 +3499,29 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         if (present.length < 2) return `<span style="color:#475569">▬</span>`;
         const first = present[0].num, last = present[present.length - 1].num;
         if (opts?.neutral || first === last) return `<span style="color:#64748b">${first === last ? '▬' : last > first ? '▲' : '▼'}</span>`;
-        if (opts?.higher) return last > first ? `<span style="color:#10b981">▲</span>` : `<span style="color:#ef4444">▼</span>`;
+        if (opts?.higher) return last > first ? `<span style="color:${TREND_UP}">▲</span>` : `<span style="color:${TREND_DOWN}">▼</span>`;
         // default: lower-is-better
-        return last < first ? `<span style="color:#10b981">▼</span>` : `<span style="color:#ef4444">▲</span>`;
+        return last < first ? `<span style="color:${TREND_UP}">▼</span>` : `<span style="color:${TREND_DOWN}">▲</span>`;
       };
+      type Band = { greenMax: number; amberMax: number };
       // The single source of truth for a metric's RAG on a given day, shared by
       // the daily cells AND the weekly green-day tally so they never diverge:
-      //  - count "bad things" (no-reply, over-SLA, oldest): 0 green, 1–4 amber, 5+ red
-      //  - higher-is-better (volume band, CSAT, QA): keep the stored/derived rag
-      const displayRag = (kind: Kind, c: { num: number; rag: number | null }): number | null => {
+      //  - count "bad things" (no-reply, over-SLA): value <= greenMax green,
+      //    <= amberMax amber, else red. Default band 0/4; per-metric override via opts.band.
+      //  - higher-is-better (volume band, CSAT, QA): keep the stored/derived rag.
+      //  - oldest: muted (null → neutral grey) so the always-red age rows don't dominate.
+      const displayRag = (kind: Kind, c: { num: number; rag: number | null }, band?: Band): number | null => {
+        if (kind === 'oldest') return null;
         if (kind === 'newvol' || kind === 'csat' || kind === 'qa') return c.rag;
-        return c.num === 0 ? 1 : c.num <= 4 ? 2 : 3;
+        const g = band?.greenMax ?? 0, a = band?.amberMax ?? 4;
+        return c.num <= g ? 1 : c.num <= a ? 2 : 3;
       };
-      const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean; higher?: boolean }): string => {
+      const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean; higher?: boolean; band?: Band }): string => {
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
           const display = kind === 'oldest' ? `${c.num}d` : kind === 'csat' ? `${c.num}%` : String(c.num);
-          return { num: c.num, rag: displayRag(kind, c), display };
+          return { num: c.num, rag: displayRag(kind, c, opts?.band), display };
         });
         return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts)}</div></div>`;
       };
@@ -3529,12 +3536,12 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // The 8 grouped metrics declared once, so the daily (top) and the weekly
       // days-breached (bottom) views render from the same getters.
       type Getter = (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null;
-      type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean; higher?: boolean } };
+      type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean; higher?: boolean; band?: Band } };
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
           { label: 'CSAT', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
-          { label: 'QA score (/5)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
+          { label: 'QA score (/10)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
         ] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
           { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
@@ -3543,7 +3550,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         ] },
         { header: 'Production', metrics: [{ label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', ['Production']), kind: 'oldest', opts: { sub: true } }] },
         { header: 'Development &middot; Tier 3 + Dev', sep: true, metrics: [
-          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', DEV), kind: 'noreply', opts: { sub: true } },
+          // Dev runs a naturally larger no-reply backlog — looser band than Support.
+          // Over SLA stays strict (golden rule: over-SLA should always be zero).
+          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', DEV), kind: 'noreply', opts: { sub: true, band: { greenMax: 9, amberMax: 29 } } },
           { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', DEV), kind: 'oversla', opts: { sub: true } },
           { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', DEV), kind: 'oldest', opts: { sub: true } },
         ] },
@@ -3579,20 +3588,21 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         // Count GREEN days (the daily board's green pills) per week, using the SAME
         // displayRag the daily view uses — so the two halves agree. No-data days
         // (e.g. CSAT with no surveys) are excluded from the denominator.
+        const muted = m.kind === 'oldest';   // oldest is shown neutral grey, not red
         const series = weeks.map(wk => {
           let green = 0, total = 0;
           for (const dk of weekDays.get(wk)!) {
             const c = m.get(byDay.get(dk)!);
             if (!c) continue;
             total++;
-            if (displayRag(m.kind, c) === 1) green++;
+            if (displayRag(m.kind, c, m.opts?.band) === 1) green++;
           }
           return total === 0 ? null : { green, total };
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          // Cell RAG by green-day count: 4–5 green, 3 amber, ≤2 red.
-          const rag = s.green >= 4 ? 1 : s.green === 3 ? 2 : 3;
+          // Cell RAG by green-day count: 4–5 green, 3 amber, ≤2 red. Oldest stays neutral.
+          const rag = muted ? null : (s.green >= 4 ? 1 : s.green === 3 ? 2 : 3);
           const col = ragColor(rag), bg = ragBg(rag);
           return `<div class="cell"><span class="pill" title="${s.green} of ${s.total} days green" style="background:${bg};color:${col};border:1px solid ${col}44">${s.green}</span></div>`;
         }).join('');
@@ -3601,7 +3611,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         let trend = `<span style="color:#475569">▬</span>`;
         if (pres.length >= 2) {
           const first = pres[0].green, lastv = pres[pres.length - 1].green;
-          trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv > first ? `<span style="color:#10b981">▲</span>` : `<span style="color:#ef4444">▼</span>`;
+          trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv > first ? `<span style="color:${TREND_UP}">▲</span>` : `<span style="color:${TREND_DOWN}">▼</span>`;
         }
         return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend">${trend}</div></div>`;
       };
