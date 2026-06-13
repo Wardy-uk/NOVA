@@ -883,6 +883,23 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_risk_recon_days_status')
      CREATE INDEX IX_agent_risk_recon_days_status ON agent_risk_recon_days (status, recon_date);`,
 
+    // AI customer inference cache (account-risk step 2). One row per ticket the AI has tried
+    // to attribute, so each ticket is inferred once (not re-done every nightly rollup). The
+    // rollup reads this as a resolution source; a budgeted batch populates it.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_ticket_customer_inference') AND type = 'U')
+     CREATE TABLE agent_ticket_customer_inference (
+       ticket_key NVARCHAR(30) NOT NULL PRIMARY KEY,
+       customer_ref NVARCHAR(100) NULL,        -- matched registry ref, or NULL if extracted but unmatched
+       customer_name NVARCHAR(200) NULL,
+       extracted_name NVARCHAR(200) NULL,      -- what the model read out of the ticket
+       extracted_url NVARCHAR(255) NULL,
+       confidence TINYINT NOT NULL DEFAULT 0,  -- 0-100 (model x registry match)
+       method NVARCHAR(30) NOT NULL DEFAULT 'ai',
+       inferred_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_cust_inference_ref')
+     CREATE INDEX IX_ticket_cust_inference_ref ON agent_ticket_customer_inference (customer_ref);`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)

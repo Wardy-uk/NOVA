@@ -3,6 +3,8 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { CustomerResolver } from './customer-resolver.js';
 import type { JiraRestClient, JiraIssue } from './jira-client.js';
 import { extractText } from './shared/adf-utils.js';
+import type { LlmService } from './llm-service.js';
+import { runInferenceBatch, loadInferenceMap, loadInferredKeys, type UnresolvedTicket } from './customer-inference.js';
 
 // Per-CUSTOMER risk rollup + nightly reconciliation. See agent_work/ba/account-risk-spec.md.
 //
@@ -114,11 +116,13 @@ export class AccountRiskEngine {
   private settings: SettingsQueries;
   private resolver: CustomerResolver;
   private jiraClient: JiraRestClient | null;
+  private llmService: LlmService | null;
 
-  constructor(settings: SettingsQueries, jiraClient?: JiraRestClient | null) {
+  constructor(settings: SettingsQueries, jiraClient?: JiraRestClient | null, llmService?: LlmService | null) {
     this.settings = settings;
     this.resolver = new CustomerResolver(settings);
     this.jiraClient = jiraClient ?? null;
+    this.llmService = llmService ?? null;
   }
 
   // Fields needed for resolution + signal detection (kept minimal to limit payload).
@@ -173,7 +177,11 @@ export class AccountRiskEngine {
 
     const seed = await this.resolver.seedFromBcCustomers().catch(() => ({ added: 0, skipped: 0 }));
     await this.resolver.loadIndex();
-    console.log(`[account-risk] seed +${seed.added} domains; index loaded; scanning ${projects.length} projects…`);
+    // Cached AI inferences (applied as a resolution source) + which tickets we've already tried.
+    const inferenceMap = await loadInferenceMap();
+    const inferredKeys = await loadInferredKeys();
+    const needsInference: UnresolvedTicket[] = [];
+    console.log(`[account-risk] seed +${seed.added} domains; index loaded; ${inferenceMap.size} cached inferences; scanning ${projects.length} projects…`);
 
     const customers = new Map<string, CustomerAccum>();
     const reconTotal = new Map<string, number>();     // `${project}|${yyyy-mm-dd}` -> count
@@ -211,31 +219,46 @@ export class AccountRiskEngine {
       const dayKey = createdDate ? `${t.project_key}|${createdDate.toISOString().slice(0, 10)}` : null;
       if (dayKey) reconTotal.set(dayKey, (reconTotal.get(dayKey) ?? 0) + 1);
 
-      // Resolve customer.
+      // Resolve customer (deterministic chain → cached AI inference → unresolved).
       const res = await this.resolver.resolveTicket({
         bcAccountNumber: t.bc_account_number,
         organizations: t.organisation_name ? [{ name: t.organisation_name }] : null,
         reporterEmail: t.reporter_email, summary: t.summary, description: t.description_text,
       });
-      bySource.set(res.source, (bySource.get(res.source) ?? 0) + 1);
-      if (!res.customerRef) {  // unresolved → counts toward recon total only
-        if (unresolvedSamples.length < 20) unresolvedSamples.push(`${t.issue_key} <${t.reporter_email ?? 'no-email'}>`);
-        continue;
+      let customerRef = res.customerRef;
+      let customerName = res.customerName;
+      let source = res.source;
+      let isNetwork = res.isNetwork;
+      if (!customerRef) {
+        const inf = inferenceMap.get(t.issue_key);
+        if (inf) {
+          customerRef = inf.ref; customerName = inf.name; source = 'ai_inference';
+          isNetwork = isNetworkAccount(inf.name, null, inf.ref);
+        } else {
+          // Truly unresolved — queue for AI inference (once) if it has content to read.
+          bySource.set('unresolved', (bySource.get('unresolved') ?? 0) + 1);
+          if (!inferredKeys.has(t.issue_key) && (t.summary || t.description_text)) {
+            needsInference.push({ ticketKey: t.issue_key, summary: t.summary, description: t.description_text });
+          }
+          if (unresolvedSamples.length < 20) unresolvedSamples.push(`${t.issue_key} <${t.reporter_email ?? 'no-email'}>`);
+          continue;
+        }
       }
+      bySource.set(source, (bySource.get(source) ?? 0) + 1);
       resolvedCount++;
       if (dayKey) reconResolved.set(dayKey, (reconResolved.get(dayKey) ?? 0) + 1);
 
       // Accumulate per customer.
-      let acc = customers.get(res.customerRef);
+      let acc = customers.get(customerRef);
       if (!acc) {
         acc = {
-          customerRef: res.customerRef, customerName: res.customerName, bcNumber: res.source === 'bc_field' ? res.customerRef : null,
+          customerRef, customerName, bcNumber: source === 'bc_field' ? customerRef : null,
           primaryDomain: CustomerResolver.emailDomain(t.reporter_email),
-          isNetwork: res.isNetwork || isNetworkAccount(res.customerName, t.reporter_email, res.customerRef),
+          isNetwork: isNetwork || isNetworkAccount(customerName, t.reporter_email, customerRef),
           projects: new Set(), totalTickets: 0, recentTickets: 0, firstTicket: null, lastTicket: null,
           score: 0, flags: { has_formal_complaint: false, has_termination: false, has_active_refund: false, has_open_escalation: false }, signalRows: [],
         };
-        customers.set(res.customerRef, acc);
+        customers.set(customerRef, acc);
       }
       acc.projects.add(t.project_key);
       acc.totalTickets++;
@@ -364,6 +387,20 @@ export class AccountRiskEngine {
       );
     }
 
+    // AI inference on the unresolved residual (cached; applied on the NEXT run). Budgeted per
+    // run via account_risk_ai_max_per_run (default 1500) so it works through the backlog
+    // without a 27k-call burst. Cheap model, never blocks the rollup result above.
+    let aiAttempted = 0, aiMatched = 0;
+    if (this.llmService && needsInference.length) {
+      const cap = parseInt(this.settings.get('account_risk_ai_max_per_run') ?? '', 10) || 1500;
+      console.log(`[account-risk] AI inference: ${needsInference.length} unresolved queued, running up to ${cap}…`);
+      try {
+        const r = await runInferenceBatch({ llmService: this.llmService }, needsInference, cap);
+        aiAttempted = r.attempted; aiMatched = r.matched;
+      } catch (err) { console.warn('[account-risk] AI inference batch failed:', err instanceof Error ? err.message : err); }
+      console.log(`[account-risk] AI inference: attempted ${aiAttempted}, matched ${aiMatched} (applied next run)`);
+    }
+
     const summary = {
       generatedAt: new Date().toISOString(),
       tickets: totalTickets,
@@ -375,6 +412,10 @@ export class AccountRiskEngine {
       tierChanges,
       reconDaysComplete: daysComplete,
       reconDaysPartial: daysPartial,
+      aiInferenceCached: inferenceMap.size,
+      aiInferenceQueued: needsInference.length,
+      aiInferenceAttempted: aiAttempted,
+      aiInferenceMatched: aiMatched,
       unresolvedSamples,
       seconds: Math.round((Date.now() - t0) / 1000),
     };
