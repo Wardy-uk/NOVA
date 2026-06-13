@@ -3409,21 +3409,21 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // days-breached (bottom) views render from the same getters.
       type Getter = (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null;
       type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean } };
-      const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[] }> = [
+      const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: dm => getCell(dm, 'newvol'), kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
           { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
           { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', SUPPORT), kind: 'oversla', opts: { sub: true } },
           { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', SUPPORT), kind: 'oldest', opts: { sub: true } },
         ] },
-        { header: 'Development &middot; Tier 3 + Dev', metrics: [
+        { header: 'Production', metrics: [{ label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', ['Production']), kind: 'oldest', opts: { sub: true } }] },
+        { header: 'Development &middot; Tier 3 + Dev', sep: true, metrics: [
           { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', DEV), kind: 'noreply', opts: { sub: true } },
           { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', DEV), kind: 'oversla', opts: { sub: true } },
           { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', DEV), kind: 'oldest', opts: { sub: true } },
         ] },
-        { header: 'Production', metrics: [{ label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', ['Production']), kind: 'oldest', opts: { sub: true } }] },
       ];
-      const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
+      const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp${g.sep ? ' grp-sep' : ''}"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
 
       // ── Weekly breach counts (bottom): per metric, how many business days in
       // each of the last 3 ISO weeks the metric was RED (rag 3). ──
@@ -3472,7 +3472,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         }
         return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend">${trend}</div></div>`;
       };
-      const weeklyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(weekRow).join('')}</div>`).join('');
+      const weeklyHtml = LEFT_GROUPS.map(g => `<div class="grp${g.sep ? ' grp-sep' : ''}"><div class="grp-h">${g.header}</div>${g.metrics.map(weekRow).join('')}</div>`).join('');
 
       // ── Roll-up: 20 granular per-queue metrics ──
       const Q6 = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2', 'Tier 3', 'Development'];
@@ -3657,6 +3657,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .right{display:grid;grid-template-rows:2fr 1fr;gap:1.2vh;min-height:0}
 /* metric rows */
 .grp{margin-bottom:.8vh}
+.grp-sep{border-top:1px dotted rgba(255,255,255,.22);margin-top:.5vh;padding-top:.4vh}
 .grp-h{font-size:1.15vh;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#5ec1ca;padding:.5vh .3vw .3vh;opacity:.85}
 .mrow{display:grid;grid-template-columns:minmax(0,1fr) 46% 3vw;align-items:center;gap:.6vw;padding:.35vh .3vw}
 .mrow.sub .mlabel{color:#cbd5e1;font-size:1.5vh}
