@@ -3324,7 +3324,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const snapRows = (await pool.request().query(`
         SELECT kpi, [count] AS cnt, rag, CAST(CreatedAt AS DATE) AS d
         FROM dbo.jira_kpi_daily
-        WHERE CAST(CreatedAt AS DATE) >= DATEADD(day, -28, CAST(GETDATE() AS DATE))
+        WHERE CAST(CreatedAt AS DATE) >= DATEADD(day, -35, CAST(GETDATE() AS DATE))
           AND CAST(CreatedAt AS DATE) < CAST(GETDATE() AS DATE)
       `)).recordset as Array<{ kpi: string; cnt: number; rag: number | null; d: Date | string }>;
 
@@ -3438,7 +3438,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         if (!weekDays.has(wk)) weekDays.set(wk, []);
         weekDays.get(wk)!.push(dk);
       }
-      const weeks = [...weekDays.keys()].sort().slice(-3);
+      const weeks = [...weekDays.keys()].sort().slice(-4);
       const weekHeadHtml = weeks.map(wk => {
         const first = weekDays.get(wk)!.slice().sort()[0];
         const mon = new Date(first + 'T00:00:00Z');
@@ -3453,11 +3453,13 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           let breached = 0, total = 0;
           for (const dk of dks) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
           if (total === 0) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          const rag = breached === 0 ? 1 : breached <= 2 ? 2 : 3;
+          // RAG by clean (non-breached) days: 4–5 clean = green, 3 = amber, ≤2 = red.
+          const clean = total - breached;
+          const rag = clean >= 4 ? 1 : clean === 3 ? 2 : 3;
           const col = ragColor(rag), bg = ragBg(rag);
           return `<div class="cell"><span class="pill" title="${breached} of ${total} days breached" style="background:${bg};color:${col};border:1px solid ${col}44">${breached}</span></div>`;
         }).join('');
-        return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcells3">${cells}</div><div class="mtrend"></div></div>`;
+        return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend"></div></div>`;
       };
       const weeklyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(weekRow).join('')}</div>`).join('');
 
@@ -3728,7 +3730,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .kblock{flex:1;min-height:0;display:flex;flex-direction:column}
 .kblock-h{font-size:1.1vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.2vh .3vw .3vh;border-bottom:1px solid #2f353d;margin-bottom:.25vh}
 .kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
-.mcells.mcells3{grid-template-columns:repeat(3,1fr)}
+.mcells.mcellsw{grid-template-columns:repeat(4,1fr)}
 .left .mhead{margin-bottom:.1vh}
 .left .grp{margin-bottom:0}
 .left .grp-h{font-size:1.1vh;padding:.25vh .3vw .15vh}
@@ -3763,7 +3765,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
       <div class="kblock">
         <div class="kblock-h">Days breached per week &middot; last 3 weeks</div>
         <div class="kgrid">
-          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcells3">${weekHeadHtml}</div><div></div></div>
+          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
           ${weeklyHtml}
         </div>
       </div>
