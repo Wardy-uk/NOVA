@@ -113,23 +113,29 @@ export class CustomerResolver {
     return CustomerResolver.normaliseDomain(email.split('@').pop());
   }
 
-  /** Pull candidate hostnames out of free text (instance URLs, website mentions). */
+  /**
+   * Pull candidate customer domains out of free text: explicit URLs, email addresses in
+   * signatures/forwards, and bare domains (e.g. "goodrichestates.co.uk" in a system ticket
+   * body). Generic free-mail + internal/system domains are dropped. Only domains present in
+   * the map will actually resolve, so over-broad extraction is harmless.
+   */
   static extractDomainsFromText(text: string | null | undefined): string[] {
     if (!text) return [];
     const out = new Set<string>();
+    const add = (raw: string | null | undefined) => {
+      const d = CustomerResolver.normaliseDomain(raw);
+      if (d && !GENERIC_DOMAINS.has(d) && !INTERNAL_DOMAINS.has(d)) out.add(d);
+    };
+    let m: RegExpExecArray | null;
     // Explicit URLs
     const urlRe = /https?:\/\/([a-z0-9.-]+\.[a-z]{2,})/gi;
-    let m: RegExpExecArray | null;
-    while ((m = urlRe.exec(text)) !== null) {
-      const d = CustomerResolver.normaliseDomain(m[1]);
-      if (d) out.add(d);
-    }
-    // Bare BYM/Nurtur instance hosts (e.g. "companyname.briefyourmarket.com")
-    const hostRe = /\b([a-z0-9-]+\.(?:briefyourmarket\.com|nurtur\.digital|nurtur\.tech))\b/gi;
-    while ((m = hostRe.exec(text)) !== null) {
-      const d = CustomerResolver.normaliseDomain(m[1]);
-      if (d) out.add(d);
-    }
+    while ((m = urlRe.exec(text)) !== null) add(m[1]);
+    // Email addresses (signatures, forwarded headers) → domain
+    const emailRe = /[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/gi;
+    while ((m = emailRe.exec(text)) !== null) add(m[1]);
+    // Bare domains with common UK/agency TLDs (e.g. acen.co.uk, foo.estate)
+    const bareRe = /\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:co\.uk|org\.uk|ltd\.uk|plc\.uk|com|net|org|uk|io|agency|properties|property|homes|estate|estates|email))\b/gi;
+    while ((m = bareRe.exec(text)) !== null) add(m[1]);
     return [...out];
   }
 

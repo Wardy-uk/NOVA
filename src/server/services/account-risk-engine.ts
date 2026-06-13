@@ -41,6 +41,18 @@ function isNetworkAccount(name: string | null, email: string | null, ref: string
   return NETWORK_ACCOUNT_PATTERNS.test(`${name ?? ''} ${email ?? ''} ${ref ?? ''}`);
 }
 
+// System / automation reporters (PMTA, DKIM monitors, no-reply mailers, service accounts).
+// Their tickets are platform monitoring, not a customer raising an issue — filter them out
+// entirely. Matched on reporter email OR display name (bulk Jira search drops the email field,
+// but the display name often IS the system address, e.g. "pmta-dkim-service@mail.briefyourmarket.com").
+const SYSTEM_REPORTER_PATTERN =
+  /\b(pmta|dkim|spf|dmarc|no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|automated|autoreply|notification|alert|monitor|nagios|zabbix|cron|daemon)\b|@mail\.briefyourmarket\.com|service@/i;
+
+function isSystemReporter(email: string | null, display: string | null): boolean {
+  const hay = `${email ?? ''} ${display ?? ''}`;
+  return hay.trim() !== '' && SYSTEM_REPORTER_PATTERN.test(hay);
+}
+
 // Ordered high → low. SQL uses lower-cased LIKE; keep patterns lower-case.
 const SIGNALS: SignalDef[] = [
   { type: 'formal_complaint', weight: 40, setsFlag: 'has_formal_complaint',
@@ -77,7 +89,8 @@ function tierForScore(score: number): number {
 
 interface TicketRow {
   issue_key: string; project_key: string; summary: string | null; description_text: string | null;
-  reporter_email: string | null; bc_account_number: string | null; organisation_name: string | null;
+  reporter_email: string | null; reporter_display: string | null;
+  bc_account_number: string | null; organisation_name: string | null;
   status_category: string | null; jira_created: string | null;
 }
 
@@ -121,6 +134,7 @@ export class AccountRiskEngine {
       summary: f.summary ?? null,
       description_text: extractText(f.description) || null,
       reporter_email: f.reporter?.emailAddress ?? null,
+      reporter_display: f.reporter?.displayName ?? null,
       bc_account_number: (f.customfield_14626 as string) ?? null,
       organisation_name: org,
       status_category: f.status?.statusCategory?.key ?? null,  // 'new' | 'indeterminate' | 'done'
@@ -168,6 +182,7 @@ export class AccountRiskEngine {
     const unresolvedSamples: string[] = [];
     let totalTickets = 0;
     let resolvedCount = 0;
+    let systemSkipped = 0;
 
     // Per-project scan, no comment JOIN — keeps each query small enough for the 30s pool
     // timeout (node-mssql/tedious has no per-request timeout override). Signals are detected
@@ -179,16 +194,18 @@ export class AccountRiskEngine {
       const tickets = this.jiraClient
         ? await this.fetchTicketsFromJira(project, sinceIso)
         : await query<TicketRow>(
-            `SELECT issue_key, project_key, summary, description_text, reporter_email,
+            `SELECT issue_key, project_key, summary, description_text, reporter_email, reporter_display,
                     bc_account_number, organisation_name, status_category, jira_created
              FROM jira_issue_cache
              WHERE project_key = ? AND jira_created >= ?`,
             [project, sinceIso],
           );
-      totalTickets += tickets.length;
       console.log(`[account-risk] ${project}: ${tickets.length} tickets (${this.jiraClient ? 'jira' : 'cache'})`);
 
       for (const t of tickets) {
+      // Filter out system/automation tickets (PMTA, DKIM, no-reply mailers) — not customer issues.
+      if (isSystemReporter(t.reporter_email, t.reporter_display)) { systemSkipped++; continue; }
+      totalTickets++;
       // mssql returns DATETIME2 as a Date object (not a string), so normalise before slicing.
       const createdDate = t.jira_created ? new Date(t.jira_created) : null;
       const dayKey = createdDate ? `${t.project_key}|${createdDate.toISOString().slice(0, 10)}` : null;
@@ -350,6 +367,7 @@ export class AccountRiskEngine {
     const summary = {
       generatedAt: new Date().toISOString(),
       tickets: totalTickets,
+      systemSkipped,
       resolved: resolvedCount,
       resolvedPct: totalTickets ? Math.round((resolvedCount / totalTickets) * 1000) / 10 : 0,
       bySource: Object.fromEntries(bySource),
