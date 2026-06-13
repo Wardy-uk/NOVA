@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
+import { ATLAS_HTML, MAP_HTML } from './atlas-map-html.js';
 import { query, queryOne, execute } from './services/database.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
@@ -2295,6 +2296,62 @@ async function main() {
 })();
 </script>`;
   }
+
+  // ── System Atlas + System Map — static showcase / orientation wallboards ──
+  // Public, no-auth, server-rendered like the other /wallboard/* routes.
+  // HTML lives in atlas-map-html.ts (plain template strings, ships in the build).
+
+  /** System Atlas — fills the three header metrics with live agent-status values. */
+  async function renderAtlasWallboard(): Promise<string> {
+    // Defaults match the static source so the page still reads well if the agent is unavailable.
+    let autonomy = 'full';
+    let tickets = '317';
+    let actions = '46';
+    try {
+      if (agentLoop) {
+        const status = agentLoop.status;
+        if (status.mode) autonomy = String(status.mode);
+        if (typeof status.ticketsProcessed === 'number') tickets = String(status.ticketsProcessed);
+        const stats = await agentLoop.getObserver().getStats();
+        if (typeof stats.total === 'number') actions = String(stats.total);
+      }
+    } catch {
+      // Fall back to the static defaults on any failure — never break the wallboard.
+    }
+    return ATLAS_HTML
+      .replace('{{AUTONOMY}}', autonomy)
+      .replace('{{TICKETS}}', tickets)
+      .replace('{{ACTIONS}}', actions);
+  }
+
+  /** System Map — fully static. */
+  function renderMapWallboard(): string {
+    return MAP_HTML;
+  }
+
+  app.get('/wallboard/atlas', async (_req, res) => {
+    const start = Date.now();
+    try {
+      res.type('html').send(await renderAtlasWallboard());
+      logWallboard('/wallboard/atlas', 'info', 200, Date.now() - start, 'OK');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logWallboard('/wallboard/atlas', 'error', 500, Date.now() - start, msg);
+      res.status(500).send('Atlas render failed');
+    }
+  });
+
+  app.get('/wallboard/map', (_req, res) => {
+    const start = Date.now();
+    try {
+      res.type('html').send(renderMapWallboard());
+      logWallboard('/wallboard/map', 'info', 200, Date.now() - start, 'OK');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logWallboard('/wallboard/map', 'error', 500, Date.now() - start, msg);
+      res.status(500).send('Map render failed');
+    }
+  });
 
   // Wallboard — server-rendered page for TV displays (no auth, no JS required)
   app.get('/wallboard/breached', async (_req, res) => {

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N.O.V.A — System Map</title>
+<style>
+  :root{--bg:#05070f;--panel:rgba(18,26,46,.78);--line:rgba(120,150,220,.14);
+    --txt:#e7eefc;--mut:#8595bd;}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--txt);font-family:"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  #bgfx{position:fixed;inset:0;z-index:0}
+  .wrap{position:relative;z-index:1;max-width:1340px;margin:0 auto;padding:24px 22px 36px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;
+    padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .kicker{font:500 11px/1 "Consolas",monospace;letter-spacing:.32em;color:#3fe8e0;
+    text-transform:uppercase;margin-bottom:10px}
+  .brand{font-weight:200;font-size:clamp(28px,5vw,50px);letter-spacing:.14em;line-height:.9;
+    background:linear-gradient(95deg,#fff,#3fe8e0 55%,#9a8bff);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand small{font-size:.42em;letter-spacing:.12em;color:var(--mut);-webkit-text-fill-color:var(--mut);
+    font-weight:400;margin-left:14px}
+  #subhead{margin-top:10px;max-width:62ch;font-weight:300;font-size:14.5px;color:var(--mut);line-height:1.5}
+  #subhead b{color:var(--txt);font-weight:500}
+  .legend{display:flex;gap:13px;flex-wrap:wrap;align-items:center}
+  .lg{display:flex;align-items:center;gap:7px;font:500 11px/1 "Consolas",monospace;
+    letter-spacing:.06em;color:var(--mut)}
+  .lg i{width:18px;height:3px;border-radius:2px;display:inline-block}
+  .toolbar{display:flex;align-items:center;gap:12px;margin-top:14px;min-height:34px}
+  .back{display:none;align-items:center;gap:8px;cursor:pointer;font:500 12px/1 "Segoe UI";
+    color:var(--txt);background:rgba(255,255,255,.04);border:1px solid var(--line);
+    padding:8px 14px;border-radius:30px;transition:.16s}
+  .back:hover{border-color:rgba(150,180,255,.45)}
+  .ctx{display:none;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut)}
+  .ctx .nm{font-weight:500;font-size:14px;margin-right:2px}
+  .ctx .fc{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.04);
+    border:1px solid var(--line);border-radius:18px;padding:4px 10px}
+  .ctx .fc.in::before{content:"<";color:#3fe8e0}
+  .ctx .fc.out::before{content:">";color:#6fe0a0}
+  .stage{position:relative;margin-top:6px}
+  svg{width:100%;height:auto;display:block;overflow:visible}
+  .edge{fill:none;transition:opacity .2s,stroke-width .2s}
+  .nodeg{cursor:pointer}
+  .nodeg.flat{cursor:default}
+  .nrect{transition:opacity .2s,filter .2s}
+  .nlabel{font-weight:500;font-size:14px;fill:var(--txt)}
+  .nsub{font-size:11px;fill:var(--mut)}
+  .ghost .nlabel{fill:var(--mut);font-weight:400}
+  .ghost .nsub{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase}
+  .nodeg:not(.flat):hover .nrect{filter:brightness(1.3)}
+  .dim{opacity:.07!important}
+  .dimn{opacity:.18!important}
+  .hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:5;
+    font:400 12px/1 "Segoe UI";color:var(--mut);background:var(--panel);border:1px solid var(--line);
+    padding:9px 16px;border-radius:30px;backdrop-filter:blur(6px)}
+  .hint b{color:var(--txt);font-weight:500}
+</style>
+</head>
+<body>
+<canvas id="bgfx"></canvas>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="kicker">how it all pieces together</div>
+      <div class="brand">N.O.V.A <small>system map</small></div>
+      <div id="subhead">Every cluster is a mini-map of its own parts. Signal flows left to right
+        &mdash; from the systems people use, into <b>perception</b>, <b>decision</b> and <b>action</b>,
+        gated by governance and fed back into learning. Click any cluster to expand it.</div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </header>
+  <div class="toolbar">
+    <div class="back" id="back">&larr; back to map</div>
+    <div class="ctx" id="ctx"></div>
+  </div>
+  <div class="stage">
+    <svg id="map" viewBox="0 0 1240 720" role="img" aria-label="NOVA system map"></svg>
+  </div>
+</div>
+<div class="hint" id="hint">Each node is a mini-map of its parts &middot; click to expand</div>
+<script>
+const FLOW={
+ signal:{c:'#3fe8e0',l:'signal in'}, decision:{c:'#9a8bff',l:'decision'},
+ action:{c:'#b27bff',l:'action'}, output:{c:'#6fe0a0',l:'output'},
+ gov:{c:'#f3a94e',l:'governance'}, knowledge:{c:'#56d6a4',l:'knowledge'},
+ feedback:{c:'#ff5ca8',l:'feedback'}, substrate:{c:'#5f7bb0',l:'runtime'},
+};
+const NODES={
+ integ:{x:130,y:250,c:'#6f8fd6',label:'Integrations',role:'external systems it reads and acts on',
+   parts:['Jira Service Mgmt','Dynamics 365','Business Central','Azure DevOps','BriefYourMarket','Confluence','SharePoint / MS Graph','Adobe Sign','NEURO bridge','Entra SSO','OpenAI Claude']},
+ data:{x:130,y:470,c:'#6f8fd6',label:'Data & pipelines',role:'where raw signal becomes stored data',
+   parts:['Azure SQL','KPI DB (jsm)','Calyx DB','External DB','Vector / RAG store','Settings store','n8n pipelines']},
+ perc:{x:370,y:300,c:'#3fe8e0',label:'Perception',role:'turns raw input into classified signal',
+   parts:['Perceiver','Ticket classifier','Triage tuner','Confidence scorer','Customer resolver','Problem scanner','KB-gap detector']},
+ cog:{x:600,y:300,c:'#9a8bff',label:'Cognition',role:'decides what should happen',
+   parts:['Reasoner','Assignment engine','Queue ranker','Escalation predictor','Account-risk engine','Capacity planner','Cross-functional intel','Suggestion engine']},
+ act:{x:840,y:300,c:'#b27bff',label:'Action',role:'makes the decision real',
+   parts:['Actor','Auto-rules engine','First-reply pipeline','Quick-win executor','Chase agent','SLA manager','Escalation router','Abuse handler','Plugin to TPJ']},
+ gov:{x:560,y:92,c:'#f3a94e',label:'Governance',role:'decides what it is allowed to do',
+   parts:['Autonomy engine','Guardrails','Cancellation guardrail','Golden rules','Approval queue','Observer critic','Flag auto-dismiss','PII sanitiser','Hygiene checker','Audit & SSO log']},
+ know:{x:360,y:560,c:'#56d6a4',label:'Knowledge (RAG)',role:'grounds decisions in real knowledge',
+   parts:['KB article service','Chunker','Embedder','Semantic search','KB-gap closure','KB health','Confluence sync','Docs sync']},
+ learn:{x:600,y:560,c:'#ff5ca8',label:'Learning',role:'turns outcomes into improvement',
+   parts:['Agent loop','Self-directed learning','AI learning service','Triage-tuning feedback','Drift detector','Eval suite','Impact measurement','Incident detector','Coach']},
+ gen:{x:1080,y:110,c:'#c5b3ff',label:'Generation',role:'writes the human-facing output',
+   parts:['LLM router','Prompt loader','Portal assistant','AI standup','Daily briefing','1-2-1 brief writer','Board MI commentary','Ops pack','QA digest']},
+ runtime:{x:840,y:560,c:'#5f7bb0',label:'Runtime & ops',role:'the substrate it all runs on',
+   parts:['Job registry','Pipeline monitor','Queue monitor','Notification engine','Alert service','Config service','MCP client','Lifecycle sweep']},
+ surf:{x:1090,y:380,c:'#6fe0a0',label:'Surfaces',role:'where output lands for people',
+   parts:['Service Desk','KPI Engine','QA','Onboarding','Calyx Portal','AI Console','Risk & Intelligence','CRM & Sales','Wallboards','People','Training','Surveys','Ops & Briefings','Admin']},
+ users:{x:1090,y:620,c:'#3fe8e0',label:'Users',role:'the people NOVA serves',
+   parts:['Head of Support','2nd line tech','1st line care','Digital design','Sales & accounts','Customers','The floor']},
+};
+const SUBS={
+ 'Jira Service Mgmt':'ticketing system','Dynamics 365':'CRM data','Business Central':'finance & subs',
+ 'Azure DevOps':'dev work','BriefYourMarket':'core product','Confluence':'knowledge base',
+ 'SharePoint / MS Graph':'docs & M365','Adobe Sign':'contract signing','NEURO bridge':'NEURO link',
+ 'Entra SSO':'identity','OpenAI Claude':'the LLMs',
+ 'Azure SQL':'primary store','KPI DB (jsm)':'KPI warehouse','Calyx DB':'portal store',
+ 'External DB':'abuse & admin','Vector / RAG store':'embeddings','Settings store':'configuration','n8n pipelines':'ingestion',
+ 'Perceiver':'builds the signal','Ticket classifier':'categorises tickets','Triage tuner':'tunes thresholds',
+ 'Confidence scorer':'rates certainty','Customer resolver':'identifies account','Problem scanner':'clusters issues','KB-gap detector':'spots missing docs',
+ 'Reasoner':'chooses the action','Assignment engine':'picks the owner','Queue ranker':'orders the queue',
+ 'Escalation predictor':'forecasts escalations','Account-risk engine':'scores churn risk','Capacity planner':'projects workload',
+ 'Cross-functional intel':'connects teams','Suggestion engine':'proposes next steps',
+ 'Actor':'executes on Jira','Auto-rules engine':'runs playbooks','First-reply pipeline':'writes first reply',
+ 'Quick-win executor':'clears easy wins','Chase agent':'chases stalled work','SLA manager':'prevents breaches',
+ 'Escalation router':'routes & logs','Abuse handler':'processes abuse reports','Plugin to TPJ':'automates TPJ flow',
+ 'Autonomy engine':'sets how far it acts','Guardrails':'blocks unsafe actions','Cancellation guardrail':'guards cancellations',
+ 'Golden rules':'hard constraints','Approval queue':'human gate','Observer critic':'reviews actions',
+ 'Flag auto-dismiss':'clears noise','PII sanitiser':'redacts sensitive data','Hygiene checker':'watches data quality','Audit & SSO log':'records everything',
+ 'KB article service':'manages articles','Chunker':'splits documents','Embedder':'creates vectors',
+ 'Semantic search':'finds by meaning','KB-gap closure':'drafts missing docs','KB health':'scores coverage',
+ 'Confluence sync':'publishes out','Docs sync':'pulls docs in',
+ 'Agent loop':'the heartbeat','Self-directed learning':'improves itself','AI learning service':'feedback to behaviour',
+ 'Triage-tuning feedback':'corrects triage','Drift detector':'watches for drift','Eval suite':'scores quality',
+ 'Impact measurement':'measures outcomes','Incident detector':'spots failures','Coach':'coaches the team',
+ 'LLM router':'routes to models','Prompt loader':'manages prompts','Portal assistant':'customer chat',
+ 'AI standup':'daily standup','Daily briefing':'morning brief','1-2-1 brief writer':'preps one-to-ones',
+ 'Board MI commentary':'narrates the numbers','Ops pack':'ops report','QA digest':'quality summary',
+ 'Job registry':'runs background jobs','Pipeline monitor':'watches pipelines','Queue monitor':'watches queues',
+ 'Notification engine':'routes messages','Alert service':'raises alerts','Config service':'holds settings',
+ 'MCP client':'calls external tools','Lifecycle sweep':'ages stale work',
+ 'Service Desk':'work tickets','KPI Engine':'performance','QA':'quality scoring','Onboarding':'go-lives',
+ 'Calyx Portal':'customer portal','AI Console':'agent cockpit','Risk & Intelligence':'early warning',
+ 'CRM & Sales':'commercial','Wallboards':'ambient status','People':'team management','Training':'capability',
+ 'Surveys':'feedback','Ops & Briefings':'daily rhythm','Admin':'config & security',
+ 'Head of Support':'runs the team','2nd line tech':'works tickets','1st line care':'first contact',
+ 'Digital design':'design delivery','Sales & accounts':'owns relationship','Customers':'self-serve','The floor':'watches live',
+};
+const EDGES=[
+ ['integ','perc','signal',-30],['data','perc','signal',30],['perc','cog','signal',0],
+ ['cog','act','decision',0],['act','surf','output',-20],['act','integ','action',150],
+ ['gov','cog','gov',-20],['gov','act','gov',30],
+ ['know','cog','knowledge',-20],['know','gen','knowledge',-200],
+ ['cog','gen','decision',-30],['gen','surf','output',30],['surf','users','output',0],
+ ['act','learn','feedback',20],['cog','learn','feedback',-30],
+ ['learn','perc','feedback',90],['learn','cog','feedback',30],
+ ['runtime','cog','substrate',40],['runtime','act','substrate',-30],['runtime','gen','substrate',-90],
+ ['users','integ','signal',320],
+];
+const INTERNAL={
+ perc:{type:'flow',edges:[['Customer resolver','Perceiver'],['Perceiver','Ticket classifier'],['Ticket classifier','Confidence scorer'],['Triage tuner','Ticket classifier'],['Perceiver','Problem scanner'],['Perceiver','KB-gap detector']]},
+ cog:{type:'flow',edges:[['Queue ranker','Reasoner'],['Escalation predictor','Reasoner'],['Account-risk engine','Reasoner'],['Capacity planner','Reasoner'],['Cross-functional intel','Reasoner'],['Reasoner','Assignment engine'],['Reasoner','Suggestion engine']]},
+ act:{type:'flow',edges:[['Auto-rules engine','Actor'],['First-reply pipeline','Actor'],['Quick-win executor','Actor'],['SLA manager','Actor'],['Chase agent','Actor'],['Escalation router','Actor'],['Abuse handler','Actor'],['Plugin to TPJ','Actor']]},
+ gov:{type:'flow',edges:[['Golden rules','Guardrails'],['Autonomy engine','Guardrails'],['PII sanitiser','Guardrails'],['Hygiene checker','Guardrails'],['Cancellation guardrail','Guardrails'],['Guardrails','Approval queue'],['Observer critic','Flag auto-dismiss'],['Approval queue','Audit & SSO log'],['Flag auto-dismiss','Audit & SSO log']]},
+ know:{type:'flow',edges:[['Docs sync','KB article service'],['KB-gap closure','KB article service'],['KB health','KB article service'],['KB article service','Chunker'],['Chunker','Embedder'],['Embedder','Semantic search'],['KB article service','Confluence sync']]},
+ learn:{type:'flow',edges:[['Agent loop','AI learning service'],['Drift detector','AI learning service'],['Eval suite','AI learning service'],['Incident detector','Impact measurement'],['Impact measurement','AI learning service'],['AI learning service','Self-directed learning'],['AI learning service','Triage-tuning feedback'],['AI learning service','Coach']]},
+ gen:{type:'flow',edges:[['Prompt loader','LLM router'],['LLM router','Portal assistant'],['LLM router','AI standup'],['LLM router','Daily briefing'],['LLM router','1-2-1 brief writer'],['LLM router','Board MI commentary'],['LLM router','Ops pack'],['LLM router','QA digest']]},
+ runtime:{type:'flow',edges:[['Config service','Job registry'],['Job registry','Pipeline monitor'],['Job registry','Queue monitor'],['Job registry','Lifecycle sweep'],['Pipeline monitor','Alert service'],['Queue monitor','Alert service'],['Alert service','Notification engine']]},
+ integ:{type:'grid'}, data:{type:'grid'}, surf:{type:'grid'}, users:{type:'grid'},
+};
+const NS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('map');
+function el(t,a){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+function pathD(a,b,curve){
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;
+  const mx=(a.x+b.x)/2+nx*curve,my=(a.y+b.y)/2+ny*curve;
+  return 'M '+a.x+' '+a.y+' Q '+mx+' '+my+' '+b.x+' '+b.y;
+}
+function nodeW(label){return Math.max(124,Math.min(196,label.length*8.1+28));}
+let particles=[],edgeRefs=[],nodeRefs={};
+function clearSvg(){while(svg.firstChild)svg.removeChild(svg.firstChild);particles=[];edgeRefs=[];nodeRefs={};}
+function addEdges(edges,pos){
+  edges.forEach(function(e){
+    const a=pos[e.from],b=pos[e.to];if(!a||!b)return;
+    const baseW=e.type==='substrate'?1:(e.thin?1.1:1.6);
+    const p=el('path',{class:'edge',d:pathD(a,b,e.curve||0),stroke:e.col,
+      'stroke-width':baseW,opacity:e.type==='substrate'?.16:(e.thin?.24:.32)});
+    if(e.dashed)p.setAttribute('stroke-dasharray','5 6');
+    svg.appendChild(p);edgeRefs.push({from:e.from,to:e.to,el:p,type:e.type,baseW:baseW});
+  });
+  const pf=el('g',{});svg.appendChild(pf);
+  edgeRefs.forEach(function(e){
+    if(e.type==='substrate')return;
+    const len=e.el.getTotalLength();const n=Math.max(2,Math.round(len/130));
+    for(let k=0;k<n;k++){const c=el('circle',{r:2.3,fill:e.el.getAttribute('stroke')});
+      pf.appendChild(c);particles.push({el:e.el,len:len,off:(k/n)*len,sp:0.8+Math.random()*0.6,dot:c});}
+  });
+}
+function hoverWire(g,id){g.addEventListener('mouseenter',function(){highlight(id);});
+  g.addEventListener('mouseleave',clearHi);}
+function renderGraph(nodes,edges,opts){
+  clearSvg();opts=opts||{};
+  const pos={};nodes.forEach(function(n){pos[n.id]=n;});
+  addEdges(edges,pos);
+  nodes.forEach(function(n){
+    if(n.thumb){
+      const w=CARDW,h=CARDH,L=n.x-w/2,T=n.y-h/2;
+      const g=el('g',{class:'nodeg'});g.dataset.id=n.id;
+      g.appendChild(el('rect',{class:'nrect',x:L,y:T,width:w,height:h,rx:12,
+        fill:'rgba(10,15,28,.97)',stroke:n.c,'stroke-width':1.3}));
+      g.appendChild(el('rect',{x:L,y:T,width:4,height:h,rx:2,fill:n.c}));
+      const tt=el('text',{class:'nlabel','text-anchor':'start',x:L+14,y:T+21});tt.textContent=n.label;g.appendChild(tt);
+      const ct=el('text',{class:'nsub','text-anchor':'end',x:L+w-12,y:T+21});ct.textContent=n.thumb.count;g.appendChild(ct);
+      g.appendChild(n.thumb.group);
+      hoverWire(g,n.id);
+      if(n.onClick)g.addEventListener('click',n.onClick);
+      svg.appendChild(g);nodeRefs[n.id]=g;return;
+    }
+    const sub=n.sub||'',hasSub=!!sub,h=hasSub?52:44;
+    const w=Math.max(nodeW(n.label),hasSub?nodeW(sub):0);
+    const g=el('g',{class:'nodeg'+((opts.flat||n.ghost)?' flat':'')+(n.ghost?' ghost':'')});
+    g.dataset.id=n.id;
+    const rect=el('rect',{class:'nrect',x:n.x-w/2,y:n.y-h/2,width:w,height:h,rx:11,
+      fill:n.ghost?'rgba(9,13,24,.7)':'rgba(12,18,34,.94)',stroke:n.c,'stroke-width':n.ghost?1:1.4});
+    if(n.ghost)rect.setAttribute('stroke-dasharray','5 5');
+    g.appendChild(rect);
+    if(!n.ghost)g.appendChild(el('rect',{x:n.x-w/2,y:n.y-h/2,width:4,height:h,rx:2,fill:n.c}));
+    const t1=el('text',{class:'nlabel','text-anchor':'middle',x:n.x+2,y:hasSub?n.y-2:n.y+5});
+    t1.textContent=n.label;g.appendChild(t1);
+    if(hasSub){const t2=el('text',{class:'nsub','text-anchor':'middle',x:n.x+2,y:n.y+15});
+      t2.textContent=sub;g.appendChild(t2);}
+    hoverWire(g,n.id);
+    if(n.onClick)g.addEventListener('click',n.onClick);
+    svg.appendChild(g);nodeRefs[n.id]=g;
+  });
+}
+function highlight(id){
+  const conn={};conn[id]=1;
+  edgeRefs.forEach(function(e){if(e.from===id||e.to===id){conn[e.from]=1;conn[e.to]=1;}});
+  edgeRefs.forEach(function(e){const on=(e.from===id||e.to===id);e.el.classList.toggle('dim',!on);
+    e.el.setAttribute('stroke-width',on?Math.max(2.4,e.baseW+1):e.baseW);});
+  Object.keys(nodeRefs).forEach(function(nid){nodeRefs[nid].classList.toggle('dimn',!conn[nid]);});
+}
+function clearHi(){
+  edgeRefs.forEach(function(e){e.el.classList.remove('dim');e.el.setAttribute('stroke-width',e.baseW);});
+  Object.keys(nodeRefs).forEach(function(nid){nodeRefs[nid].classList.remove('dimn');});
+}
+function animate(){
+  for(const pt of particles){pt.off=(pt.off+pt.sp)%pt.len;
+    const p=pt.el.getPointAtLength(pt.off);pt.dot.setAttribute('cx',p.x);pt.dot.setAttribute('cy',p.y);
+    pt.dot.setAttribute('opacity',pt.el.classList.contains('dim')?0:0.9);}
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+function neighbours(id){
+  const ins=[],outs=[];
+  EDGES.forEach(function(e){if(e[1]===id)ins.push(e[0]);if(e[0]===id)outs.push(e[1]);});
+  return {ins:Array.from(new Set(ins)),outs:Array.from(new Set(outs))};
+}
+function layeredPositions(parts,edges){
+  const adj={},ind={};parts.forEach(function(p){adj[p]=[];ind[p]=0;});
+  edges.forEach(function(e){const a=e[0],b=e[1];if(adj[a]&&b in ind){adj[a].push(b);ind[b]++;}});
+  const layer={};parts.filter(function(p){return ind[p]===0;}).forEach(function(p){layer[p]=0;});
+  const ind2={};parts.forEach(function(p){ind2[p]=ind[p];});
+  const queue=parts.filter(function(p){return ind2[p]===0;});
+  while(queue.length){const u=queue.shift();adj[u].forEach(function(v){ind2[v]--;
+    layer[v]=Math.max(layer[v]||0,(layer[u]||0)+1);if(ind2[v]===0)queue.push(v);});}
+  parts.forEach(function(p){if(layer[p]===undefined)layer[p]=0;});
+  const groups={};parts.forEach(function(p){(groups[layer[p]]=groups[layer[p]]||[]).push(p);});
+  const layers=Object.keys(groups).map(Number).sort(function(a,b){return a-b;});
+  const nL=layers.length,x0=330,x1=950,pos={};
+  layers.forEach(function(L,li){const col=groups[L];const x=nL>1?x0+(x1-x0)*li/(nL-1):640;
+    const gap=Math.min(98,650/Math.max(col.length,1));const y0=380-(col.length-1)*gap/2;
+    col.forEach(function(p,i){pos[p]={x:x,y:y0+i*gap};});});
+  return pos;
+}
+function gridPositions(parts){
+  let cols=Math.ceil(Math.sqrt(parts.length));if(parts.length>9)cols++;
+  const rows=Math.ceil(parts.length/cols);
+  const cw=Math.min(232,940/Math.max(cols-1,1)),ch=Math.min(120,560/Math.max(rows-1,1));
+  const x0=640-(cols-1)*cw/2,y0=380-(rows-1)*ch/2,pos={};
+  parts.forEach(function(p,i){const r=Math.floor(i/cols),c=i%cols;pos[p]={x:x0+c*cw,y:y0+r*ch};});
+  return pos;
+}
+const CARDW=204,CARDH=152;
+function miniGroup(id){
+  const n0=NODES[id],spec=INTERNAL[id],parts=n0.parts,c=n0.c;
+  const pos=spec.type==='flow'?layeredPositions(parts,spec.edges):gridPositions(parts);
+  const boxes=parts.map(function(p){return {id:p,x:pos[p].x,y:pos[p].y,w:nodeW(p),h:40};});
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  boxes.forEach(function(b){minx=Math.min(minx,b.x-b.w/2);maxx=Math.max(maxx,b.x+b.w/2);
+    miny=Math.min(miny,b.y-b.h/2);maxy=Math.max(maxy,b.y+b.h/2);});
+  const bw=Math.max(maxx-minx,1),bh=Math.max(maxy-miny,1);
+  const innerW=CARDW-20,innerH=CARDH-44,s=Math.min(innerW/bw,innerH/bh);
+  const cx=n0.x,cy=n0.y;
+  const ox=cx-CARDW/2+10+(innerW-bw*s)/2-minx*s;
+  const oy=cy-CARDH/2+36+(innerH-bh*s)/2-miny*s;
+  const G=el('g',{transform:'translate('+ox+','+oy+') scale('+s+')'});
+  (spec.type==='flow'?spec.edges:[]).forEach(function(e){const a=pos[e[0]],b=pos[e[1]];if(!a||!b)return;
+    const ln=el('path',{d:pathD(a,b,0),fill:'none',stroke:c,'stroke-width':1,opacity:.5});
+    ln.setAttribute('vector-effect','non-scaling-stroke');G.appendChild(ln);});
+  boxes.forEach(function(b){
+    const r=el('rect',{x:b.x-b.w/2,y:b.y-b.h/2,width:b.w,height:b.h,rx:7,fill:'rgba(20,28,48,.97)',stroke:c,'stroke-width':1.3});
+    r.setAttribute('vector-effect','non-scaling-stroke');G.appendChild(r);
+    const t=el('text',{class:'nlabel','text-anchor':'middle',x:b.x,y:b.y+5});t.textContent=b.id;G.appendChild(t);
+  });
+  return {group:G,count:parts.length};
+}
+function showOverview(){
+  document.getElementById('back').style.display='none';
+  document.getElementById('ctx').style.display='none';
+  document.getElementById('subhead').style.display='block';
+  document.getElementById('hint').innerHTML='Each node is a mini-map of its parts &nbsp;&middot;&nbsp; <b>click to expand</b>, hover to trace flow';
+  const nodes=Object.keys(NODES).map(function(id){const n=NODES[id];
+    return {id:id,label:n.label,x:n.x,y:n.y,c:n.c,thumb:miniGroup(id),onClick:function(){showDetail(id);}};});
+  const edges=EDGES.map(function(e){return {from:e[0],to:e[1],type:e[2],curve:e[3],col:FLOW[e[2]].c,
+      dashed:(e[2]==='feedback'||e[2]==='substrate'||e[2]==='action')};});
+  renderGraph(nodes,edges,{});
+}
+function showDetail(id){
+  const n=NODES[id],spec=INTERNAL[id];
+  document.getElementById('back').style.display='inline-flex';
+  document.getElementById('subhead').style.display='none';
+  document.getElementById('hint').innerHTML='Hover a part to isolate its links &nbsp;&middot;&nbsp; <b>back</b> for the full map';
+  const nb=neighbours(id),ins=nb.ins,outs=nb.outs;
+  const ctx=document.getElementById('ctx');ctx.style.display='flex';
+  ctx.innerHTML='<span class="nm" style="color:'+n.c+'">'+n.label+'</span>'+
+    '<span>'+n.parts.length+' parts &middot; '+n.role+'</span>'+
+    ins.map(function(i){return '<span class="fc in">'+NODES[i].label+'</span>';}).join('')+
+    outs.map(function(o){return '<span class="fc out">'+NODES[o].label+'</span>';}).join('');
+  const pos=spec.type==='flow'?layeredPositions(n.parts,spec.edges):gridPositions(n.parts);
+  const nodes=n.parts.map(function(p){return {id:p,label:p,sub:SUBS[p]||'',x:pos[p].x,y:pos[p].y,c:n.c};});
+  let edges=(spec.type==='flow'?spec.edges:[]).map(function(e){return {from:e[0],to:e[1],col:n.c,type:'decision',curve:0};});
+  if(spec.type==='flow'){
+    const indeg={},outdeg={};n.parts.forEach(function(p){indeg[p]=0;outdeg[p]=0;});
+    spec.edges.forEach(function(e){outdeg[e[0]]++;indeg[e[1]]++;});
+    const entry=n.parts.filter(function(p){return indeg[p]===0;});
+    const exit=n.parts.filter(function(p){return outdeg[p]===0;});
+    ins.forEach(function(nc,i){const gy=380-(ins.length-1)*150/2+i*150,gid='in:'+nc;
+      nodes.push({id:gid,label:NODES[nc].label,sub:'sends in',x:140,y:gy,c:NODES[nc].c,ghost:true});
+      entry.forEach(function(ep){edges.push({from:gid,to:ep,col:FLOW.signal.c,type:'signal',curve:0,thin:true});});});
+    outs.forEach(function(nc,i){const gy=380-(outs.length-1)*150/2+i*150,gid='out:'+nc;
+      nodes.push({id:gid,label:NODES[nc].label,sub:'receives',x:1140,y:gy,c:NODES[nc].c,ghost:true});
+      exit.forEach(function(xp){edges.push({from:xp,to:gid,col:FLOW.output.c,type:'output',curve:0,thin:true});});});
+  }
+  renderGraph(nodes,edges,{flat:true});
+}
+document.getElementById('back').onclick=showOverview;
+addEventListener('keydown',function(e){if(e.key==='Escape')showOverview();});
+const lg=document.getElementById('legend');
+['signal','decision','action','knowledge','gov','feedback','output'].forEach(function(k){
+  const d=document.createElement('div');d.className='lg';
+  d.innerHTML='<i style="background:'+FLOW[k].c+'"></i>'+FLOW[k].l;lg.appendChild(d);});
+showOverview();
+const cv=document.getElementById('bgfx'),g=cv.getContext('2d');
+let w,h;function rz(){w=cv.width=innerWidth;h=cv.height=innerHeight;}rz();addEventListener('resize',rz);
+const ps=[];for(let i=0;i<60;i++)ps.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,
+  vy:0.12+Math.random()*0.4,r:Math.random()*1.5+0.3,a:Math.random()*0.45+0.12,
+  c:['#3fe8e0','#9a8bff','#56d6a4'][i%3]});
+function bg(){g.clearRect(0,0,w,h);
+  const grd=g.createRadialGradient(w*0.5,h*0.1,0,w*0.5,h*0.1,h*1.1);
+  grd.addColorStop(0,'#0b1730');grd.addColorStop(.6,'#070b18');grd.addColorStop(1,'#04060d');
+  g.fillStyle=grd;g.fillRect(0,0,w,h);
+  for(const p of ps){p.y+=p.vy;if(p.y>h){p.y=-4;p.x=Math.random()*w;}
+    g.globalAlpha=p.a;g.fillStyle=p.c;g.beginPath();g.arc(p.x,p.y,p.r,0,7);g.fill();}
+  g.globalAlpha=1;requestAnimationFrame(bg);}bg();
+</script>
+</body>
+</html>
