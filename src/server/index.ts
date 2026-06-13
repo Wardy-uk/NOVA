@@ -3324,7 +3324,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const snapRows = (await pool.request().query(`
         SELECT kpi, [count] AS cnt, rag, CAST(CreatedAt AS DATE) AS d
         FROM dbo.jira_kpi_daily
-        WHERE CAST(CreatedAt AS DATE) >= DATEADD(day, -14, CAST(GETDATE() AS DATE))
+        WHERE CAST(CreatedAt AS DATE) >= DATEADD(day, -28, CAST(GETDATE() AS DATE))
           AND CAST(CreatedAt AS DATE) < CAST(GETDATE() AS DATE)
       `)).recordset as Array<{ kpi: string; cnt: number; rag: number | null; d: Date | string }>;
 
@@ -3402,20 +3402,64 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 
       const SUPPORT = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2'];
       const DEV = ['Tier 3', 'Development'];
-      const leftHtml = [
-        { header: 'Intake', rows: [metricRow('New ticket volume', dm => getCell(dm, 'newvol'), 'newvol', { neutral: true })] },
-        { header: 'Support &middot; CC + Tier 2 + TPJ', rows: [
-          metricRow('Tickets with no reply', dm => groupCell(dm, 'noreply', SUPPORT), 'noreply', { sub: true }),
-          metricRow('Over SLA (actionable)', dm => groupCell(dm, 'oversla', SUPPORT), 'oversla', { sub: true }),
-          metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', SUPPORT), 'oldest', { sub: true }),
+      // The 8 grouped metrics declared once, so the daily (top) and the weekly
+      // days-breached (bottom) views render from the same getters.
+      type Getter = (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null;
+      type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean } };
+      const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[] }> = [
+        { header: 'Intake', metrics: [{ label: 'New ticket volume', get: dm => getCell(dm, 'newvol'), kind: 'newvol', opts: { neutral: true } }] },
+        { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
+          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
+          { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', SUPPORT), kind: 'oversla', opts: { sub: true } },
+          { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', SUPPORT), kind: 'oldest', opts: { sub: true } },
         ] },
-        { header: 'Development &middot; Tier 3 + Dev', rows: [
-          metricRow('Tickets with no reply', dm => groupCell(dm, 'noreply', DEV), 'noreply', { sub: true }),
-          metricRow('Over SLA (actionable)', dm => groupCell(dm, 'oversla', DEV), 'oversla', { sub: true }),
-          metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', DEV), 'oldest', { sub: true }),
+        { header: 'Development &middot; Tier 3 + Dev', metrics: [
+          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', DEV), kind: 'noreply', opts: { sub: true } },
+          { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', DEV), kind: 'oversla', opts: { sub: true } },
+          { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', DEV), kind: 'oldest', opts: { sub: true } },
         ] },
-        { header: 'Production', rows: [metricRow('Oldest actionable', dm => groupCell(dm, 'oldest', ['Production']), 'oldest', { sub: true })] },
-      ].map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.rows.join('')}</div>`).join('');
+        { header: 'Production', metrics: [{ label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', ['Production']), kind: 'oldest', opts: { sub: true } }] },
+      ];
+      const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
+
+      // ── Weekly breach counts (bottom): per metric, how many business days in
+      // each of the last 3 ISO weeks the metric was RED (rag 3). ──
+      const isoWeekKey = (d: Date) => {
+        const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        const day = dd.getUTCDay() || 7;
+        dd.setUTCDate(dd.getUTCDate() + 4 - day);                       // nearest Thursday
+        const yearStart = new Date(Date.UTC(dd.getUTCFullYear(), 0, 1));
+        const wk = Math.ceil((((dd.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+        return `${dd.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+      };
+      const weekDays = new Map<string, string[]>();
+      for (const dk of [...byDay.keys()].filter(isWeekday)) {
+        const wk = isoWeekKey(new Date(dk + 'T00:00:00Z'));
+        if (!weekDays.has(wk)) weekDays.set(wk, []);
+        weekDays.get(wk)!.push(dk);
+      }
+      const weeks = [...weekDays.keys()].sort().slice(-3);
+      const weekHeadHtml = weeks.map(wk => {
+        const first = weekDays.get(wk)!.slice().sort()[0];
+        const mon = new Date(first + 'T00:00:00Z');
+        const md = mon.getUTCDay() || 7;
+        mon.setUTCDate(mon.getUTCDate() - (md - 1));                    // back to Monday
+        const lbl = mon.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+        return `<div class="cell dh">w/c<br><span class="dh-n">${lbl}</span></div>`;
+      }).join('');
+      const weekRow = (m: MetricDef): string => {
+        const cells = weeks.map(wk => {
+          const dks = weekDays.get(wk)!;
+          let breached = 0, total = 0;
+          for (const dk of dks) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
+          if (total === 0) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
+          const rag = breached === 0 ? 1 : breached <= 2 ? 2 : 3;
+          const col = ragColor(rag), bg = ragBg(rag);
+          return `<div class="cell"><span class="pill" title="${breached} of ${total} days breached" style="background:${bg};color:${col};border:1px solid ${col}44">${breached}</span></div>`;
+        }).join('');
+        return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcells3">${cells}</div><div class="mtrend"></div></div>`;
+      };
+      const weeklyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(weekRow).join('')}</div>`).join('');
 
       // ── Roll-up: 20 granular per-queue metrics ──
       const Q6 = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2', 'Tier 3', 'Development'];
@@ -3679,18 +3723,22 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .ov.open .ov-body{opacity:1}
 .ov.closing .ov-body{opacity:0;transition:opacity .12s}
 @media(prefers-reduced-motion:reduce){.ov-card,.ov-back,.ov-body,.exp{transition-duration:.01s}}
-/* Strategic KPIs panel — enlarge content to fill the whole tile */
-.left .panel-body{display:flex;flex-direction:column;justify-content:space-between;overflow:auto;padding:1vh 1.2vw}
-.left .mhead{margin-bottom:.3vh}
+/* Strategic KPIs panel — split top (daily) / bottom (weekly breach counts) */
+.left .panel-body{display:flex;flex-direction:column;gap:1vh;overflow:hidden;padding:1vh 1.2vw}
+.kblock{flex:1;min-height:0;display:flex;flex-direction:column}
+.kblock-h{font-size:1.25vh;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5ec1ca;opacity:.9;padding:.3vh .3vw .5vh;border-bottom:1px solid #2f353d;margin-bottom:.4vh}
+.kgrid{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;overflow:auto}
+.mcells.mcells3{grid-template-columns:repeat(3,1fr)}
+.left .mhead{margin-bottom:.2vh}
 .left .grp{margin-bottom:0}
-.left .grp-h{font-size:1.55vh;padding:.8vh .3vw .5vh}
-.left .mrow{padding:.75vh .3vw}
-.left .mlabel{font-size:2.3vh}
-.left .mrow.sub .mlabel{font-size:2.1vh}
-.left .pill{font-size:2.2vh;min-width:3.6vw;padding:.6vh .6vw;border-radius:9px}
-.left .mtrend{font-size:2.7vh}
-.left .cell.dh{font-size:1.3vh}
-.left .dh-n{font-size:1.7vh}
+.left .grp-h{font-size:1.3vh;padding:.45vh .3vw .3vh}
+.left .mrow{padding:.5vh .3vw}
+.left .mlabel{font-size:1.85vh}
+.left .mrow.sub .mlabel{font-size:1.7vh}
+.left .pill{font-size:1.85vh;min-width:3vw;padding:.45vh .5vw;border-radius:8px}
+.left .mtrend{font-size:2.1vh}
+.left .cell.dh{font-size:1.15vh}
+.left .dh-n{font-size:1.45vh}
 /* Risk panel now 2/3 height — give rows room to fill it */
 .right .rrow{padding:1.3vh .8vw;margin-bottom:.6vh}
 .right .rrow .rname{font-size:1.95vh}
@@ -3705,8 +3753,20 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   <div class="panel left exp" data-expand="src-kpi" data-title="Strategic KPIs — full granular breakdown" tabindex="0" role="button">
     <div class="panel-h"><span>Strategic KPIs</span><span class="exp-hint">Expand ⤢</span></div>
     <div class="panel-body">
-      <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
-      ${leftHtml}
+      <div class="kblock">
+        <div class="kblock-h">This week &middot; day by day</div>
+        <div class="kgrid">
+          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
+          ${dailyHtml}
+        </div>
+      </div>
+      <div class="kblock">
+        <div class="kblock-h">Days breached per week &middot; last 3 weeks</div>
+        <div class="kgrid">
+          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcells3">${weekHeadHtml}</div><div></div></div>
+          ${weeklyHtml}
+        </div>
+      </div>
     </div>
   </div>
   <div class="right">
