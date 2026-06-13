@@ -3390,7 +3390,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
-          return { num: c.num, rag: c.rag, display: kind === 'oldest' ? `${c.num}d` : String(c.num) };
+          // Value-based RAG for the "bad things" metrics: 0 green, 1–4 amber, 5+ red.
+          // New ticket volume is throughput (not good/bad) so it keeps its stored RAG.
+          const valueRag = kind === 'newvol' ? c.rag : (c.num === 0 ? 1 : c.num <= 4 ? 2 : 3);
+          return { num: c.num, rag: valueRag, display: kind === 'oldest' ? `${c.num}d` : String(c.num) };
         });
         return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts?.neutral)}</div></div>`;
       };
@@ -3448,18 +3451,26 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return `<div class="cell dh">w/c<br><span class="dh-n">${lbl}</span></div>`;
       }).join('');
       const weekRow = (m: MetricDef): string => {
-        const cells = weeks.map(wk => {
-          const dks = weekDays.get(wk)!;
+        const series = weeks.map(wk => {
           let breached = 0, total = 0;
-          for (const dk of dks) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
-          if (total === 0) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
+          for (const dk of weekDays.get(wk)!) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
+          return total === 0 ? null : { clean: total - breached, total, breached };
+        });
+        const cells = series.map(s => {
+          if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
           // Show clean (non-breached) days. RAG: 4–5 clean = green, 3 = amber, ≤2 = red.
-          const clean = total - breached;
-          const rag = clean >= 4 ? 1 : clean === 3 ? 2 : 3;
+          const rag = s.clean >= 4 ? 1 : s.clean === 3 ? 2 : 3;
           const col = ragColor(rag), bg = ragBg(rag);
-          return `<div class="cell"><span class="pill" title="${clean} of ${total} days clean (${breached} breached)" style="background:${bg};color:${col};border:1px solid ${col}44">${clean}</span></div>`;
+          return `<div class="cell"><span class="pill" title="${s.clean} of ${s.total} days clean (${s.breached} breached)" style="background:${bg};color:${col};border:1px solid ${col}44">${s.clean}</span></div>`;
         }).join('');
-        return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend"></div></div>`;
+        // Trend on clean days (higher = better): more clean weeks = ▲ green, fewer = ▼ red.
+        const pres = series.filter((s): s is { clean: number; total: number; breached: number } => s !== null);
+        let trend = `<span style="color:#475569">▬</span>`;
+        if (pres.length >= 2) {
+          const first = pres[0].clean, lastv = pres[pres.length - 1].clean;
+          trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv > first ? `<span style="color:#10b981">▲</span>` : `<span style="color:#ef4444">▼</span>`;
+        }
+        return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend">${trend}</div></div>`;
       };
       const weeklyHtml = LEFT_GROUPS.map(g => `<div class="grp"><div class="grp-h">${g.header}</div>${g.metrics.map(weekRow).join('')}</div>`).join('');
 
