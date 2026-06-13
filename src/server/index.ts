@@ -3431,16 +3431,20 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         // default: lower-is-better
         return last < first ? `<span style="color:#10b981">▼</span>` : `<span style="color:#ef4444">▲</span>`;
       };
+      // The single source of truth for a metric's RAG on a given day, shared by
+      // the daily cells AND the weekly green-day tally so they never diverge:
+      //  - count "bad things" (no-reply, over-SLA, oldest): 0 green, 1–4 amber, 5+ red
+      //  - higher-is-better (volume band, CSAT, QA): keep the stored/derived rag
+      const displayRag = (kind: Kind, c: { num: number; rag: number | null }): number | null => {
+        if (kind === 'newvol' || kind === 'csat' || kind === 'qa') return c.rag;
+        return c.num === 0 ? 1 : c.num <= 4 ? 2 : 3;
+      };
       const metricRow = (label: string, get: (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null, kind: Kind, opts?: { neutral?: boolean; sub?: boolean; higher?: boolean }): string => {
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
-          // Value-based RAG for the count "bad things" metrics: 0 green, 1–4 amber, 5+ red.
-          // Higher-is-better metrics (volume, CSAT, QA) keep their stored/derived RAG.
-          const useStored = kind === 'newvol' || kind === 'csat' || kind === 'qa';
-          const valueRag = useStored ? c.rag : (c.num === 0 ? 1 : c.num <= 4 ? 2 : 3);
           const display = kind === 'oldest' ? `${c.num}d` : kind === 'csat' ? `${c.num}%` : String(c.num);
-          return { num: c.num, rag: valueRag, display };
+          return { num: c.num, rag: displayRag(kind, c), display };
         });
         return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts)}</div></div>`;
       };
@@ -3476,8 +3480,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       ];
       const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp${g.sep ? ' grp-sep' : ''}"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
 
-      // ── Weekly breach counts (bottom): per metric, how many business days in
-      // each of the last 3 ISO weeks the metric was RED (rag 3). ──
+      // ── Weekly green-day counts (bottom): per metric, how many business days in
+      // each of the last 4 ISO weeks the metric was GREEN (same rag as daily). ──
       const isoWeekKey = (d: Date) => {
         const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
         const day = dd.getUTCDay() || 7;
@@ -3502,23 +3506,31 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return `<div class="cell dh">w/c<br><span class="dh-n">${lbl}</span></div>`;
       }).join('');
       const weekRow = (m: MetricDef): string => {
+        // Count GREEN days (the daily board's green pills) per week, using the SAME
+        // displayRag the daily view uses — so the two halves agree. No-data days
+        // (e.g. CSAT with no surveys) are excluded from the denominator.
         const series = weeks.map(wk => {
-          let breached = 0, total = 0;
-          for (const dk of weekDays.get(wk)!) { const c = m.get(byDay.get(dk)!); if (c) { total++; if (c.rag === 3) breached++; } }
-          return total === 0 ? null : { clean: total - breached, total, breached };
+          let green = 0, total = 0;
+          for (const dk of weekDays.get(wk)!) {
+            const c = m.get(byDay.get(dk)!);
+            if (!c) continue;
+            total++;
+            if (displayRag(m.kind, c) === 1) green++;
+          }
+          return total === 0 ? null : { green, total };
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          // Show clean (non-breached) days. RAG: 4–5 clean = green, 3 = amber, ≤2 = red.
-          const rag = s.clean >= 4 ? 1 : s.clean === 3 ? 2 : 3;
+          // Cell RAG by green-day count: 4–5 green, 3 amber, ≤2 red.
+          const rag = s.green >= 4 ? 1 : s.green === 3 ? 2 : 3;
           const col = ragColor(rag), bg = ragBg(rag);
-          return `<div class="cell"><span class="pill" title="${s.clean} of ${s.total} days clean (${s.breached} breached)" style="background:${bg};color:${col};border:1px solid ${col}44">${s.clean}</span></div>`;
+          return `<div class="cell"><span class="pill" title="${s.green} of ${s.total} days green" style="background:${bg};color:${col};border:1px solid ${col}44">${s.green}</span></div>`;
         }).join('');
-        // Trend on clean days (higher = better): more clean weeks = ▲ green, fewer = ▼ red.
-        const pres = series.filter((s): s is { clean: number; total: number; breached: number } => s !== null);
+        // Trend on green days (higher = better): more green = ▲ green, fewer = ▼ red.
+        const pres = series.filter((s): s is { green: number; total: number } => s !== null);
         let trend = `<span style="color:#475569">▬</span>`;
         if (pres.length >= 2) {
-          const first = pres[0].clean, lastv = pres[pres.length - 1].clean;
+          const first = pres[0].green, lastv = pres[pres.length - 1].green;
           trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv > first ? `<span style="color:#10b981">▲</span>` : `<span style="color:#ef4444">▼</span>`;
         }
         return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend">${trend}</div></div>`;
