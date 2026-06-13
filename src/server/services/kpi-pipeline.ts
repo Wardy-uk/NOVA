@@ -43,6 +43,16 @@ export function computeRag(value: number, target: number, direction: string): nu
   return 3;
 }
 
+/**
+ * Fixed-band RAG for KPIs whose thresholds don't fit the generic target±band
+ * model. Returns null when the KPI has no custom band (caller falls back to
+ * computeRag). New ticket volume: <90 green, 90–110 amber, >110 red.
+ */
+export function customRag(kpi: string, value: number): number | null {
+  if (kpi === 'New Tickets Today') return value < 90 ? 1 : value <= 110 ? 2 : 3;
+  return null;
+}
+
 /** Whole business days (Mon–Fri) elapsed between two instants, ignoring weekends. */
 function businessDaysBetween(from: Date, to: Date): number {
   if (!(from instanceof Date) || isNaN(from.getTime())) return 0;
@@ -493,7 +503,7 @@ export class KpiPipeline {
         { kpi: 'SLA Breached', group: 'SLA', count: breachedCount, target: t('SLA Breached').target || 0, direction: 'Lower is better' },
         { kpi: 'Unassigned', group: 'Queue', count: unassignedCount, target: t('Unassigned').target || 0, direction: 'Lower is better' },
         { kpi: 'Tickets Solved Today', group: 'Throughput', count: parsedResolved.length, target: t('Tickets Solved Today').target || 15, direction: 'Higher is better' },
-        { kpi: 'New Tickets Today', group: 'Volume', count: createdToday, target: t('New Tickets Today').target || 20, direction: 'Lower is better' },
+        { kpi: 'New Tickets Today', group: 'Volume', count: createdToday, target: t('New Tickets Today').target || 90, direction: 'Lower is better' },
         { kpi: 'Waiting on Requestor', group: 'Queue', count: worCount, target: t('Waiting on Requestor').target || 10, direction: 'Lower is better' },
       );
 
@@ -599,7 +609,7 @@ export class KpiPipeline {
         const target = tgt?.target ?? m.target;
         const direction = tgt?.direction ?? m.direction;
         const group = tgt?.group ?? m.group;
-        const rag = computeRag(m.count, target, direction);
+        const rag = customRag(m.kpi, m.count) ?? computeRag(m.count, target, direction);
         const request = p.request();
         request.input('kpi', sql.NVarChar(100), m.kpi.slice(0, 100));
         request.input('kpiGroup', sql.NVarChar(100), group.slice(0, 100));

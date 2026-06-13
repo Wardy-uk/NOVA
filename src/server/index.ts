@@ -3398,6 +3398,14 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         for (const [name, v] of dm) if (pred(name)) return { num: v.count, rag: v.rag };
         return null;
       };
+      // New ticket volume RAG is a fixed business band: <90 green, 90–110 amber,
+      // >110 red. Computed here from the value (not the stored rag) so the displayed
+      // history is correct immediately, regardless of what was stored historically.
+      const newvolRag = (v: number) => v < 90 ? 1 : v <= 110 ? 2 : 3;
+      const newvolCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
+        const c = getCell(dm, 'newvol');
+        return c ? { num: c.num, rag: newvolRag(c.num) } : null;
+      };
 
       const ragColor = (rag: number | null) => rag === 1 ? '#10b981' : rag === 2 ? '#f59e0b' : rag === 3 ? '#ef4444' : '#475569';
       const ragBg = (rag: number | null) => rag === 1 ? 'rgba(16,185,129,.12)' : rag === 2 ? 'rgba(245,158,11,.12)' : rag === 3 ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.03)';
@@ -3442,7 +3450,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       type Getter = (dm: Map<string, { count: number; rag: number | null }>) => { num: number; rag: number | null } | null;
       type MetricDef = { label: string; get: Getter; kind: Kind; opts?: { neutral?: boolean; sub?: boolean; higher?: boolean } };
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
-        { header: 'Intake', metrics: [{ label: 'New ticket volume', get: dm => getCell(dm, 'newvol'), kind: 'newvol', opts: { neutral: true } }] },
+        { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
           { label: 'CSAT', get: dm => getNamed(dm, n => n.includes('csat') && !n.includes('derived')), kind: 'csat', opts: { sub: true, higher: true } },
           { label: 'QA score (/5)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
@@ -3517,7 +3525,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const rollSection = (title: string, kind: Kind, queues: string[]) =>
         `<div class="grp"><div class="grp-h">${title}</div>${queues.map(q => metricRow(shortQ(q), dm => getCell(dm, kind, q), kind, { sub: true })).join('')}</div>`;
       const rollupHtml = [
-        `<div class="grp"><div class="grp-h">Intake</div>${metricRow('New ticket volume', dm => getCell(dm, 'newvol'), 'newvol', { neutral: true, sub: true })}</div>`,
+        `<div class="grp"><div class="grp-h">Intake</div>${metricRow('New ticket volume', newvolCell, 'newvol', { neutral: true, sub: true })}</div>`,
         rollSection('Tickets with no reply', 'noreply', Q6),
         rollSection('Over SLA (actionable)', 'oversla', Q6),
         rollSection('Oldest actionable (days)', 'oldest', Q7),

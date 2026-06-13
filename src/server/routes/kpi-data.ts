@@ -109,6 +109,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
         'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
         'development over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'new tickets today': { target: 90, direction: 'lower is better' },
       };
       // Also match any KPI containing these patterns (catch name variants)
       const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
@@ -194,6 +195,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
         'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
         'development over sla (actionable)': { target: 0, direction: 'lower is better' },
+        'new tickets today': { target: 90, direction: 'lower is better' },
       };
       const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
         { pattern: /frt compliance/i, target: 95, direction: 'higher is better' },
