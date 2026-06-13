@@ -1,6 +1,8 @@
 import { query, execute, queryOne } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { CustomerResolver } from './customer-resolver.js';
+import type { JiraRestClient, JiraIssue } from './jira-client.js';
+import { extractText } from './shared/adf-utils.js';
 
 // Per-CUSTOMER risk rollup + nightly reconciliation. See agent_work/ba/account-risk-spec.md.
 //
@@ -98,10 +100,39 @@ interface CustomerAccum {
 export class AccountRiskEngine {
   private settings: SettingsQueries;
   private resolver: CustomerResolver;
+  private jiraClient: JiraRestClient | null;
 
-  constructor(settings: SettingsQueries) {
+  constructor(settings: SettingsQueries, jiraClient?: JiraRestClient | null) {
     this.settings = settings;
     this.resolver = new CustomerResolver(settings);
+    this.jiraClient = jiraClient ?? null;
+  }
+
+  // Fields needed for resolution + signal detection (kept minimal to limit payload).
+  private static readonly JIRA_FIELDS = ['summary', 'description', 'reporter', 'status', 'created', 'customfield_14626', 'customfield_12500'];
+
+  /** Map a live Jira issue to the internal TicketRow shape (mirrors jira-sync's extraction). */
+  private mapIssueToRow(issue: JiraIssue): TicketRow {
+    const f = issue.fields as Record<string, any>;
+    const org = Array.isArray(f.customfield_12500) ? (f.customfield_12500[0]?.name ?? null) : (f.customfield_12500?.name ?? null);
+    return {
+      issue_key: issue.key,
+      project_key: issue.key.split('-')[0],
+      summary: f.summary ?? null,
+      description_text: extractText(f.description) || null,
+      reporter_email: f.reporter?.emailAddress ?? null,
+      bc_account_number: (f.customfield_14626 as string) ?? null,
+      organisation_name: org,
+      status_category: f.status?.statusCategory?.key ?? null,  // 'new' | 'indeterminate' | 'done'
+      jira_created: f.created ?? null,
+    };
+  }
+
+  /** Pull a project's full in-scope history from Jira (paginated, all statuses). */
+  private async fetchTicketsFromJira(project: string, sinceIso: string): Promise<TicketRow[]> {
+    const jql = `project = ${project} AND created >= "${sinceIso}" ORDER BY created DESC`;
+    const result = await this.jiraClient!.searchJqlAll(jql, AccountRiskEngine.JIRA_FIELDS, 50000);
+    return result.issues.map(i => this.mapIssueToRow(i));
   }
 
   /** Decay factor for a ticket's signals: resolved 0.25, open >90d 0.5, open recent 1.0. */
@@ -137,14 +168,19 @@ export class AccountRiskEngine {
     // from the ticket's own summary + description; escalation language appearing ONLY in
     // comments is a known gap — follow-up: targeted per-customer comment scans after resolution.
     for (const project of projects) {
-      const tickets = await query<TicketRow>(
-        `SELECT issue_key, project_key, summary, description_text, reporter_email,
-                bc_account_number, organisation_name, status_category, jira_created
-         FROM jira_issue_cache
-         WHERE project_key = ? AND jira_created >= ?`,
-        [project, sinceIso],
-      );
+      // Pull full history from Jira when a client is available (the cache only holds open +
+      // last-7-days-closed, capped — far short of the real ~10k+ history). Fall back to cache.
+      const tickets = this.jiraClient
+        ? await this.fetchTicketsFromJira(project, sinceIso)
+        : await query<TicketRow>(
+            `SELECT issue_key, project_key, summary, description_text, reporter_email,
+                    bc_account_number, organisation_name, status_category, jira_created
+             FROM jira_issue_cache
+             WHERE project_key = ? AND jira_created >= ?`,
+            [project, sinceIso],
+          );
       totalTickets += tickets.length;
+      console.log(`[account-risk] ${project}: ${tickets.length} tickets (${this.jiraClient ? 'jira' : 'cache'})`);
 
       for (const t of tickets) {
       // mssql returns DATETIME2 as a Date object (not a string), so normalise before slicing.

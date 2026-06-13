@@ -1146,12 +1146,13 @@ async function main() {
   // Jira client — it uses its own resolver + DB), guarded so it runs once, non-blocking.
   // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
   // (assignment-engine setup) could abort before it was reached.
-  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v5') ?? '(unset)'}`);
-  if (!settingsQueries.get('account_risk_backfill_v5')) {
+  // Pulls full ticket history from Jira (the cache only holds open + recently-closed).
+  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v6') ?? '(unset)'}`);
+  if (!settingsQueries.get('account_risk_backfill_v6')) {
     void (async () => {
       try {
-        await new AccountRiskEngine(settingsQueries).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
-        settingsQueries.set('account_risk_backfill_v5', 'true');
+        await new AccountRiskEngine(settingsQueries, agentJiraClient).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
+        settingsQueries.set('account_risk_backfill_v6', 'true');
       } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
     })();
   }
@@ -1159,7 +1160,7 @@ async function main() {
   // Nightly refresh (every 24h from boot) so account risk stays current for triage enrichment
   // + the dashboard. Idempotent (upserts). Unconditional — must not be gated by the agent block.
   setInterval(() => {
-    void new AccountRiskEngine(settingsQueries)
+    void new AccountRiskEngine(settingsQueries, agentJiraClient)
       .runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'])
       .catch(err => console.warn('[account-risk] nightly refresh failed:', err instanceof Error ? err.message : err));
   }, 24 * 60 * 60 * 1000);
