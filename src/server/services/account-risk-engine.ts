@@ -25,6 +25,20 @@ interface SignalDef {
 const TERMINATION_FALSE_POSITIVE =
   /\b(member|customer|client|landlord|tenant|applicant|agent|branch|office)s?\b[\s\S]{0,60}\bterminat|\bterminat\w*[\s\S]{0,60}\b(member|membership|customer|client|their (?:account|contract|membership))\b|\bterminate (?:the |a |their )?(feed|connection|session|integration|sync|account on)\b/i;
 
+// Known network/franchise accounts: ALL their termination tickets are about their own
+// members/agents leaving them (e.g. agents leaving eXp, members terminating Guild
+// membership), never the network churning from Nurtur. For these accounts the termination
+// signal is suppressed outright (the language rule above can't catch every phrasing, e.g.
+// "leaving eXp" / "terminating their eXp agreement"). Matched against customer name + email
+// domain + ref. Extend this list as more networks are identified; the risk-register import
+// will eventually formalise it via the is_network flag.
+const NETWORK_ACCOUNT_PATTERNS =
+  /guildproperty|the\s*guild|fineandcountry|fine\s*(?:and|&)\s*country|propertyfranchise|property\s*franchise|ewemove|exp\.uk|\bexp\s*(?:uk|realty)\b|\bexp\b/i;
+
+function isNetworkAccount(name: string | null, email: string | null, ref: string | null): boolean {
+  return NETWORK_ACCOUNT_PATTERNS.test(`${name ?? ''} ${email ?? ''} ${ref ?? ''}`);
+}
+
 // Ordered high → low. SQL uses lower-cased LIKE; keep patterns lower-case.
 const SIGNALS: SignalDef[] = [
   { type: 'formal_complaint', weight: 40, setsFlag: 'has_formal_complaint',
@@ -157,7 +171,8 @@ export class AccountRiskEngine {
       if (!acc) {
         acc = {
           customerRef: res.customerRef, customerName: res.customerName, bcNumber: res.source === 'bc_field' ? res.customerRef : null,
-          primaryDomain: CustomerResolver.emailDomain(t.reporter_email), isNetwork: res.isNetwork,
+          primaryDomain: CustomerResolver.emailDomain(t.reporter_email),
+          isNetwork: res.isNetwork || isNetworkAccount(res.customerName, t.reporter_email, res.customerRef),
           projects: new Set(), totalTickets: 0, recentTickets: 0, firstTicket: null, lastTicket: null,
           score: 0, flags: { has_formal_complaint: false, has_termination: false, has_active_refund: false, has_open_escalation: false }, signalRows: [],
         };
@@ -180,6 +195,7 @@ export class AccountRiskEngine {
       for (const sig of SIGNALS) {
         if (!sig.re.test(haystack)) continue;
         if (sig.exclude && sig.exclude.test(haystack)) continue;  // false positive (e.g. member termination)
+        if (sig.type === 'termination' && acc.isNetwork) continue;  // network: terminations are their members', not theirs
         acc.score += sig.weight * decay;
         acc.signalRows.push({
           ticketKey: t.issue_key, project: t.project_key, type: sig.type, weight: Math.round(sig.weight * decay),
