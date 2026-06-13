@@ -389,10 +389,10 @@ export class AccountRiskEngine {
 
     // AI inference on the unresolved residual (cached; applied on the NEXT run). Budgeted per
     // run via account_risk_ai_max_per_run (default 1500) so it works through the backlog
-    // without a 27k-call burst. Cheap model, never blocks the rollup result above.
+    // without a 27k-call burst (default 5000/run). Cheap model, never blocks the rollup above.
     let aiAttempted = 0, aiMatched = 0;
     if (this.llmService && needsInference.length) {
-      const cap = parseInt(this.settings.get('account_risk_ai_max_per_run') ?? '', 10) || 1500;
+      const cap = parseInt(this.settings.get('account_risk_ai_max_per_run') ?? '', 10) || 5000;
       console.log(`[account-risk] AI inference: ${needsInference.length} unresolved queued, running up to ${cap}…`);
       try {
         const r = await runInferenceBatch({ llmService: this.llmService }, needsInference, cap);
