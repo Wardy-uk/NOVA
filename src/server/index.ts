@@ -3407,6 +3407,12 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const c = getCell(dm, 'newvol');
         return c ? { num: c.num, rag: newvolRag(c.num) } : null;
       };
+      // CSAT 0% means no surveys returned that day (any real rating is ≥20%), so
+      // treat 0 as no-data → renders as a grey dash, excluded from trend/weekly.
+      const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
+        const c = getNamed(dm, n => n.includes('csat') && !n.includes('derived'));
+        return c && c.num > 0 ? c : null;
+      };
 
       const ragColor = (rag: number | null) => rag === 1 ? '#10b981' : rag === 2 ? '#f59e0b' : rag === 3 ? '#ef4444' : '#475569';
       const ragBg = (rag: number | null) => rag === 1 ? 'rgba(16,185,129,.12)' : rag === 2 ? 'rgba(245,158,11,.12)' : rag === 3 ? 'rgba(239,68,68,.15)' : 'rgba(255,255,255,.03)';
@@ -3453,7 +3459,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
-          { label: 'CSAT', get: dm => getNamed(dm, n => n.includes('csat') && !n.includes('derived')), kind: 'csat', opts: { sub: true, higher: true } },
+          { label: 'CSAT', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
           { label: 'QA score (/5)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
         ] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
