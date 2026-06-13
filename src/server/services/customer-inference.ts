@@ -51,38 +51,68 @@ async function matchToRegistry(name: string | null, url: string | null): Promise
   return null;
 }
 
-/** Infer + cache up to `cap` tickets. Idempotent (MERGE by ticket_key). */
-export async function runInferenceBatch(deps: InferenceDeps, tickets: UnresolvedTicket[], cap: number): Promise<{ attempted: number; matched: number }> {
-  let attempted = 0, matched = 0;
-  for (const t of tickets) {
-    if (attempted >= cap) break;
-    attempted++;
-    let out: InferenceOut | null = null;
-    try {
-      const res = await deps.llmService.call<InferenceOut>(
-        SYSTEM_PROMPT,
-        `Ticket ${t.ticketKey}\nSummary: ${t.summary ?? ''}\nDescription: ${(t.description ?? '').slice(0, 1500)}`,
-        InferenceSchema,
-        { temperature: 0, tier: 'cheap', callType: 'customer_inference', ticketId: t.ticketKey, maxTokens: 250 },
-      );
-      out = res.data;
-    } catch { /* model/parse error — record as attempted-but-unmatched so we don't retry forever */ }
-
-    let ref: string | null = null, custName: string | null = null, conf = 0;
-    if (out?.company_name) {
-      const m = await matchToRegistry(out.company_name, out.instance_url);
-      if (m) { ref = m.ref; custName = m.name; conf = Math.round(out.confidence * m.matchConf); matched++; }
-    }
-    await execute(
-      `MERGE agent_ticket_customer_inference AS tgt USING (SELECT ? AS k) AS s ON tgt.ticket_key = s.k
-       WHEN MATCHED THEN UPDATE SET customer_ref=?, customer_name=?, extracted_name=?, extracted_url=?, confidence=?, method='ai', inferred_at=GETUTCDATE()
-       WHEN NOT MATCHED THEN INSERT (ticket_key, customer_ref, customer_name, extracted_name, extracted_url, confidence, method)
-         VALUES (?, ?, ?, ?, ?, ?, 'ai');`,
-      [t.ticketKey, ref, custName, out?.company_name ?? null, out?.instance_url ?? null, conf,
-       t.ticketKey, ref, custName, out?.company_name ?? null, out?.instance_url ?? null, conf],
+/** Infer one ticket's customer and cache the result. Returns whether it matched a customer. */
+async function inferAndCacheOne(deps: InferenceDeps, t: UnresolvedTicket): Promise<boolean> {
+  let out: InferenceOut | null = null;
+  try {
+    const res = await deps.llmService.call<InferenceOut>(
+      SYSTEM_PROMPT,
+      `Ticket ${t.ticketKey}\nSummary: ${t.summary ?? ''}\nDescription: ${(t.description ?? '').slice(0, 1500)}`,
+      InferenceSchema,
+      { temperature: 0, tier: 'cheap', callType: 'customer_inference', ticketId: t.ticketKey, maxTokens: 250 },
     );
+    out = res.data;
+  } catch { /* model/parse error — still cache as attempted so we don't retry forever */ }
+
+  let ref: string | null = null, custName: string | null = null, conf = 0, matched = false;
+  if (out?.company_name) {
+    const m = await matchToRegistry(out.company_name, out.instance_url);
+    if (m) { ref = m.ref; custName = m.name; conf = Math.round(out.confidence * m.matchConf); matched = true; }
   }
-  return { attempted, matched };
+  await execute(
+    `MERGE agent_ticket_customer_inference AS tgt USING (SELECT ? AS k) AS s ON tgt.ticket_key = s.k
+     WHEN MATCHED THEN UPDATE SET customer_ref=?, customer_name=?, extracted_name=?, extracted_url=?, confidence=?, method='ai', inferred_at=GETUTCDATE()
+     WHEN NOT MATCHED THEN INSERT (ticket_key, customer_ref, customer_name, extracted_name, extracted_url, confidence, method)
+       VALUES (?, ?, ?, ?, ?, ?, 'ai');`,
+    [t.ticketKey, ref, custName, out?.company_name ?? null, out?.instance_url ?? null, conf,
+     t.ticketKey, ref, custName, out?.company_name ?? null, out?.instance_url ?? null, conf],
+  );
+  return matched;
+}
+
+/** Enqueue unresolved tickets for the background worker (skips ones already inferred). */
+export async function enqueueForInference(tickets: UnresolvedTicket[]): Promise<number> {
+  let added = 0;
+  for (const t of tickets) {
+    const r = await execute(
+      `MERGE agent_inference_queue AS tgt USING (SELECT ? AS k) AS s ON tgt.ticket_key = s.k
+       WHEN NOT MATCHED AND NOT EXISTS (SELECT 1 FROM agent_ticket_customer_inference i WHERE i.ticket_key = s.k)
+         THEN INSERT (ticket_key, summary, description) VALUES (?, ?, ?);`,
+      [t.ticketKey, t.ticketKey, t.summary, (t.description ?? '').slice(0, 1900)],
+    );
+    added += r.rowsAffected;
+  }
+  return added;
+}
+
+/**
+ * Drain up to `chunk` tickets from the queue: infer, cache, dequeue. Resumable — survives
+ * restarts because progress lives in the DB (cache + queue), not in memory. Newest first.
+ */
+export async function processInferenceQueue(deps: InferenceDeps, chunk: number): Promise<{ processed: number; matched: number; remaining: number }> {
+  const rows = await query<{ ticket_key: string; summary: string | null; description: string | null }>(
+    `SELECT TOP (${Math.max(1, Math.floor(chunk))}) ticket_key, summary, description
+     FROM agent_inference_queue ORDER BY ticket_key DESC`,
+  );
+  let matched = 0;
+  for (const row of rows) {
+    try {
+      if (await inferAndCacheOne(deps, { ticketKey: row.ticket_key, summary: row.summary, description: row.description })) matched++;
+    } catch { /* leave in queue to retry next tick */ continue; }
+    await execute(`DELETE FROM agent_inference_queue WHERE ticket_key = ?`, [row.ticket_key]);
+  }
+  const rem = await queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM agent_inference_queue`);
+  return { processed: rows.length, matched, remaining: rem?.n ?? 0 };
 }
 
 /** Confident, matched inferences keyed by ticket — consumed by the rollup as a resolution source. */

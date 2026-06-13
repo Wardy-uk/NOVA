@@ -131,6 +131,7 @@ import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
 import { AccountRiskEngine } from './services/account-risk-engine.js';
+import { processInferenceQueue } from './services/customer-inference.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -1149,20 +1150,32 @@ async function main() {
   // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
   // (assignment-engine setup) could abort before it was reached.
   // Pulls full ticket history from Jira (the cache only holds open + recently-closed).
-  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v8') ?? '(unset)'}`);
-  if (!settingsQueries.get('account_risk_backfill_v8')) {
+  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v9') ?? '(unset)'}`);
+  if (!settingsQueries.get('account_risk_backfill_v9')) {
     void (async () => {
       try {
-        await new AccountRiskEngine(settingsQueries, agentJiraClient, llmService).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
-        settingsQueries.set('account_risk_backfill_v8', 'true');
+        await new AccountRiskEngine(settingsQueries, agentJiraClient).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
+        settingsQueries.set('account_risk_backfill_v9', 'true');
       } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
     })();
+  }
+
+  // AI inference worker: drains the unresolved-ticket queue in small chunks every 2 min,
+  // independent of the rollup so deploys/restarts don't lose progress (it resumes from the
+  // DB queue). Each cheap inference is cached; the next rollup applies the confident matches.
+  {
+    const inferenceChunk = parseInt(settingsQueries.get('account_risk_ai_chunk') ?? '', 10) || 150;
+    setInterval(() => {
+      void processInferenceQueue({ llmService }, inferenceChunk)
+        .then(r => { if (r.processed) console.log(`[account-risk] inference worker: ${r.processed} done, ${r.matched} matched, ${r.remaining} left in queue`); })
+        .catch(err => console.warn('[account-risk] inference worker failed:', err instanceof Error ? err.message : err));
+    }, 2 * 60 * 1000);
   }
 
   // Nightly refresh (every 24h from boot) so account risk stays current for triage enrichment
   // + the dashboard. Idempotent (upserts). Unconditional — must not be gated by the agent block.
   setInterval(() => {
-    void new AccountRiskEngine(settingsQueries, agentJiraClient, llmService)
+    void new AccountRiskEngine(settingsQueries, agentJiraClient)
       .runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'])
       .catch(err => console.warn('[account-risk] nightly refresh failed:', err instanceof Error ? err.message : err));
   }, 24 * 60 * 60 * 1000);

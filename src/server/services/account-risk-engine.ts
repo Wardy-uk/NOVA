@@ -3,8 +3,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { CustomerResolver } from './customer-resolver.js';
 import type { JiraRestClient, JiraIssue } from './jira-client.js';
 import { extractText } from './shared/adf-utils.js';
-import type { LlmService } from './llm-service.js';
-import { runInferenceBatch, loadInferenceMap, loadInferredKeys, type UnresolvedTicket } from './customer-inference.js';
+import { enqueueForInference, loadInferenceMap, loadInferredKeys, type UnresolvedTicket } from './customer-inference.js';
 
 // Per-CUSTOMER risk rollup + nightly reconciliation. See agent_work/ba/account-risk-spec.md.
 //
@@ -116,13 +115,11 @@ export class AccountRiskEngine {
   private settings: SettingsQueries;
   private resolver: CustomerResolver;
   private jiraClient: JiraRestClient | null;
-  private llmService: LlmService | null;
 
-  constructor(settings: SettingsQueries, jiraClient?: JiraRestClient | null, llmService?: LlmService | null) {
+  constructor(settings: SettingsQueries, jiraClient?: JiraRestClient | null) {
     this.settings = settings;
     this.resolver = new CustomerResolver(settings);
     this.jiraClient = jiraClient ?? null;
-    this.llmService = llmService ?? null;
   }
 
   // Fields needed for resolution + signal detection (kept minimal to limit payload).
@@ -387,18 +384,12 @@ export class AccountRiskEngine {
       );
     }
 
-    // AI inference on the unresolved residual (cached; applied on the NEXT run). Budgeted per
-    // run via account_risk_ai_max_per_run (default 1500) so it works through the backlog
-    // without a 27k-call burst (default 10000/run). Cheap model, never blocks the rollup above.
-    let aiAttempted = 0, aiMatched = 0;
-    if (this.llmService && needsInference.length) {
-      const cap = parseInt(this.settings.get('account_risk_ai_max_per_run') ?? '', 10) || 10000;
-      console.log(`[account-risk] AI inference: ${needsInference.length} unresolved queued, running up to ${cap}…`);
-      try {
-        const r = await runInferenceBatch({ llmService: this.llmService }, needsInference, cap);
-        aiAttempted = r.attempted; aiMatched = r.matched;
-      } catch (err) { console.warn('[account-risk] AI inference batch failed:', err instanceof Error ? err.message : err); }
-      console.log(`[account-risk] AI inference: attempted ${aiAttempted}, matched ${aiMatched} (applied next run)`);
+    // Enqueue the unresolved residual for the background inference worker (fast, DB-only —
+    // no inline AI, so this rollup completes quickly and survives deploys). The worker drains
+    // the queue in chunks and the NEXT rollup applies the resulting cached inferences.
+    const aiQueuedNew = needsInference.length ? await enqueueForInference(needsInference) : 0;
+    if (needsInference.length) {
+      console.log(`[account-risk] AI inference: ${needsInference.length} unresolved, ${aiQueuedNew} newly queued (background worker drains it)`);
     }
 
     const summary = {
@@ -413,9 +404,8 @@ export class AccountRiskEngine {
       reconDaysComplete: daysComplete,
       reconDaysPartial: daysPartial,
       aiInferenceCached: inferenceMap.size,
-      aiInferenceQueued: needsInference.length,
-      aiInferenceAttempted: aiAttempted,
-      aiInferenceMatched: aiMatched,
+      aiInferenceUnresolved: needsInference.length,
+      aiInferenceQueuedNew: aiQueuedNew,
       unresolvedSamples,
       seconds: Math.round((Date.now() - t0) / 1000),
     };

@@ -900,6 +900,17 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_cust_inference_ref')
      CREATE INDEX IX_ticket_cust_inference_ref ON agent_ticket_customer_inference (customer_ref);`,
 
+    // Work queue for AI customer inference. The rollup enqueues unresolved tickets (fast);
+    // a background worker drains it in small chunks, surviving restarts (the inline batch
+    // was getting killed by deploys). Rows are deleted once the ticket is inferred + cached.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_inference_queue') AND type = 'U')
+     CREATE TABLE agent_inference_queue (
+       ticket_key NVARCHAR(30) NOT NULL PRIMARY KEY,
+       summary NVARCHAR(500) NULL,
+       description NVARCHAR(2000) NULL,
+       queued_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)
