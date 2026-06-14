@@ -21,7 +21,7 @@ export function BackgroundJobsPanel() {
   const fetchJobs = async () => {
     try {
       const r = await fetch('/api/admin/jobs', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}` },
       });
       const data = await r.json();
       if (data.ok) setJobs(data.data ?? []);
@@ -35,7 +35,7 @@ export function BackgroundJobsPanel() {
     const action = enabled ? 'stop' : 'start';
     await fetch(`/api/admin/jobs/${id}/${action}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}` },
     });
     fetchJobs();
   };
@@ -44,7 +44,7 @@ export function BackgroundJobsPanel() {
     setRunningJob(id);
     await fetch(`/api/admin/jobs/${id}/run-now`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}` },
     });
     setRunningJob(null);
     fetchJobs();

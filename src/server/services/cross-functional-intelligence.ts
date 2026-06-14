@@ -43,8 +43,11 @@ export class CrossFunctionalIntelligence {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const periodStartStr = monthStart.toISOString().split('T')[0];
-    const periodEndStr = now.toISOString().split('T')[0];
+    // Format from local calendar components — toISOString() shifts to the previous day
+    // under positive-offset timezones (e.g. BST), which mislabels the period start.
+    const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const periodStartStr = fmtDate(monthStart);
+    const periodEndStr = fmtDate(now);
 
     let signalCount = 0;
 

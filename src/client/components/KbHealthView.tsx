@@ -22,7 +22,7 @@ interface CoverageItem {
 const api = async (path: string, method = 'GET') => {
   const r = await fetch(`/api/kb-health${path}`, {
     method,
-    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}` },
   });
   return r.json();
 };

@@ -22,7 +22,7 @@ const api = async (path: string, method = 'GET', body?: unknown) => {
   const opts: RequestInit = {
     method,
     headers: {
-      Authorization: `Bearer ${localStorage.getItem('token')}`,
+      Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}`,
       'Content-Type': 'application/json',
     },
   };
@@ -191,7 +191,7 @@ export function IntelligenceView() {
     const [r, u] = await Promise.all([
       api('/report'),
       fetch('/api/admin/users', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token')}` },
       }).then(r => r.json()).catch(() => ({ ok: false })),
     ]);
     if (r.ok) setReport(r.data);
