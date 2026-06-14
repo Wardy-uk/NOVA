@@ -3617,7 +3617,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp${g.sep ? ' grp-sep' : ''}"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
 
       // ── Weekly red-day counts (bottom): per metric, how many business days in
-      // each of the last 4 ISO weeks the metric was RED. Week RAG: 5=red/4=amber/≤3=green. ──
+      // each of the last 4 ISO weeks the metric was RED. Week RAG: 5=red/3–4=amber/≤2=green. ──
       const isoWeekKey = (d: Date) => {
         const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
         const day = dd.getUTCDay() || 7;
@@ -3643,7 +3643,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       }).join('');
       const weekRow = (m: MetricDef): string => {
         // Count RED days per week (same displayRag the daily view uses). Cell RAG:
-        // 5 red days = red, 4 = amber, ≤3 = green. No-data days excluded. Oldest grey.
+        // 5 red days = red, 3–4 = amber, ≤2 = green. No-data days excluded. Oldest grey.
         const muted = m.kind === 'oldest';   // oldest is shown neutral grey, not red
         const series = weeks.map(wk => {
           let red = 0, total = 0;
@@ -3657,7 +3657,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          const rag = muted ? null : (s.red >= 5 ? 3 : s.red === 4 ? 2 : 1);
+          const rag = muted ? null : (s.red >= 5 ? 3 : s.red >= 3 ? 2 : 1);
           const col = ragColor(rag), bg = ragBg(rag);
           return `<div class="cell"><span class="pill" title="${s.red} of ${s.total} days red" style="background:${bg};color:${col};border:1px solid ${col}44">${s.red}</span></div>`;
         }).join('');
