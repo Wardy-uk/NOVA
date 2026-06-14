@@ -3642,22 +3642,24 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return `<div class="cell dh">w/c<br><span class="dh-n">${lbl}</span></div>`;
       }).join('');
       const weekRow = (m: MetricDef): string => {
-        // Count RED days per week (same displayRag the daily view uses). Cell RAG:
-        // 5 red days = red, 3–4 = amber, ≤2 = green. No-data days excluded. Oldest grey.
-        const muted = m.kind === 'oldest';   // oldest is shown neutral grey, not red
+        // Count RED days per week. Cell RAG: 5 red days = red, 3–4 = amber, ≤2 = green.
+        // No-data days excluded. Oldest is muted (grey) on the daily view, but here it
+        // counts red days via its value band (5+ days = red) like every other metric.
+        const dayRedRag = (c: { num: number; rag: number | null }): number | null =>
+          m.kind === 'oldest' ? (c.num === 0 ? 1 : c.num <= 4 ? 2 : 3) : displayRag(m.kind, c, m.opts?.band);
         const series = weeks.map(wk => {
           let red = 0, total = 0;
           for (const dk of weekDays.get(wk)!) {
             const c = m.get(byDay.get(dk)!);
             if (!c) continue;
             total++;
-            if (displayRag(m.kind, c, m.opts?.band) === 3) red++;
+            if (dayRedRag(c) === 3) red++;
           }
           return total === 0 ? null : { red, total };
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          const rag = muted ? null : (s.red >= 5 ? 3 : s.red >= 3 ? 2 : 1);
+          const rag = s.red >= 5 ? 3 : s.red >= 3 ? 2 : 1;
           const col = ragColor(rag), bg = ragBg(rag);
           return `<div class="cell"><span class="pill" title="${s.red} of ${s.total} days red" style="background:${bg};color:${col};border:1px solid ${col}44">${s.red}</span></div>`;
         }).join('');
