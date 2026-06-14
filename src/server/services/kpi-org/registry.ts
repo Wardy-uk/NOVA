@@ -265,6 +265,51 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     rag: { greenMin: 80, amberMin: 64 },
     compute: { kind: 'resolved_outcome', metric: 'csat' },
   },
+
+  // ── Legacy 7-tier shape (colA 'Legacy'). Open-ticket volumes split by CurrentTier
+  // (cf12981), with Customer Care further split by request type — reproducing the
+  // legacy jira_kpi_daily definitions so the "Legacy KPIs" view can read this engine
+  // with the same numbers. amber band = target × 1.5 (legacy computeRag for counts). ──
+  {
+    key: 'nt_legacy_cc_incidents', label: 'Number of Tickets in CC (Incidents)', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 40, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 40, amberMax: 60 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care" AND (${RT} not in ("Service Request (NT)", "TPJ Request (NT)") OR ${RT} is EMPTY)` },
+  },
+  {
+    key: 'nt_legacy_cc_service_requests', label: 'Number of Tickets in CC (Service Requests)', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 40, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 40, amberMax: 60 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care" AND ${RT} = "Service Request (NT)"` },
+  },
+  {
+    key: 'nt_legacy_cc_tpj', label: 'Number of Tickets in CC (TPJ)', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 40, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 40, amberMax: 60 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care" AND ${RT} = "TPJ Request (NT)"` },
+  },
+  {
+    key: 'nt_legacy_production', label: 'Number of Tickets in Production', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 40, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 40, amberMax: 60 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Production"` },
+  },
+  {
+    key: 'nt_legacy_tier2', label: 'Number of Tickets in Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 20, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 20, amberMax: 30 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Tier 2"` },
+  },
+  {
+    key: 'nt_legacy_tier3', label: 'Number of Tickets in Tier 3', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 10, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 10, amberMax: 15 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Tier 3"` },
+  },
+  {
+    key: 'nt_legacy_development', label: 'Number of Tickets in Development', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 125, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 125, amberMax: 188 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Development"` },
+  },
+  {
+    key: 'nt_legacy_solved_today', label: 'Tickets Solved Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'higher-better', dailyTarget: 85, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 85, amberMin: 68 },
+    compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND statusCategory = Done AND ${SOLVED_TRANSITION} DURING ("${ctx.day}", "${ctx.nextDay}")` },
+  },
 ];
 
 /** All registered org KPIs (only Support/NT for now). */
