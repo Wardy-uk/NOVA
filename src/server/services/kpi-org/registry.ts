@@ -320,6 +320,53 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   },
 ];
 
+// ── Legacy per-tier hygiene matrix (no-reply / over-SLA actionable+not / oldest,
+// for all 7 legacy tiers). Labels match the Legacy KPIs view's KPI_ORDER so it can
+// read this engine. Generated to stay DRY. amber bands match legacy computeRag. ──
+const LT = (tierJql: string) => `${NT_OPEN} AND ${tierJql}`;
+const CC_TIER = `${TIER} = "Customer Care"`;
+interface LegacyTierDef { bucket: string; noReply: string; overSla: string; notAct: string; oldest: string; oldestTarget: number; }
+const LEGACY_TIERS: LegacyTierDef[] = [
+  { bucket: `${LT(CC_TIER)} AND (${RT} not in ("Service Request (NT)", "TPJ Request (NT)") OR ${RT} is EMPTY)`,
+    noReply: 'Number of Tickets With No Reply in CC (Incidents)', overSla: 'CC Incidents over SLA (actionable)',
+    notAct: 'CC Incidents over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in CC Incidents', oldestTarget: 5 },
+  { bucket: `${LT(CC_TIER)} AND ${RT} = "Service Request (NT)"`,
+    noReply: 'Number of Tickets With No Reply in CC (Service Requests)', overSla: 'CC Service Requests over SLA (actionable)',
+    notAct: 'CC Service Requests over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in CC Service Requests', oldestTarget: 5 },
+  { bucket: `${LT(CC_TIER)} AND ${RT} = "TPJ Request (NT)"`,
+    noReply: 'Number of Tickets With No Reply in CC (TPJ)', overSla: 'CC (TPJ) over SLA (actionable)',
+    notAct: 'CC (TPJ) over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in CC (TPJ)', oldestTarget: 5 },
+  { bucket: LT(`${TIER} = "Production"`),
+    noReply: 'Number of Tickets With No Reply in Production', overSla: 'Production over SLA (actionable)',
+    notAct: 'Production over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in Production', oldestTarget: 15 },
+  { bucket: LT(`${TIER} = "Tier 2"`),
+    noReply: 'Number of Tickets With No Reply in Tier 2', overSla: 'Tier 2 over SLA (actionable)',
+    notAct: 'Tier 2 over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in Tier 2', oldestTarget: 5 },
+  { bucket: LT(`${TIER} = "Tier 3"`),
+    noReply: 'Number of Tickets With No Reply in Tier 3', overSla: 'Tier 3 over SLA (actionable)',
+    notAct: 'Tier 3 over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in Tier 3', oldestTarget: 10 },
+  { bucket: LT(`${TIER} = "Development"`),
+    noReply: 'Number of Tickets With No Reply in Development', overSla: 'Development over SLA (actionable)',
+    notAct: 'Development over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in Development', oldestTarget: 60 },
+];
+for (const t of LEGACY_TIERS) {
+  const slug = t.overSla.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/_+$/, '');
+  SUPPORT_NT_KPIS.push(
+    { key: `nt_lg_noreply_${slug}`, label: t.noReply, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
+      compute: { kind: 'no_reply', bucketJql: t.bucket } },
+    { key: `nt_lg_oversla_${slug}`, label: t.overSla, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
+      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` } },
+    { key: `nt_lg_oversla_notact_${slug}`, label: t.notAct, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'count', direction: 'lower-better', dailyTarget: 20, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 20, amberMax: 30 },
+      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${NOT_ACTIONABLE_JQL}` } },
+    { key: `nt_lg_oldest_${slug}`, label: t.oldest, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'days', direction: 'lower-better', dailyTarget: t.oldestTarget, monthlyTarget: null, rollup: 'latest', rag: { greenMax: t.oldestTarget, amberMax: t.oldestTarget * 2 },
+      compute: { kind: 'oldest_actionable', bucketJql: t.bucket } },
+  );
+}
+
 /** All registered org KPIs (only Support/NT for now). */
 export const ORG_KPIS: OrgKpi[] = [...SUPPORT_NT_KPIS];
 
