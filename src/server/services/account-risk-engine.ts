@@ -392,6 +392,11 @@ export class AccountRiskEngine {
       console.log(`[account-risk] AI inference: ${needsInference.length} unresolved, ${aiQueuedNew} newly queued (background worker drains it)`);
     }
 
+    // Inference pipeline state (so the report shows exactly where AI attribution is at).
+    const infTotal = (await queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM agent_ticket_customer_inference`))?.n ?? 0;
+    const infMatched = (await queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM agent_ticket_customer_inference WHERE customer_ref IS NOT NULL`))?.n ?? 0;
+    const infQueueRemaining = (await queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM agent_inference_queue`))?.n ?? 0;
+
     const summary = {
       generatedAt: new Date().toISOString(),
       tickets: totalTickets,
@@ -403,9 +408,12 @@ export class AccountRiskEngine {
       tierChanges,
       reconDaysComplete: daysComplete,
       reconDaysPartial: daysPartial,
-      aiInferenceCached: inferenceMap.size,
+      aiInferenceAppliedThisRun: inferenceMap.size,   // confident (>=50) cached matches applied
+      aiInferenceTotalAttempted: infTotal,            // tickets the worker has inferred
+      aiInferenceTotalMatched: infMatched,            // of those, matched to a customer
       aiInferenceUnresolved: needsInference.length,
       aiInferenceQueuedNew: aiQueuedNew,
+      aiInferenceQueueRemaining: infQueueRemaining,   // still waiting for the worker
       unresolvedSamples,
       seconds: Math.round((Date.now() - t0) / 1000),
     };

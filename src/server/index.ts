@@ -1150,12 +1150,12 @@ async function main() {
   // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
   // (assignment-engine setup) could abort before it was reached.
   // Pulls full ticket history from Jira (the cache only holds open + recently-closed).
-  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v9') ?? '(unset)'}`);
-  if (!settingsQueries.get('account_risk_backfill_v9')) {
+  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v10') ?? '(unset)'}`);
+  if (!settingsQueries.get('account_risk_backfill_v10')) {
     void (async () => {
       try {
         await new AccountRiskEngine(settingsQueries, agentJiraClient).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
-        settingsQueries.set('account_risk_backfill_v9', 'true');
+        settingsQueries.set('account_risk_backfill_v10', 'true');
       } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
     })();
   }
