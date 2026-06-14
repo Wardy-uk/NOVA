@@ -101,8 +101,8 @@ const SOLVED_TRANSITION = `status CHANGED TO ("Resolved", "Closed", "Done")`;
 export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_new_tickets', label: 'New Tickets', team: 'Support', colA: 'Support', jiraSpace: 'NT',
-    unit: 'count', direction: 'lower-better', dailyTarget: 120, monthlyTarget: null, rollup: 'sum',
-    rag: { greenMax: 119, amberMax: 150 },  // <120 green, 120–150 amber, >150 red
+    unit: 'count', direction: 'lower-better', dailyTarget: 90, monthlyTarget: null, rollup: 'sum',
+    rag: { greenMax: 89, amberMax: 110 },  // <90 green, 90–110 amber, >110 red
     compute: { kind: 'jql_count', jql: c => `project = NT AND created >= "${c.day}" AND created < "${c.nextDay}"` },
   },
   {

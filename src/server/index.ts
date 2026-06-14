@@ -3456,9 +3456,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             if (v) { s += v.s; n += v.n; }
           }
           if (n > 0) {
-            const pct = Math.round((s / n) * 20);                 // 1–5 avg → %
-            const rag = pct >= 80 ? 1 : pct >= 64 ? 2 : 3;         // CSAT % target 80
-            byDay.get(dayKey)!.set('__csat_roll__', { count: pct, rag });
+            const avg = Math.round((s / n) * 10) / 10;            // 1–5 average, 1dp
+            const rag = avg >= 4 ? 1 : avg >= 3 ? 2 : 3;          // 4/5 = green
+            byDay.get(dayKey)!.set('__csat_roll__', { count: avg, rag });
           }
         }
       } catch { /* CSAT rolling optional */ }
@@ -3516,10 +3516,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         for (const [name, v] of dm) if (pred(name)) return { num: v.count, rag: v.rag };
         return null;
       };
-      // New ticket volume RAG is a fixed business band: <120 green, 120–150 amber,
-      // >150 red (calibrated to real intake ~95–135/day). Computed here from the
-      // value (not the stored rag) so the displayed history is correct immediately.
-      const newvolRag = (v: number) => v < 120 ? 1 : v <= 150 ? 2 : 3;
+      // New ticket volume RAG is a fixed business band: <90 green, 90–110 amber,
+      // >110 red. Computed here from the value (not the stored rag) so the
+      // displayed history is correct immediately.
+      const newvolRag = (v: number) => v < 90 ? 1 : v <= 110 ? 2 : 3;
       const newvolCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
         const c = getCell(dm, 'newvol');
         return c ? { num: c.num, rag: newvolRag(c.num) } : null;
@@ -3566,7 +3566,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
-          const display = kind === 'oldest' ? `${c.num}d` : (kind === 'csat' || kind === 'pct') ? `${c.num}%` : String(c.num);
+          const display = kind === 'oldest' ? `${c.num}d` : kind === 'pct' ? `${c.num}%` : kind === 'csat' ? `${c.num}/5` : String(c.num);
           return { num: c.num, rag: displayRag(kind, c, opts?.band), display };
         });
         return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts)}</div></div>`;
@@ -3586,7 +3586,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       const LEFT_GROUPS: Array<{ header: string; metrics: MetricDef[]; sep?: boolean }> = [
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
-          { label: 'CSAT (7d)', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
+          { label: 'CSAT', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
           { label: 'QA score (/10)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
         ] },
         { header: 'Performance', metrics: [

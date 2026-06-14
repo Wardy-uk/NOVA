@@ -46,10 +46,10 @@ export function computeRag(value: number, target: number, direction: string): nu
 /**
  * Fixed-band RAG for KPIs whose thresholds don't fit the generic target±band
  * model. Returns null when the KPI has no custom band (caller falls back to
- * computeRag). New ticket volume: <120 green, 120–150 amber, >150 red.
+ * computeRag). New ticket volume: <90 green, 90–110 amber, >110 red.
  */
 export function customRag(kpi: string, value: number): number | null {
-  if (kpi === 'New Tickets Today') return value < 120 ? 1 : value <= 150 ? 2 : 3;
+  if (kpi === 'New Tickets Today') return value < 90 ? 1 : value <= 110 ? 2 : 3;
   return null;
 }
 
@@ -503,7 +503,7 @@ export class KpiPipeline {
         { kpi: 'SLA Breached', group: 'SLA', count: breachedCount, target: t('SLA Breached').target || 0, direction: 'Lower is better' },
         { kpi: 'Unassigned', group: 'Queue', count: unassignedCount, target: t('Unassigned').target || 0, direction: 'Lower is better' },
         { kpi: 'Tickets Solved Today', group: 'Throughput', count: parsedResolved.length, target: t('Tickets Solved Today').target || 15, direction: 'Higher is better' },
-        { kpi: 'New Tickets Today', group: 'Volume', count: createdToday, target: t('New Tickets Today').target || 120, direction: 'Lower is better' },
+        { kpi: 'New Tickets Today', group: 'Volume', count: createdToday, target: t('New Tickets Today').target || 90, direction: 'Lower is better' },
         { kpi: 'Waiting on Requestor', group: 'Queue', count: worCount, target: t('Waiting on Requestor').target || 10, direction: 'Lower is better' },
       );
 

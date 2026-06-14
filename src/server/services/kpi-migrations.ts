@@ -12,11 +12,11 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import { getKpiPool } from './kpi-pipeline.js';
 
-/** Backfill historical New Tickets Today rows to the <120/120–150/>150 RAG band. */
+/** Backfill historical New Tickets Today rows to the <90/90–110/>110 RAG band. */
 async function backfillNewTicketVolumeRag(settings: SettingsQueries): Promise<void> {
-  // Flag bumped to v2 when the band was recalibrated 90/110 → 120/150, so the
-  // backfill re-runs once more even if the v1 backfill already applied.
-  const FLAG = 'kpi_migration_newvol_rag_band_v2';
+  // Flag bumped to v3 when the band was reverted 120/150 → 90/110, so the
+  // backfill re-runs once more even if an earlier backfill already applied.
+  const FLAG = 'kpi_migration_newvol_rag_band_v3';
   if (settings.get(FLAG) === 'done') return;
 
   const pool = await getKpiPool(settings);
@@ -24,20 +24,20 @@ async function backfillNewTicketVolumeRag(settings: SettingsQueries): Promise<vo
   // New Tickets Today row to the new band and align the stored target/direction.
   const res = await pool.request().query(`
     UPDATE dbo.jira_kpi_daily
-    SET rag = CASE WHEN [count] < 120 THEN 1 WHEN [count] <= 150 THEN 2 ELSE 3 END,
-        target = 120, direction = 'Lower is better'
+    SET rag = CASE WHEN [count] < 90 THEN 1 WHEN [count] <= 110 THEN 2 ELSE 3 END,
+        target = 90, direction = 'Lower is better'
     WHERE kpi = 'New Tickets Today';
   `);
   // Align the master target if a stale row exists (table may not exist in all envs).
   try {
     await pool.request().query(`
-      UPDATE dbo.KpiTargets SET TargetValue = 120 WHERE KpiName = 'New Tickets Today';
+      UPDATE dbo.KpiTargets SET TargetValue = 90 WHERE KpiName = 'New Tickets Today';
     `);
   } catch { /* KpiTargets optional */ }
 
   const rows = Array.isArray(res.rowsAffected) ? res.rowsAffected.reduce((a, b) => a + b, 0) : 0;
   settings.set(FLAG, 'done');
-  console.log(`[N.O.V.A] KPI migration: New Tickets Today RAG backfilled (${rows} rows) — band <120/120–150/>150`);
+  console.log(`[N.O.V.A] KPI migration: New Tickets Today RAG backfilled (${rows} rows) — band <90/90–110/>110`);
 }
 
 /** Run all pending one-time KPI migrations. Safe to call on every startup. */
