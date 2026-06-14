@@ -91,13 +91,20 @@ export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClien
   }
 
   // ── Stocks: pull from legacy dbo.jira_kpi_daily, mapped onto new keys ──
+  // STOCK_MAP (3-bucket approx) + every colA='Legacy' stock KPI, whose label IS the
+  // legacy KPI name → exact back-history for the repointed Legacy KPIs view. One
+  // legacy name can map to several new keys (e.g. nt_incidents + nt_legacy_cc_incidents).
+  const stockMap: Record<string, string> = {
+    ...STOCK_MAP,
+    ...Object.fromEntries(SUPPORT_NT_KPIS.filter(k => k.colA === 'Legacy' && k.rollup === 'latest').map(k => [k.key, k.label])),
+  };
   let stockRows = 0;
   try {
     const pool = await getKpiPool(settings);
     const req = pool.request();
     req.input('from', sql.Date, fromDay);
     req.input('to', sql.Date, toDay);
-    const legacyNames = Object.values(STOCK_MAP);
+    const legacyNames = [...new Set(Object.values(stockMap))];
     const inList = legacyNames.map((_, i) => `@k${i}`).join(', ');
     legacyNames.forEach((nm, i) => req.input(`k${i}`, sql.NVarChar(300), nm));
     const result = await req.query(`
@@ -105,14 +112,18 @@ export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClien
       FROM dbo.jira_kpi_daily
       WHERE CAST(CreatedAt AS DATE) >= @from AND CAST(CreatedAt AS DATE) <= @to AND kpi IN (${inList})
     `);
-    const nameToKey = new Map(Object.entries(STOCK_MAP).map(([k, v]) => [v, k]));
+    const nameToKeys = new Map<string, string[]>();
+    for (const [key, name] of Object.entries(stockMap)) {
+      const arr = nameToKeys.get(name) ?? []; arr.push(key); nameToKeys.set(name, arr);
+    }
     for (const row of result.recordset as Array<{ kpi: string; count: number; d: string }>) {
-      const key = nameToKey.get(row.kpi);
-      const def = key ? getKpi(key) : undefined;
-      if (!key || !def) continue;
       const value = row.count == null ? null : Number(row.count);
-      await upsertDaily(row.d, 'Support', key, value, def.dailyTarget, computeRag(def, value), 'backfill-legacy');
-      stockRows++;
+      for (const key of nameToKeys.get(row.kpi) ?? []) {
+        const def = getKpi(key);
+        if (!def) continue;
+        await upsertDaily(row.d, 'Support', key, value, def.dailyTarget, computeRag(def, value), 'backfill-legacy');
+        stockRows++;
+      }
     }
   } catch (err) {
     failures.push(`stocks: ${err instanceof Error ? err.message : 'failed'}`);
