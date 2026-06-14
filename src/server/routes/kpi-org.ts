@@ -6,7 +6,7 @@ import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
-  captureSupportNt, getDay, getLatest, getRange, setManualValue,
+  captureSupportNt, getDay, getLatest, getRange, getTeamRange, setManualValue,
   ORG_KPIS, getKpi, getOrgPeriod, getOrgHistoryGrid, startOrgBackfill, getLegacyEarliest, orgBackfillState,
 } from '../services/kpi-org/index.js';
 
@@ -94,6 +94,33 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     try {
       const rows = await getDay('Support', req.params.day);
       res.json({ ok: true, data: rows.map(enrich) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Legacy daily-history shape — serves kpi_org_daily in the SAME shape the old
+  // /api/kpi-data/daily-history returned, so the "Legacy KPIs" view can read this
+  // engine instead. /support/legacy-history?from=YYYY-MM-DD&to=YYYY-MM-DD
+  router.get('/support/legacy-history', async (req, res) => {
+    const { from, to } = req.query as { from?: string; to?: string };
+    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
+    try {
+      const ragNum = (r: string | null) => r === 'green' ? 1 : r === 'amber' ? 2 : r === 'red' ? 3 : null;
+      const rows = await getTeamRange('Support', from, to);
+      const data = rows.map(row => {
+        const def = getKpi(row.kpi_key);
+        return {
+          kpi: def?.label ?? row.kpi_key,
+          kpiGroup: def?.colA ?? 'Other',
+          count: row.value,
+          target: row.target,
+          direction: def?.direction === 'higher-better' ? 'Higher is better' : 'Lower is better',
+          rag: ragNum(row.rag),
+          CreatedAt: typeof row.kpi_date === 'string' ? row.kpi_date : new Date(row.kpi_date as unknown as string).toISOString().slice(0, 10),
+        };
+      });
+      res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

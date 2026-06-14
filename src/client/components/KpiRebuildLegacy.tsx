@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
 
 // Legacy KPIs daily-history grid, rendered in the rebuild look (Tailwind, RAG dots).
-// Sources the original n8n-populated KPI snapshots from dbo.jira_kpi_daily via
-// /api/kpi-data/daily-history. KPI order + grouping + the "Reportable" subset mirror
-// the legacy KpiDailyHistoryView so the two stay in sync.
+// Now sourced from the NEW kpi-org engine (kpi_org_daily) via
+// /api/kpi-org/support/legacy-history, returned in the legacy daily-history shape.
+// KPI order + grouping + the "Reportable" subset mirror the legacy view names.
 
 interface DailyKpi {
   kpi: string;
@@ -128,7 +128,7 @@ export function KpiRebuildLegacy() {
   async function load() {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/kpi-data/daily-history?env=${env}&from=${from}&to=${to}`);
+      const r = await fetch(`/api/kpi-org/support/legacy-history?from=${from}&to=${to}`);
       const j = await r.json();
       if (j.ok) setRows(j.data as DailyKpi[]);
       else setError(j.error || 'Failed to load');

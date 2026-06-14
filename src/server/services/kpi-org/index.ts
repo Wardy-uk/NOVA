@@ -7,7 +7,7 @@ import { SUPPORT_NT_KPIS, type DayCtx } from './registry.js';
 import { computeNtKpi } from './nt-compute.js';
 import { ensureOrgKpiTable, saveComputed } from './store.js';
 
-export { ensureOrgKpiTable, getDay, getLatest, getRange, setManualValue } from './store.js';
+export { ensureOrgKpiTable, getDay, getLatest, getRange, getTeamRange, setManualValue } from './store.js';
 export { ORG_KPIS, SUPPORT_NT_KPIS, getKpi } from './registry.js';
 export { getOrgPeriod, getOrgHistoryGrid, type Period } from './period.js';
 export { backfillOrg, startOrgBackfill, getLegacyEarliest, orgBackfillState } from './backfill.js';
