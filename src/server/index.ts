@@ -3528,6 +3528,11 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // week → not injected → grey dash, excluded from trend/weekly.
       const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null =>
         getNamed(dm, n => n === '__csat_roll__');
+      // FCR rate band: ≥65% green, 35–64% amber, <35% red.
+      const fcrCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
+        const c = getNamed(dm, n => n.includes('fcr'));
+        return c ? { num: c.num, rag: c.num >= 65 ? 1 : c.num >= 35 ? 2 : 3 } : null;
+      };
 
       // Muted RAG palette — calm "attention" tones, not alarm, for the SLT board.
       const ragColor = (rag: number | null) => rag === 1 ? '#4ca88a' : rag === 2 ? '#c99a3f' : rag === 3 ? '#c2554f' : '#475569';
@@ -3592,6 +3597,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         { header: 'Performance', metrics: [
           { label: 'FRT compliance', get: dm => getNamed(dm, n => n.includes('frt compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
           { label: 'Resolution compliance', get: dm => getNamed(dm, n => n.includes('resolution compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
+          { label: 'FCR rate', get: fcrCell, kind: 'pct', opts: { sub: true, higher: true } },
           { label: 'Solved by Team', get: dm => getNamed(dm, n => n === '__solved_team__'), kind: 'solved', opts: { sub: true, higher: true } },
           { label: 'Solved by NOVA', get: dm => getNamed(dm, n => n === '__solved_nova__'), kind: 'solved', opts: { sub: true, higher: true } },
         ] },
