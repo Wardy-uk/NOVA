@@ -3,9 +3,11 @@
 // their entered values survive. Designed to run at ~18:00 UK (the agreed freeze).
 
 import type { JiraRestClient } from '../jira-client.js';
+import type { SettingsQueries } from '../../db/settings-store.js';
 import { SUPPORT_NT_KPIS, type DayCtx } from './registry.js';
 import { computeNtKpi } from './nt-compute.js';
 import { ensureOrgKpiTable, saveComputed } from './store.js';
+import { startOrgBackfill, getLegacyEarliest } from './backfill.js';
 
 export { ensureOrgKpiTable, getDay, getLatest, getRange, getTeamRange, setManualValue } from './store.js';
 export { ORG_KPIS, SUPPORT_NT_KPIS, getKpi } from './registry.js';
@@ -64,4 +66,41 @@ export async function captureSupportNt(jira: JiraRestClient, now: Date = new Dat
 
   console.log(`[kpi-org] Support/NT capture ${day}: ${summary.computed} computed, ${summary.failed} failed, ${summary.skipped} manual`);
   return summary;
+}
+
+/**
+ * Startup tasks for the org engine — run fire-and-forget from the server bootstrap
+ * so the Legacy KPIs view populates after a deploy without anyone POSTing:
+ *   1. Initial history backfill — once (settings flag), capped to the last 90 days.
+ *   2. A fresh capture of today's column — at most once per UK day from startup
+ *      (the 18:00 job still runs the daily freeze).
+ * Never throws.
+ */
+export async function runKpiOrgStartupTasks(settings: SettingsQueries, jira: JiraRestClient): Promise<void> {
+  const isoMinus = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+
+  // 1. One-time initial backfill (last 90 days of history).
+  try {
+    if (settings.get('kpi_org_initial_backfill_v1') !== 'done') {
+      const earliest = await getLegacyEarliest(settings).catch(() => ({ org: null, agent: null }));
+      const cap = isoMinus(90);
+      const from = earliest.org && earliest.org > cap ? earliest.org : cap;
+      startOrgBackfill(settings, jira, from, isoMinus(1));
+      settings.set('kpi_org_initial_backfill_v1', 'done');
+      console.log(`[kpi-org] startup: initial backfill kicked off ${from}→${isoMinus(1)}`);
+    }
+  } catch (err) {
+    console.warn('[kpi-org] startup backfill failed:', err instanceof Error ? err.message : err);
+  }
+
+  // 2. Capture today's column (once per UK day from startup).
+  try {
+    const today = ukDay(new Date());
+    if (settings.get('kpi_org_startup_capture_day') !== today) {
+      await captureSupportNt(jira);
+      settings.set('kpi_org_startup_capture_day', today);
+    }
+  } catch (err) {
+    console.warn('[kpi-org] startup capture failed:', err instanceof Error ? err.message : err);
+  }
 }

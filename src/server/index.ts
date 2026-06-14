@@ -195,7 +195,7 @@ import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 */
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
-import { captureSupportNt } from './services/kpi-org/index.js';
+import { captureSupportNt, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
@@ -4163,6 +4163,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // One-time KPI data migrations (each guarded by a settings flag → runs once).
   // Fire-and-forget so a slow/failed Azure SQL call never blocks boot.
   void runKpiMigrations(settingsQueries);
+
+  // Org-KPI startup tasks: one-time history backfill + a fresh capture of today,
+  // so the Legacy KPIs view populates after a deploy without manual POSTs.
+  if (agentJiraClient) void runKpiOrgStartupTasks(settingsQueries, agentJiraClient);
 
   // 7. Auto-sync: per-source timers with individual intervals
   const syncTimers = new Map<string, ReturnType<typeof setInterval>>();
