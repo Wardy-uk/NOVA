@@ -3463,6 +3463,22 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         }
       } catch { /* CSAT rolling optional */ }
 
+      // Solved by Team / Solved by NOVA come from the BA-spec engine (kpi_org_daily,
+      // the canonical org KPIs), injected per day under sentinel keys. Higher-better.
+      try {
+        const ragNum = (r: string | null) => r === 'green' ? 1 : r === 'amber' ? 2 : r === 'red' ? 3 : null;
+        const solvedRows = await query<{ d: Date | string; kpi_key: string; value: number; rag: string | null }>(
+          `SELECT kpi_date AS d, kpi_key, value, rag FROM kpi_org_daily
+           WHERE team_key = 'Support' AND kpi_key IN ('nt_solved_team', 'nt_solved_nova')
+             AND kpi_date >= DATEADD(day, -42, CAST(GETDATE() AS DATE)) AND kpi_date < CAST(GETDATE() AS DATE)`);
+        for (const r of solvedRows) {
+          const key = toDayKey(r.d);
+          if (!byDay.has(key)) byDay.set(key, new Map());
+          const sentinel = r.kpi_key === 'nt_solved_nova' ? '__solved_nova__' : '__solved_team__';
+          byDay.get(key)!.set(sentinel, { count: Math.round(Number(r.value) || 0), rag: ragNum(r.rag) });
+        }
+      } catch { /* solved KPIs optional — kpi_org_daily may be unpopulated */ }
+
       const days = [...byDay.keys()].filter(isWeekday).sort().slice(-5);
 
       // Fragments to locate a stored KPI name for a queue. `noreply` names keep
@@ -3476,7 +3492,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         'Tier 3': { noreply: 'tier 3', bare: 'tier 3' },
         'Development': { noreply: 'development', bare: 'development' },
       };
-      type Kind = 'newvol' | 'noreply' | 'oversla' | 'oldest' | 'csat' | 'qa';
+      type Kind = 'newvol' | 'noreply' | 'oversla' | 'oldest' | 'csat' | 'qa' | 'pct' | 'solved';
       const matches = (name: string, kind: Kind, queue?: string) => {
         if (kind === 'newvol') return name.includes('new tickets');
         const f = queue ? FRAG[queue] : null; if (!f) return false;
@@ -3541,7 +3557,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       //  - oldest: muted (null → neutral grey) so the always-red age rows don't dominate.
       const displayRag = (kind: Kind, c: { num: number; rag: number | null }, band?: Band): number | null => {
         if (kind === 'oldest') return null;
-        if (kind === 'newvol' || kind === 'csat' || kind === 'qa') return c.rag;
+        // Higher-is-better metrics keep their stored/derived RAG.
+        if (kind === 'newvol' || kind === 'csat' || kind === 'qa' || kind === 'pct' || kind === 'solved') return c.rag;
         const g = band?.greenMax ?? 0, a = band?.amberMax ?? 4;
         return c.num <= g ? 1 : c.num <= a ? 2 : 3;
       };
@@ -3549,7 +3566,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         const vals: DayVal[] = days.map(d => {
           const c = get(byDay.get(d)!);
           if (!c) return null;
-          const display = kind === 'oldest' ? `${c.num}d` : kind === 'csat' ? `${c.num}%` : String(c.num);
+          const display = kind === 'oldest' ? `${c.num}d` : (kind === 'csat' || kind === 'pct') ? `${c.num}%` : String(c.num);
           return { num: c.num, rag: displayRag(kind, c, opts?.band), display };
         });
         return `<div class="mrow${opts?.sub ? ' sub' : ''}"><div class="mlabel">${label}</div><div class="mcells">${vals.map(cellHtml).join('')}</div><div class="mtrend">${trendHtml(vals, opts)}</div></div>`;
@@ -3571,6 +3588,12 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         { header: 'Quality &middot; CSAT + QA', metrics: [
           { label: 'CSAT (7d)', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
           { label: 'QA score (/10)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
+        ] },
+        { header: 'Performance', metrics: [
+          { label: 'FRT compliance', get: dm => getNamed(dm, n => n.includes('frt compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
+          { label: 'Resolution compliance', get: dm => getNamed(dm, n => n.includes('resolution compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
+          { label: 'Solved by Team', get: dm => getNamed(dm, n => n === '__solved_team__'), kind: 'solved', opts: { sub: true, higher: true } },
+          { label: 'Solved by NOVA', get: dm => getNamed(dm, n => n === '__solved_nova__'), kind: 'solved', opts: { sub: true, higher: true } },
         ] },
         { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
           { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
@@ -3868,6 +3891,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .exp:hover,.exp:focus-visible{border-color:rgba(94,193,202,.45);box-shadow:0 6px 24px rgba(0,0,0,.3);outline:none}
 .exp .panel-h{display:flex;justify-content:space-between;align-items:center}
 .exp-hint{font-size:1.05vh;color:#5ec1ca;font-weight:700;letter-spacing:.4px;opacity:.8}
+.wk-toggle{cursor:pointer;font:700 1.05vh system-ui,-apple-system,sans-serif;letter-spacing:.3px;color:#94a3b8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:.4vh .9vw}
+.wk-toggle:hover{color:#5ec1ca;border-color:rgba(94,193,202,.45)}
 .detail-src{display:none}
 /* commitment bucket dashboard */
 .bk-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.6vh .6vw;padding:.4vh .2vw}
@@ -3939,7 +3964,12 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 </div>
 <div class="cols">
   <div class="panel left exp" data-expand="src-kpi" data-title="Strategic KPIs — full granular breakdown" tabindex="0" role="button">
-    <div class="panel-h"><span>Strategic KPIs</span><span class="exp-hint">Expand ⤢</span></div>
+    <div class="panel-h"><span>Strategic KPIs</span>
+      <span style="display:flex;align-items:center;gap:1vw">
+        <button class="wk-toggle" id="wk-toggle" type="button" onclick="event.stopPropagation();window.__toggleWk&&window.__toggleWk(this)">Show 4-week view</button>
+        <span class="exp-hint">Expand ⤢</span>
+      </span>
+    </div>
     <div class="panel-body">
       <div class="kblock">
         <div class="kblock-h">This week &middot; day by day</div>
@@ -3948,7 +3978,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
           ${dailyHtml}
         </div>
       </div>
-      <div class="kblock">
+      <div class="kblock" id="wk-block" style="display:none">
         <div class="kblock-h">Clean (green) days per week &middot; last 4 weeks</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
@@ -3988,6 +4018,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 <script>
 (function(){
   function byId(i){return document.getElementById(i);}
+  // 4-week ("monthly") section toggle — hidden by default.
+  window.__toggleWk=function(btn){
+    var wk=byId('wk-block'); if(!wk)return;
+    var on=wk.style.display==='none';
+    wk.style.display=on?'flex':'none';
+    btn.textContent=on?'Hide 4-week view':'Show 4-week view';
+  };
   var ov=byId('ov'),card=byId('ovcard'),body=byId('ovbody'),title=byId('ovt'),min=byId('ovmin'),last=null,busy=false;
   function expand(src){
     if(busy||ov.classList.contains('show'))return; busy=true;
