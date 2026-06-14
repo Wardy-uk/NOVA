@@ -3767,14 +3767,33 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
-        // Resolution SLA target comes from Jira's LIVE SLA cycle (customfield_14048
-        // via getResolutionSlaTarget) — it already accounts for the goal rule (request
-        // type / tier / priority), the working-hours calendar AND any time the SLA spent
-        // paused. Only the ongoing cycle is used; tickets whose resolution SLA is already
-        // complete (no live cycle) have no pending target and are skipped.
+        // Resolution SLA goal in WORKING HOURS — reproduces Jira's "Resolution" goal
+        // rule list (first match wins: request type → Current Tier → priority). Used
+        // ONLY as a fallback when a ticket has no live SLA cycle. Null = no SLA goal.
+        const slaHoursFor = (reqType: string, tier: string, prio: string): number | null => {
+          const rt = reqType.replace(/\s*\(NT\)\s*$/, '');
+          const p = prio || 'Unset';
+          if (rt === 'Delivery QA') return 240;
+          if (rt === 'TPJ Request') {
+            if (p === 'Normal') return 18; if (p === 'Major') return 8;
+            if (p === 'None' || p === 'Minor' || p === 'Unset') return 48; return 6;
+          }
+          if (tier === 'Production') return 176;
+          if (tier === 'Development') return 1640;
+          if (rt === 'Incident' || rt === '' || rt === 'Emailed request' || rt === 'AI Request') {
+            if (p === 'Major') return 4; if (p === 'Unset' || p === 'Minor' || p === 'Normal') return 8; return 4;
+          }
+          if (rt === 'Service Request') {
+            if (p === 'Normal') return 40; if (p === 'Major') return 21.5;
+            if (p === 'None' || p === 'Minor') return 80; return 8;
+          }
+          return null;
+        };
+        // SLA target: Jira's LIVE ongoing cycle breachTime (pause-adjusted) when present;
+        // otherwise created + the goal-rule hours (no live cycle → no active pauses to miss).
         if (agentJiraClient && projs) {
           const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_14048'], 100);
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_12800', 'customfield_14048'], 100);
           const dayMs = 86400000;
           const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
           type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
@@ -3784,9 +3803,14 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
             const created = f.created ? new Date(f.created) : null;
             if (!due || !created) continue;
-            // Beyond SLA only: due date later than the live (pause-adjusted) SLA breach.
             const tierName = (f.customfield_12981 && f.customfield_12981.value) || '';
-            const slaTarget = getResolutionSlaTarget(iss as unknown as Record<string, unknown>);
+            let slaTarget = getResolutionSlaTarget(iss as unknown as Record<string, unknown>);
+            if (!slaTarget) {
+              const reqType = (f.customfield_12800 && f.customfield_12800.requestType && f.customfield_12800.requestType.name) || '';
+              const h = slaHoursFor(reqType, tierName, (f.priority && f.priority.name) || '');
+              if (h != null) slaTarget = addBusinessHours(created, h);
+            }
+            // Beyond SLA only: due date later than the SLA target. No target → skip.
             if (!slaTarget || dateOnly(due) <= dateOnly(slaTarget)) continue;
             const cycle = Math.round((due.getTime() - created.getTime()) / dayMs);
             const summary = String(f.summary || '');
