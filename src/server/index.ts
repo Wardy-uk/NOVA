@@ -3766,10 +3766,16 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
-        const slaDays = parseInt(settingsQueries.get('commitment_sla_working_days') || '', 10) || 10;
+        // Resolution SLA in WORKING DAYS per request type (Jira only tracks the short
+        // 8h "Resolution" SLA, not the long ones, so we map them here). Override via
+        // the commitment_sla_by_request_type setting (JSON: { "Onboarding": 30, ... }).
+        // Unmapped types fall back to commitment_sla_working_days (default 10).
+        const fallbackSla = parseInt(settingsQueries.get('commitment_sla_working_days') || '', 10) || 10;
+        let slaByType: Record<string, number> = { Onboarding: 30 };
+        try { const cfg = settingsQueries.get('commitment_sla_by_request_type'); if (cfg) slaByType = { ...slaByType, ...JSON.parse(cfg) }; } catch { /* keep default */ }
         if (agentJiraClient && projs) {
           const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981'], 100);
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_12800'], 100);
           const dayMs = 86400000;
           type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
           const items: Commit[] = [];
@@ -3778,7 +3784,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
             const created = f.created ? new Date(f.created) : null;
             if (!due || !created) continue;
-            // Beyond SLA only: working days from creation to due exceed the SLA.
+            // Beyond SLA only: working days from creation to due exceed this type's SLA.
+            const reqType = (f.customfield_12800 && f.customfield_12800.requestType && f.customfield_12800.requestType.name) || '';
+            const slaDays = slaByType[reqType] ?? fallbackSla;
             const bdays = businessDaysBetween(created, due);
             if (bdays <= slaDays) continue;
             const cycle = Math.round((due.getTime() - created.getTime()) / dayMs);
