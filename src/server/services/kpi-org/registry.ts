@@ -325,6 +325,11 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'count', direction: 'lower-better', dailyTarget: 120, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 120, amberMax: 180 },
     compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care"` },
   },
+  {
+    key: 'nt_legacy_new_tickets', label: 'New Tickets Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 90, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 89, amberMax: 110 },
+    compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND created >= "${ctx.day}" AND created < "${ctx.nextDay}"` },
+  },
 
   // ── Escalations / rejections by destination tier (escalation_log, by from/to tier). ──
   {
