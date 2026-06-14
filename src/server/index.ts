@@ -3766,17 +3766,19 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
-        // Resolution SLA in WORKING DAYS per request type (Jira only tracks the short
-        // 8h "Resolution" SLA, not the long ones, so we map them here). Override via
-        // the commitment_sla_by_request_type setting (JSON: { "Onboarding": 30, ... }).
-        // Unmapped types fall back to commitment_sla_working_days (default 10).
-        const fallbackSla = parseInt(settingsQueries.get('commitment_sla_working_days') || '', 10) || 10;
-        let slaByType: Record<string, number> = { Onboarding: 30 };
-        try { const cfg = settingsQueries.get('commitment_sla_by_request_type'); if (cfg) slaByType = { ...slaByType, ...JSON.parse(cfg) }; } catch { /* keep default */ }
+        // Resolution SLA in WORKING HOURS per Current Tier (cf12981) — mirrors Jira's
+        // tier-based SLA calendar (e.g. Production = 176h "Nurtur Working Hours"). The
+        // SLA target = created + N working hours (business-hours calendar). Override via
+        // commitment_sla_by_tier setting (JSON: { "Production": 176, ... }); unmapped
+        // tiers fall back to commitment_sla_fallback_hours (default 80 ≈ 10 working days).
+        const fallbackHours = parseInt(settingsQueries.get('commitment_sla_fallback_hours') || '', 10) || 80;
+        let slaByTier: Record<string, number> = { Production: 176 };
+        try { const cfg = settingsQueries.get('commitment_sla_by_tier'); if (cfg) slaByTier = { ...slaByTier, ...JSON.parse(cfg) }; } catch { /* keep default */ }
         if (agentJiraClient && projs) {
           const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_12800'], 100);
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981'], 100);
           const dayMs = 86400000;
+          const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
           type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
           const items: Commit[] = [];
           for (const iss of (r.issues || [])) {
@@ -3784,20 +3786,19 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
             const created = f.created ? new Date(f.created) : null;
             if (!due || !created) continue;
-            // Beyond SLA only: working days from creation to due exceed this type's SLA.
-            const reqType = (f.customfield_12800 && f.customfield_12800.requestType && f.customfield_12800.requestType.name) || '';
-            const slaDays = slaByType[reqType] ?? fallbackSla;
-            const bdays = businessDaysBetween(created, due);
-            if (bdays <= slaDays) continue;
+            // Beyond SLA only: due date later than created + this tier's working-hours SLA.
+            const tierName = (f.customfield_12981 && f.customfield_12981.value) || '';
+            const slaTarget = addBusinessHours(created, slaByTier[tierName] ?? fallbackHours);
+            if (dateOnly(due) <= dateOnly(slaTarget)) continue;
             const cycle = Math.round((due.getTime() - created.getTime()) / dayMs);
             const summary = String(f.summary || '');
             items.push({
               key: iss.key,
               trunc: summary.length > 60 ? summary.slice(0, 59) + '…' : summary,
-              tier: (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—',
+              tier: tierName || (f.issuetype && f.issuetype.name) || '—',
               dueStr: due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
               daysRem: Math.ceil((due.getTime() - now.getTime()) / dayMs),
-              pastSla: bdays - slaDays,
+              pastSla: businessDaysBetween(slaTarget, due),
               over60: cycle > 60,
             });
           }
