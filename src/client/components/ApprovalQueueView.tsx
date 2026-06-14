@@ -277,16 +277,20 @@ function ApprovalDetail({
     </GlassCard>
   ) : undefined;
 
+  const approveActionLabel = item.action_type
+    ? (ACTION_LABELS[item.action_type]?.label ?? item.action_type.replace(/_/g, ' '))
+    : null;
+
   const actionBar = isPending && canInteract ? (
     <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
       {isShadow ? (
         <>
           <button onClick={handleConfirm} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>{'✓'} Confirm Correct</button>
-          <button onClick={handleExecute} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>Execute Action</button>
+          <button onClick={handleExecute} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>Execute{approveActionLabel ? ` · ${approveActionLabel}` : ' Action'}</button>
         </>
       ) : (
         <button onClick={handleApprove} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a]" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)' }}>
-          {hasEdits ? 'Edit & Approve' : '✓ Approve'}
+          {hasEdits ? 'Edit & Approve' : '✓ Approve'}{approveActionLabel ? ` · ${approveActionLabel}` : ''}
         </button>
       )}
       <button onClick={handleDecline} className="px-4 py-2 text-xs rounded-lg font-bold bg-red-900/30 text-red-400 border border-red-800/40 hover:bg-red-900/50">Decline</button>
@@ -326,7 +330,6 @@ function ApprovalDetail({
         headerActions={item.source === 'nova_ai' && onNavigateToAgent ? (
           <button onClick={() => onNavigateToAgent(item.ticket_id)} className="px-3 py-1.5 text-[11px] rounded-lg bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 font-medium shrink-0">Review in Agent</button>
         ) : undefined}
-        aiNextAction={{ compact: true }}
         aiDecisionContext={aiDecisionContext}
         conversationJson={item.conversation_json ?? undefined}
         proposedResolution={originalText || undefined}
