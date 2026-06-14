@@ -1788,6 +1788,92 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
   router.get('/manager/overview', async (req, res) => {
     const period = (req.query.period as string) || 'today';
+    const df = periodToDateFilter(period, 'd');
+
+    // What "actually happened": live (not shadow), a real action (not no_action),
+    // and either NOVA was allowed to act without approval OR a human approved it.
+    // Mirrors observer.ts ACTUAL_FILTER so this view agrees with the ROI metrics.
+    const ACTUAL = `(d.approval_required = 0 OR d.approval_status IN ('approved','confirmed','executed'))`;
+    const ACTED = `d.shadow_mode = 0 AND d.action <> 'no_action' AND ${ACTUAL}`;
+
+    try {
+      const agg = (await query<{
+        actionsTaken: number; autonomous: number; humanApproved: number;
+        pendingApproval: number; declined: number; shadow: number;
+        reverted: number; minutesSaved: number;
+      }>(
+        `SELECT
+           SUM(CASE WHEN ${ACTED} THEN 1 ELSE 0 END) AS actionsTaken,
+           SUM(CASE WHEN d.shadow_mode = 0 AND d.action <> 'no_action' AND d.approval_required = 0 THEN 1 ELSE 0 END) AS autonomous,
+           SUM(CASE WHEN d.shadow_mode = 0 AND d.action <> 'no_action' AND d.approval_required = 1 AND d.approval_status IN ('approved','confirmed','executed') THEN 1 ELSE 0 END) AS humanApproved,
+           SUM(CASE WHEN d.shadow_mode = 0 AND d.action <> 'no_action' AND d.approval_required = 1 AND (d.approval_status IS NULL OR d.approval_status = 'pending') THEN 1 ELSE 0 END) AS pendingApproval,
+           SUM(CASE WHEN d.shadow_mode = 0 AND d.approval_status = 'declined' THEN 1 ELSE 0 END) AS declined,
+           SUM(CASE WHEN d.shadow_mode = 1 THEN 1 ELSE 0 END) AS shadow,
+           SUM(CASE WHEN d.shadow_mode = 0 AND d.quick_win_undone = 1 THEN 1 ELSE 0 END) AS reverted,
+           ISNULL(SUM(CASE WHEN ${ACTED} THEN ISNULL(d.estimated_minutes_saved, 0) ELSE 0 END), 0) AS minutesSaved
+         FROM agent_decisions d WHERE 1 = 1 ${df}`,
+        [],
+      ))[0] ?? { actionsTaken: 0, autonomous: 0, humanApproved: 0, pendingApproval: 0, declined: 0, shadow: 0, reverted: 0, minutesSaved: 0 };
+
+      const actionBreakdown = (await query<{ action: string; count: number }>(
+        `SELECT d.action AS action, COUNT(*) AS count
+         FROM agent_decisions d WHERE ${ACTED} ${df}
+         GROUP BY d.action ORDER BY count DESC`,
+        [],
+      ));
+
+      const recentActions = (await query<{
+        ticket_id: string; action: string; confidence: number | null;
+        approval_required: number; quick_win_type: string | null;
+        resolved_by: string | null; created_at: string;
+      }>(
+        `SELECT TOP 50 d.ticket_id, d.action, d.confidence, d.approval_required,
+                d.quick_win_type, d.resolved_by, d.created_at
+         FROM agent_decisions d WHERE ${ACTED} ${df}
+         ORDER BY d.created_at DESC`,
+        [],
+      )).map(r => ({
+        ticketKey: r.ticket_id,
+        action: r.action,
+        confidence: r.confidence,
+        quickWinType: r.quick_win_type,
+        mode: r.approval_required === 0 ? 'auto' as const : 'approved' as const,
+        approvedBy: r.resolved_by,
+        createdAt: r.created_at,
+      }));
+
+      const funnel = [
+        { label: 'Autonomous', count: agg.autonomous },
+        { label: 'Human-Approved', count: agg.humanApproved },
+        { label: 'Pending Approval', count: agg.pendingApproval },
+        { label: 'Declined', count: agg.declined },
+        { label: 'Shadow (not acted)', count: agg.shadow },
+      ].filter(f => f.count > 0);
+
+      res.json({
+        ok: true,
+        data: {
+          period,
+          kpis: {
+            actionsTaken: agg.actionsTaken,
+            autonomous: agg.autonomous,
+            humanApproved: agg.humanApproved,
+            pendingApproval: agg.pendingApproval,
+            reverted: agg.reverted,
+            minutesSaved: agg.minutesSaved,
+          },
+          actionBreakdown,
+          funnel,
+          recentActions,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Manager overview failed' });
+    }
+  });
+
+  router.get('/manager/overview-legacy', async (req, res) => {
+    const period = (req.query.period as string) || 'today';
     const pool = (req.query.pool as string) || 'all';
     const dateFilter = periodToDateFilter(period);
     const poolFilter = pool !== 'all' ? `AND ar.pool = '${pool.replace(/'/g, '')}'` : '';
