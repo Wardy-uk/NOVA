@@ -3516,10 +3516,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         for (const [name, v] of dm) if (pred(name)) return { num: v.count, rag: v.rag };
         return null;
       };
-      // New ticket volume RAG is a fixed business band: <90 green, 90–110 amber,
-      // >110 red. Computed here from the value (not the stored rag) so the
+      // New ticket volume RAG is a fixed business band: ≤110 green, 111–120 amber,
+      // >120 red. Computed here from the value (not the stored rag) so the
       // displayed history is correct immediately.
-      const newvolRag = (v: number) => v < 90 ? 1 : v <= 110 ? 2 : 3;
+      const newvolRag = (v: number) => v <= 110 ? 1 : v <= 120 ? 2 : 3;
       const newvolCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
         const c = getCell(dm, 'newvol');
         return c ? { num: c.num, rag: newvolRag(c.num) } : null;
@@ -3528,11 +3528,6 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // week → not injected → grey dash, excluded from trend/weekly.
       const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null =>
         getNamed(dm, n => n === '__csat_roll__');
-      // FCR rate band: ≥65% green, 35–64% amber, <35% red.
-      const fcrCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null => {
-        const c = getNamed(dm, n => n.includes('fcr'));
-        return c ? { num: c.num, rag: c.num >= 65 ? 1 : c.num >= 35 ? 2 : 3 } : null;
-      };
 
       // Muted RAG palette — calm "attention" tones, not alarm, for the SLT board.
       const ragColor = (rag: number | null) => rag === 1 ? '#4ca88a' : rag === 2 ? '#c99a3f' : rag === 3 ? '#c2554f' : '#475569';
@@ -3582,7 +3577,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return `<div class="cell dh">${wd}<br><span class="dh-n">${dt.getUTCDate()}</span></div>`;
       }).join('');
 
-      const SUPPORT = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)', 'Tier 2'];
+      const CUSTOMER_CARE = ['CC (Incidents)', 'CC (Service Requests)', 'CC (TPJ)'];
+      const TIER2 = ['Tier 2'];
       const DEV = ['Tier 3', 'Development'];
       // The 8 grouped metrics declared once, so the daily (top) and the weekly
       // days-breached (bottom) views render from the same getters.
@@ -3597,14 +3593,17 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         { header: 'Performance', metrics: [
           { label: 'FRT compliance', get: dm => getNamed(dm, n => n.includes('frt compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
           { label: 'Resolution compliance', get: dm => getNamed(dm, n => n.includes('resolution compliance') && n.includes('resolved')), kind: 'pct', opts: { sub: true, higher: true } },
-          { label: 'FCR rate', get: fcrCell, kind: 'pct', opts: { sub: true, higher: true } },
-          { label: 'Solved by Team', get: dm => getNamed(dm, n => n === '__solved_team__'), kind: 'solved', opts: { sub: true, higher: true } },
           { label: 'Solved by NOVA', get: dm => getNamed(dm, n => n === '__solved_nova__'), kind: 'solved', opts: { sub: true, higher: true } },
         ] },
-        { header: 'Support &middot; CC + Tier 2 + TPJ', metrics: [
-          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', SUPPORT), kind: 'noreply', opts: { sub: true } },
-          { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', SUPPORT), kind: 'oversla', opts: { sub: true } },
-          { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', SUPPORT), kind: 'oldest', opts: { sub: true } },
+        { header: 'Customer Care', metrics: [
+          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', CUSTOMER_CARE), kind: 'noreply', opts: { sub: true } },
+          { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', CUSTOMER_CARE), kind: 'oversla', opts: { sub: true } },
+          { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', CUSTOMER_CARE), kind: 'oldest', opts: { sub: true } },
+        ] },
+        { header: 'Tier 2', metrics: [
+          { label: 'Tickets with no reply', get: dm => groupCell(dm, 'noreply', TIER2), kind: 'noreply', opts: { sub: true } },
+          { label: 'Over SLA (actionable)', get: dm => groupCell(dm, 'oversla', TIER2), kind: 'oversla', opts: { sub: true } },
+          { label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', TIER2), kind: 'oldest', opts: { sub: true } },
         ] },
         { header: 'Production', metrics: [{ label: 'Oldest actionable', get: dm => groupCell(dm, 'oldest', ['Production']), kind: 'oldest', opts: { sub: true } }] },
         { header: 'Development &middot; Tier 3 + Dev', sep: true, metrics: [

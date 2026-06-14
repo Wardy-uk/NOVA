@@ -107,8 +107,8 @@ const SOLVED_TRANSITION = `status CHANGED TO ("Resolved", "Closed", "Done")`;
 export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_new_tickets', label: 'New Tickets', team: 'Support', colA: 'Support', jiraSpace: 'NT',
-    unit: 'count', direction: 'lower-better', dailyTarget: 90, monthlyTarget: null, rollup: 'sum',
-    rag: { greenMax: 89, amberMax: 110 },  // <90 green, 90–110 amber, >110 red
+    unit: 'count', direction: 'lower-better', dailyTarget: 110, monthlyTarget: null, rollup: 'sum',
+    rag: { greenMax: 110, amberMax: 120 },  // ≤110 green, 111–120 amber, >120 red
     compute: { kind: 'jql_count', jql: c => `project = NT AND created >= "${c.day}" AND created < "${c.nextDay}"` },
   },
   {
@@ -327,7 +327,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   },
   {
     key: 'nt_legacy_new_tickets', label: 'New Tickets Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
-    unit: 'count', direction: 'lower-better', dailyTarget: 90, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 89, amberMax: 110 },
+    unit: 'count', direction: 'lower-better', dailyTarget: 110, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 110, amberMax: 120 },
     compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND created >= "${ctx.day}" AND created < "${ctx.nextDay}"` },
   },
 
