@@ -210,18 +210,16 @@ export function getSlaRemainingMs(issue: Record<string, unknown>): number | null
 }
 
 /**
- * Absolute timestamp by which the resolution SLA says the ticket should be
- * completed — Jira's own computed target (it already factors in priority and the
- * UK business-hours calendar). Prefers the ongoing/paused cycle's `breachTime`;
- * falls back to the most recent completed cycle's `breachTime` so a parked ticket
- * (whose live cycle may be gone) still reports its original target. Returns null
- * when the SLA field carries no usable target.
+ * Absolute timestamp by which the LIVE resolution SLA breaches — Jira's own
+ * computed target, which already factors in the goal rule (request type / tier /
+ * priority), the working-hours calendar AND any time the SLA spent paused (a
+ * status like Waiting on Requestor pushes the breach time out). Only the ONGOING
+ * cycle is used: a completed cycle means the resolution SLA is already met/done,
+ * which is not a pending target — returning its stale breachTime is what wrongly
+ * flagged NT-20764, so we don't. Returns null when there's no live SLA.
  *
  * Used to decide whether a manually-set due date defers resolution *beyond* SLA:
- * due date later than this target = a conscious commitment past the SLA.
- *
- * breachTime shapes handled: { epochMillis: number }, { iso8601: string }, or a
- * bare ISO string.
+ * due date later than this live breach time = a conscious commitment past the SLA.
  */
 export function getResolutionSlaTarget(issue: Record<string, unknown>): Date | null {
   const raw = field(issue, 'customfield_14048');
@@ -238,24 +236,13 @@ export function getResolutionSlaTarget(issue: Record<string, unknown>): Date | n
     return toDate(o.iso8601 as string | undefined);
   };
 
-  // Live (ongoing or paused) cycle is the authoritative current target.
+  // Live (ongoing/paused) cycle only — pause-adjusted, authoritative current target.
   for (const sla of slaList) {
     if (!sla || typeof sla !== 'object') continue;
     const t = readBreach(sla.ongoingCycle);
     if (t) return t;
   }
-  // Otherwise the latest completed cycle's breachTime (original target).
-  let latest: Date | null = null;
-  for (const sla of slaList) {
-    if (!sla || typeof sla !== 'object') continue;
-    const completed = sla.completedCycles as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(completed)) continue;
-    for (const c of completed) {
-      const t = readBreach(c);
-      if (t && (!latest || t.getTime() > latest.getTime())) latest = t;
-    }
-  }
-  return latest;
+  return null;
 }
 
 /**
