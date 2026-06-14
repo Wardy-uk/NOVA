@@ -3616,8 +3616,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       ];
       const dailyHtml = LEFT_GROUPS.map(g => `<div class="grp${g.sep ? ' grp-sep' : ''}"><div class="grp-h">${g.header}</div>${g.metrics.map(m => metricRow(m.label, m.get, m.kind, m.opts)).join('')}</div>`).join('');
 
-      // ── Weekly green-day counts (bottom): per metric, how many business days in
-      // each of the last 4 ISO weeks the metric was GREEN (same rag as daily). ──
+      // ── Weekly red-day counts (bottom): per metric, how many business days in
+      // each of the last 4 ISO weeks the metric was RED. Week RAG: 5=red/4=amber/≤3=green. ──
       const isoWeekKey = (d: Date) => {
         const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
         const day = dd.getUTCDay() || 7;
@@ -3642,35 +3642,31 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         return `<div class="cell dh">w/c<br><span class="dh-n">${lbl}</span></div>`;
       }).join('');
       const weekRow = (m: MetricDef): string => {
-        // Count GREEN days (the daily board's green pills) per week, using the SAME
-        // displayRag the daily view uses — so the two halves agree. No-data days
-        // (e.g. CSAT with no surveys) are excluded from the denominator.
+        // Count RED days per week (same displayRag the daily view uses). Cell RAG:
+        // 5 red days = red, 4 = amber, ≤3 = green. No-data days excluded. Oldest grey.
         const muted = m.kind === 'oldest';   // oldest is shown neutral grey, not red
         const series = weeks.map(wk => {
-          let green = 0, total = 0;
+          let red = 0, total = 0;
           for (const dk of weekDays.get(wk)!) {
             const c = m.get(byDay.get(dk)!);
             if (!c) continue;
             total++;
-            if (displayRag(m.kind, c, m.opts?.band) === 1) green++;
+            if (displayRag(m.kind, c, m.opts?.band) === 3) red++;
           }
-          return total === 0 ? null : { green, total };
+          return total === 0 ? null : { red, total };
         });
         const cells = series.map(s => {
           if (!s) return `<div class="cell"><span class="pill" style="color:#475569;border:1px solid rgba(255,255,255,.06)">—</span></div>`;
-          // Cell RAG by PROPORTION of available days green (fair to short/holiday
-          // weeks): ≥80% green, ≥60% amber, else red. Oldest stays neutral.
-          const ratio = s.green / s.total;
-          const rag = muted ? null : (ratio >= 0.8 ? 1 : ratio >= 0.6 ? 2 : 3);
+          const rag = muted ? null : (s.red >= 5 ? 3 : s.red === 4 ? 2 : 1);
           const col = ragColor(rag), bg = ragBg(rag);
-          return `<div class="cell"><span class="pill" title="${s.green} of ${s.total} days green" style="background:${bg};color:${col};border:1px solid ${col}44">${s.green}</span></div>`;
+          return `<div class="cell"><span class="pill" title="${s.red} of ${s.total} days red" style="background:${bg};color:${col};border:1px solid ${col}44">${s.red}</span></div>`;
         }).join('');
-        // Trend on green days (higher = better): more green = ▲ green, fewer = ▼ red.
-        const pres = series.filter((s): s is { green: number; total: number } => s !== null);
+        // Trend on red days (lower = better): fewer red = ▼ green, more = ▲ red.
+        const pres = series.filter((s): s is { red: number; total: number } => s !== null);
         let trend = `<span style="color:#475569">▬</span>`;
         if (pres.length >= 2) {
-          const first = pres[0].green, lastv = pres[pres.length - 1].green;
-          trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv > first ? `<span style="color:${TREND_UP}">▲</span>` : `<span style="color:${TREND_DOWN}">▼</span>`;
+          const first = pres[0].red, lastv = pres[pres.length - 1].red;
+          trend = first === lastv ? `<span style="color:#64748b">▬</span>` : lastv < first ? `<span style="color:${TREND_UP}">▼</span>` : `<span style="color:${TREND_DOWN}">▲</span>`;
         }
         return `<div class="mrow${m.opts?.sub ? ' sub' : ''}"><div class="mlabel">${m.label}</div><div class="mcells mcellsw">${cells}</div><div class="mtrend">${trend}</div></div>`;
       };
@@ -3984,7 +3980,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
         </div>
       </div>
       <div class="kblock" id="wk-block" style="display:none">
-        <div class="kblock-h">Clean (green) days per week &middot; last 4 weeks</div>
+        <div class="kblock-h">Red days per week &middot; last 4 weeks</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
           ${weeklyHtml}
