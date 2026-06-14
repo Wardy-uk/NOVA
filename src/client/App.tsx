@@ -193,7 +193,7 @@ const AREAS: Record<Area, AreaDef> = {
     ],
   },
   kpis: {
-    label: 'KPIs',
+    label: 'Legacy KPIs (do not use)',
     defaultView: 'kpi-dashboard',
     tabs: [
       { view: 'kpi-dashboard', label: 'Dashboard' },

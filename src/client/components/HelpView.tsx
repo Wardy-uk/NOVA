@@ -36,8 +36,9 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: 'KPIs',
+    title: 'Legacy KPIs (do not use)',
     content: [
+      'Deprecated — use the KPIs (Rebuild) area instead. Kept only for reference during the rebuild.',
       'Detailed analytics and metrics across all your task sources.',
       'Key metrics: completion rate, tasks by status, overdue breakdown, average age, SLA tracking, source distribution, and high-priority open count.',
       'Use this page to identify bottlenecks — which sources have the most overdue tasks, which are aging, and where your focus should be.',
