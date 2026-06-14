@@ -3853,7 +3853,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             // Group the detail by Current Tier.
             const byTier = new Map<string, Commit[]>();
             for (const i of items) { const t = i.tier || 'Other'; if (!byTier.has(t)) byTier.set(t, []); byTier.get(t)!.push(i); }
-            const tierOrder = ['Customer Care', 'Tier 2', 'Tier 3', 'Production', 'Development'];
+            const tierOrder = ['Customer Care', 'Tier 2', 'Production', 'Tier 3', 'Development'];
             const rank = (t: string) => { const i = tierOrder.indexOf(t); return i < 0 ? 99 : i; };
             const tiers = [...byTier.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
             commitDetailHtml = tiers.map(t =>
