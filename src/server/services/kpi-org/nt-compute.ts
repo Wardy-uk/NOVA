@@ -29,6 +29,43 @@ function slaBreached(field: unknown): boolean | null {
   return false;
 }
 
+// CC customer-request types (cf12800 values) that count toward FCR.
+const CC_RT_VALUES = ['Incident (NT)', 'Chat (NT)', 'AI Request (NT)', 'Emailed request (NT)', 'GDPR (NT)', 'Service Request (NT)', 'TPJ Request (NT)'];
+const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
+const isBot = (name: string) => BOT_PATTERNS.some(p => name.toLowerCase().includes(p));
+
+/** First Contact Resolution % over CC tickets solved during the day. Mirrors the
+ *  legacy comment scan: FCR = an agent replied and the customer did NOT comment
+ *  after the agent's first reply. Sampled to the first 30 tickets, like legacy. */
+async function computeFcr(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
+  const jql = `project = NT AND statusCategory = Done ` +
+    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const res = await jira.searchJqlAll(jql, ['customfield_12800'], 2000);
+  const ccTickets = res.issues.filter(iss => {
+    const rt = ((iss.fields as Record<string, unknown> | undefined)?.customfield_12800 as { value?: string } | undefined)?.value ?? '';
+    return CC_RT_VALUES.includes(rt);
+  }).slice(0, 30);
+  let fcrCount = 0, fcrTotal = 0;
+  for (const iss of ccTickets) {
+    try {
+      const comments = await jira.getComments(iss.key, 50);
+      const agent = comments.filter(c => {
+        const a = c.author as { displayName?: string; accountType?: string } | undefined;
+        return a?.accountType !== 'customer' && !isBot(a?.displayName ?? '');
+      });
+      const customer = comments.filter(c => (c.author as { accountType?: string } | undefined)?.accountType === 'customer');
+      fcrTotal++;
+      if (agent.length > 0) {
+        const firstAgentTime = new Date(agent[agent.length - 1].created);
+        const customerAfter = customer.some(c => new Date(c.created) > firstAgentTime);
+        if (!customerAfter) fcrCount++;
+      }
+      await new Promise(r => setTimeout(r, 150));
+    } catch { /* skip ticket on comment fetch error */ }
+  }
+  return fcrTotal > 0 ? Math.round((fcrCount / fcrTotal) * 100) : 0;
+}
+
 interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number; resBreached: number; csatSum: number; csatCount: number; }
 
 /** Aggregate FRT/Resolution breaches + CSAT ratings over tickets solved during the
@@ -164,5 +201,8 @@ export async function computeNtKpi(
       // res
       return { value: agg.resTotal > 0 ? Math.round(((agg.resTotal - agg.resBreached) / agg.resTotal) * 100) : 100, failed: false };
     }
+
+    case 'fcr':
+      return { value: await computeFcr(jira, ctx), failed: false };
   }
 }

@@ -38,6 +38,8 @@ export type ComputeSpec =
   | { kind: 'escalation_log'; rejection: boolean }
   // Outcome derived from tickets solved during the day: SLA compliance % / CSAT.
   | { kind: 'resolved_outcome'; metric: 'frt' | 'res' | 'csat' }
+  // First Contact Resolution % — comment scan over CC tickets solved today.
+  | { kind: 'fcr' }
   // Entered by a human; capture preserves the existing manual value.
   | { kind: 'manual' };
 
@@ -264,6 +266,12 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'percent', direction: 'higher-better', dailyTarget: 80, monthlyTarget: null, rollup: 'average',
     rag: { greenMin: 80, amberMin: 64 },
     compute: { kind: 'resolved_outcome', metric: 'csat' },
+  },
+  {
+    key: 'nt_fcr', label: 'FCR Rate %', team: 'Support', colA: 'Quality', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 65, monthlyTarget: null, rollup: 'average',
+    rag: { greenMin: 65, amberMin: 35 },
+    compute: { kind: 'fcr' },
   },
 
   // ── Legacy 7-tier shape (colA 'Legacy'). Open-ticket volumes split by CurrentTier
