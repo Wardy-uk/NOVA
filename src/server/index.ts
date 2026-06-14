@@ -146,7 +146,6 @@ import { ConfluenceSyncProvider } from './services/kb-confluence-sync.js';
 import type { KbSyncProvider } from './services/kb-sync-provider.js';
 import { createKbAdminRoutes } from './routes/kb-admin.js';
 import { KpiPipeline, computeRag, getKpiPool } from './services/kpi-pipeline.js';
-import { getResolutionSlaTarget } from './services/jira-sla.js';
 import { runKpiMigrations } from './services/kpi-migrations.js';
 import { QaPipeline } from './services/qa-pipeline.js';
 import { GrPipeline } from './services/gr-pipeline.js';
@@ -180,7 +179,7 @@ import { CallReviewService } from './services/call-reviews.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createTrainingRoutes } from './routes/training.js';
 import { sendTrainingReminders } from './services/training-reminder.js';
-import { addBusinessHours, toSqliteDatetime } from './utils/business-hours.js';
+import { addBusinessHours, businessDaysBetween, toSqliteDatetime } from './utils/business-hours.js';
 /* CALYX SHELVED — imports commented out
 import { getCalyxDb, initializeCalyxSchema, seedCalyxData } from './db/calyx-db.js';
 import { CalyxQueries } from './db/calyx-queries.js';
@@ -3758,32 +3757,31 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
 
       // ── RIGHT BOTTOM: Key Commitments — future due dates that defer past SLA ──
       // Only surface tickets where a CONSCIOUS commitment was made beyond the SLA:
-      // the manually-set due date is later than Jira's computed resolution target
-      // (customfield_14048 breachTime — already factors in priority + business
-      // hours). Tickets within SLA are normal and excluded; tickets with no SLA
-      // data can't be judged, so they're skipped. Within/over-60-day-from-creation
-      // gives a second read on how far past the dev cycle the commitment runs.
+      // the manually-set due date is later than the resolution-SLA target, computed
+      // as created + N working days (commitment_sla_working_days, default 10). We do
+      // NOT use Jira's customfield_14048 — that's an 8h first-resolution SLA which
+      // would flag almost everything. Within-SLA tickets are excluded.
       // In-panel = count dashboard bucketed by time-to-due; expanded = full list.
       let commitSummaryHtml = '', commitDetailHtml = '';
       try {
         const projsRaw = settingsQueries.get('agent_jira_project') || 'NT,NTPJ';
         const projs = projsRaw.split(',').map(p => p.trim()).filter(Boolean).join(', ');
+        const slaDays = parseInt(settingsQueries.get('commitment_sla_working_days') || '', 10) || 10;
         if (agentJiraClient && projs) {
           const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_14048'], 100);
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981'], 100);
           const dayMs = 86400000;
-          const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
           type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
           const items: Commit[] = [];
           for (const iss of (r.issues || [])) {
             const f = iss.fields as Record<string, any>;
             const due = f.duedate ? new Date(f.duedate + 'T00:00:00Z') : null;
-            if (!due) continue;
-            const slaTarget = getResolutionSlaTarget(iss as unknown as Record<string, unknown>);
-            // Beyond SLA only: due day strictly later than the SLA target day.
-            if (!slaTarget || dateOnly(due) <= dateOnly(slaTarget)) continue;
             const created = f.created ? new Date(f.created) : null;
-            const cycle = created ? Math.round((due.getTime() - created.getTime()) / dayMs) : null;
+            if (!due || !created) continue;
+            // Beyond SLA only: working days from creation to due exceed the SLA.
+            const bdays = businessDaysBetween(created, due);
+            if (bdays <= slaDays) continue;
+            const cycle = Math.round((due.getTime() - created.getTime()) / dayMs);
             const summary = String(f.summary || '');
             items.push({
               key: iss.key,
@@ -3791,8 +3789,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               tier: (f.customfield_12981 && f.customfield_12981.value) || (f.issuetype && f.issuetype.name) || '—',
               dueStr: due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
               daysRem: Math.ceil((due.getTime() - now.getTime()) / dayMs),
-              pastSla: Math.round((dateOnly(due) - dateOnly(slaTarget)) / dayMs),
-              over60: cycle != null && cycle > 60,
+              pastSla: bdays - slaDays,
+              over60: cycle > 60,
             });
           }
           if (!items.length) {
