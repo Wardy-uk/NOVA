@@ -40,6 +40,10 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
       return { jql: `${c.bucketJql} AND status not in (${NOT_ACTIONABLE_LIST}) ORDER BY created ASC`, applyNoReply: false };
     case 'escalation_log':
       return { message: 'Escalations are tracked in the escalation log — no ticket drill-down.' };
+    case 'resolved_outcome': {
+      const ctx = dayCtx(now);
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`, applyNoReply: false };
+    }
     case 'manual':
       return { message: 'Manually-entered KPI — no ticket drill-down.' };
   }

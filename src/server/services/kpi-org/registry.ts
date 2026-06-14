@@ -36,6 +36,8 @@ export type ComputeSpec =
   | { kind: 'oldest_actionable'; bucketJql: string }
   // Distinct NT tickets in escalation_log for the day (rejection flag splits #13/#14).
   | { kind: 'escalation_log'; rejection: boolean }
+  // Outcome derived from tickets solved during the day: SLA compliance % / CSAT.
+  | { kind: 'resolved_outcome'; metric: 'frt' | 'res' | 'csat' }
   // Entered by a human; capture preserves the existing manual value.
   | { kind: 'manual' };
 
@@ -241,6 +243,27 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     rag: { greenMax: 75, amberMax: 90 },
     compute: { kind: 'jql_count', jql: () =>
       `${NT_OPEN} AND ${RT} = "TPJ Request (NT)" AND ${TIER} in ("Tier 3", "Development")` },
+  },
+
+  // ── Outcome KPIs (derived from tickets solved during the day). Reproduce the
+  // legacy "Resolved Today" formulas so the numbers match. ──
+  {
+    key: 'nt_frt_compliance', label: 'FRT Compliance %', team: 'Support', colA: 'SLA', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'average',
+    rag: { greenMin: 90, amberMin: 72 },
+    compute: { kind: 'resolved_outcome', metric: 'frt' },
+  },
+  {
+    key: 'nt_res_compliance', label: 'Resolution Compliance %', team: 'Support', colA: 'SLA', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'average',
+    rag: { greenMin: 90, amberMin: 72 },
+    compute: { kind: 'resolved_outcome', metric: 'res' },
+  },
+  {
+    key: 'nt_csat', label: 'CSAT %', team: 'Support', colA: 'Quality', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 80, monthlyTarget: null, rollup: 'average',
+    rag: { greenMin: 80, amberMin: 64 },
+    compute: { kind: 'resolved_outcome', metric: 'csat' },
   },
 ];
 

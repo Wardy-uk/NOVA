@@ -8,6 +8,49 @@ import { query } from '../database.js';
 import type { OrgKpi, DayCtx } from './registry.js';
 import { NOT_ACTIONABLE_STATUSES } from './registry.js';
 
+/** Port of kpi-pipeline.ts isSlaBreached — true if any cycle is breached / over time.
+ *  Returns null when the SLA field is absent (ticket excluded from compliance %). */
+function slaBreached(field: unknown): boolean | null {
+  if (!field) return null;
+  const cycles = Array.isArray(field) ? field : [field];
+  for (const cyc of cycles as Array<Record<string, unknown>>) {
+    if (!cyc || typeof cyc !== 'object') continue;
+    const completed = cyc.completedCycles as Array<Record<string, unknown>> | undefined;
+    for (const cc of completed ?? []) {
+      const rt = cc.remainingTime as { millis?: number } | undefined;
+      if (cc.breached === true || (rt?.millis != null && rt.millis < 0)) return true;
+    }
+    const ongoing = cyc.ongoingCycle as Record<string, unknown> | undefined;
+    if (ongoing) {
+      const rt = ongoing.remainingTime as { millis?: number } | undefined;
+      if (ongoing.breached === true || (rt?.millis != null && rt.millis < 0)) return true;
+    }
+  }
+  return false;
+}
+
+interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number; resBreached: number; csatSum: number; csatCount: number; }
+
+/** Aggregate FRT/Resolution breaches + CSAT ratings over tickets solved during the
+ *  day (status transitioned to a Done status that day). Mirrors the legacy
+ *  resolved-today snapshot: cf14046 (FRT), cf14048 (Resolution), cf12802.rating (CSAT). */
+async function resolvedAgg(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedAgg> {
+  const jql = `project = NT AND statusCategory = Done ` +
+    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const res = await jira.searchJqlAll(jql, ['customfield_14046', 'customfield_14048', 'customfield_12802'], 2000);
+  const agg: ResolvedAgg = { frtTotal: 0, frtBreached: 0, resTotal: 0, resBreached: 0, csatSum: 0, csatCount: 0 };
+  for (const iss of res.issues) {
+    const f = (iss.fields ?? {}) as Record<string, unknown>;
+    const frt = slaBreached(f.customfield_14046);
+    if (frt !== null) { agg.frtTotal++; if (frt) agg.frtBreached++; }
+    const r = slaBreached(f.customfield_14048);
+    if (r !== null) { agg.resTotal++; if (r) agg.resBreached++; }
+    const rating = (f.customfield_12802 as { rating?: number } | undefined)?.rating;
+    if (typeof rating === 'number' && rating >= 1 && rating <= 5) { agg.csatSum += rating; agg.csatCount++; }
+  }
+  return agg;
+}
+
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const FIFTY_TWO_WEEKS_MS = 52 * 7 * 24 * 60 * 60 * 1000;
 
@@ -108,6 +151,18 @@ export async function computeNtKpi(
       if (!created) return { value: 0, failed: false };
       const days = Math.floor((now.getTime() - created.getTime()) / 86_400_000);
       return { value: Math.max(0, days), failed: false };
+    }
+
+    case 'resolved_outcome': {
+      const agg = await resolvedAgg(jira, ctx);
+      if (c.metric === 'csat') {
+        return { value: agg.csatCount > 0 ? Math.round((agg.csatSum / agg.csatCount) * 20) : 0, failed: false };
+      }
+      if (c.metric === 'frt') {
+        return { value: agg.frtTotal > 0 ? Math.round(((agg.frtTotal - agg.frtBreached) / agg.frtTotal) * 100) : 100, failed: false };
+      }
+      // res
+      return { value: agg.resTotal > 0 ? Math.round(((agg.resTotal - agg.resBreached) / agg.resTotal) * 100) : 100, failed: false };
     }
   }
 }
