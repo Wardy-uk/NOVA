@@ -17,6 +17,10 @@ import {
   isCancellationGuardrailEnabled,
   buildCancellationHoldingResponse,
 } from './cancellation-guardrail.js';
+import {
+  detectAutoReply,
+  isAutoReplyGuardrailEnabled,
+} from './auto-reply-guardrail.js';
 
 const CONFIDENCE_HIGH = 0.8;
 const CONFIDENCE_LOW = 0.4;
@@ -264,10 +268,41 @@ export class Reasoner {
 
     await this.trackLearningCitations(triage.reasoning_trace, learningsCtx.learnings);
 
+    // Auto-reply / bounce guardrail — deterministically auto-close mail-generated noise
+    // (out-of-office, delivery failures) instead of drafting a reply to a no-reply mailbox.
+    this.applyAutoReplyGuardrail(decision, event.summary);
+
     // Cancellation guardrail runs last so it has the final say over the action.
     this.applyCancellationGuardrail(decision, `${event.summary}\n${event.description ?? ''}`);
 
     return decision;
+  }
+
+  // Auto-reply / non-actionable mail guardrail. When the ticket subject is an unambiguous
+  // mail-system auto-reply or bounce, force a closable quick-win so the agent loop auto-closes
+  // it (out_of_office / auto_reply are in alwaysAutoCloseTypes) rather than drafting a reply.
+  // Action stays 'draft_response' (not 'no_action') because no_action returns before the
+  // quick-win auto-close runs; the draft is cleared so nothing is sent to the customer.
+  private applyAutoReplyGuardrail(decision: AgentDecision, subject: string): boolean {
+    if (!isAutoReplyGuardrailEnabled(this.settings)) return false;
+    const hit = detectAutoReply(subject, this.settings);
+    if (!hit.matched || !hit.kind) return false;
+
+    console.log(`[reasoner] Auto-reply guardrail fired on ${decision.ticketKey} (matched: "${hit.phrase}") — auto-closing as ${hit.kind}`);
+
+    decision.action = 'draft_response';
+    decision.output.recommended_action = 'no_action';
+    decision.output.draft_response = null;
+    decision.output.needs_customer_reply = false;
+    decision.output.quick_win = {
+      type: hit.kind,
+      confidence: 0.97,
+      reasoning: `Auto-reply guardrail — subject is a mail-generated ${hit.kind.replace(/_/g, ' ')} ("${hit.phrase}"), not a support request. Auto-closing without a reply.`,
+    };
+    decision.output.website_amend = { is_website_amend: false, confidence: 0, reasoning: 'Auto-reply guardrail — not a website amend.' };
+    decision.approvalRequired = false;
+    decision.reasoning += `\n[Guardrail: subject is a mail-generated auto-reply/bounce ("${hit.phrase}") — auto-closing as ${hit.kind}, no customer reply]`;
+    return true;
   }
 
   private extractImageContent(event: TicketEvent): import('./llm-service.js').LlmImageContent[] {
