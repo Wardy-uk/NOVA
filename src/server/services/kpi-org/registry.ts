@@ -36,6 +36,8 @@ export type ComputeSpec =
   | { kind: 'oldest_actionable'; bucketJql: string }
   // Distinct NT tickets in escalation_log for the day (rejection flag splits #13/#14).
   | { kind: 'escalation_log'; rejection: boolean }
+  // escalation_log rows for the day filtered by from/to tier (escalated-to / rejected-by).
+  | { kind: 'escalation_tier'; fromTiers?: string[]; toTiers: string[] }
   // Outcome derived from tickets solved during the day: SLA compliance % / CSAT.
   | { kind: 'resolved_outcome'; metric: 'frt' | 'res' | 'csat' }
   // First Contact Resolution % — comment scan over CC tickets solved today.
@@ -317,6 +319,43 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_legacy_solved_today', label: 'Tickets Solved Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 85, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 85, amberMin: 68 },
     compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND statusCategory = Done AND ${SOLVED_TRANSITION} DURING ("${ctx.day}", "${ctx.nextDay}")` },
+  },
+  {
+    key: 'nt_legacy_cc_total', label: 'Number of Tickets in Customer Care', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 120, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 120, amberMax: 180 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care"` },
+  },
+
+  // ── Escalations / rejections by destination tier (escalation_log, by from/to tier). ──
+  {
+    key: 'nt_legacy_esc_t2', label: 'Tickets escalated to Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', toTiers: ['T2', 'Tier 2'] },
+  },
+  {
+    key: 'nt_legacy_esc_t3', label: 'Tickets escalated to Tier 3', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', toTiers: ['T3', 'Tier 3'] },
+  },
+  {
+    key: 'nt_legacy_esc_dev', label: 'Tickets escalated to Development', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', toTiers: ['Dev', 'Development'] },
+  },
+  {
+    key: 'nt_legacy_rej_t2', label: 'Tickets rejected by Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', fromTiers: ['T2', 'Tier 2'], toTiers: ['T1', 'Customer Care'] },
+  },
+  {
+    key: 'nt_legacy_rej_t3', label: 'Tickets rejected by Tier 3', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', fromTiers: ['T3', 'Tier 3'], toTiers: ['T2', 'Tier 2', 'T1', 'Customer Care'] },
+  },
+  {
+    key: 'nt_legacy_rej_dev', label: 'Tickets rejected by Development', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'escalation_tier', fromTiers: ['Dev', 'Development'], toTiers: ['T3', 'Tier 3', 'T2', 'Tier 2'] },
   },
 ];
 

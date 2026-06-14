@@ -39,6 +39,7 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
     case 'oldest_actionable':
       return { jql: `${c.bucketJql} AND status not in (${NOT_ACTIONABLE_LIST}) ORDER BY created ASC`, applyNoReply: false };
     case 'escalation_log':
+    case 'escalation_tier':
       return { message: 'Escalations are tracked in the escalation log — no ticket drill-down.' };
     case 'resolved_outcome':
     case 'fcr': {

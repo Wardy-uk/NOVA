@@ -176,6 +176,19 @@ export async function computeNtKpi(
       return { value: rows[0]?.n ?? 0, failed: false };
     }
 
+    case 'escalation_tier': {
+      const params: unknown[] = [`${ctx.day}T00:00:00.000Z`, `${ctx.nextDay}T00:00:00.000Z`];
+      let where = 'created_at >= ? AND created_at < ?';
+      if (c.fromTiers && c.fromTiers.length) {
+        where += ` AND from_tier IN (${c.fromTiers.map(() => '?').join(', ')})`;
+        params.push(...c.fromTiers);
+      }
+      where += ` AND to_tier IN (${c.toTiers.map(() => '?').join(', ')})`;
+      params.push(...c.toTiers);
+      const rows = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where}`, params);
+      return { value: rows[0]?.n ?? 0, failed: false };
+    }
+
     case 'no_reply':
       return { value: await countNoReply(jira, c.bucketJql, now), failed: false };
 
