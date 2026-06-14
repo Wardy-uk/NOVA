@@ -3841,15 +3841,24 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               const n = items.filter(i => b.test(i.daysRem)).length;
               return `<div class="bk ${b.cls}${n === 0 ? ' bk-0' : ''}"><div class="bk-n">${n}</div><div class="bk-l">${b.label}</div></div>`;
             }).join('')}</div><div class="bk-total">${items.length} commitment${items.length === 1 ? '' : 's'} beyond SLA</div>`;
-            commitDetailHtml = items.map(i => {
+            const renderRow = (i: Commit) => {
               const rowCls = i.daysRem < 0 ? ' c-red' : i.daysRem <= 7 ? ' c-amber' : '';
               const remLbl = i.daysRem < 0 ? `${-i.daysRem}d overdue` : `${i.daysRem}d`;
               return `<a class="crow${rowCls}" href="${jiraBase}/browse/${esc(i.key)}" target="_blank">
                 <div class="ckey">${esc(i.key)}</div>
-                <div class="csum">${esc(i.trunc)}<span class="ctier">${esc(i.tier)}</span></div>
+                <div class="csum">${esc(i.trunc)}</div>
                 <div class="cdue"><span class="cbadge" style="${i.over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${i.over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${i.dueStr}</span><span class="cpast">${i.pastSla}d past SLA</span><span class="crem">${remLbl}</span></div>
               </a>`;
-            }).join('');
+            };
+            // Group the detail by Current Tier.
+            const byTier = new Map<string, Commit[]>();
+            for (const i of items) { const t = i.tier || 'Other'; if (!byTier.has(t)) byTier.set(t, []); byTier.get(t)!.push(i); }
+            const tierOrder = ['Customer Care', 'Tier 2', 'Tier 3', 'Production', 'Development'];
+            const rank = (t: string) => { const i = tierOrder.indexOf(t); return i < 0 ? 99 : i; };
+            const tiers = [...byTier.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+            commitDetailHtml = tiers.map(t =>
+              `<div class="grp"><div class="grp-h">${esc(t)} &middot; ${byTier.get(t)!.length}</div>${byTier.get(t)!.map(renderRow).join('')}</div>`
+            ).join('');
           }
         } else {
           commitSummaryHtml = `<div class="empty">Jira not configured</div>`;
