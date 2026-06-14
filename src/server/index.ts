@@ -3389,7 +3389,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     try {
       const now = new Date();
-      const jiraBase = (settingsQueries.get('jira_ob_url') || 'https://nurturtech.atlassian.net').replace(/\/$/, '');
+      // Browse-link base = the Jira SITE, not jira_ob_url (that's the api.atlassian.net
+      // gateway used by the REST client, which 404s for /browse). Override via jira_browse_url.
+      const jiraBase = (settingsQueries.get('jira_browse_url') || 'https://nurturtech.atlassian.net').replace(/\/$/, '');
 
       // ── LEFT: 5-day end-of-day KPI snapshots from jira_kpi_daily (NOVA-populated) ──
       const pool = await getKpiPool(settingsQueries);
