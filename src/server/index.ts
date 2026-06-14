@@ -3972,7 +3972,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
       </span>
     </div>
     <div class="panel-body">
-      <div class="kblock">
+      <div class="kblock" id="day-block">
         <div class="kblock-h">This week &middot; day by day</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
@@ -4019,12 +4019,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 <script>
 (function(){
   function byId(i){return document.getElementById(i);}
-  // 4-week ("monthly") section toggle — hidden by default.
+  // Toggle between the daily view and the 4-week view (mutually exclusive).
   window.__toggleWk=function(btn){
-    var wk=byId('wk-block'); if(!wk)return;
-    var on=wk.style.display==='none';
-    wk.style.display=on?'flex':'none';
-    btn.textContent=on?'Hide 4-week view':'Show 4-week view';
+    var wk=byId('wk-block'),day=byId('day-block'); if(!wk||!day)return;
+    var showWeekly=wk.style.display==='none';
+    wk.style.display=showWeekly?'flex':'none';
+    day.style.display=showWeekly?'none':'flex';
+    btn.textContent=showWeekly?'Show daily view':'Show 4-week view';
   };
   var ov=byId('ov'),card=byId('ovcard'),body=byId('ovbody'),title=byId('ovt'),min=byId('ovmin'),last=null,busy=false;
   function expand(src){
