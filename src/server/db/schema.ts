@@ -911,6 +911,45 @@ async function runMigrations(): Promise<void> {
        queued_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
      );`,
 
+    // ── Issue Router (AgentBrain) — cross-customer issue cards POSTed in by Liam's router ──
+    // Replaces NOVA's home-grown ticket→customer attribution: AgentBrain already classifies +
+    // attributes across JSM + Zendesk. One row per issue (upsert on signature); customer_share
+    // is also exploded into agent_issue_customers so the per-customer at-risk view is a GROUP BY.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_issue_cards') AND type = 'U')
+     CREATE TABLE agent_issue_cards (
+       signature NVARCHAR(120) NOT NULL PRIMARY KEY,   -- iss-<hash>, stable identity across runs
+       route NVARCHAR(30) NULL,                        -- bug_external|ux_friction|missing_feature|docs_gap|uncertain
+       confidence FLOAT NULL,                          -- 0.0-1.0
+       severity NVARCHAR(20) NULL,                     -- optional (if AgentBrain adds it)
+       title NVARCHAR(500) NULL,
+       problem_statement NVARCHAR(MAX) NULL,
+       customer_count INT NULL,
+       frequency_label NVARCHAR(300) NULL,
+       trend NVARCHAR(20) NULL,                         -- new|growing|stable
+       first_seen DATETIME2 NULL,
+       last_seen DATETIME2 NULL,
+       reasoning NVARCHAR(MAX) NULL,
+       customer_share NVARCHAR(MAX) NULL,               -- raw JSON
+       citing_tickets NVARCHAR(MAX) NULL,               -- raw JSON
+       last_action NVARCHAR(30) NULL,                   -- send_dashboard|update_dashboard
+       received_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_issue_cards_route')
+     CREATE INDEX IX_agent_issue_cards_route ON agent_issue_cards (route, trend);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_issue_customers') AND type = 'U')
+     CREATE TABLE agent_issue_customers (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       signature NVARCHAR(120) NOT NULL,
+       customer NVARCHAR(255) NOT NULL,
+       ticket_count INT NOT NULL DEFAULT 0,
+       pct FLOAT NULL,
+       CONSTRAINT UQ_agent_issue_customers UNIQUE (signature, customer)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_issue_customers_customer')
+     CREATE INDEX IX_agent_issue_customers_customer ON agent_issue_customers (customer);`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)

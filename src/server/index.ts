@@ -132,6 +132,7 @@ import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
 import { AccountRiskEngine } from './services/account-risk-engine.js';
 import { processInferenceQueue } from './services/customer-inference.js';
+import { upsertIssueCard } from './services/issue-router-store.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -697,6 +698,24 @@ async function main() {
     }
   });
 
+  // Issue Router (AgentBrain) — Liam's cross-customer issue cards. Machine-to-machine, no JWT;
+  // authenticated by a shared secret in the x-issue-router-secret header. One issue per POST,
+  // upsert on signature. See issue-router-dashboard-handover.md.
+  app.post('/api/public/webhooks/issue-router', express.json({ limit: '2mb' }), async (req, res) => {
+    const expected = settingsQueries.get('issue_router_secret') || process.env.ISSUE_ROUTER_SECRET;
+    if (!expected) { res.status(503).json({ ok: false, error: 'issue_router_secret not configured' }); return; }
+    const provided = (req.headers['x-issue-router-secret'] as string | undefined) ?? '';
+    const ok = provided.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    if (!ok) { res.status(401).json({ ok: false, error: 'Invalid or missing x-issue-router-secret' }); return; }
+    try {
+      await upsertIssueCard(req.body);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Invalid payload' });
+    }
+  });
+
   // Training export — token-gated, no JWT, for n8n automation (Training Matrix Sync).
   // Returns a flat dump of categories, items, scores, members, and the display-name
   // map needed to render the matrix into Obsidian. Requires TRAINING_EXPORT_TOKEN env
@@ -1145,40 +1164,33 @@ async function main() {
   app.use('/api/risk', requireAreaAccess(['servicedesk', 'kpis'], 'view'),
     createRiskRoutes({ settings: settingsQueries }));
 
-  // Account-risk backfill (chunks 1-2). Runs UNCONDITIONALLY (does not depend on the agent
-  // Jira client — it uses its own resolver + DB), guarded so it runs once, non-blocking.
-  // Previously nested inside `if (agentJiraClient)`, where an earlier throw in that block
-  // (assignment-engine setup) could abort before it was reached.
-  // Pulls full ticket history from Jira (the cache only holds open + recently-closed).
-  console.log(`[account-risk] backfill guard: flag=${settingsQueries.get('account_risk_backfill_v11') ?? '(unset)'}`);
-  if (!settingsQueries.get('account_risk_backfill_v11')) {
-    void (async () => {
-      try {
-        await new AccountRiskEngine(settingsQueries, agentJiraClient).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
-        settingsQueries.set('account_risk_backfill_v11', 'true');
-      } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
-    })();
-  }
-
-  // AI inference worker: drains the unresolved-ticket queue in small chunks every 2 min,
-  // independent of the rollup so deploys/restarts don't lose progress (it resumes from the
-  // DB queue). Each cheap inference is cached; the next rollup applies the confident matches.
-  {
+  // ── LEGACY home-grown attribution (resolver + AI inference) — RETIRED ──
+  // Superseded by AgentBrain's issue-router feed (it owns customer attribution + classification
+  // across JSM + Zendesk). The collapse/over-attribution problems lived here. Disabled by
+  // default; set account_risk_legacy_enabled='true' only to temporarily revive it.
+  if (settingsQueries.get('account_risk_legacy_enabled') === 'true') {
+    if (!settingsQueries.get('account_risk_backfill_v11')) {
+      void (async () => {
+        try {
+          await new AccountRiskEngine(settingsQueries, agentJiraClient).runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF']);
+          settingsQueries.set('account_risk_backfill_v11', 'true');
+        } catch (err) { console.warn('[account-risk] backfill failed:', err instanceof Error ? err.message : err); }
+      })();
+    }
     const inferenceChunk = parseInt(settingsQueries.get('account_risk_ai_chunk') ?? '', 10) || 150;
     setInterval(() => {
       void processInferenceQueue({ llmService }, inferenceChunk)
         .then(r => { if (r.processed) console.log(`[account-risk] inference worker: ${r.processed} done, ${r.matched} matched, ${r.remaining} left in queue`); })
         .catch(err => console.warn('[account-risk] inference worker failed:', err instanceof Error ? err.message : err));
     }, 2 * 60 * 1000);
+    setInterval(() => {
+      void new AccountRiskEngine(settingsQueries, agentJiraClient)
+        .runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'])
+        .catch(err => console.warn('[account-risk] nightly refresh failed:', err instanceof Error ? err.message : err));
+    }, 24 * 60 * 60 * 1000);
+  } else {
+    console.log('[account-risk] legacy attribution disabled — using AgentBrain issue-router feed');
   }
-
-  // Nightly refresh (every 24h from boot) so account risk stays current for triage enrichment
-  // + the dashboard. Idempotent (upserts). Unconditional — must not be gated by the agent block.
-  setInterval(() => {
-    void new AccountRiskEngine(settingsQueries, agentJiraClient)
-      .runRollupAndRecon(['NT', 'NTPJ', 'STBY', 'YO', 'KYM', 'NAI', 'NF'])
-      .catch(err => console.warn('[account-risk] nightly refresh failed:', err instanceof Error ? err.message : err));
-  }, 24 * 60 * 60 * 1000);
 
   if (agentJiraClient) {
     agentLoop = new AgentLoop(agentJiraClient, llmService, settingsQueries, approvalQueries, jiraCacheQueries);

@@ -4,6 +4,7 @@ import { query, queryOne } from '../services/database.js';
 import {
   getTicketCustomerRisk, getRiskTierDistribution, getAtRiskAccounts, RISK_TIER_LABELS,
 } from '../services/account-risk-queries.js';
+import { getAtRiskCustomersFromIssues, getIssueCards } from '../services/issue-router-store.js';
 
 interface RiskRouteDeps {
   settings: SettingsQueries;
@@ -64,6 +65,26 @@ export function createRiskRoutes(deps: RiskRouteDeps): Router {
     try {
       const data = await getTicketCustomerRisk(String(req.params.key), settings);
       res.json({ ok: true, data });  // null when unresolved or Normal tier
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // ── AgentBrain issue-router feed ──
+  // At-risk customers derived from cross-customer issue cards (the new source of truth).
+  router.get('/issue-customers', async (_req: Request, res: Response) => {
+    try {
+      res.json({ ok: true, data: await getAtRiskCustomersFromIssues() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // Raw issue cards (most recently updated first).
+  router.get('/issues', async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string, 10) || 200;
+      res.json({ ok: true, data: await getIssueCards(limit) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     }
