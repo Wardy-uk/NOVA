@@ -19,6 +19,12 @@ Daily History UI · Trends UI · Weekly/Monthly rollups · Backfill · Operation
 Indicators on NOVA · SLA fix · per-tier volume/no-reply/oldest/over-SLA/FRT/escalations/
 solved(transition)/CSAT/FRT+Res compliance/FCR.
 
+## STATUS (2026-06-15)
+- [x] **B2 done** (commit 44a9f47) — AI×3, 1st-line, bug-ack, WTD×2 ported to kpi-org.
+- [x] **P1 done** (commit 01f090e) — 34 per-tier SLA Met/Breached/Compliance + Escalation Accuracy (daily + All Time).
+- KPI-DATA parity layer complete. Remaining = operational (B1, P2) + UI (P3–P7) + retirement.
+- ⚠ Deploy pending: commits 372d393, 44a9f47, 01f090e need a prod deploy + capture to populate.
+
 ## HARD BLOCKERS (must do before n8n off)
 - [ ] **B1 — `dbo.Agent` stats dependency.** `assignment-engine.ts` (round-robin),
   `capacity-planner.ts`, `agent-availability.ts`, `people.ts`, `agent.ts` READ
