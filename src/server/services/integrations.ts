@@ -346,6 +346,16 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
       { key: 'whisper_api_key', label: 'API Key (if different from OpenAI)', type: 'password', placeholder: 'Uses OpenAI key if blank', required: false },
     ],
   },
+  {
+    id: 'agentic-brain',
+    name: 'Agentic Brain',
+    description: 'AgentBrain — the cross-customer issue router. It classifies + attributes support tickets (JSM + Zendesk) and POSTs issue cards into NOVA Risk Intelligence at /api/public/webhooks/issue-router, authenticated with the shared secret below (sent in the x-issue-router-secret header). Agree the secret with the AgentBrain owner and paste it here.',
+    enabledKey: 'issue_router_enabled',
+    authType: 'credentials',
+    fields: [
+      { key: 'issue_router_secret', label: 'Shared Secret', type: 'password', placeholder: 'Agreed with AgentBrain; sent in the x-issue-router-secret header', required: true },
+    ],
+  },
 ];
 
 export interface McpServerConfig {

@@ -38,7 +38,7 @@ const ms365Env = {
 };
 
 // Admin-only integrations: credentials stay in global settings.json
-const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'kb-retrieval']);
+const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'adobe-sign', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'kb-retrieval', 'agentic-brain']);
 
 // Super-admin-only: contain API keys/secrets — hidden from regular admins entirely
 const SUPER_ADMIN_ONLY_IDS = new Set(['llm', 'ai-agent', 'teams-webhook', 'whisper']);
