@@ -50,6 +50,11 @@ export type ComputeSpec =
   | { kind: 'bug_ack' }
   // WTD meta: % of captured kpi_org_daily rows this week that are green / red.
   | { kind: 'wtd_rag'; rag: 'green' | 'red' }
+  // Per-tier SLA outcome over tickets solved during the day: FRT/Resolution Met /
+  // Breached counts and Compliance %. tier='' means all tiers.
+  | { kind: 'resolved_sla'; metric: 'frt' | 'res'; stat: 'met' | 'breached' | 'compliance'; tier: string }
+  // Escalation accuracy % from escalation_log: (escalations - rejections) / escalations.
+  | { kind: 'escalation_accuracy'; allTime: boolean }
   // Entered by a human; capture preserves the existing manual value.
   | { kind: 'manual' };
 
@@ -497,6 +502,42 @@ for (const t of LEGACY_TIERS) {
       compute: { kind: 'oldest_actionable', bucketJql: t.bucket } },
   );
 }
+
+// ── Per-tier resolved-SLA outcome matrix (FRT/Resolution Met/Breached/Compliance),
+// + escalation accuracy. Reproduces the n8n-only granular SLA KPIs for full parity.
+// Computed over tickets solved during the day, split by CurrentTier (cf12981). ──
+const SLA_TIERS: Array<[string, string]> = [
+  ['', 'All'], ['Customer Care', 'Customer Care'], ['Production', 'Production'],
+  ['Tier 2', 'Tier 2'], ['Tier 3', 'Tier 3'], ['Development', 'Development'],
+];
+for (const [metricKey, metricLabel] of [['frt', 'FRT'], ['res', 'Resolution']] as Array<['frt' | 'res', string]>) {
+  for (const [tierVal, tierLabel] of SLA_TIERS) {
+    const slug = `${metricKey}_${tierLabel.replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`;
+    SUPPORT_NT_KPIS.push(
+      { key: `nt_sla_${slug}_met`, label: `${metricLabel} Met (${tierLabel})`, team: 'Support', colA: 'SLA', jiraSpace: 'NT',
+        unit: 'count', direction: 'higher-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 0 },
+        compute: { kind: 'resolved_sla', metric: metricKey, stat: 'met', tier: tierVal } },
+      { key: `nt_sla_${slug}_breached`, label: `${metricLabel} Breached (${tierLabel})`, team: 'Support', colA: 'SLA', jiraSpace: 'NT',
+        unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
+        compute: { kind: 'resolved_sla', metric: metricKey, stat: 'breached', tier: tierVal } },
+    );
+    if (tierVal) { // compliance only for the 5 named tiers (aggregate already exists)
+      SUPPORT_NT_KPIS.push(
+        { key: `nt_sla_${slug}_compliance`, label: `${metricLabel} Compliance % (${tierLabel})`, team: 'Support', colA: 'SLA', jiraSpace: 'NT',
+          unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'average', rag: { greenMin: 90, amberMin: 72 },
+          compute: { kind: 'resolved_sla', metric: metricKey, stat: 'compliance', tier: tierVal } },
+      );
+    }
+  }
+}
+SUPPORT_NT_KPIS.push(
+  { key: 'nt_esc_accuracy', label: 'Escalation Accuracy %', team: 'Support', colA: 'Escalation', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'average', rag: { greenMin: 90, amberMin: 72 },
+    compute: { kind: 'escalation_accuracy', allTime: false } },
+  { key: 'nt_esc_accuracy_alltime', label: 'Escalation Accuracy % (All Time)', team: 'Support', colA: 'Escalation', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'latest', rag: { greenMin: 90, amberMin: 72 },
+    compute: { kind: 'escalation_accuracy', allTime: true } },
+);
 
 /** All registered org KPIs (only Support/NT for now). */
 export const ORG_KPIS: OrgKpi[] = [...SUPPORT_NT_KPIS];

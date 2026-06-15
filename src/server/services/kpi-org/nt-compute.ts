@@ -101,6 +101,29 @@ function weekStartOf(day: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Extract a string from a Jira select/text field that may be a string, {value} or {name}. */
+function fieldStr(v: unknown): string {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  const o = v as { value?: string; name?: string };
+  return o.value ?? o.name ?? '';
+}
+
+// Cache the solved-during-day issue set (with SLA + tier fields) so the ~30 per-tier
+// SLA KPIs share ONE Jira fetch per capture/live pass instead of refetching each.
+interface ResolvedIssue { fields?: Record<string, unknown> }
+let resolvedSlaCache: { day: string; ts: number; issues: ResolvedIssue[] } | null = null;
+async function getResolvedSlaIssues(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedIssue[]> {
+  if (resolvedSlaCache && resolvedSlaCache.day === ctx.day && Date.now() - resolvedSlaCache.ts < 120_000) {
+    return resolvedSlaCache.issues;
+  }
+  const jql = `project = NT AND statusCategory = Done ` +
+    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const res = await jira.searchJqlAll(jql, ['customfield_14046', 'customfield_14048', 'customfield_12981'], 2000);
+  resolvedSlaCache = { day: ctx.day, ts: Date.now(), issues: res.issues };
+  return res.issues;
+}
+
 interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number; resBreached: number; csatSum: number; csatCount: number; }
 
 /** Aggregate FRT/Resolution breaches + CSAT ratings over tickets solved during the
@@ -293,6 +316,33 @@ export async function computeNtKpi(
       if (scored.length === 0) return { value: 0, failed: false };
       const hit = scored.filter(r => r.rag === c.rag).length;
       return { value: Math.round((hit / scored.length) * 100), failed: false };
+    }
+
+    case 'resolved_sla': {
+      const issues = await getResolvedSlaIssues(jira, ctx);
+      const field = c.metric === 'frt' ? 'customfield_14046' : 'customfield_14048';
+      let met = 0, breached = 0;
+      for (const iss of issues) {
+        const f = iss.fields ?? {};
+        if (c.tier && fieldStr(f.customfield_12981) !== c.tier) continue;
+        const b = slaBreached(f[field]);
+        if (b === true) breached++; else if (b === false) met++;
+      }
+      if (c.stat === 'met') return { value: met, failed: false };
+      if (c.stat === 'breached') return { value: breached, failed: false };
+      const tot = met + breached;
+      return { value: tot > 0 ? Math.round((met / tot) * 100) : 100, failed: false };
+    }
+
+    case 'escalation_accuracy': {
+      const where = c.allTime
+        ? `ticket_key LIKE 'NT-%'`
+        : `ticket_key LIKE 'NT-%' AND created_at >= ? AND created_at < ?`;
+      const params = c.allTime ? [] : [`${ctx.day}T00:00:00.000Z`, `${ctx.nextDay}T00:00:00.000Z`];
+      const esc = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND escalation_type <> 'rejection'`, params);
+      const rej = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND escalation_type = 'rejection'`, params);
+      const e = esc[0]?.n ?? 0, r = rej[0]?.n ?? 0;
+      return { value: e > 0 ? Math.round(((e - r) / e) * 100) : 100, failed: false };
     }
   }
 }

@@ -58,6 +58,13 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
       return { message: 'AI agent throughput is tracked in the approval queue — no ticket drill-down.' };
     case 'wtd_rag':
       return { message: 'Week-to-date KPI RAG summary — no ticket drill-down.' };
+    case 'resolved_sla': {
+      const ctx = dayCtx(now);
+      const tierClause = c.tier ? ` AND cf[12981] = "${c.tier}"` : '';
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")${tierClause}`, applyNoReply: false };
+    }
+    case 'escalation_accuracy':
+      return { message: 'Escalation accuracy is derived from the escalation log — no ticket drill-down.' };
     case 'manual':
       return { message: 'Manually-entered KPI — no ticket drill-down.' };
   }
