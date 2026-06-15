@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState } from 'react';
 
-// Operational Indicators — stage 1 of porting the full legacy KPI set into the
-// rebuild area. Surfaces the operational metrics NOVA's kpi-pipeline already
-// captures + calculates into dbo.jira_kpi_daily (per-tier volume, no-reply,
-// oldest-actionable age, resolution/FRT breach counts, queue health, escalations).
-// Names are generated from the SAME logic as services/kpi-pipeline.ts (n8nKpiName /
-// ccBucket / ALL_TIERS) so they match the stored rows exactly.
+// Operational Indicators — operational metrics for the KPI Rebuild area, sourced
+// ENTIRELY from the NOVA-only kpi-org engine via /api/kpi-org/support/legacy-history
+// (kpi_org_daily, team 'Support'). This tab used to read the legacy jira_kpi_daily
+// table, which is written by BOTH n8n and NOVA's old kpi-pipeline (they race) — so
+// the numbers were non-deterministic. The rebuild area must be NOVA-only; this tab
+// now reads the same engine as every other Rebuild tab. KPI names match the labels
+// in kpi-org/registry.ts (the 'Legacy' colA slice) exactly.
 //
 // Scope is deliberately counts + age only. The %-based metrics (SLA compliance %,
 // FRT/Resolution compliance %, CSAT %, FCR, Escalation Accuracy %) are Performance/
@@ -64,7 +65,6 @@ function Dot({ rag }: { rag: number | null }) {
 
 export function OperationalIndicators() {
   const today = new Date();
-  const [env, setEnv] = useState<'live' | 'uat'>('live');
   const [from, setFrom] = useState(iso(mondayOf(today)));
   const [to, setTo] = useState(iso(today));
   const [rows, setRows] = useState<DailyKpi[]>([]);
@@ -74,14 +74,14 @@ export function OperationalIndicators() {
   async function load() {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/kpi-data/daily-history?env=${env}&from=${from}&to=${to}`);
+      const r = await fetch(`/api/kpi-org/support/legacy-history?from=${from}&to=${to}`);
       const j = await r.json();
       if (j.ok) setRows(j.data as DailyKpi[]);
       else setError(j.error || 'Failed to load');
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, [env, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function quick(kind: 'thisWeek' | 'lastWeek' | 'thisMonth' | 'last30') {
     const t = new Date();
@@ -110,14 +110,7 @@ export function OperationalIndicators() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-3">
-        <h1 className="text-2xl font-bold">Operational Indicators <span className="text-sm font-normal text-slate-400">(daily history)</span></h1>
-        <div className="flex rounded-lg overflow-hidden border border-white/10 text-sm">
-          {(['live', 'uat'] as const).map(e => (
-            <button key={e} onClick={() => setEnv(e)} className={`px-3 py-1.5 ${env === e ? 'bg-blue-600 text-white' : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]'}`}>
-              {e === 'live' ? 'Live' : 'UAT'}
-            </button>
-          ))}
-        </div>
+        <h1 className="text-2xl font-bold">Operational Indicators <span className="text-sm font-normal text-slate-400">(daily history · NOVA engine)</span></h1>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">

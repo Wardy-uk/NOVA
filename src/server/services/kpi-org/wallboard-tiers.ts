@@ -5,11 +5,10 @@
 // (NT open-filter, isNoReply, resolution-SLA-breached + actionable). 60s-cached.
 
 import type { JiraRestClient } from '../jira-client.js';
-import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RESOLUTION_SLA_NAME, DUE_GATE } from './registry.js';
+import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RES_BREACHED, DUE_GATE } from './registry.js';
 import { countNoReply } from './nt-compute.js';
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
-const RES_BREACHED = `"${RESOLUTION_SLA_NAME}" = breached()`;
 const ACTIONABLE = `status not in (${NOT_ACTIONABLE_LIST})`;
 
 export interface TierBucket {

@@ -89,9 +89,15 @@ export const NOT_ACTIONABLE_STATUSES = ['Waiting On Requestor', 'Waiting On Part
 const NOT_ACTIONABLE_JQL = `status in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
 const ACTIONABLE_JQL = `status not in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
 
-/** Resolution SLA name for breached() JQL. ⚠ Confirm the exact SLA display name at build. */
-export const RESOLUTION_SLA_NAME = 'Time to resolution';
-const RES_BREACHED = `"${RESOLUTION_SLA_NAME}" = breached()`;
+/** Resolution SLA = cf14048 ("Resolution") and FRT = cf14046 ("First Reply Time").
+ *  These are the SLA fields the legacy pipeline used. Their display names collide
+ *  with system fields in JQL ("Resolution" resolves to the resolution field, not the
+ *  SLA), so they MUST be queried by cf id. (The display names "Time to resolution"/
+ *  "Time to first response" are DIFFERENT, unused SLA fields — cf12805/cf12806 —
+ *  that return 0 breaches; using them silently zeroed the whole over-SLA group.) */
+export const RESOLUTION_SLA_NAME = 'Resolution';
+export const RES_BREACHED = `cf[14048] = breached()`;
+export const FRT_BREACHED = `cf[14046] = breached()`;
 
 /** Legacy due-date gate for over-SLA (ACTIONABLE only): count only tickets whose
  *  due date has passed (or have none). Matches the SLA Breach Board / n8n report. */
@@ -331,6 +337,31 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND created >= "${ctx.day}" AND created < "${ctx.nextDay}"` },
   },
 
+  // ── Global queue-health stocks (the throughput group on the Operational Indicators
+  // tab). These were NOVA-only in the legacy jira_kpi_daily (n8n never produced them);
+  // computed here so the Rebuild reads them from this NOVA-only engine. Onboarding NOT
+  // excluded (agreed 2026-06-15). SLA Breached uses cf14048 native breached(). ──
+  {
+    key: 'nt_legacy_open_tickets', label: 'Open Tickets', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 30, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 30, amberMax: 45 },
+    compute: { kind: 'jql_count', jql: () => NT_OPEN },
+  },
+  {
+    key: 'nt_legacy_unassigned', label: 'Unassigned', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 3 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND assignee is EMPTY` },
+  },
+  {
+    key: 'nt_legacy_waiting_on_requestor', label: 'Waiting on Requestor', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 10, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 10, amberMax: 15 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND status = "Waiting On Requestor"` },
+  },
+  {
+    key: 'nt_legacy_sla_breached', label: 'SLA Breached', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${RES_BREACHED}` },
+  },
+
   // ── Escalations / rejections by destination tier (escalation_log, by from/to tier). ──
   {
     key: 'nt_legacy_esc_t2', label: 'Tickets escalated to Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
@@ -395,6 +426,10 @@ const LEGACY_TIERS: LegacyTierDef[] = [
 ];
 for (const t of LEGACY_TIERS) {
   const slug = t.overSla.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/_+$/, '');
+  // FRT-breach labels mirror the over-SLA labels (e.g. "Tier 2 FRT breached (actionable)"),
+  // matching the Operational Indicators tab's `${bare(tier)} FRT breached (...)` names.
+  const frtAct = t.overSla.replace('over SLA', 'FRT breached');
+  const frtNotAct = t.notAct.replace('over SLA', 'FRT breached');
   SUPPORT_NT_KPIS.push(
     { key: `nt_lg_noreply_${slug}`, label: t.noReply, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
       unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
@@ -405,6 +440,12 @@ for (const t of LEGACY_TIERS) {
     { key: `nt_lg_oversla_notact_${slug}`, label: t.notAct, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
       unit: 'count', direction: 'lower-better', dailyTarget: 20, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 20, amberMax: 30 },
       compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${NOT_ACTIONABLE_JQL}` } },
+    { key: `nt_lg_frt_${slug}`, label: frtAct, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
+      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${FRT_BREACHED} AND ${ACTIONABLE_JQL}` } },
+    { key: `nt_lg_frt_notact_${slug}`, label: frtNotAct, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
+      unit: 'count', direction: 'lower-better', dailyTarget: 20, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 20, amberMax: 30 },
+      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${FRT_BREACHED} AND ${NOT_ACTIONABLE_JQL}` } },
     { key: `nt_lg_oldest_${slug}`, label: t.oldest, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
       unit: 'days', direction: 'lower-better', dailyTarget: t.oldestTarget, monthlyTarget: null, rollup: 'latest', rag: { greenMax: t.oldestTarget, amberMax: t.oldestTarget * 2 },
       compute: { kind: 'oldest_actionable', bucketJql: t.bucket } },
