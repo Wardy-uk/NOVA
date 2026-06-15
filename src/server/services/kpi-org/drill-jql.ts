@@ -46,6 +46,18 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
       const ctx = dayCtx(now);
       return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`, applyNoReply: false };
     }
+    case 'first_line_rate': {
+      const ctx = dayCtx(now);
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`, applyNoReply: false };
+    }
+    case 'bug_ack': {
+      const ctx = dayCtx(now);
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}") AND cf[12981] in ("Tier 3", "Development")`, applyNoReply: false };
+    }
+    case 'ai_metric':
+      return { message: 'AI agent throughput is tracked in the approval queue — no ticket drill-down.' };
+    case 'wtd_rag':
+      return { message: 'Week-to-date KPI RAG summary — no ticket drill-down.' };
     case 'manual':
       return { message: 'Manually-entered KPI — no ticket drill-down.' };
   }

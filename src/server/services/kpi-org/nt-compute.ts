@@ -66,6 +66,41 @@ async function computeFcr(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
   return fcrTotal > 0 ? Math.round((fcrCount / fcrTotal) * 100) : 0;
 }
 
+/** Avg hours from creation to first agent comment, over Tier-3/Dev tickets solved
+ *  during the day. Mirrors the legacy "Bug Escalation-to-Ack" (sampled to 30). */
+async function computeBugAck(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
+  const jql = `project = NT AND statusCategory = Done ` +
+    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}") ` +
+    `AND cf[12981] in ("Tier 3", "Development")`;
+  const res = await jira.searchJqlAll(jql, ['created'], 2000);
+  const sample = res.issues.slice(0, 30);
+  const hours: number[] = [];
+  for (const iss of sample) {
+    try {
+      const comments = await jira.getComments(iss.key, 50);
+      const agent = comments.filter(c => {
+        const a = c.author as { displayName?: string; accountType?: string } | undefined;
+        return a?.accountType !== 'customer' && !isBot(a?.displayName ?? '');
+      });
+      const created = (iss.fields as Record<string, unknown> | undefined)?.created;
+      if (agent.length > 0 && typeof created === 'string') {
+        const h = (new Date(agent[agent.length - 1].created).getTime() - new Date(created).getTime()) / 3_600_000;
+        if (h >= 0) hours.push(h);
+      }
+      await new Promise(r => setTimeout(r, 150));
+    } catch { /* skip ticket on comment fetch error */ }
+  }
+  return hours.length ? Math.round((hours.reduce((a, b) => a + b, 0) / hours.length) * 10) / 10 : 0;
+}
+
+/** Monday (UK week start) of the given YYYY-MM-DD, as YYYY-MM-DD. */
+function weekStartOf(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
 interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number; resBreached: number; csatSum: number; csatCount: number; }
 
 /** Aggregate FRT/Resolution breaches + CSAT ratings over tickets solved during the
@@ -217,5 +252,47 @@ export async function computeNtKpi(
 
     case 'fcr':
       return { value: await computeFcr(jira, ctx), failed: false };
+
+    case 'ai_metric': {
+      // AI agent throughput from the local approval_queue (NOVA app DB).
+      if (c.metric === 'pending') {
+        const rows = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM approval_queue WHERE status = 'pending'`);
+        return { value: rows[0]?.n ?? 0, failed: false };
+      }
+      const resolved = await query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM approval_queue WHERE status = 'approved' AND CAST(decided_at AS DATE) = ?`, [ctx.day]);
+      const rv = resolved[0]?.n ?? 0;
+      if (c.metric === 'resolved') return { value: rv, failed: false };
+      // rate = approved today / created today
+      const total = await query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM approval_queue WHERE CAST(created_at AS DATE) = ?`, [ctx.day]);
+      const tv = total[0]?.n ?? 0;
+      return { value: tv > 0 ? Math.round((rv / tv) * 100) : 0, failed: false };
+    }
+
+    case 'first_line_rate': {
+      const solved = `project = NT AND statusCategory = Done AND ` +
+        `status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+      const total = await jira.jqlCount(solved);
+      if (total < 0) return { value: null, failed: true };
+      if (total === 0) return { value: 0, failed: false };
+      const cc = await jira.jqlCount(`${solved} AND cf[12981] = "Customer Care"`);
+      if (cc < 0) return { value: null, failed: true };
+      return { value: Math.round((cc / total) * 100), failed: false };
+    }
+
+    case 'bug_ack':
+      return { value: await computeBugAck(jira, ctx), failed: false };
+
+    case 'wtd_rag': {
+      // % of this-week captured Support rows (target-bearing) that are green / red.
+      const rows = await query<{ rag: string | null }>(
+        `SELECT rag FROM kpi_org_daily WHERE team_key = 'Support' AND target IS NOT NULL AND kpi_date >= ? AND kpi_date <= ?`,
+        [weekStartOf(ctx.day), ctx.day]);
+      const scored = rows.filter(r => r.rag === 'green' || r.rag === 'amber' || r.rag === 'red');
+      if (scored.length === 0) return { value: 0, failed: false };
+      const hit = scored.filter(r => r.rag === c.rag).length;
+      return { value: Math.round((hit / scored.length) * 100), failed: false };
+    }
   }
 }

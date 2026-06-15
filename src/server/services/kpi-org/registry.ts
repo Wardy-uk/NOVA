@@ -42,6 +42,14 @@ export type ComputeSpec =
   | { kind: 'resolved_outcome'; metric: 'frt' | 'res' | 'csat' }
   // First Contact Resolution % — comment scan over CC tickets solved today.
   | { kind: 'fcr' }
+  // AI agent throughput from the local approval_queue table.
+  | { kind: 'ai_metric'; metric: 'resolved' | 'pending' | 'rate' }
+  // 1st-line resolution %: solved-today at Customer Care tier / all solved today.
+  | { kind: 'first_line_rate' }
+  // Bug escalation-to-ack hours: avg created→first-agent-comment over bug/dev tickets solved today.
+  | { kind: 'bug_ack' }
+  // WTD meta: % of captured kpi_org_daily rows this week that are green / red.
+  | { kind: 'wtd_rag'; rag: 'green' | 'red' }
   // Entered by a human; capture preserves the existing manual value.
   | { kind: 'manual' };
 
@@ -360,6 +368,44 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_legacy_sla_breached', label: 'SLA Breached', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
     compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${RES_BREACHED}` },
+  },
+
+  // ── AI agent + derived + summary KPIs (were NOVA-only in legacy jira_kpi_daily;
+  // n8n never produced them). Ported so the rebuild reaches full legacy parity. ──
+  {
+    key: 'nt_ai_resolved', label: 'AI Tickets Resolved (Today)', team: 'Support', colA: 'AI', jiraSpace: 'NT',
+    unit: 'count', direction: 'higher-better', dailyTarget: 10, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 10, amberMin: 5 },
+    compute: { kind: 'ai_metric', metric: 'resolved' },
+  },
+  {
+    key: 'nt_ai_pending', label: 'AI Tickets Pending Approval', team: 'Support', colA: 'AI', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
+    compute: { kind: 'ai_metric', metric: 'pending' },
+  },
+  {
+    key: 'nt_ai_rate', label: 'AI Resolution Rate %', team: 'Support', colA: 'AI', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 50, monthlyTarget: null, rollup: 'average', rag: { greenMin: 50, amberMin: 25 },
+    compute: { kind: 'ai_metric', metric: 'rate' },
+  },
+  {
+    key: 'nt_first_line_rate', label: '1st Line Resolution Rate %', team: 'Support', colA: 'Derived', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 60, monthlyTarget: null, rollup: 'average', rag: { greenMin: 60, amberMin: 48 },
+    compute: { kind: 'first_line_rate' },
+  },
+  {
+    key: 'nt_bug_ack', label: 'Bug Escalation-to-Ack (hours)', team: 'Support', colA: 'Derived', jiraSpace: 'NT',
+    unit: 'count', direction: 'lower-better', dailyTarget: 4, monthlyTarget: null, rollup: 'average', rag: { greenMax: 4, amberMax: 6 },
+    compute: { kind: 'bug_ack' },
+  },
+  {
+    key: 'nt_wtd_green', label: "WTD percentage KPI's Green", team: 'Support', colA: 'Summary', jiraSpace: 'NT',
+    unit: 'percent', direction: 'higher-better', dailyTarget: 80, monthlyTarget: null, rollup: 'latest', rag: { greenMin: 80, amberMin: 64 },
+    compute: { kind: 'wtd_rag', rag: 'green' },
+  },
+  {
+    key: 'nt_wtd_red', label: "WTD percentage KPI's Red", team: 'Support', colA: 'Summary', jiraSpace: 'NT',
+    unit: 'percent', direction: 'lower-better', dailyTarget: 10, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 10, amberMax: 15 },
+    compute: { kind: 'wtd_rag', rag: 'red' },
   },
 
   // ── Escalations / rejections by destination tier (escalation_log, by from/to tier). ──
