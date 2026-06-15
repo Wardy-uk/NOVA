@@ -3794,7 +3794,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         // SLA target: Jira's LIVE ongoing cycle breachTime (pause-adjusted) when present;
         // otherwise created + the goal-rule hours (no live cycle → no active pauses to miss).
         if (agentJiraClient && projs) {
-          const jql = `project in (${projs}) AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
+          const jql = `project = NT AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
           const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_12800', 'customfield_14048'], 100);
           const dayMs = 86400000;
           const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
