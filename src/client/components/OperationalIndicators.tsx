@@ -74,7 +74,7 @@ export function OperationalIndicators() {
   async function load() {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/kpi-org/support/legacy-history?from=${from}&to=${to}`);
+      const r = await fetch(`/api/kpi-org/support/legacy-history?from=${from}&to=${to}&liveToday=1`);
       const j = await r.json();
       if (j.ok) setRows(j.data as DailyKpi[]);
       else setError(j.error || 'Failed to load');
@@ -110,7 +110,7 @@ export function OperationalIndicators() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-3">
-        <h1 className="text-2xl font-bold">Operational Indicators <span className="text-sm font-normal text-slate-400">(daily history · NOVA engine)</span></h1>
+        <h1 className="text-2xl font-bold">Operational Indicators <span className="text-sm font-normal text-slate-400">(today live · prior days frozen · NOVA engine)</span></h1>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">

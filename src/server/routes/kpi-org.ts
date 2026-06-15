@@ -9,6 +9,7 @@ import {
   captureSupportNt, getDay, getLatest, getRange, getTeamRange, setManualValue,
   ORG_KPIS, getKpi, getOrgPeriod, getOrgHistoryGrid, startOrgBackfill, getLegacyEarliest, orgBackfillState,
 } from '../services/kpi-org/index.js';
+import { getSupportLiveSnapshot } from '../services/kpi-org/live.js';
 
 function yesterday(): string { const d = new Date(); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); }
 import type { OrgKpiDailyRow } from '../services/kpi-org/store.js';
@@ -103,23 +104,51 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
   // /api/kpi-data/daily-history returned, so the "Legacy KPIs" view can read this
   // engine instead. /support/legacy-history?from=YYYY-MM-DD&to=YYYY-MM-DD
   router.get('/support/legacy-history', async (req, res) => {
-    const { from, to } = req.query as { from?: string; to?: string };
+    const { from, to, liveToday } = req.query as { from?: string; to?: string; liveToday?: string };
     if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
     try {
       const ragNum = (r: string | null) => r === 'green' ? 1 : r === 'amber' ? 2 : r === 'red' ? 3 : null;
+      const dir = (d?: string) => d === 'higher-better' ? 'Higher is better' : 'Lower is better';
       const rows = await getTeamRange('Support', from, to);
-      const data = rows.map(row => {
+      let data = rows.map(row => {
         const def = getKpi(row.kpi_key);
         return {
           kpi: def?.label ?? row.kpi_key,
           kpiGroup: def?.colA ?? 'Other',
           count: row.value,
           target: row.target,
-          direction: def?.direction === 'higher-better' ? 'Higher is better' : 'Lower is better',
+          direction: dir(def?.direction),
           rag: ragNum(row.rag),
           CreatedAt: typeof row.kpi_date === 'string' ? row.kpi_date : new Date(row.kpi_date as unknown as string).toISOString().slice(0, 10),
         };
       });
+
+      // Live overlay for today's column: the stored table freezes at 18:00, so when
+      // the caller opts in (liveToday=1) and the range includes today (UK), replace
+      // today's stored rows with a fresh 60s-cached recompute. Keeps prior days frozen
+      // for history. Falls back silently to stored rows if Jira is unavailable.
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (liveToday && from <= todayUk && todayUk <= to) {
+        const jira = deps.getJiraClient();
+        if (jira) {
+          try {
+            const snap = await getSupportLiveSnapshot(jira);
+            data = data.filter(d => d.CreatedAt !== todayUk);
+            for (const it of snap.items) {
+              const def = getKpi(it.key);
+              data.push({
+                kpi: it.label,
+                kpiGroup: def?.colA ?? 'Other',
+                count: it.value,
+                target: it.target,
+                direction: dir(def?.direction),
+                rag: ragNum(it.rag),
+                CreatedAt: todayUk,
+              });
+            }
+          } catch { /* keep stored today rows on live-compute failure */ }
+        }
+      }
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
