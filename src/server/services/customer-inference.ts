@@ -29,26 +29,75 @@ export interface UnresolvedTicket { ticketKey: string; summary: string | null; d
 
 const CRM_REF_PREFIX = 'crm:';
 
-/** Match an extracted name/URL to the customer registry → ref + match confidence (0-1). */
+// A network/brand PARENT or internal entity stated on its own. Attributing member tickets to
+// these collapses hundreds of distinct agencies onto one account, so they are NOT valid match
+// targets. Anchored brand-only forms so a specific member ("Ajq Property Ltd T/A F&C West
+// Hampstead") is NOT caught; internal tokens (nurtur/intercompany/briefyourmarket) match anywhere.
+export const BRAND_ONLY_OR_INTERNAL =
+  /^(the\s+)?guild(\s+of\s+property\s+professionals)?$|^fine\s*(and|&)\s*country$|^f\s*&?\s*c$|^exp(\s+(uk|realty))?$|^(the\s+)?property\s+franchise(\s+group)?$|^ewemove$|^know\s*your\s*market$|nurtur|intercompany|brief\s*your\s*market/i;
+
+// Shared network/product domains — owned by the network, not a single member, so they can't
+// pick out a specific customer.
+export const NETWORK_OR_INTERNAL_DOMAINS = new Set([
+  'guildproperty.co.uk', 'fineandcountry.com', 'ewemove.com', 'exp.uk.com', 'propertyfranchise.co.uk',
+  'knowyourmarket.net', 'nurtur.tech', 'nurtur.digital', 'briefyourmarket.com',
+]);
+
+/**
+ * Match an extracted name/URL to the registry → ref + match confidence (0-1). Strict: rejects
+ * brand-only/internal names and shared network domains, and only accepts an UNAMBIGUOUS name
+ * match (exact, or a single registry row containing it) — no "shortest of many" guessing.
+ */
 async function matchToRegistry(name: string | null, url: string | null): Promise<{ ref: string; name: string; matchConf: number } | null> {
-  // 1. URL/domain → existing verified domain map (strongest).
-  const domain = CustomerResolver.normaliseDomain(url) ?? CustomerResolver.normaliseDomain(name);
-  if (domain) {
+  const n = (name ?? '').trim();
+  if (n && BRAND_ONLY_OR_INTERNAL.test(n)) return null;  // network parent / internal → not attributable to one customer
+
+  // 1. Specific (non-network) domain → map.
+  const domain = CustomerResolver.normaliseDomain(url) ?? CustomerResolver.normaliseDomain(n);
+  if (domain && !NETWORK_OR_INTERNAL_DOMAINS.has(domain)) {
     const d = await queryOne<{ customer_ref: string; customer_name: string | null }>(
       `SELECT TOP(1) customer_ref, customer_name FROM agent_customer_domains WHERE domain = ? ORDER BY is_verified DESC, confidence DESC`, [domain]);
-    if (d) return { ref: d.customer_ref, name: d.customer_name ?? domain, matchConf: 0.95 };
+    if (d && !(d.customer_name && BRAND_ONLY_OR_INTERNAL.test(d.customer_name))) {
+      return { ref: d.customer_ref, name: d.customer_name ?? domain, matchConf: 0.9 };
+    }
   }
-  // 2. Name → bc_customers / crm_customers (substring; shortest match wins = tightest).
-  const n = (name ?? '').trim();
-  if (n.length >= 3) {
-    const bc = await queryOne<{ number: string; display_name: string }>(
-      `SELECT TOP(1) number, display_name FROM bc_customers WHERE display_name LIKE ? AND number IS NOT NULL ORDER BY LEN(display_name) ASC`, [`%${n}%`]);
-    if (bc) return { ref: bc.number, name: bc.display_name, matchConf: 0.8 };
-    const crm = await queryOne<{ id: number; name: string }>(
-      `SELECT TOP(1) id, name FROM crm_customers WHERE name LIKE ? OR company LIKE ? ORDER BY LEN(name) ASC`, [`%${n}%`, `%${n}%`]);
-    if (crm) return { ref: `${CRM_REF_PREFIX}${crm.id}`, name: crm.name, matchConf: 0.7 };
+
+  if (n.length < 5) return null;
+  // 2. Exact name match (normalised).
+  const exact = await queryOne<{ number: string; display_name: string }>(
+    `SELECT TOP(1) number, display_name FROM bc_customers WHERE LOWER(display_name) = LOWER(?) AND number IS NOT NULL`, [n]);
+  if (exact) return { ref: exact.number, name: exact.display_name, matchConf: 0.9 };
+  // 3. Containment — but ONLY if unambiguous (exactly one registry row contains it).
+  const bcHits = await query<{ number: string; display_name: string }>(
+    `SELECT TOP(2) number, display_name FROM bc_customers WHERE display_name LIKE ? AND number IS NOT NULL`, [`%${n}%`]);
+  if (bcHits.length === 1) return { ref: bcHits[0].number, name: bcHits[0].display_name, matchConf: 0.75 };
+  const crmHits = await query<{ id: number; name: string }>(
+    `SELECT TOP(2) id, name FROM crm_customers WHERE name LIKE ? OR company LIKE ?`, [`%${n}%`, `%${n}%`]);
+  if (crmHits.length === 1) return { ref: `${CRM_REF_PREFIX}${crmHits[0].id}`, name: crmHits[0].name, matchConf: 0.7 };
+  return null;  // no match or ambiguous → leave unresolved rather than guess
+}
+
+/**
+ * Re-match all cached inferences against the (fixed) matcher WITHOUT re-calling the model — the
+ * extractions were fine, only the matching was wrong. Cheap + fast; clears the collapse.
+ */
+export async function rematchAllInferences(): Promise<{ updated: number; nowMatched: number }> {
+  const rows = await query<{ ticket_key: string; extracted_name: string | null; extracted_url: string | null; confidence: number }>(
+    `SELECT ticket_key, extracted_name, extracted_url, confidence FROM agent_ticket_customer_inference`);
+  let updated = 0, nowMatched = 0;
+  for (const r of rows) {
+    const m = r.extracted_name || r.extracted_url ? await matchToRegistry(r.extracted_name, r.extracted_url) : null;
+    const ref = m?.ref ?? null;
+    const cname = m?.name ?? null;
+    // confidence: keep the model's read scaled by the (new) match strength; 0 if now unmatched.
+    const conf = m ? Math.min(95, Math.round(60 * m.matchConf) + 20) : 0;
+    if (m) nowMatched++;
+    await execute(
+      `UPDATE agent_ticket_customer_inference SET customer_ref=?, customer_name=?, confidence=? WHERE ticket_key=?`,
+      [ref, cname, conf, r.ticket_key]);
+    updated++;
   }
-  return null;
+  return { updated, nowMatched };
 }
 
 /** Infer one ticket's customer and cache the result. Returns whether it matched a customer. */

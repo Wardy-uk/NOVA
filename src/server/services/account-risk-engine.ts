@@ -3,7 +3,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { CustomerResolver } from './customer-resolver.js';
 import type { JiraRestClient, JiraIssue } from './jira-client.js';
 import { extractText } from './shared/adf-utils.js';
-import { enqueueForInference, loadInferenceMap, loadInferredKeys, type UnresolvedTicket } from './customer-inference.js';
+import { enqueueForInference, loadInferenceMap, loadInferredKeys, rematchAllInferences, BRAND_ONLY_OR_INTERNAL, type UnresolvedTicket } from './customer-inference.js';
 
 // Per-CUSTOMER risk rollup + nightly reconciliation. See agent_work/ba/account-risk-spec.md.
 //
@@ -174,6 +174,14 @@ export class AccountRiskEngine {
 
     const seed = await this.resolver.seedFromBcCustomers().catch(() => ({ added: 0, skipped: 0 }));
     await this.resolver.loadIndex();
+    // One-time: re-match cached inferences with the corrected (strict, brand-aware) matcher,
+    // fixing the network/brand collapse without re-calling the model.
+    if (!this.settings.get('account_risk_rematch_v1')) {
+      const rm = await rematchAllInferences();
+      this.settings.set('account_risk_rematch_v1', 'true');
+      console.log(`[account-risk] re-matched ${rm.updated} cached inferences (${rm.nowMatched} now matched a customer)`);
+    }
+
     // Cached AI inferences (applied as a resolution source) + which tickets we've already tried.
     const inferenceMap = await loadInferenceMap();
     const inferredKeys = await loadInferredKeys();
@@ -188,6 +196,7 @@ export class AccountRiskEngine {
     let totalTickets = 0;
     let resolvedCount = 0;
     let systemSkipped = 0;
+    let excludedInternal = 0;
 
     // Per-project scan, no comment JOIN — keeps each query small enough for the 30s pool
     // timeout (node-mssql/tedious has no per-request timeout override). Signals are detected
@@ -241,6 +250,10 @@ export class AccountRiskEngine {
           continue;
         }
       }
+      // Network-parent / internal (Nurtur, Guild parent, etc.) are not real at-risk customers —
+      // exclude from the league table (and don't count as a customer resolution).
+      if (customerName && BRAND_ONLY_OR_INTERNAL.test(customerName)) { excludedInternal++; continue; }
+
       bySource.set(source, (bySource.get(source) ?? 0) + 1);
       resolvedCount++;
       if (dayKey) reconResolved.set(dayKey, (reconResolved.get(dayKey) ?? 0) + 1);
@@ -401,6 +414,7 @@ export class AccountRiskEngine {
       generatedAt: new Date().toISOString(),
       tickets: totalTickets,
       systemSkipped,
+      excludedInternal,
       resolved: resolvedCount,
       resolvedPct: totalTickets ? Math.round((resolvedCount / totalTickets) * 1000) / 10 : 0,
       bySource: Object.fromEntries(bySource),

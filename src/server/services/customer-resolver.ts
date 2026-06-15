@@ -31,6 +31,10 @@ const GENERIC_DOMAINS = new Set([
 // Internal Nurtur domains — reporter is staff (e.g. CSM forwarding on behalf).
 const INTERNAL_DOMAINS = new Set([
   'nurtur.tech', 'nurtur.digital', 'briefyourmarket.com',
+  // Shared network/product domains — owned by a network, not one member, so they can't
+  // identify a specific customer (resolving them collapses many members onto one account).
+  'guildproperty.co.uk', 'fineandcountry.com', 'ewemove.com', 'exp.uk.com',
+  'propertyfranchise.co.uk', 'knowyourmarket.net',
 ]);
 
 export type ResolveSource =
