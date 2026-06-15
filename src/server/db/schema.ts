@@ -950,6 +950,18 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_issue_customers_customer')
      CREATE INDEX IX_agent_issue_customers_customer ON agent_issue_customers (customer);`,
 
+    // citing_tickets exploded — lets the agent triage flag map a ticket → the cross-customer issue(s) it belongs to.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_issue_tickets') AND type = 'U')
+     CREATE TABLE agent_issue_tickets (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       signature NVARCHAR(120) NOT NULL,
+       ticket_key NVARCHAR(60) NOT NULL,
+       source NVARCHAR(20) NULL,                 -- jsm | zendesk
+       CONSTRAINT UQ_agent_issue_tickets UNIQUE (signature, ticket_key)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_issue_tickets_key')
+     CREATE INDEX IX_agent_issue_tickets_key ON agent_issue_tickets (ticket_key);`,
+
     // ── Performance indexes (audit Apr 2026) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)

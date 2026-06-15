@@ -61,6 +61,61 @@ export async function upsertIssueCard(p: IssueCardPayload): Promise<void> {
       [p.signature, String(cs.customer).slice(0, 255), Number(cs.count) || 0, typeof cs.pct === 'number' ? cs.pct : null],
     );
   }
+
+  await execute(`DELETE FROM agent_issue_tickets WHERE signature = ?`, [p.signature]);
+  const seen = new Set<string>();
+  for (const ct of p.citing_tickets ?? []) {
+    if (!ct || !ct.key) continue;
+    const key = String(ct.key).slice(0, 60);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await execute(
+      `INSERT INTO agent_issue_tickets (signature, ticket_key, source) VALUES (?, ?, ?)`,
+      [p.signature, key, ct.source ?? null],
+    );
+  }
+}
+
+/**
+ * For the AI agent triage flag: the cross-customer issue(s) a ticket belongs to. Returns a
+ * one-line note (most-affecting issue first) or null. Maps ticket → issue via citing_tickets.
+ */
+export async function getTicketIssueContext(ticketKey: string): Promise<string | null> {
+  const rows = await query<{ title: string | null; route: string | null; trend: string | null; customer_count: number | null }>(
+    `SELECT TOP(3) c.title, c.route, c.trend, c.customer_count
+     FROM agent_issue_tickets t JOIN agent_issue_cards c ON c.signature = t.signature
+     WHERE t.ticket_key = ? ORDER BY c.customer_count DESC`,
+    [ticketKey],
+  );
+  if (!rows.length) return null;
+  const top = rows[0];
+  const bits: string[] = [];
+  if (top.route) bits.push(top.route.replace(/_/g, ' '));
+  if (top.trend && top.trend !== 'stable') bits.push(top.trend);
+  if (top.customer_count) bits.push(`${top.customer_count} customers affected`);
+  const more = rows.length > 1 ? ` (+${rows.length - 1} more)` : '';
+  return `⚠️ **Known cross-customer issue:** ${top.title ?? 'pattern'}${bits.length ? ` — ${bits.join(', ')}` : ''}${more}`;
+}
+
+export interface IssueSummary {
+  totalIssues: number; atRiskCustomers: number; growing: number;
+  byRoute: { route: string; count: number }[];
+}
+
+export async function getIssueSummary(): Promise<IssueSummary> {
+  const [totals, routes] = await Promise.all([
+    query<{ totalIssues: number; growing: number }>(
+      `SELECT COUNT(*) AS totalIssues, SUM(CASE WHEN trend='growing' THEN 1 ELSE 0 END) AS growing FROM agent_issue_cards`),
+    query<{ route: string; count: number }>(
+      `SELECT ISNULL(route,'uncertain') AS route, COUNT(*) AS count FROM agent_issue_cards GROUP BY route ORDER BY COUNT(*) DESC`),
+  ]);
+  const atRisk = await query<{ n: number }>(`SELECT COUNT(DISTINCT customer) AS n FROM agent_issue_customers`);
+  return {
+    totalIssues: totals[0]?.totalIssues ?? 0,
+    growing: totals[0]?.growing ?? 0,
+    atRiskCustomers: atRisk[0]?.n ?? 0,
+    byRoute: routes.map(r => ({ route: r.route, count: r.count })),
+  };
 }
 
 // Route severity weights — used to lift a customer's score for the more serious issue types.

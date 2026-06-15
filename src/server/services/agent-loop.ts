@@ -20,7 +20,7 @@ import { AlertService } from './alert-service.js';
 import { TicketClassifier } from './ticket-classifier.js';
 import { CoachingEngine } from './coach.js';
 import { RiskScorer } from './risk-scorer.js';
-import { getTicketCustomerRisk, formatRiskLine } from './account-risk-queries.js';
+import { getTicketIssueContext } from './issue-router-store.js';
 import { PluginToTpjExecutor } from './plugin-to-tpj-executor.js';
 import { AbuseReportExecutor } from './abuse-report-executor.js';
 import { AutoRulesEngine } from './auto-rules-engine.js';
@@ -1622,14 +1622,12 @@ export class AgentLoop {
       const willPostFirstReply = decision.eventType === 'ticket_created' && hasDraft && draftText && !looksLikeStructuredPayload(draftText);
       const skipDraft = willPostFirstReply && (decision.confidence >= frThreshold || hasDraft);
       try {
-        // Annotate with the customer's account-level risk (churn/complaint/termination)
-        // when the customer is resolvable and at Watch+ tier.
+        // Annotate with the cross-customer issue (from AgentBrain) this ticket belongs to, if any.
         let riskLine: string | null = null;
         try {
-          const risk = await getTicketCustomerRisk(decision.ticketKey, this.settings);
-          if (risk) riskLine = formatRiskLine(risk);
+          riskLine = await getTicketIssueContext(decision.ticketKey);
         } catch (err) {
-          console.warn(`[agent] customer-risk lookup failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+          console.warn(`[agent] issue-context lookup failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
         }
         await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft, riskLine }), { internal: true });
         console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}${riskLine ? ' (+risk)' : ''}`);

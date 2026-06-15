@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const C = {
   bg1: '#272C33', bg2: '#2f353d', bg3: '#343a42',
@@ -6,102 +6,73 @@ const C = {
   text1: '#e2e8f0', text2: '#94a3b8', text3: '#64748b', border: 'rgba(255,255,255,0.06)',
 } as const;
 
-// Tier 0 Normal .. 4 Critical
 const TIER_COLORS = [C.text3, C.teal, C.amber, '#f97316', C.red];
+const TIER_NAMES = ['Normal', 'Watch', 'Medium', 'High', 'Critical'];
+const ROUTE_COLORS: Record<string, string> = {
+  bug_external: C.red, missing_feature: C.purple, ux_friction: C.amber, docs_gap: C.teal, uncertain: C.text3,
+};
 
-interface AccountRow {
-  customer_ref: string; customer_name: string | null; bc_number: string | null; primary_domain: string | null;
-  risk_score: number; risk_tier: number;
-  has_formal_complaint: boolean; has_termination: boolean; has_active_refund: boolean; has_open_escalation: boolean;
-  is_network_account: boolean; total_ticket_count: number; last_ticket_date: string | null; last_score_update: string | null;
+interface AtRiskCustomer {
+  customer: string; issue_count: number; ticket_total: number; growing: number; routes: string[]; score: number; tier: number;
 }
-interface Summary {
-  distribution: { tier: number; label: string; count: number }[];
-  lastRun: { generatedAt?: string; tickets?: number; resolved?: number; resolvedPct?: number; customersAtRisk?: number; bySource?: Record<string, number>; reconDaysComplete?: number; reconDaysPartial?: number } | null;
-  recon: { status: string; cnt: number }[];
+interface IssueCard {
+  signature: string; route: string | null; confidence: number | null; title: string | null;
+  problem_statement: string | null; customer_count: number | null; frequency_label: string | null;
+  trend: string | null; customer_share: string | null; citing_tickets: string | null;
 }
+interface Summary { totalIssues: number; atRiskCustomers: number; growing: number; byRoute: { route: string; count: number }[]; }
 
-function StatCard({ value, label, color, sub }: { value: string | number; label: string; color: string; sub?: string }) {
+function StatCard({ value, label, color }: { value: string | number; label: string; color: string }) {
   return (
     <div style={{ padding: '16px 20px', borderRadius: 12, flex: 1, minWidth: 130, background: `${color}08`, border: `1px solid ${color}20` }}>
       <div style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 10, fontWeight: 600, color: C.text3, marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: C.text2, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
-
-function TierBadge({ tier, label }: { tier: number; label?: string }) {
-  const col = TIER_COLORS[tier] ?? C.text3;
-  const names = ['Normal', 'Watch', 'Medium', 'High', 'Critical'];
-  return (
-    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700, color: col, background: `${col}1a`, border: `1px solid ${col}33` }}>
-      {label ?? names[tier] ?? '?'}
-    </span>
-  );
-}
-
-function FlagChips({ a }: { a: AccountRow }) {
-  const chips: [boolean, string, string][] = [
-    [a.has_formal_complaint, 'Complaint', C.red],
-    [a.has_termination, 'Termination', C.red],
-    [a.has_active_refund, 'Refund', C.amber],
-    [a.has_open_escalation, 'Escalation', '#f97316'],
-  ];
-  return (
-    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
-      {chips.filter(c => c[0]).map(([, label, col]) => (
-        <span key={label} style={{ padding: '1px 6px', borderRadius: 6, fontSize: 10, fontWeight: 600, color: col, background: `${col}1a` }}>{label}</span>
-      ))}
-    </span>
-  );
+function Chip({ label, color }: { label: string; color: string }) {
+  return <span style={{ padding: '1px 7px', borderRadius: 6, fontSize: 10, fontWeight: 600, color, background: `${color}1a` }}>{label}</span>;
 }
 
 export function RiskIntelligenceView() {
+  const [tab, setTab] = useState<'customers' | 'issues'>('customers');
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [customers, setCustomers] = useState<AtRiskCustomer[]>([]);
+  const [issues, setIssues] = useState<IssueCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ account: Record<string, unknown>; signals: Record<string, unknown>[]; history: Record<string, unknown>[] } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [s, a] = await Promise.all([
+      const [s, c, i] = await Promise.all([
         fetch('/api/risk/summary').then(r => r.json()),
-        fetch('/api/risk/accounts?minTier=1').then(r => r.json()),
+        fetch('/api/risk/issue-customers').then(r => r.json()),
+        fetch('/api/risk/issues').then(r => r.json()),
       ]);
-      if (!s.ok) throw new Error(s.error || 'summary failed');
-      if (!a.ok) throw new Error(a.error || 'accounts failed');
-      setSummary(s.data); setAccounts(a.data);
+      if (!s.ok || !c.ok || !i.ok) throw new Error(s.error || c.error || i.error || 'load failed');
+      setSummary(s.data); setCustomers(c.data); setIssues(i.data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally { setLoading(false); }
   }, []);
-
   useEffect(() => { load(); }, [load]);
 
-  const openDetail = useCallback(async (ref: string) => {
-    if (selected === ref) { setSelected(null); setDetail(null); return; }
-    setSelected(ref); setDetail(null);
-    try {
-      const r = await fetch(`/api/risk/account/${encodeURIComponent(ref)}`).then(x => x.json());
-      if (r.ok) setDetail(r.data);
-    } catch { /* ignore */ }
-  }, [selected]);
-
-  const lr = summary?.lastRun;
-  const dist = summary?.distribution ?? [];
-  const tierCount = (t: number) => dist.find(d => d.tier === t)?.count ?? 0;
-  const reconComplete = summary?.recon.find(r => r.status === 'complete')?.cnt ?? 0;
-  const reconPartial = summary?.recon.find(r => r.status === 'partial')?.cnt ?? 0;
+  const tabBtn = (key: 'customers' | 'issues', label: string) => (
+    <button onClick={() => setTab(key)} style={{
+      background: tab === key ? C.bg3 : 'transparent', color: tab === key ? C.text1 : C.text2,
+      border: `1px solid ${tab === key ? C.border : 'transparent'}`, borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    }}>{label}</button>
+  );
 
   return (
     <div style={{ padding: 24, color: C.text1 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Risk Intelligence</h2>
         <button onClick={load} style={{ background: C.bg3, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}>Refresh</button>
+      </div>
+      <div style={{ fontSize: 12, color: C.text3, marginBottom: 16 }}>
+        Fed by AgentBrain's cross-customer issue router (JSM + Zendesk).
       </div>
 
       {error && <div style={{ color: C.red, marginBottom: 12 }}>Error: {error}</div>}
@@ -110,88 +81,73 @@ export function RiskIntelligenceView() {
       {!loading && (
         <>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-            <StatCard value={tierCount(4)} label="Critical" color={TIER_COLORS[4]} />
-            <StatCard value={tierCount(3)} label="High" color={TIER_COLORS[3]} />
-            <StatCard value={tierCount(2)} label="Medium" color={TIER_COLORS[2]} />
-            <StatCard value={tierCount(1)} label="Watch" color={TIER_COLORS[1]} />
-            <StatCard value={accounts.length} label="At-risk accounts" color={C.purple} />
+            <StatCard value={summary?.atRiskCustomers ?? 0} label="At-risk customers" color={C.red} />
+            <StatCard value={summary?.totalIssues ?? 0} label="Cross-customer issues" color={C.purple} />
+            <StatCard value={summary?.growing ?? 0} label="Growing" color={C.amber} />
           </div>
 
-          {lr && (
-            <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 16px', marginBottom: 16, fontSize: 12, color: C.text2 }}>
-              <span style={{ fontWeight: 700, color: C.text1 }}>Last backfill</span>
-              {lr.generatedAt ? ` · ${new Date(lr.generatedAt).toLocaleString()}` : ''}
-              {' · '}{lr.resolved ?? 0}/{lr.tickets ?? 0} tickets resolved to a customer (<b style={{ color: C.teal }}>{lr.resolvedPct ?? 0}%</b>)
-              {' · '}{lr.customersAtRisk ?? 0} flagged
-              {' · recon: '}<b style={{ color: C.green }}>{reconComplete}</b> days complete, {reconPartial} partial
+          {summary && summary.totalIssues === 0 && (
+            <div style={{ background: C.bg1, border: `1px dashed ${C.border}`, borderRadius: 12, padding: 20, color: C.text3, marginBottom: 16 }}>
+              No issue cards received yet — waiting on the first AgentBrain run.
             </div>
           )}
 
-          <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: C.bg2, color: C.text3, textAlign: 'left' }}>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Customer</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Tier</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Score</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Signals</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Tickets</th>
-                  <th style={{ padding: '10px 14px', fontWeight: 600 }}>Last activity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.length === 0 && (
-                  <tr><td colSpan={6} style={{ padding: 20, color: C.text3, textAlign: 'center' }}>No at-risk accounts.</td></tr>
-                )}
-                {accounts.map(a => (
-                  <Fragment key={a.customer_ref}>
-                    <tr onClick={() => openDetail(a.customer_ref)}
-                      style={{ borderTop: `1px solid ${C.border}`, cursor: 'pointer', background: selected === a.customer_ref ? C.bg2 : 'transparent' }}>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontWeight: 600 }}>{a.customer_name || a.customer_ref}{a.is_network_account ? <span style={{ color: C.text3, fontWeight: 400 }}> · network</span> : ''}</div>
-                        <div style={{ fontSize: 11, color: C.text3 }}>{a.primary_domain || a.bc_number || ''}</div>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}><TierBadge tier={a.risk_tier} /></td>
-                      <td style={{ padding: '10px 14px', fontWeight: 700, color: TIER_COLORS[a.risk_tier] }}>{a.risk_score}</td>
-                      <td style={{ padding: '10px 14px' }}><FlagChips a={a} /></td>
-                      <td style={{ padding: '10px 14px', color: C.text2 }}>{a.total_ticket_count}</td>
-                      <td style={{ padding: '10px 14px', color: C.text3, fontSize: 12 }}>{a.last_ticket_date ? new Date(a.last_ticket_date).toLocaleDateString() : '—'}</td>
-                    </tr>
-                    {selected === a.customer_ref && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '0 14px 14px', background: C.bg2 }}>
-                          {!detail && <div style={{ color: C.text3, padding: 8 }}>Loading detail…</div>}
-                          {detail && (
-                            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', paddingTop: 8 }}>
-                              <div style={{ flex: 1, minWidth: 280 }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6 }}>ACTIVE SIGNALS</div>
-                                {detail.signals.filter(s => (s as any).is_active).length === 0 && <div style={{ color: C.text3, fontSize: 12 }}>None active.</div>}
-                                {detail.signals.filter(s => (s as any).is_active).map((s, i) => (
-                                  <div key={i} style={{ fontSize: 12, color: C.text2, marginBottom: 4 }}>
-                                    <span style={{ color: C.amber, fontWeight: 600 }}>{String((s as any).signal_type).replace(/_/g, ' ')}</span>
-                                    {' '}({String((s as any).signal_weight)}) · {String((s as any).ticket_key)} · {String((s as any).ticket_status ?? '')}
-                                  </div>
-                                ))}
-                              </div>
-                              <div style={{ flex: 1, minWidth: 240 }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6 }}>SCORE HISTORY</div>
-                                {detail.history.length === 0 && <div style={{ color: C.text3, fontSize: 12 }}>No tier changes recorded.</div>}
-                                {detail.history.map((h, i) => (
-                                  <div key={i} style={{ fontSize: 12, color: C.text2, marginBottom: 4 }}>
-                                    {new Date(String((h as any).changed_at)).toLocaleDateString()}: tier {String((h as any).previous_tier)}→{String((h as any).new_tier)} (score {String((h as any).previous_score)}→{String((h as any).new_score)})
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {tabBtn('customers', `At-risk customers (${customers.length})`)}
+            {tabBtn('issues', `Issues (${issues.length})`)}
           </div>
+
+          {tab === 'customers' && (
+            <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: C.bg2, color: C.text3, textAlign: 'left' }}>
+                    <th style={{ padding: '10px 14px' }}>Customer</th>
+                    <th style={{ padding: '10px 14px' }}>Tier</th>
+                    <th style={{ padding: '10px 14px' }}>Score</th>
+                    <th style={{ padding: '10px 14px' }}>Issues</th>
+                    <th style={{ padding: '10px 14px' }}>Tickets</th>
+                    <th style={{ padding: '10px 14px' }}>Growing</th>
+                    <th style={{ padding: '10px 14px' }}>Types</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.length === 0 && <tr><td colSpan={7} style={{ padding: 20, color: C.text3, textAlign: 'center' }}>No at-risk customers.</td></tr>}
+                  {customers.map(c => (
+                    <tr key={c.customer} style={{ borderTop: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '10px 14px', fontWeight: 600 }}>{c.customer}</td>
+                      <td style={{ padding: '10px 14px' }}><Chip label={TIER_NAMES[c.tier] ?? '?'} color={TIER_COLORS[c.tier] ?? C.text3} /></td>
+                      <td style={{ padding: '10px 14px', fontWeight: 700, color: TIER_COLORS[c.tier] }}>{c.score}</td>
+                      <td style={{ padding: '10px 14px', color: C.text2 }}>{c.issue_count}</td>
+                      <td style={{ padding: '10px 14px', color: C.text2 }}>{c.ticket_total}</td>
+                      <td style={{ padding: '10px 14px', color: c.growing ? C.amber : C.text3 }}>{c.growing || '—'}</td>
+                      <td style={{ padding: '10px 14px' }}><span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>{c.routes.map(r => <Chip key={r} label={r.replace(/_/g, ' ')} color={ROUTE_COLORS[r] ?? C.text3} />)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {tab === 'issues' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {issues.length === 0 && <div style={{ color: C.text3 }}>No issues yet.</div>}
+              {issues.map(i => (
+                <div key={i.signature} style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    {i.route && <Chip label={i.route.replace(/_/g, ' ')} color={ROUTE_COLORS[i.route] ?? C.text3} />}
+                    {i.trend && i.trend !== 'stable' && <Chip label={i.trend} color={i.trend === 'growing' ? C.red : C.teal} />}
+                    <span style={{ fontWeight: 700 }}>{i.title ?? '(untitled)'}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.text2 }}>{i.problem_statement}</div>
+                  <div style={{ fontSize: 11, color: C.text3, marginTop: 6 }}>
+                    {i.customer_count ?? 0} customers{i.frequency_label ? ` · ${i.frequency_label}` : ''}
+                    {i.confidence != null ? ` · confidence ${Math.round(i.confidence * 100)}%` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
