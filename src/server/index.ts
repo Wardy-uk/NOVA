@@ -3830,6 +3830,11 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             commitSummaryHtml = `<div class="empty">No commitments beyond SLA</div>`;
             commitDetailHtml = commitSummaryHtml;
           } else {
+            // Dev (incl Tier 3) is the expected long backlog — excluded from the headline
+            // counts by default and tucked behind a toggle in the detail.
+            const DEV_TIERS = new Set(['Tier 3', 'Development']);
+            const mainItems = items.filter(i => !DEV_TIERS.has(i.tier));
+            const devItems = items.filter(i => DEV_TIERS.has(i.tier));
             const buckets: Array<{ label: string; cls: string; test: (d: number) => boolean }> = [
               { label: 'Overdue', cls: 'b-red', test: d => d < 0 },
               { label: 'Due ≤7d', cls: 'b-amber', test: d => d >= 0 && d <= 7 },
@@ -3838,9 +3843,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               { label: '60d+', cls: 'b-amber', test: d => d > 60 },
             ];
             commitSummaryHtml = `<div class="bk-grid">${buckets.map(b => {
-              const n = items.filter(i => b.test(i.daysRem)).length;
+              const n = mainItems.filter(i => b.test(i.daysRem)).length;
               return `<div class="bk ${b.cls}${n === 0 ? ' bk-0' : ''}"><div class="bk-n">${n}</div><div class="bk-l">${b.label}</div></div>`;
-            }).join('')}</div><div class="bk-total">${items.length} commitment${items.length === 1 ? '' : 's'} beyond SLA</div>`;
+            }).join('')}</div><div class="bk-total">${mainItems.length} commitment${mainItems.length === 1 ? '' : 's'} beyond SLA${devItems.length ? ` &middot; +${devItems.length} Dev/T3` : ''}</div>`;
             const renderRow = (i: Commit) => {
               const rowCls = i.daysRem < 0 ? ' c-red' : i.daysRem <= 7 ? ' c-amber' : '';
               const remLbl = i.daysRem < 0 ? `${-i.daysRem}d overdue` : `${i.daysRem}d`;
@@ -3850,15 +3855,18 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
                 <div class="cdue"><span class="cbadge" style="${i.over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${i.over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${i.dueStr}</span><span class="cpast">${i.pastSla}d past SLA</span><span class="crem">${remLbl}</span></div>
               </a>`;
             };
-            // Group the detail by Current Tier.
-            const byTier = new Map<string, Commit[]>();
-            for (const i of items) { const t = i.tier || 'Other'; if (!byTier.has(t)) byTier.set(t, []); byTier.get(t)!.push(i); }
             const tierOrder = ['Customer Care', 'Tier 2', 'Production', 'Tier 3', 'Development'];
             const rank = (t: string) => { const i = tierOrder.indexOf(t); return i < 0 ? 99 : i; };
-            const tiers = [...byTier.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-            commitDetailHtml = tiers.map(t =>
-              `<div class="grp"><div class="grp-h">${esc(t)} &middot; ${byTier.get(t)!.length}</div>${byTier.get(t)!.map(renderRow).join('')}</div>`
-            ).join('');
+            const groupByTier = (its: Commit[]) => {
+              const byTier = new Map<string, Commit[]>();
+              for (const i of its) { const t = i.tier || 'Other'; if (!byTier.has(t)) byTier.set(t, []); byTier.get(t)!.push(i); }
+              return [...byTier.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+                .map(t => `<div class="grp"><div class="grp-h">${esc(t)} &middot; ${byTier.get(t)!.length}</div>${byTier.get(t)!.map(renderRow).join('')}</div>`).join('');
+            };
+            const devBlock = devItems.length
+              ? `<button class="wk-toggle" type="button" style="margin:1vh 0" onclick="var d=document.getElementById('commit-dev');var on=d.style.display==='none';d.style.display=on?'block':'none';this.textContent=(on?'Hide':'Show')+' Dev / Tier 3 (${devItems.length})'">Show Dev / Tier 3 (${devItems.length})</button><div id="commit-dev" style="display:none">${groupByTier(devItems)}</div>`
+              : '';
+            commitDetailHtml = (groupByTier(mainItems) || '<div class="empty">No non-Dev commitments beyond SLA</div>') + devBlock;
           }
         } else {
           commitSummaryHtml = `<div class="empty">Jira not configured</div>`;
@@ -4009,19 +4017,19 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   <div class="panel left exp" data-expand="src-kpi" data-title="Strategic KPIs — full granular breakdown" tabindex="0" role="button">
     <div class="panel-h"><span>Strategic KPIs</span>
       <span style="display:flex;align-items:center;gap:1vw">
-        <button class="wk-toggle" id="wk-toggle" type="button" onclick="event.stopPropagation();window.__toggleWk&&window.__toggleWk(this)">Show 4-week view</button>
+        <button class="wk-toggle" id="wk-toggle" type="button" onclick="event.stopPropagation();window.__toggleWk&&window.__toggleWk(this)">Show daily view</button>
         <span class="exp-hint">Expand ⤢</span>
       </span>
     </div>
     <div class="panel-body">
-      <div class="kblock" id="day-block">
+      <div class="kblock" id="day-block" style="display:none">
         <div class="kblock-h">This week &middot; day by day</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
           ${dailyHtml}
         </div>
       </div>
-      <div class="kblock" id="wk-block" style="display:none">
+      <div class="kblock" id="wk-block" style="display:flex">
         <div class="kblock-h">Red days per week &middot; last 4 weeks</div>
         <div class="kgrid">
           <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
