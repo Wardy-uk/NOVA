@@ -42,7 +42,7 @@ export interface AgentKpiRow {
   rag: Record<string, Rag | null>;
 }
 
-function parseDate(v: unknown): Date | null {
+export function parseDate(v: unknown): Date | null {
   if (!v) return null;
   const d = v instanceof Date ? v : new Date(v as string);
   return isNaN(d.getTime()) ? null : d;
@@ -53,7 +53,7 @@ function parseDate(v: unknown): Date | null {
 // SLA" stock on open tickets — without it, a completed cycle that breached months
 // ago resurrects as a phantom breach. ongoingOnly=false (default) keeps the
 // completed-cycle read for resolved tickets, where the final cycle is the answer.
-function slaBreached(fieldsJson: string | null, field: string, ongoingOnly = false): boolean | null {
+export function slaBreached(fieldsJson: string | null, field: string, ongoingOnly = false): boolean | null {
   if (!fieldsJson) return null;
   let sla: any;
   try { sla = JSON.parse(fieldsJson)?.[field]; } catch { return null; }
@@ -81,7 +81,7 @@ function parseCsat(fieldsJson: string | null): number | null {
   } catch { return null; }
 }
 
-function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date): boolean {
+export function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date): boolean {
   if ((status || '').toLowerCase() === 'waiting on requestor') return false;
   if (!created || now.getTime() - created.getTime() < FOUR_HOURS) return false;
   if (nextUpd && nextUpd > now) return false;

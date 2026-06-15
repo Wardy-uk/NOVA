@@ -201,6 +201,7 @@ import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
+import { sendAllKpiEmails } from './services/kpi-email-digest.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -1643,6 +1644,12 @@ async function main() {
       if (isWeekday && ukHour === 17 && ukMin >= 30 && ukMin < 40) {
         await kpiPipeline.collectDerivedKpis();
         await kpiPipeline.generateDailyDigest();
+      }
+      // P2: NOVA-owned KPI emails (daily comparison + evidence + agent KPI) from the
+      // Rebuild engines. No-op unless kpi_email_digests_enabled='true' — avoids
+      // double-sending while n8n "Daily KPI Report v4" is still active.
+      if (isWeekday && ukHour === 17 && ukMin >= 40 && ukMin < 50 && agentJiraClient) {
+        await sendAllKpiEmails({ settings: settingsQueries, jira: agentJiraClient, llm: llmService, email: briefingEmailService });
       }
       if (ukDay === 'Mon' && ukHour === 9 && ukMin < 10) {
         await kpiPipeline.generateWeeklyDigest();
