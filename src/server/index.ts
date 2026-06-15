@@ -200,7 +200,7 @@ import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } fr
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
-import { captureAgentKpis, getAgentLiveSnapshot, type AgentKpiRow } from './services/kpi-agent/index.js';
+import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -1600,15 +1600,19 @@ async function main() {
     kpiPipeline.ensureKpiTargetDirections().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)
-    jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot + agent metrics refresh', async () => {
+    jobRegistry.register('kpi-jira-snapshot', 'KPI Jira snapshot', async () => {
       await kpiPipeline.collectJiraSnapshot();
-      await kpiPipeline.refreshAllAgentMetrics();
     }, 10 * 60 * 1000);
     jobRegistry.register('kpi-agent-snapshot', 'KPI agent daily snapshot (all 27 cols)', async () => {
       await kpiPipeline.snapshotAgentKpis();
     }, 30 * 60 * 1000);
+    // B1: Rebuild engine owns dbo.Agent live stat maintenance (round-robin dependency),
+    // replacing the legacy kpi-pipeline refreshAllAgentMetrics so n8n + kpi-pipeline can be retired.
+    jobRegistry.register('kpi-agent-roster-sync', 'KPI agent roster stats → dbo.Agent', async () => {
+      if (agentJiraClient) await syncAgentRosterStats(settingsQueries, agentJiraClient);
+    }, 10 * 60 * 1000);
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
-    setTimeout(() => kpiPipeline.refreshAllAgentMetrics().catch(() => {}), 100_000);
+    setTimeout(() => { if (agentJiraClient) syncAgentRosterStats(settingsQueries, agentJiraClient).catch(() => {}); }, 100_000);
     setTimeout(() => {
       kpiPipeline.captureEodSnapshot().catch(() => {});
       kpiPipeline.collectDerivedKpis().catch(err => console.error('[kpi-pipeline] Derived KPIs startup failed:', err instanceof Error ? err.message : err));

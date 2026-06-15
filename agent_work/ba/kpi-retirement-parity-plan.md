@@ -22,17 +22,23 @@ solved(transition)/CSAT/FRT+Res compliance/FCR.
 ## STATUS (2026-06-15)
 - [x] **B2 done** (commit 44a9f47) — AI×3, 1st-line, bug-ack, WTD×2 ported to kpi-org.
 - [x] **P1 done** (commit 01f090e) — 34 per-tier SLA Met/Breached/Compliance + Escalation Accuracy (daily + All Time).
-- KPI-DATA parity layer complete. Remaining = operational (B1, P2) + UI (P3–P7) + retirement.
+- [x] **B1 done** — Rebuild engine owns `dbo.Agent` stats (round-robin dep); legacy refresh removed.
+- KPI-DATA parity layer complete. Remaining = operational (P2) + UI (P3–P7) + retirement.
 - ⚠ Deploy pending: commits 372d393, 44a9f47, 01f090e need a prod deploy + capture to populate.
 
 ## HARD BLOCKERS (must do before n8n off)
-- [ ] **B1 — `dbo.Agent` stats dependency.** `assignment-engine.ts` (round-robin),
-  `capacity-planner.ts`, `agent-availability.ts`, `people.ts`, `agent.ts` READ
-  `OpenTickets_Total/Over2Hours`, `SolvedTickets_Today/ThisWeek`, `OldestTicketDays`.
-  Only n8n + NOVA's old `refreshAllAgentMetrics` keep them fresh. Fix: make the Rebuild
-  `kpi-agent` engine maintain `dbo.Agent` stats (own job), OR repoint consumers to
-  `kpi_agent_daily`. Decision: keep writing `dbo.Agent` from a small NOVA job (least
-  disruptive to round-robin).
+- [x] **B1 done** — Rebuild `kpi-agent` engine now owns `dbo.Agent` live stat maintenance.
+  New `kpi-agent/roster-sync.ts` (`syncAgentRosterStats`) writes `OpenTickets_*`,
+  `SolvedTickets_Today/ThisWeek`, `OldestTicketDays/Key`, `TicketsSnapshotAt` from the
+  60s-cached live snapshot (corrected definitions, covers all active NT/NOVA_AI agents
+  incl. NOVA AI). Registered as its own job `kpi-agent-roster-sync` (10 min) + 100s
+  startup kick in `index.ts`; the racing legacy `refreshAllAgentMetrics` /
+  `refreshNovaAiMetrics` calls were removed (methods left in `kpi-pipeline.ts` as dead
+  code for Phase-4 deletion). No separate zeroing needed — cleared queues write open=0.
+  Verified: live readers were `kpi-data.ts` agent-admin endpoints + breach board (already
+  on the snapshot); `capacity-planner`/`people` read `jira_agent_kpi_daily` (separate
+  `snapshotAgentKpis` job, untouched); `assignment-engine` roster query reads no stat
+  columns. ⚠ Deploy + first sync needed to populate.
 - [ ] **B2 — Port 9 NOVA-only KPIs into kpi-org:** AI Tickets Resolved/Pending/
   Resolution Rate % (from `approval_queue`), 1st-line Resolution % (resolved-today CC
   tier / total), Bug-Ack hours (comment scan on bug types), WTD % Green/Red (meta, from
