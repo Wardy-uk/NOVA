@@ -575,7 +575,7 @@ async function main() {
     standupQueries: teamStandupQueries,
     getJiraClient: buildServiceDeskJiraClient,
     getRoster: () => getStandupRoster(settingsQueries),
-    plaudService: new PlaudService(() => settingsQueries.getAll()),
+    plaudService: new PlaudService(mcpManager),
     emailService: new EmailService(() => settingsQueries.getAll()),
     auditQueries,
   };

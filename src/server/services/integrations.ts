@@ -347,6 +347,14 @@ export const INTEGRATIONS: IntegrationDefinition[] = [
     ],
   },
   {
+    id: 'plaud',
+    name: 'Plaud',
+    description: 'Plaud voice recorder — imports the daily standup transcript and AI notes via the official Plaud MCP server (npx @plaud-ai/mcp). Auth is a one-time browser OAuth on the server (tokens auto-refresh); no API key needed. Use the "Connect" action to sign in.',
+    enabledKey: 'plaud_enabled',
+    authType: 'device_code',
+    fields: [],
+  },
+  {
     id: 'agentic-brain',
     name: 'Agentic Brain',
     description: 'AgentBrain — the cross-customer issue router. It classifies + attributes support tickets (JSM + Zendesk) and POSTs issue cards into NOVA Risk Intelligence at /api/public/webhooks/issue-router, authenticated with the shared secret below (sent in the x-issue-router-secret header). Agree the secret with the AgentBrain owner and paste it here.',
@@ -371,6 +379,14 @@ export function buildMcpConfig(
 ): McpServerConfig | null {
   switch (id) {
     // Jira uses direct REST API (per-user credentials) — no MCP server needed
+    case 'plaud': {
+      // Official Plaud MCP server. OAuth tokens persist at ~/.plaud/tokens-mcp.json
+      // after a one-time browser sign-in; no env/API key required.
+      return {
+        command: 'npx',
+        args: ['-y', '@plaud-ai/mcp@latest'],
+      };
+    }
     case 'msgraph': {
       return {
         command: 'npx',

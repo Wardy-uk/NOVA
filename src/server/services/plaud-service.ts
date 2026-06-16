@@ -1,146 +1,116 @@
 /**
- * Plaud API client — used to auto-import the daily standup recording.
+ * Plaud client — imports the daily standup recording via the official Plaud MCP
+ * server (npx @plaud-ai/mcp), registered in NOVA's mcpManager like Jira/MS365.
  *
- * Endpoints/shapes documented in NOVA-Plaud-Integration-Notes.md (reverse-engineered
- * from the "PLAUD Sync to Obsidian" n8n workflow). Base API is regional:
- *   https://api-euc1.plaud.ai   (EU-Central-1)
+ * Auth is browser OAuth (one-time, tokens auto-refresh at ~/.plaud/tokens-mcp.json)
+ * — there is no API key. All Plaud access goes through mcpManager.callTool('plaud', …);
+ * routes/jobs never talk to Plaud directly.
  *
- * Config resolution (env first, then settings.json fallback):
- *   PLAUD_API_URL   / setting: plaud_api_base   (default https://api-euc1.plaud.ai)
- *   PLAUD_API_TOKEN / setting: plaud_api_token   (long-lived Bearer JWT, manual rotation)
- *
- * All Plaud HTTP calls live here — routes/jobs must not fetch Plaud directly.
+ * MCP tool output shapes (confirmed against the live server):
+ *   list_files     -> { type:'list', data:[{ id, name, start_at, duration }] }
+ *   get_transcript -> [ { speaker, content|text, start_time? }, … ]  (empty [] if none)
+ *   get_note       -> [ { data_title, data_content }, … ]            (empty [] if none)
  */
+import type { McpClientManager } from './mcp-client.js';
 
-const DEFAULT_BASE = 'https://api-euc1.plaud.ai';
-const REQUEST_TIMEOUT_MS = 20_000;
+const PLAUD_SERVER = 'plaud';
 
 export interface PlaudRecording {
   id: string;
   filename: string;
   start_time: number; // unix seconds
-  duration: number;
-  is_summary: boolean;
-  is_trans: boolean;
+  duration: number; // ms (as Plaud reports)
 }
 
-interface PlaudListResponse {
-  data_file_list?: Array<Record<string, unknown>>;
-}
-
-interface PlaudDetailResponse {
-  ai_content?: {
-    summary?: string;
-    highlights?: string[];
-    key_points?: string[];
-  };
-  trans_result?: {
-    paragraphs?: Array<{ start_time?: number; speaker?: string; content?: string }>;
-  };
+/** Unwrap an MCP CallToolResult into parsed JSON (or the raw text / value). */
+function unwrap(result: unknown): any {
+  const r = result as any;
+  if (r == null) return null;
+  if (typeof r === 'object' && Array.isArray(r.content)) {
+    const textPart = r.content.find((c: any) => c?.type === 'text');
+    if (textPart?.text != null) {
+      try { return JSON.parse(textPart.text); } catch { return textPart.text; }
+    }
+    if (r.structuredContent != null) return r.structuredContent;
+    return null;
+  }
+  return r; // already a plain value (e.g. when called through a pre-parsing client)
 }
 
 export class PlaudService {
-  private getSettings: () => Record<string, string>;
+  constructor(private mcp: McpClientManager) {}
 
-  constructor(settingsGetter: () => Record<string, string> = () => ({})) {
-    this.getSettings = settingsGetter;
-  }
-
-  private get baseUrl(): string {
-    const s = this.getSettings();
-    return (process.env.PLAUD_API_URL || s.plaud_api_base || DEFAULT_BASE).replace(/\/+$/, '');
-  }
-
-  private get token(): string {
-    const s = this.getSettings();
-    return (process.env.PLAUD_API_TOKEN || s.plaud_api_token || '').trim();
-  }
-
+  /** True once the Plaud MCP server is connected and exposing tools. */
   isConfigured(): boolean {
-    return !!this.token;
+    return this.mcp.getServerTools(PLAUD_SERVER).length > 0;
   }
 
-  private async request<T>(path: string): Promise<T> {
-    if (!this.isConfigured()) {
-      throw new Error('Plaud not configured. Set PLAUD_API_TOKEN (env) or plaud_api_token (settings).');
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json' },
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        throw new Error(`Plaud API ${path} returned ${res.status} ${res.statusText}`);
-      }
-      return (await res.json()) as T;
-    } finally {
-      clearTimeout(timer);
-    }
+  /** YYYY-MM-DD for a Plaud start_at (local ISO, no tz) in UK time. */
+  private ukDate(startAt: string): string {
+    return new Date(startAt).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
 
-  /** Format a unix-seconds timestamp to a YYYY-MM-DD date string in UK time. */
-  private ukDate(unixSeconds: number): string {
-    return new Date(unixSeconds * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-  }
-
-  /** List recordings whose start time falls on the given UK calendar date (YYYY-MM-DD). */
+  /** List recordings whose start falls on the given UK calendar date (YYYY-MM-DD). */
   async listRecordings(dateString: string): Promise<PlaudRecording[]> {
-    const resp = await this.request<PlaudListResponse>(
-      '/file/simple/web?skip=0&limit=99999&is_trash=0&sort_by=edit_time&is_desc=true',
-    );
-    const all = (resp.data_file_list ?? []).map((r) => ({
-      id: String(r.id ?? ''),
-      filename: String(r.filename ?? ''),
-      start_time: Number(r.start_time ?? 0),
-      duration: Number(r.duration ?? 0),
-      is_summary: Boolean(r.is_summary),
-      is_trans: Boolean(r.is_trans),
+    const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'list_files', {
+      date_from: dateString,
+      date_to: dateString,
     }));
-    return all.filter((r) => r.id && r.start_time && this.ukDate(r.start_time) === dateString);
+    const list: any[] = Array.isArray(raw) ? raw : (raw?.data ?? raw?.data_file_list ?? raw?.files ?? []);
+    return list
+      .map((r) => {
+        const startAt = r.start_at ?? r.start_time ?? r.created_at ?? '';
+        return {
+          id: String(r.id ?? r.file_id ?? ''),
+          filename: String(r.name ?? r.filename ?? r.title ?? ''),
+          start_time: startAt ? Math.floor(new Date(startAt).getTime() / 1000) : 0,
+          duration: Number(r.duration ?? 0),
+          _startAt: startAt as string,
+        };
+      })
+      // Keep the date filter even though the API filters too (defensive).
+      .filter((r) => r.id && (!r._startAt || this.ukDate(r._startAt) === dateString))
+      .map(({ _startAt, ...rec }) => rec);
   }
 
-  /** Find the standup recording for a date (filename contains "standup"/"stand up"). null if none. */
+  /** Find the standup recording for a date (name contains "standup"/"stand up"). null if none. */
   async findStandupRecording(dateString: string): Promise<PlaudRecording | null> {
     const recordings = await this.listRecordings(dateString);
-    const match = recordings.find((r) => /stand\s?up/i.test(r.filename));
-    return match ?? null;
+    return recordings.find((r) => /stand\s?up/i.test(r.filename)) ?? null;
   }
 
-  private async getDetail(recordingId: string): Promise<PlaudDetailResponse> {
-    return this.request<PlaudDetailResponse>(`/file/detail/${encodeURIComponent(recordingId)}`);
-  }
-
-  /** Full timestamped transcript as plain text. Empty string if not transcribed yet. */
+  /** Full timestamped transcript as plain text. '' if not transcribed yet. */
   async getTranscript(recordingId: string): Promise<string> {
-    const detail = await this.getDetail(recordingId);
-    const paragraphs = detail.trans_result?.paragraphs ?? [];
-    if (paragraphs.length === 0) return '';
-    return paragraphs
-      .map((p) => {
-        const t = Number(p.start_time ?? 0);
-        const mm = String(Math.floor(t / 60)).padStart(2, '0');
-        const ss = String(Math.floor(t % 60)).padStart(2, '0');
-        const speaker = p.speaker ? `${p.speaker}: ` : '';
-        return `[${mm}:${ss}] ${speaker}${(p.content ?? '').trim()}`;
+    const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'get_transcript', { file_id: recordingId }));
+    if (typeof raw === 'string') return raw;
+    const segments: any[] = Array.isArray(raw) ? raw : (raw?.paragraphs ?? raw?.data ?? []);
+    if (!segments.length) return '';
+    return segments
+      .map((s) => {
+        const t = Number(s.start_time ?? s.timestamp ?? NaN);
+        const stamp = Number.isFinite(t) ? `[${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}] ` : '';
+        const speaker = s.speaker ? `${s.speaker}: ` : '';
+        const text = (s.content ?? s.text ?? '').toString().trim();
+        return `${stamp}${speaker}${text}`.trim();
       })
+      .filter(Boolean)
       .join('\n');
   }
 
-  /** AI-generated notes/summary as markdown. Empty string if not summarised yet. */
+  /** AI-generated notes/summary as markdown. '' if not summarised yet. */
   async getNotes(recordingId: string): Promise<string> {
-    const detail = await this.getDetail(recordingId);
-    const ai = detail.ai_content;
-    if (!ai) return '';
-    const parts: string[] = [];
-    if (ai.summary?.trim()) parts.push(ai.summary.trim());
-    if (ai.highlights?.length) {
-      parts.push('### Highlights\n' + ai.highlights.map((h) => `- ${h}`).join('\n'));
-    }
-    if (ai.key_points?.length) {
-      parts.push('### Key points\n' + ai.key_points.map((k) => `- ${k}`).join('\n'));
-    }
-    return parts.join('\n\n');
+    const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'get_note', { file_id: recordingId }));
+    if (typeof raw === 'string') return raw;
+    const blocks: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+    if (!blocks.length) return '';
+    return blocks
+      .map((b) => {
+        const title = (b.data_title ?? b.title ?? '').toString().trim();
+        const content = (b.data_content ?? b.content ?? '').toString().trim();
+        if (!content) return '';
+        return title ? `### ${title}\n${content}` : content;
+      })
+      .filter(Boolean)
+      .join('\n\n');
   }
 }
