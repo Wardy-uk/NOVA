@@ -15,6 +15,12 @@ import type { McpClientManager } from './mcp-client.js';
 
 const PLAUD_SERVER = 'plaud';
 
+// Standup runs at ~10:00 UK most weekdays. We match the recording starting nearest
+// this time (within the window) rather than by name, since Plaud auto-names by
+// timestamp. Adjust here if the standup slot moves.
+const STANDUP_TARGET_MINUTES = 10 * 60; // 10:00
+const STANDUP_WINDOW_MINUTES = 45; // accept 09:15–10:45
+
 export interface PlaudRecording {
   id: string;
   filename: string;
@@ -73,10 +79,34 @@ export class PlaudService {
       .map(({ _startAt, ...rec }) => rec);
   }
 
-  /** Find the standup recording for a date (name contains "standup"/"stand up"). null if none. */
+  /** UK minutes-since-midnight for a unix-seconds timestamp. */
+  private ukMinutesOfDay(unixSeconds: number): number {
+    const d = new Date(unixSeconds * 1000);
+    const hh = parseInt(d.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }), 10);
+    const mm = parseInt(d.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: '2-digit' }), 10);
+    return hh * 60 + mm;
+  }
+
+  /**
+   * Find the standup recording for a date. Prefers any recording explicitly named
+   * "standup"; otherwise picks the one starting nearest 10:00 UK (within the window).
+   * Returns null if nothing qualifies.
+   */
   async findStandupRecording(dateString: string): Promise<PlaudRecording | null> {
     const recordings = await this.listRecordings(dateString);
-    return recordings.find((r) => /stand\s?up/i.test(r.filename)) ?? null;
+    if (!recordings.length) return null;
+
+    const named = recordings.find((r) => /stand\s?up/i.test(r.filename));
+    if (named) return named;
+
+    let best: PlaudRecording | null = null;
+    let bestDelta = Infinity;
+    for (const r of recordings) {
+      if (!r.start_time) continue;
+      const delta = Math.abs(this.ukMinutesOfDay(r.start_time) - STANDUP_TARGET_MINUTES);
+      if (delta < bestDelta) { bestDelta = delta; best = r; }
+    }
+    return best && bestDelta <= STANDUP_WINDOW_MINUTES ? best : null;
   }
 
   /** Full timestamped transcript as plain text. '' if not transcribed yet. */
