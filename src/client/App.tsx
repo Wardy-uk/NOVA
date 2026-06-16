@@ -47,6 +47,8 @@ import { SetupPortal } from './components/SetupPortal.js';
 const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').then(m => ({ default: m.SurveyAdminView })));
 const PortalAdminView = lazy(() => import('./components/PortalAdminView.js'));
 import { SurveyRespondView } from './components/SurveyRespondView.js';
+import { StandupSubmitForm } from './components/StandupSubmitForm.js';
+const StandupView = lazy(() => import('./components/StandupView.js').then(m => ({ default: m.StandupView })));
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
 const EscalationReportView = lazy(() => import('./components/EscalationReportView.js').then(m => ({ default: m.EscalationReportView })));
@@ -102,7 +104,7 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
 type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
@@ -119,6 +121,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
+  | 'standup-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'admin-contract-terms' | 'my-feedback'
   | 'help' | 'debug';
 
@@ -320,9 +323,16 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'backlog-board', label: 'Kanban' },
     ],
   },
+  standup: {
+    label: 'Standup',
+    defaultView: 'standup-board',
+    tabs: [
+      { view: 'standup-board', label: 'Standup' },
+    ],
+  },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog', 'standup'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -366,7 +376,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
 // Read initial view from URL hash (e.g. #delivery → 'delivery')
 function getViewFromHash(): View | null {
-  const hash = window.location.hash.slice(1); // strip '#'
+  const hash = window.location.hash.slice(1).split('?')[0]; // strip '#' and any ?query
   if (!hash || hash.includes('sso_token')) return null;
   // Validate it's a known view
   const allViews = new Set<string>([
@@ -391,6 +401,10 @@ export function App() {
   // Public survey response page — token-based, no auth
   const surveyMatch = window.location.pathname.match(/^\/survey\/([0-9a-f-]{36})$/);
   if (surveyMatch) return <SurveyRespondView token={surveyMatch[1]} />;
+
+  // Public standup submission form — no NOVA auth (agents submit from their phones)
+  const standupMatch = window.location.pathname.match(/^\/standup\/submit\/(\d{4}-\d{2}-\d{2})$/);
+  if (standupMatch) return <StandupSubmitForm date={standupMatch[1]} />;
 
   // Public wallboard — no auth required
   if (window.location.hash === '#wallboard') {
@@ -737,6 +751,8 @@ export function App() {
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
     if (area === 'kpi-rebuild') return true;
+    // Standup manager view is admin-only (Nick's view)
+    if (area === 'standup') return userRole.split(',').map(r => r.trim()).some(r => r === 'admin' || r === 'super_admin');
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)
@@ -1273,6 +1289,12 @@ export function App() {
           {view === 'backlog-board' && (
             <Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400" /></div>}>
               <BacklogKanbanView canWrite={areaAccess.backlog === 'edit'} />
+            </Suspense>
+          )}
+
+          {view === 'standup-board' && canSeeArea('standup') && (
+            <Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400" /></div>}>
+              <StandupView token={auth.token!} />
             </Suspense>
           )}
 

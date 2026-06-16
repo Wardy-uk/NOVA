@@ -96,6 +96,66 @@ export function setupPortalHtml(opts: {
   `);
 }
 
+export function standupPromptHtml(opts: {
+  name: string;
+  dateDisplay: string;
+  submitUrl: string;
+  queue?: { total: number; over5: number; oldest: string | null } | null;
+}): string {
+  const queueRows = opts.queue
+    ? `<table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px;width:100%">
+         <tr><td style="padding:4px 0;color:#a0a0a0;font-size:13px;width:160px">Open tickets</td><td style="padding:4px 0;color:#e5e5e5;font-size:13px;font-weight:600">${opts.queue.total}</td></tr>
+         <tr><td style="padding:4px 0;color:#a0a0a0;font-size:13px">Over 5 days</td><td style="padding:4px 0;color:${opts.queue.over5 > 0 ? '#ef4444' : '#e5e5e5'};font-size:13px;font-weight:600">${opts.queue.over5}</td></tr>
+         ${opts.queue.oldest ? `<tr><td style="padding:4px 0;color:#a0a0a0;font-size:13px">Oldest ticket</td><td style="padding:4px 0;color:#5ec1ca;font-size:13px;font-weight:600">${opts.queue.oldest}</td></tr>` : ''}
+       </table>`
+    : '';
+  return wrap(`
+    <p style="margin:0 0 16px;color:#e5e5e5;font-size:15px">Hi ${opts.name},</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">Before today's standup, please take 2 minutes to submit your numbers and commitments.</p>
+    ${queueRows}
+    ${button(opts.submitUrl, 'Submit my standup')}
+    <p style="margin:16px 0 0;color:#a0a0a0;font-size:13px">See you at standup.</p>
+  `);
+}
+
+export function standupAccountabilityHtml(opts: {
+  dateDisplay: string;
+  submitted: number;
+  totalAgents: number;
+  delivered: number;
+  missed: number;
+  pending: number;
+  agents: Array<{ name: string; commitments: number; delivered: number; missed: number; pending: number }>;
+  sessionUrl: string;
+}): string {
+  const agentRows = opts.agents
+    .map(
+      (a) => `<tr>
+        <td style="padding:6px 0;color:#e5e5e5;font-size:13px">${a.name}</td>
+        <td style="padding:6px 8px;color:#a0a0a0;font-size:12px;text-align:right">${a.commitments}</td>
+        <td style="padding:6px 8px;color:#10b981;font-size:12px;text-align:right">${a.delivered}</td>
+        <td style="padding:6px 8px;color:#ef4444;font-size:12px;text-align:right">${a.missed}</td>
+        <td style="padding:6px 0 6px 8px;color:#f59e0b;font-size:12px;text-align:right">${a.pending}</td>
+      </tr>`,
+    )
+    .join('');
+  return wrap(`
+    <p style="margin:0 0 8px;color:#e5e5e5;font-size:15px;font-weight:600">Standup accountability — ${opts.dateDisplay}</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px"><strong style="color:#e5e5e5">${opts.submitted} of ${opts.totalAgents}</strong> agents submitted &nbsp;·&nbsp; <span style="color:#10b981">${opts.delivered} delivered</span> &nbsp;·&nbsp; <span style="color:#ef4444">${opts.missed} missed</span> &nbsp;·&nbsp; <span style="color:#f59e0b">${opts.pending} awaiting review</span></p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px">
+      <tr style="border-bottom:1px solid #3a424d">
+        <td style="padding:0 0 6px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:1px">Agent</td>
+        <td style="padding:0 8px 6px;color:#6b7280;font-size:10px;text-transform:uppercase;text-align:right">Total</td>
+        <td style="padding:0 8px 6px;color:#6b7280;font-size:10px;text-transform:uppercase;text-align:right">Done</td>
+        <td style="padding:0 8px 6px;color:#6b7280;font-size:10px;text-transform:uppercase;text-align:right">Miss</td>
+        <td style="padding:0 0 6px 8px;color:#6b7280;font-size:10px;text-transform:uppercase;text-align:right">Pend</td>
+      </tr>
+      ${agentRows}
+    </table>
+    ${button(opts.sessionUrl, 'Open in N.O.V.A')}
+  `);
+}
+
 export function trainingReminderHtml(opts: {
   displayName: string;
   completionPct: number;

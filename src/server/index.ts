@@ -22,6 +22,10 @@ import { createIntegrationRoutes } from './routes/integrations.js';
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
 import { createStandupRoutes } from './routes/standups.js';
+import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes/team-standup.js';
+import { TeamStandupQueries } from './db/team-standup-queries.js';
+import { PlaudService } from './services/plaud-service.js';
+import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
@@ -369,6 +373,7 @@ async function main() {
   const onboardingRunQueries = new OnboardingRunQueries();
   const milestoneQueries = new MilestoneQueries();
   const auditQueries = new AuditQueries();
+  const teamStandupQueries = new TeamStandupQueries();
   const notificationQueries = new NotificationQueries();
   const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries, userQueries);
   const problemTicketQueries = new ProblemTicketQueries();
@@ -564,6 +569,15 @@ async function main() {
 
   const aggregator = new TaskAggregator(mcpManager, taskQueries, settingsQueries, buildServiceDeskJiraClient);
 
+  // Daily team standup — shared deps for routes + scheduled jobs.
+  const standupDeps: StandupDeps = {
+    standupQueries: teamStandupQueries,
+    getJiraClient: buildServiceDeskJiraClient,
+    plaudService: new PlaudService(() => settingsQueries.getAll()),
+    emailService: new EmailService(() => settingsQueries.getAll()),
+    auditQueries,
+  };
+
   // Jira cache layer — single background sync replaces per-consumer live API calls
   const jiraCacheQueries = new JiraCacheQueries();
   let jiraSyncService: JiraSyncService | null = null;
@@ -628,6 +642,10 @@ async function main() {
 
   // KPI Wallboard — public route for TV displays (no auth required)
   app.use('/api/public/wallboard', createKpiWallboardRoutes(settingsQueries));
+
+  // Team standup — public agent submission endpoints (form has no NOVA login).
+  // Mounted before auth; unmatched paths fall through to the authed manager router.
+  app.use('/api/standup', createTeamStandupPublicRoutes(standupDeps));
 
   // AI Approval ingest from n8n (no auth required)
   app.post('/api/public/approvals/ingest', (req, res) => {
@@ -1010,6 +1028,33 @@ async function main() {
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries, jiraUserClientFactory));
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
+  // Team standup — authenticated manager routes (Nick's view).
+  app.use('/api/standup', requireAreaAccess('nova_features', 'view'), createTeamStandupRoutes(standupDeps));
+
+  // ── Daily team standup jobs (poll every 5 min; gated to UK weekday mornings) ──
+  jobRegistry.register('standup-morning-prompts', 'Standup morning prompts (Mon–Fri 09:00)', async () => {
+    const now = new Date();
+    const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+    const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+    const ukWeekday = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
+    if (['Sat', 'Sun'].includes(ukWeekday)) return;
+    if (ukHour === 9 && ukMin < 5) {
+      const r = await runStandupPrompts(standupUkToday(), standupDeps);
+      console.log(`[standup] morning prompts: sent ${r.sent}, skipped ${r.skipped}, failed ${r.failed}, no-email ${r.noEmail.length}`);
+    }
+  }, 5 * 60 * 1000);
+
+  jobRegistry.register('standup-accountability', 'Standup accountability report (Mon–Fri 09:15)', async () => {
+    const now = new Date();
+    const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+    const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+    const ukWeekday = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
+    if (['Sat', 'Sun'].includes(ukWeekday)) return;
+    if (ukHour === 9 && ukMin >= 15 && ukMin < 20) {
+      const r = await runStandupReport(standupUkDaysAgo(1), standupDeps);
+      console.log(`[standup] accountability report for ${standupUkDaysAgo(1)}: ${r.ok ? 'sent' : 'no session'}`);
+    }
+  }, 5 * 60 * 1000);
   const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
   app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
   // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)

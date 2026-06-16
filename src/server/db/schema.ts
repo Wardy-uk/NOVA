@@ -3248,6 +3248,68 @@ async function runMigrations(): Promise<void> {
      );`,
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_template_field_signer_overrides_template')
      CREATE INDEX IX_template_field_signer_overrides_template ON template_field_signer_overrides(template_id);`,
+
+    // ── Daily team standup (accountability loop) ──
+    // One session per calendar date. brief_json holds the pre-standup Jira brief,
+    // plaud_* fields hold the imported recording, notes_text holds extracted notes
+    // and the appended accountability report.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'standup_sessions') AND type = 'U')
+     CREATE TABLE standup_sessions (
+       id                INT IDENTITY(1,1) PRIMARY KEY,
+       date              NVARCHAR(10)  NOT NULL,
+       brief_json        NVARCHAR(MAX) NULL,
+       plaud_recording_id NVARCHAR(200) NULL,
+       transcript_text   NVARCHAR(MAX) NULL,
+       notes_text        NVARCHAR(MAX) NULL,
+       status            NVARCHAR(20)  NOT NULL DEFAULT 'pending',
+       created_at        DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_standup_sessions_date UNIQUE (date)
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'standup_submissions') AND type = 'U')
+     CREATE TABLE standup_submissions (
+       id                INT IDENTITY(1,1) PRIMARY KEY,
+       session_id        INT           NOT NULL,
+       agent_name        NVARCHAR(200) NOT NULL,
+       submitted_at      DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+       ticket_count      INT           NULL,
+       over_5_count      INT           NULL,
+       oldest_ticket     NVARCHAR(50)  NULL,
+       oldest_age        INT           NULL,
+       blockers          NVARCHAR(MAX) NULL,
+       commitments_json  NVARCHAR(MAX) NULL,
+       notes             NVARCHAR(MAX) NULL,
+       CONSTRAINT UQ_standup_submissions_session_agent UNIQUE (session_id, agent_name)
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_standup_submissions_session')
+     CREATE INDEX IX_standup_submissions_session ON standup_submissions(session_id);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'standup_commitments') AND type = 'U')
+     CREATE TABLE standup_commitments (
+       id                INT IDENTITY(1,1) PRIMARY KEY,
+       submission_id     INT           NOT NULL,
+       session_id        INT           NOT NULL,
+       agent_name        NVARCHAR(200) NOT NULL,
+       commitment_text   NVARCHAR(MAX) NOT NULL,
+       status            NVARCHAR(20)  NOT NULL DEFAULT 'pending',
+       reviewed_at       DATETIME2     NULL,
+       review_note       NVARCHAR(MAX) NULL,
+       created_at        DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_standup_commitments_session')
+     CREATE INDEX IX_standup_commitments_session ON standup_commitments(session_id);`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_standup_commitments_submission')
+     CREATE INDEX IX_standup_commitments_submission ON standup_commitments(submission_id);`,
+
+    // Tracks morning-prompt sends so the 09:00 job is idempotent within a day.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'standup_email_log') AND type = 'U')
+     CREATE TABLE standup_email_log (
+       id                INT IDENTITY(1,1) PRIMARY KEY,
+       session_id        INT           NOT NULL,
+       agent_name        NVARCHAR(200) NOT NULL,
+       sent_at           DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_standup_email_log_session_agent UNIQUE (session_id, agent_name)
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }
