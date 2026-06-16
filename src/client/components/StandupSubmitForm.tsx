@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { TEAM_AGENTS } from '../../shared/team-standup.js';
 
 interface ExistingSubmission {
   ticket_count: number | null;
@@ -17,6 +16,7 @@ const inputCls =
   'placeholder-neutral-500 focus:outline-none focus:border-[#5ec1ca] focus:ring-1 focus:ring-[#5ec1ca]';
 
 export function StandupSubmitForm({ date }: { date: string }) {
+  const [agents, setAgents] = useState<string[]>([]);
   const [agentName, setAgentName] = useState('');
   const [editable, setEditable] = useState(true);
   const [ticketCount, setTicketCount] = useState('');
@@ -35,6 +35,21 @@ export function StandupSubmitForm({ date }: { date: string }) {
       return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
     } catch { return date; }
   })();
+
+  // Load the participant list (and session status) on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/standup/public/${date}`);
+        const json = await res.json();
+        if (cancelled || !json.ok) return;
+        setAgents(json.data.agents ?? []);
+        setEditable(json.data.editable);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [date]);
 
   // When a name is picked, load any existing submission for the day.
   useEffect(() => {
@@ -150,7 +165,7 @@ export function StandupSubmitForm({ date }: { date: string }) {
                   <label className={labelCls}>Your name <span className="text-red-400">*</span></label>
                   <select value={agentName} onChange={(e) => setAgentName(e.target.value)} className={inputCls}>
                     <option value="">Select your name…</option>
-                    {TEAM_AGENTS.map((n) => <option key={n} value={n}>{n}</option>)}
+                    {agents.map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
 

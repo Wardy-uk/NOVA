@@ -26,6 +26,7 @@ import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes
 import { TeamStandupQueries } from './db/team-standup-queries.js';
 import { PlaudService } from './services/plaud-service.js';
 import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
+import { getStandupRoster } from './services/standup-roster.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
@@ -573,6 +574,7 @@ async function main() {
   const standupDeps: StandupDeps = {
     standupQueries: teamStandupQueries,
     getJiraClient: buildServiceDeskJiraClient,
+    getRoster: () => getStandupRoster(settingsQueries),
     plaudService: new PlaudService(() => settingsQueries.getAll()),
     emailService: new EmailService(() => settingsQueries.getAll()),
     auditQueries,

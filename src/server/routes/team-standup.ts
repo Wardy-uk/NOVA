@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { CommitmentStatus } from '../db/team-standup-queries.js';
-import { TEAM_AGENTS } from '../../shared/team-standup.js';
 import {
   type StandupDeps,
   refreshBrief,
@@ -39,13 +38,14 @@ export function createTeamStandupPublicRoutes(deps: StandupDeps): Router {
       if (agentName) {
         submission = (await standupQueries.getSubmissionByAgent(session.id, agentName)) ?? null;
       }
+      const roster = await deps.getRoster().catch(() => []);
       res.json({
         ok: true,
         data: {
           date,
           status: session.status,
           editable: session.status === 'pending',
-          agents: TEAM_AGENTS,
+          agents: roster.map((a) => a.name),
           submission,
         },
       });
@@ -61,7 +61,8 @@ export function createTeamStandupPublicRoutes(deps: StandupDeps): Router {
       const commitments: unknown = req.body?.commitments;
 
       if (!DATE_RE.test(date ?? '')) { res.status(400).json({ ok: false, error: 'Invalid date' }); return; }
-      if (!agent_name || !TEAM_AGENTS.includes(agent_name)) {
+      const roster = await deps.getRoster().catch(() => []);
+      if (!agent_name || !roster.some((a) => a.name === agent_name)) {
         res.status(400).json({ ok: false, error: 'Please choose your name from the list.' });
         return;
       }
@@ -128,7 +129,8 @@ export function createTeamStandupRoutes(deps: StandupDeps): Router {
       const commitments = await standupQueries.getCommitments(session.id);
       const report = await buildAccountabilityReport(date, deps);
       const brief = session.brief_json ? JSON.parse(session.brief_json) : null;
-      res.json({ ok: true, data: { session: { ...session, brief_json: undefined }, brief, submissions, commitments, report } });
+      const roster = await deps.getRoster().catch(() => []);
+      res.json({ ok: true, data: { session: { ...session, brief_json: undefined }, brief, submissions, commitments, report, roster: roster.map((a) => a.name) } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

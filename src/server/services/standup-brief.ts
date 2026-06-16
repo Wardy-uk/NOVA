@@ -50,10 +50,14 @@ function ageInDays(created: string | null): number | null {
   return Math.max(0, Math.floor(ms / 86_400_000));
 }
 
-function categorise(tier: string, labels: string[], components: string[]): BriefCategory {
+/** Digital-design team membership, used to flag "Design" tickets by assignee. */
+export interface DesignIdentity { accountIds: Set<string>; names: Set<string> }
+
+function categorise(tier: string, isDesignAgent: boolean): BriefCategory {
+  // "Design" isn't a tier — it's whoever is on the Digital Design team (e.g. working
+  // Production tickets). Person-based, so it takes precedence over the tier.
+  if (isDesignAgent) return 'design';
   const lower = tier.toLowerCase();
-  // "Design" isn't a tier — it's flagged via a label/component on a tiered ticket.
-  if ([...labels, ...components].some((x) => /design/i.test(x))) return 'design';
   if (lower.includes('customer care')) return 'cc';
   if (lower.includes('tier 2')) return 'tier2';
   if (lower.includes('production')) return 'production';
@@ -61,10 +65,10 @@ function categorise(tier: string, labels: string[], components: string[]): Brief
 }
 
 /** Build the brief by querying Jira live. Throws if no client is available. */
-export async function buildStandupBrief(client: JiraRestClient): Promise<StandupBrief> {
+export async function buildStandupBrief(client: JiraRestClient, design?: DesignIdentity): Promise<StandupBrief> {
   const result = await client.searchJqlAll(
     STANDUP_BRIEF_JQL,
-    ['summary', 'status', 'created', 'assignee', 'customfield_12981', 'labels', 'components'],
+    ['summary', 'status', 'created', 'assignee', 'customfield_12981'],
     500,
   );
 
@@ -72,9 +76,12 @@ export async function buildStandupBrief(client: JiraRestClient): Promise<Standup
   for (const issue of result.issues) {
     const f = issue.fields as Record<string, any>;
     const assignee = f.assignee?.displayName?.trim() || 'Unassigned';
+    const assigneeAccountId: string = f.assignee?.accountId ?? '';
     const tier = (f.customfield_12981?.value ?? f.customfield_12981 ?? '').toString();
-    const labels: string[] = Array.isArray(f.labels) ? f.labels : [];
-    const components: string[] = Array.isArray(f.components) ? f.components.map((c: any) => c?.name ?? '') : [];
+    const isDesignAgent = !!design && (
+      (assigneeAccountId && design.accountIds.has(assigneeAccountId)) ||
+      design.names.has(assignee.toLowerCase())
+    );
     const created = f.created ?? null;
     const ageDays = ageInDays(created);
     const ticket: BriefTicket = {
@@ -82,7 +89,7 @@ export async function buildStandupBrief(client: JiraRestClient): Promise<Standup
       summary: (f.summary ?? '').toString(),
       assignee,
       tier,
-      category: categorise(tier, labels, components),
+      category: categorise(tier, isDesignAgent),
       status: f.status?.name ?? '',
       created,
       ageDays,

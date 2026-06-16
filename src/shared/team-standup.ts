@@ -1,28 +1,10 @@
 /**
- * Team standup — shared config used by both the public submission form (client)
- * and the daily jobs / routes (server).
+ * Team standup — shared helpers used by both client and server.
  *
- * TEAM_AGENTS is the canonical list of agents who take part in the daily standup.
- * Keep this in sync with the team roster. Agent email addresses (server-only) live
- * in src/server/config/standup-config.ts, keyed by these exact names.
+ * The agent roster is NOT hard-coded: it is sourced live from the KPI database
+ * (techservicesjsm dbo.Agent) on the server — see services/standup-roster.ts.
+ * The client receives the names from the standup API.
  */
-export const TEAM_AGENTS = [
-  'Abdi Mohamed',
-  'Arman Shazad',
-  'Heidi Power',
-  'Hope Goodall',
-  'Isabel Busk',
-  'Luke Scaife',
-  'Maria Pappa',
-  'Naomi Wentworth',
-  'Nathan Rutland',
-  'Sebastian Broome',
-  'Stephen Mitchell',
-  'Willem Kruger',
-  'Zoe Rees',
-] as const;
-
-export type TeamAgent = (typeof TEAM_AGENTS)[number];
 
 /** Initials for avatar chips, e.g. "Abdi Mohamed" -> "AM". */
 export function agentInitials(name: string): string {

@@ -9,12 +9,13 @@ import type { EmailService } from './email.js';
 import type { AuditQueries } from '../db/audit.js';
 import { buildStandupBrief, findAgentBrief, type StandupBrief } from './standup-brief.js';
 import { standupPromptHtml, standupAccountabilityHtml } from './email-templates.js';
-import { TEAM_AGENTS } from '../../shared/team-standup.js';
-import { agentEmail, nickEmail, novaBaseUrl } from '../config/standup-config.js';
+import { designIdentity, type StandupAgent } from './standup-roster.js';
+import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 
 export interface StandupDeps {
   standupQueries: TeamStandupQueries;
   getJiraClient: () => JiraRestClient | null;
+  getRoster: () => Promise<StandupAgent[]>;
   plaudService: PlaudService;
   emailService: EmailService;
   auditQueries: AuditQueries;
@@ -43,7 +44,8 @@ export function displayDate(isoDate: string): string {
 export async function refreshBrief(date: string, deps: StandupDeps): Promise<StandupBrief> {
   const client = deps.getJiraClient();
   if (!client) throw new Error('Jira is not configured — cannot build the standup brief.');
-  const brief = await buildStandupBrief(client);
+  const roster = await deps.getRoster().catch(() => []);
+  const brief = await buildStandupBrief(client, designIdentity(roster));
   await deps.standupQueries.ensureSession(date);
   await deps.standupQueries.updateSession(date, { brief_json: JSON.stringify(brief) });
   return brief;
@@ -117,8 +119,15 @@ export async function buildAccountabilityReport(date: string, deps: StandupDeps)
   const submissions = await deps.standupQueries.getSubmissions(session.id);
   const commitments = await deps.standupQueries.getCommitments(session.id);
   const submittedNames = new Set(submissions.map((s) => s.agent_name));
+  const roster = await deps.getRoster().catch(() => []);
+  // Union of roster names and anyone who actually submitted/committed (covers leavers).
+  const names = [...new Set([
+    ...roster.map((a) => a.name),
+    ...submissions.map((s) => s.agent_name),
+    ...commitments.map((c) => c.agent_name),
+  ])].sort();
 
-  const perAgent: AgentAccountability[] = TEAM_AGENTS.map((name) => {
+  const perAgent: AgentAccountability[] = names.map((name) => {
     const own = commitments.filter((c) => c.agent_name === name);
     return {
       agent_name: name,
@@ -141,7 +150,7 @@ export async function buildAccountabilityReport(date: string, deps: StandupDeps)
   return {
     date,
     submitted: submissions.length,
-    totalAgents: TEAM_AGENTS.length,
+    totalAgents: roster.length || names.length,
     stats: { total: commitments.length, delivered, missed, excused, pending, deliveryRate },
     perAgent,
     commitments: commitments.map((c) => ({
@@ -247,8 +256,14 @@ export async function sendMorningPrompts(date: string, deps: StandupDeps): Promi
     return result;
   }
 
-  for (const name of TEAM_AGENTS) {
-    const to = agentEmail(name);
+  const roster = await deps.getRoster().catch((err) => {
+    console.warn('[standup] roster unavailable for morning prompts:', err instanceof Error ? err.message : err);
+    return [];
+  });
+
+  for (const agent of roster) {
+    const name = agent.name;
+    const to = agent.email;
     if (!to) { result.noEmail.push(name); continue; }
     if (await deps.standupQueries.wasEmailSent(session.id, name)) { result.skipped++; continue; }
 

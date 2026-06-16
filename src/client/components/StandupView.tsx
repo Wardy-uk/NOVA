@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { TEAM_AGENTS, agentInitials } from '../../shared/team-standup.js';
+import { agentInitials } from '../../shared/team-standup.js';
 
 type CommitmentStatus = 'pending' | 'delivered' | 'missed' | 'excused';
 type BriefCategory = 'cc' | 'tier2' | 'production' | 'design' | 'other';
@@ -28,6 +28,7 @@ interface SessionDetail {
   submissions: Submission[];
   commitments: Commitment[];
   report: { stats: { total: number; delivered: number; missed: number; excused: number; pending: number; deliveryRate: number } } | null;
+  roster: string[];
 }
 interface SessionSummary { date: string; status: string; submission_count: number; }
 
@@ -135,6 +136,7 @@ export function StandupView({ token }: { token: string }) {
     await Promise.all(ids.map((id) => updateCommitment(id, 'delivered')));
   }
 
+  const roster = detail?.roster ?? [];
   const submittedNames = new Set((detail?.submissions ?? []).map((s) => s.agent_name));
   const submissionByName = new Map((detail?.submissions ?? []).map((s) => [s.agent_name, s]));
 
@@ -201,10 +203,10 @@ export function StandupView({ token }: { token: string }) {
       {/* Submission tracker */}
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
-          Submissions — {submittedNames.size}/{TEAM_AGENTS.length}
+          Submissions — {submittedNames.size}/{roster.length}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-          {TEAM_AGENTS.map((name) => {
+          {roster.map((name) => {
             const sub = submissionByName.get(name);
             const submitted = !!sub;
             const open = expandedAgent === name;
