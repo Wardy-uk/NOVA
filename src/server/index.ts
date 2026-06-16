@@ -27,6 +27,8 @@ import { TeamStandupQueries } from './db/team-standup-queries.js';
 import { PlaudService } from './services/plaud-service.js';
 import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
 import { getStandupRoster } from './services/standup-roster.js';
+import { PlaudOAuthProvider } from './services/plaud-oauth-provider.js';
+import { PLAUD_MCP_URL } from './routes/integrations.js';
 import { createDeliveryRoutes } from './routes/delivery.js';
 import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
@@ -528,6 +530,17 @@ async function main() {
     }
   }
 
+  // Plaud — hosted MCP over HTTP with OAuth. Registered directly (not via the stdio
+  // INTEGRATIONS loop). redirect_uri uses the public NOVA URL.
+  const plaudOAuth = new PlaudOAuthProvider(
+    settingsQueries,
+    () => settingsQueries.get('app_base_url') || process.env.NOVA_BASE_URL || 'https://nova.nurtur.tech',
+  );
+  if (settings['plaud_enabled'] === 'true') {
+    mcpManager.registerServer('plaud', { url: PLAUD_MCP_URL, authProvider: plaudOAuth });
+    console.log('[N.O.V.A] Plaud: Registered (hosted MCP)');
+  }
+
   // Attempt connections (non-blocking)
   mcpManager.connectAll().catch((err) =>
     console.error('[Startup] MCP connection error:', err)
@@ -648,6 +661,26 @@ async function main() {
   // Team standup — public agent submission endpoints (form has no NOVA login).
   // Mounted before auth; unmatched paths fall through to the authed manager router.
   app.use('/api/standup', createTeamStandupPublicRoutes(standupDeps));
+
+  // Plaud hosted-MCP OAuth callback — public (browser redirect carries no NOVA JWT).
+  app.get('/api/public/plaud/oauth/callback', async (req, res) => {
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!code) { res.status(400).send('Missing authorization code'); return; }
+    const saved = plaudOAuth.savedState();
+    if (saved && state && saved !== state) {
+      res.status(400).send('State mismatch — please retry the Plaud connection from N.O.V.A.');
+      return;
+    }
+    try {
+      await mcpManager.finishAuth('plaud', code);
+      plaudOAuth.clearAuthorizationUrl();
+      await mcpManager.connectWithRetry('plaud');
+      res.send('<html><body style="font-family:sans-serif;background:#1e2228;color:#e5e5e5;text-align:center;padding:60px"><h2 style="color:#5ec1ca">Plaud connected &#10003;</h2><p>You can close this tab and return to N.O.V.A.</p></body></html>');
+    } catch (err) {
+      res.status(500).send(`Plaud sign-in failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
+  });
 
   // AI Approval ingest from n8n (no auth required)
   app.post('/api/public/approvals/ingest', (req, res) => {
@@ -1025,7 +1058,7 @@ async function main() {
     if (key.startsWith('bc_sub_') || key === 'bc_tenant_id' || key === 'bc_client_id' || key === 'bc_client_secret') {
       buildBcSubscriptionImportService();
     }
-  }, buildOnboardingJiraClient, () => bymClient));
+  }, buildOnboardingJiraClient, () => bymClient, plaudOAuth));
 
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries, jiraUserClientFactory));

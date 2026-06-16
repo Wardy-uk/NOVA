@@ -352,7 +352,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
             <div className="space-y-3">
               <p className="text-xs text-neutral-300">
                 {integration.id === 'plaud'
-                  ? 'Open this URL in a browser ON THE SERVER (the sign-in callback hits the server’s localhost), then complete Plaud sign-in:'
+                  ? 'Open this URL, sign in to Plaud, and you’ll be redirected back automatically. Then this card will show “Signed in”.'
                   : 'Open this URL in your browser and enter the code:'}
               </p>
               <div className="flex items-center gap-3">

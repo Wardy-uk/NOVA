@@ -378,15 +378,9 @@ export function buildMcpConfig(
   uvxCommand: string
 ): McpServerConfig | null {
   switch (id) {
-    // Jira uses direct REST API (per-user credentials) — no MCP server needed
-    case 'plaud': {
-      // Official Plaud MCP server. OAuth tokens persist at ~/.plaud/tokens-mcp.json
-      // after a one-time browser sign-in; no env/API key required.
-      return {
-        command: 'npx',
-        args: ['-y', '@plaud-ai/mcp@latest'],
-      };
-    }
+    // Jira uses direct REST API (per-user credentials) — no MCP server needed.
+    // Plaud uses the hosted MCP over HTTP with OAuth — registered directly in
+    // index.ts with its OAuth provider, not here.
     case 'msgraph': {
       return {
         command: 'npx',

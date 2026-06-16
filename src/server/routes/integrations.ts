@@ -11,6 +11,8 @@ import type { IntegrationStatus, McpServerStatus } from '../../shared/types.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { BymClient } from '../services/bym-client.js';
 import { isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
+import type { PlaudOAuthProvider } from '../services/plaud-oauth-provider.js';
+export const PLAUD_MCP_URL = 'https://mcp.plaud.ai/mcp';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -89,6 +91,7 @@ export function createIntegrationRoutes(
   onSettingsChange?: (key: string) => void,
   getJiraClient?: () => JiraRestClient | null,
   getBymClient?: () => BymClient | null,
+  plaudOAuth?: PlaudOAuthProvider,
 ): Router {
   const router = Router();
 
@@ -382,52 +385,30 @@ export function createIntegrationRoutes(
       return;
     }
 
-    // ── Plaud: drive the MCP server's `login` tool (OAuth, callback on localhost:8199) ──
+    // ── Plaud: start the hosted-MCP OAuth flow (browser sign-in anywhere) ──
     if (integId === 'plaud') {
       try {
-        if (!mcpManager.isRegistered('plaud')) {
-          const cfg = buildMcpConfig('plaud', settingsQueries.getAll(), uvxCommand);
-          if (cfg) mcpManager.registerServer('plaud', cfg);
-        }
-        const st = mcpManager.getStatus().find((s) => s.name === 'plaud');
-        if (st?.status !== 'connected') await mcpManager.connectWithRetry('plaud');
-
-        // The login tool requires a scenario enum (e.g. 'account_login'). Discover the
-        // parameter from its schema so we pass the right arg rather than {}.
-        const loginArgs: Record<string, unknown> = {};
-        try {
-          const defs = await mcpManager.getToolDefinitions('plaud');
-          const props = defs.find((d) => d.name === 'login')?.inputSchema?.properties ?? {};
-          for (const [key, spec] of Object.entries(props)) {
-            const en = (spec as { enum?: unknown[] })?.enum;
-            if (Array.isArray(en) && en.includes('account_login')) loginArgs[key] = 'account_login';
-          }
-        } catch { /* fall back below */ }
-        if (Object.keys(loginArgs).length === 0) loginArgs.scenario = 'account_login';
-
-        // The login tool prints a sign-in URL to the child's stderr, then blocks until
-        // the OAuth callback (localhost:8199) completes. So we fire the call (not await
-        // it) and poll the captured stderr for the URL.
-        mcpManager.clearServerStderr('plaud');
-        let toolResult = '';
-        mcpManager.callTool('plaud', 'login', loginArgs)
-          .then((r) => { toolResult = mcpResultText(r); })
-          .catch(() => { /* resolves when OAuth finishes or on error */ });
-
-        let url: string | null = null;
-        for (let i = 0; i < 40 && !url; i++) {
-          await new Promise((r) => setTimeout(r, 500));
-          const buf = mcpManager.getServerStderr('plaud') + '\n' + toolResult;
-          url = buf.match(/https?:\/\/\S*plaud\.ai\/[^\s"'`]+/i)?.[0]
-            ?? buf.match(/https?:\/\/[^\s"'`]+/)?.[0]
-            ?? null;
-        }
-        const rawOutput = mcpManager.getServerStderr('plaud') || toolResult;
-        if (!url) {
-          res.status(504).json({ ok: false, error: 'Could not capture a Plaud sign-in URL. Check the NOVA log for the Plaud login output.', rawOutput });
+        if (!plaudOAuth) {
+          res.status(500).json({ ok: false, error: 'Plaud OAuth provider not configured' });
           return;
         }
-        res.json({ ok: true, deviceCodeUrl: url, userCode: null, rawOutput });
+        if (!mcpManager.isRegistered('plaud')) {
+          mcpManager.registerServer('plaud', { url: PLAUD_MCP_URL, authProvider: plaudOAuth });
+        }
+        plaudOAuth.clearAuthorizationUrl();
+        // A single connect attempt: if we already have tokens it connects; otherwise
+        // the SDK captures an authorization URL (via the provider) and returns false.
+        const connected = await mcpManager.connect('plaud');
+        if (connected) {
+          res.json({ ok: true, deviceCodeUrl: null, alreadyConnected: true });
+          return;
+        }
+        const url = plaudOAuth.authorizationUrl();
+        if (url) {
+          res.json({ ok: true, deviceCodeUrl: url, userCode: null });
+          return;
+        }
+        res.status(502).json({ ok: false, error: 'Could not start Plaud authorization. Check NOVA logs.', rawOutput: mcpManager.getStatus().find((s) => s.name === 'plaud')?.lastError ?? null });
       } catch (err) {
         res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Plaud login failed' });
       }
@@ -563,9 +544,10 @@ export function createIntegrationRoutes(
   router.post('/:id/logout', async (req, res) => {
     const integId = req.params.id;
 
-    // Plaud: revoke via the MCP logout tool
+    // Plaud: drop the OAuth tokens and disconnect
     if (integId === 'plaud') {
-      try { await mcpManager.callTool('plaud', 'logout', {}); } catch { /* ignore */ }
+      try { await mcpManager.disconnect('plaud'); } catch { /* ignore */ }
+      plaudOAuth?.reset();
       res.json({ ok: true });
       return;
     }

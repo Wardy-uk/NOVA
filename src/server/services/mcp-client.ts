@@ -1,5 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { McpServerInfo, McpServerStatus } from '../../shared/types.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -9,15 +12,19 @@ import path from 'path';
 const execAsync = promisify(exec);
 
 interface McpServerConfig {
-  command: string;
-  args: string[];
+  // stdio transport
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
+  // streamable-HTTP transport (remote MCP, e.g. Plaud hosted server)
+  url?: string;
+  authProvider?: OAuthClientProvider;
 }
 
 interface McpServerConnection {
   config: McpServerConfig;
   client: Client | null;
-  transport: StdioClientTransport | null;
+  transport: StdioClientTransport | StreamableHTTPClientTransport | null;
   status: McpServerStatus;
   tools: string[];
   lastError: string | null;
@@ -117,8 +124,55 @@ export class McpClientManager {
     server.status = 'connecting';
     server.lastError = null;
 
+    // ── HTTP (remote MCP) transport, e.g. Plaud hosted server with OAuth ──
+    if (server.config.url) {
+      try {
+        const transport = new StreamableHTTPClientTransport(new URL(server.config.url), {
+          authProvider: server.config.authProvider,
+        });
+        server.transport = transport;
+        server.client = new Client({ name: `daypilot-${name}`, version: '0.1.0' });
+
+        await Promise.race([
+          server.client.connect(transport),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Connection timed out after 30s')), 30_000)
+          ),
+        ]);
+
+        server.transport.onclose = () => {
+          if (server.status === 'connected') {
+            console.warn(`[MCP] ${name}: Transport closed unexpectedly — marking for reconnect`);
+            server.status = 'error';
+            server.lastError = 'Connection closed unexpectedly';
+            server.client = null;
+            server.transport = null;
+          }
+        };
+
+        const { tools } = await server.client.listTools();
+        server.tools = tools.map((t) => t.name);
+        server.status = 'connected';
+        server.lastConnected = new Date().toISOString();
+        console.log(`[MCP] ${name}: Connected (http). ${tools.length} tools: ${server.tools.join(', ')}`);
+        server.reconnecting = false;
+        return true;
+      } catch (err) {
+        const isAuth = err instanceof UnauthorizedError || (err instanceof Error && /unauthor/i.test(err.message));
+        server.status = isAuth ? 'unavailable' : 'error';
+        server.lastError = isAuth
+          ? 'Authorization required — click Connect to sign in'
+          : (err instanceof Error ? err.message : String(err));
+        if (!isAuth) console.error(`[MCP] ${name}: HTTP connection failed:`, server.lastError);
+        server.client = null;
+        server.transport = null;
+        server.reconnecting = false;
+        return false;
+      }
+    }
+
     // Check if the command binary exists
-    const commandExists = await this.checkCommand(server.config.command);
+    const commandExists = await this.checkCommand(server.config.command!);
     if (!commandExists) {
       server.status = 'unavailable';
       server.lastError =
@@ -146,10 +200,10 @@ export class McpClientManager {
       }
 
       server.transport = new StdioClientTransport({
-        command: server.config.command,
-        args: server.config.args,
+        command: server.config.command!,
+        args: server.config.args ?? [],
         env: resolvedEnv,
-        stderr: 'pipe', // capture child stderr (e.g. Plaud login URL)
+        stderr: 'pipe', // capture child stderr
       });
 
       server.client = new Client({
@@ -209,6 +263,20 @@ export class McpClientManager {
       server.reconnecting = false;
       return false;
     }
+  }
+
+  /** Complete an OAuth authorization-code exchange for an HTTP MCP server.
+   *  A fresh transport works because the authProvider persists the PKCE verifier
+   *  and client registration. Call connect()/connectWithRetry() afterwards. */
+  async finishAuth(name: string, authorizationCode: string): Promise<void> {
+    const server = this.servers.get(name);
+    if (!server) throw new Error(`Unknown server: ${name}`);
+    if (!server.config.url) throw new Error(`${name} is not an HTTP MCP server`);
+    const transport = new StreamableHTTPClientTransport(new URL(server.config.url), {
+      authProvider: server.config.authProvider,
+    });
+    await transport.finishAuth(authorizationCode);
+    try { await transport.close(); } catch { /* ignore */ }
   }
 
   async callTool(
