@@ -43,6 +43,13 @@ const ADMIN_ONLY_IDS = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'b
 // Super-admin-only: contain API keys/secrets — hidden from regular admins entirely
 const SUPER_ADMIN_ONLY_IDS = new Set(['llm', 'ai-agent', 'teams-webhook', 'whisper']);
 
+// Hard-gated to a single user (Nick) — hidden from everyone else, admins included.
+const NICK_ONLY_IDS = new Set(['plaud']);
+const NICK_ONLY_USERNAME = 'nickw';
+function isNickUser(req: unknown): boolean {
+  return String((req as any)?.user?.username ?? '').toLowerCase() === NICK_ONLY_USERNAME;
+}
+
 const execFileAsync = promisify(execFile);
 
 function maskToken(value: string): string {
@@ -71,6 +78,17 @@ export function createIntegrationRoutes(
   getBymClient?: () => BymClient | null,
 ): Router {
   const router = Router();
+
+  // Hard gate: any /:id route for a Nick-only integration is invisible to others.
+  // (The list route below also omits these cards for non-Nick users.)
+  router.use((req, res, next) => {
+    const seg = req.path.split('/').filter(Boolean)[0];
+    if (seg && NICK_ONLY_IDS.has(seg) && !isNickUser(req)) {
+      res.status(404).json({ ok: false, error: 'Not found' });
+      return;
+    }
+    next();
+  });
 
   // Helper: check if MS365 has cached accounts
   async function checkMs365LoggedIn(): Promise<boolean> {
@@ -102,6 +120,8 @@ export function createIntegrationRoutes(
     for (const integ of INTEGRATIONS) {
       // Super-admin-only integrations: completely hidden from regular admins
       if (SUPER_ADMIN_ONLY_IDS.has(integ.id) && !userIsSuperAdmin) continue;
+      // Nick-only integrations: hidden from everyone else (admins included)
+      if (NICK_ONLY_IDS.has(integ.id) && !isNickUser(req)) continue;
 
       const mcpInfo = mcpStatuses.find((s) => s.name === integ.id);
       const values: Record<string, string> = {};
