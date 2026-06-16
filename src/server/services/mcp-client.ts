@@ -55,6 +55,18 @@ export class McpClientManager {
     if (s) s.stderrBuffer = '';
   }
 
+  /** Full tool definitions (incl. inputSchema) for a connected server. [] if not connected. */
+  async getToolDefinitions(name: string): Promise<Array<{ name: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }>> {
+    const server = this.servers.get(name);
+    if (!server?.client || server.status !== 'connected') return [];
+    try {
+      const { tools } = await server.client.listTools();
+      return tools as Array<{ name: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }>;
+    } catch {
+      return [];
+    }
+  }
+
   async connectAll(): Promise<void> {
     const promises = [...this.servers.keys()].map((name) => this.connectWithRetry(name));
     await Promise.allSettled(promises);

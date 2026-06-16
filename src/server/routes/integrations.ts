@@ -392,12 +392,25 @@ export function createIntegrationRoutes(
         const st = mcpManager.getStatus().find((s) => s.name === 'plaud');
         if (st?.status !== 'connected') await mcpManager.connectWithRetry('plaud');
 
+        // The login tool requires a scenario enum (e.g. 'account_login'). Discover the
+        // parameter from its schema so we pass the right arg rather than {}.
+        const loginArgs: Record<string, unknown> = {};
+        try {
+          const defs = await mcpManager.getToolDefinitions('plaud');
+          const props = defs.find((d) => d.name === 'login')?.inputSchema?.properties ?? {};
+          for (const [key, spec] of Object.entries(props)) {
+            const en = (spec as { enum?: unknown[] })?.enum;
+            if (Array.isArray(en) && en.includes('account_login')) loginArgs[key] = 'account_login';
+          }
+        } catch { /* fall back below */ }
+        if (Object.keys(loginArgs).length === 0) loginArgs.scenario = 'account_login';
+
         // The login tool prints a sign-in URL to the child's stderr, then blocks until
         // the OAuth callback (localhost:8199) completes. So we fire the call (not await
         // it) and poll the captured stderr for the URL.
         mcpManager.clearServerStderr('plaud');
         let toolResult = '';
-        mcpManager.callTool('plaud', 'login', {})
+        mcpManager.callTool('plaud', 'login', loginArgs)
           .then((r) => { toolResult = mcpResultText(r); })
           .catch(() => { /* resolves when OAuth finishes or on error */ });
 
