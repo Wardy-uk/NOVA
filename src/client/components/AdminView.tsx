@@ -288,9 +288,10 @@ export function AdminView() {
       const res = await fetch('/api/integrations');
       const json = await res.json();
       if (json.ok) {
-        // 'plaud' is hard-gated server-side to a single user; the server only returns it
-        // to that user, so adding it here just lets that user's card render.
-        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'business-central-subscription-import', 'adobe-sign', 'contract-approvals', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'sharepoint', 'kb-retrieval', 'agentic-brain', 'plaud']);
+        // 'plaud' is NOT here on purpose: it's a device_code login that lives in
+        // My Settings (SettingsView/IntegrationCard, which has the Connect button).
+        // It's still hard-gated server-side so only Nick ever receives it.
+        const ADMIN_ONLY = new Set(['jira-onboarding', 'jira-servicedesk', 'sso', 'jira-oauth', 'smtp', 'bym-setup', 'azdo', 'kpi-sql', 'business-central', 'business-central-subscription-import', 'adobe-sign', 'contract-approvals', 'llm', 'ai-agent', 'people-hr', 'teams-webhook', 'whisper', 'sharepoint', 'kb-retrieval', 'agentic-brain']);
         const withFields = (json.data as IntegrationConfig[]).filter(i => ADMIN_ONLY.has(i.id));
         setIntegrations(withFields);
         const vals: Record<string, Record<string, string>> = {};
