@@ -24,6 +24,7 @@ interface McpServerConnection {
   lastConnected: string | null;
   reconnecting: boolean;
   _reconnectStarted?: number;
+  stderrBuffer: string;
 }
 
 export class McpClientManager {
@@ -39,7 +40,19 @@ export class McpClientManager {
       lastError: null,
       lastConnected: null,
       reconnecting: false,
+      stderrBuffer: '',
     });
+  }
+
+  /** Recent stderr output from a server's child process (capped). Used to surface
+   *  OAuth sign-in URLs printed by MCP servers (e.g. Plaud login). */
+  getServerStderr(name: string): string {
+    return this.servers.get(name)?.stderrBuffer ?? '';
+  }
+
+  clearServerStderr(name: string): void {
+    const s = this.servers.get(name);
+    if (s) s.stderrBuffer = '';
   }
 
   async connectAll(): Promise<void> {
@@ -124,12 +137,23 @@ export class McpClientManager {
         command: server.config.command,
         args: server.config.args,
         env: resolvedEnv,
+        stderr: 'pipe', // capture child stderr (e.g. Plaud login URL)
       });
 
       server.client = new Client({
         name: `daypilot-${name}`,
         version: '0.1.0',
       });
+
+      // Capture child stderr into a small ring buffer (and still forward to our log).
+      const captureStderr = () => {
+        const stderr = (server.transport as unknown as { stderr?: NodeJS.ReadableStream })?.stderr;
+        if (!stderr) return;
+        stderr.on('data', (chunk: Buffer) => {
+          server.stderrBuffer = (server.stderrBuffer + chunk.toString()).slice(-8192);
+          process.stderr.write(`[MCP:${name}] ${chunk.toString()}`);
+        });
+      };
 
       // Connect with timeout (npx downloads can stall)
       await Promise.race([
@@ -138,6 +162,7 @@ export class McpClientManager {
           setTimeout(() => reject(new Error('Connection timed out after 30s')), 30_000)
         ),
       ]);
+      captureStderr();
 
       // Listen for transport close to detect process crashes
       server.transport.onclose = () => {

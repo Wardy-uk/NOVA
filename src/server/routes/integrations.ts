@@ -392,15 +392,29 @@ export function createIntegrationRoutes(
         const st = mcpManager.getStatus().find((s) => s.name === 'plaud');
         if (st?.status !== 'connected') await mcpManager.connectWithRetry('plaud');
 
-        // The login tool returns a sign-in URL and listens on localhost:8199 for the
-        // OAuth callback. The URL MUST be opened in a browser ON THIS SERVER.
-        const result = await Promise.race([
-          mcpManager.callTool('plaud', 'login', {}),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Plaud login timed out waiting for a sign-in URL')), 30000)),
-        ]);
-        const text = mcpResultText(result);
-        const url = text.match(/https?:\/\/[^\s"'`]+/)?.[0] ?? null;
-        res.json({ ok: true, deviceCodeUrl: url, userCode: null, rawOutput: text });
+        // The login tool prints a sign-in URL to the child's stderr, then blocks until
+        // the OAuth callback (localhost:8199) completes. So we fire the call (not await
+        // it) and poll the captured stderr for the URL.
+        mcpManager.clearServerStderr('plaud');
+        let toolResult = '';
+        mcpManager.callTool('plaud', 'login', {})
+          .then((r) => { toolResult = mcpResultText(r); })
+          .catch(() => { /* resolves when OAuth finishes or on error */ });
+
+        let url: string | null = null;
+        for (let i = 0; i < 40 && !url; i++) {
+          await new Promise((r) => setTimeout(r, 500));
+          const buf = mcpManager.getServerStderr('plaud') + '\n' + toolResult;
+          url = buf.match(/https?:\/\/\S*plaud\.ai\/[^\s"'`]+/i)?.[0]
+            ?? buf.match(/https?:\/\/[^\s"'`]+/)?.[0]
+            ?? null;
+        }
+        const rawOutput = mcpManager.getServerStderr('plaud') || toolResult;
+        if (!url) {
+          res.status(504).json({ ok: false, error: 'Could not capture a Plaud sign-in URL. Check the NOVA log for the Plaud login output.', rawOutput });
+          return;
+        }
+        res.json({ ok: true, deviceCodeUrl: url, userCode: null, rawOutput });
       } catch (err) {
         res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Plaud login failed' });
       }
