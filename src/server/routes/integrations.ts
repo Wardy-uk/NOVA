@@ -57,6 +57,19 @@ function maskToken(value: string): string {
   return value.slice(0, 4) + '****' + value.slice(-4);
 }
 
+/** Flatten an MCP CallToolResult into plain text. */
+function mcpResultText(result: unknown): string {
+  const r = result as any;
+  if (r == null) return '';
+  if (typeof r === 'string') return r;
+  if (Array.isArray(r.content)) {
+    return r.content.filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('\n');
+  }
+  return JSON.stringify(r);
+}
+
+const PLAUD_NOT_AUTHED_RE = /unauthor|not.*(logged|authenticat)|login required|sign in/i;
+
 const SaveSchema = z.object({
   enabled: z.boolean(),
   credentials: z.record(z.string()),
@@ -160,6 +173,14 @@ export function createIntegrationRoutes(
             d365Error = st.lastError;
             d365LastConnected = st.lastConnected;
           }
+        } else if (integ.id === 'plaud') {
+          // Logged in if the Plaud MCP server answers get_current_user.
+          try {
+            if (mcpManager.getServerTools('plaud').length) {
+              const me = mcpResultText(await mcpManager.callTool('plaud', 'get_current_user', {}));
+              loggedIn = !!me.trim() && !PLAUD_NOT_AUTHED_RE.test(me);
+            }
+          } catch { loggedIn = false; }
         }
       }
 
@@ -353,11 +374,36 @@ export function createIntegrationRoutes(
   });
 
   // POST /api/integrations/:id/login — start device code login flow
-  router.post('/:id/login', (req, res) => {
+  router.post('/:id/login', async (req, res) => {
     const integId = req.params.id;
     const integ = INTEGRATIONS.find((i) => i.id === integId);
     if (!integ || integ.authType !== 'device_code') {
       res.status(400).json({ ok: false, error: 'Integration does not support device code login' });
+      return;
+    }
+
+    // ── Plaud: drive the MCP server's `login` tool (OAuth, callback on localhost:8199) ──
+    if (integId === 'plaud') {
+      try {
+        if (!mcpManager.isRegistered('plaud')) {
+          const cfg = buildMcpConfig('plaud', settingsQueries.getAll(), uvxCommand);
+          if (cfg) mcpManager.registerServer('plaud', cfg);
+        }
+        const st = mcpManager.getStatus().find((s) => s.name === 'plaud');
+        if (st?.status !== 'connected') await mcpManager.connectWithRetry('plaud');
+
+        // The login tool returns a sign-in URL and listens on localhost:8199 for the
+        // OAuth callback. The URL MUST be opened in a browser ON THIS SERVER.
+        const result = await Promise.race([
+          mcpManager.callTool('plaud', 'login', {}),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Plaud login timed out waiting for a sign-in URL')), 30000)),
+        ]);
+        const text = mcpResultText(result);
+        const url = text.match(/https?:\/\/[^\s"'`]+/)?.[0] ?? null;
+        res.json({ ok: true, deviceCodeUrl: url, userCode: null, rawOutput: text });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Plaud login failed' });
+      }
       return;
     }
 
@@ -450,6 +496,17 @@ export function createIntegrationRoutes(
       return;
     }
 
+    // Plaud: ask the MCP server who we are
+    if (integId === 'plaud') {
+      let loggedIn = false;
+      try {
+        const me = mcpResultText(await mcpManager.callTool('plaud', 'get_current_user', {}));
+        loggedIn = !!me.trim() && !PLAUD_NOT_AUTHED_RE.test(me);
+      } catch { loggedIn = false; }
+      res.json({ ok: true, loggedIn, loginInProgress: false, output: null });
+      return;
+    }
+
     // D365: check MSAL cache
     if (integId === 'dynamics365') {
       const svc = getD365Service();
@@ -478,6 +535,13 @@ export function createIntegrationRoutes(
   // POST /api/integrations/:id/logout — log out of device code auth
   router.post('/:id/logout', async (req, res) => {
     const integId = req.params.id;
+
+    // Plaud: revoke via the MCP logout tool
+    if (integId === 'plaud') {
+      try { await mcpManager.callTool('plaud', 'logout', {}); } catch { /* ignore */ }
+      res.json({ ok: true });
+      return;
+    }
 
     // D365: clear MSAL cache
     if (integId === 'dynamics365') {

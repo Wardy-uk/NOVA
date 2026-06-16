@@ -351,7 +351,9 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
           ) : deviceCode ? (
             <div className="space-y-3">
               <p className="text-xs text-neutral-300">
-                Open this URL in your browser and enter the code:
+                {integration.id === 'plaud'
+                  ? 'Open this URL in a browser ON THE SERVER (the sign-in callback hits the server’s localhost), then complete Plaud sign-in:'
+                  : 'Open this URL in your browser and enter the code:'}
               </p>
               <div className="flex items-center gap-3">
                 <a
@@ -381,7 +383,7 @@ export function IntegrationCard({ integration, onSave, onReconnect, onStartLogin
               disabled={loginPending}
               className="px-4 py-2 text-xs bg-[#5ec1ca] hover:bg-[#4ba8b0] text-[#272C33] font-semibold rounded transition-colors disabled:opacity-50"
             >
-              {loginPending ? 'Starting login...' : 'Sign in with Microsoft'}
+              {loginPending ? 'Starting login...' : integration.id === 'plaud' ? `Connect ${integration.name}` : 'Sign in with Microsoft'}
             </button>
           )}
         </div>
