@@ -44,9 +44,10 @@ export function createKpiAgentRoutes(deps: KpiAgentDeps): Router {
     catch (err) { res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' }); }
   });
 
-  // Weekly / monthly rollup across all agents: /period?period=week|month&anchor=YYYY-MM-DD
+  // Daily / weekly / monthly rollup across all agents: /period?period=day|week|month&anchor=YYYY-MM-DD
   router.get('/period', async (req, res) => {
-    const period = (req.query.period === 'month' ? 'month' : 'week') as 'week' | 'month';
+    const q = req.query.period;
+    const period = (q === 'month' ? 'month' : q === 'day' ? 'day' : 'week') as 'day' | 'week' | 'month';
     const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     try {
       res.json({ ok: true, data: await getAgentPeriod(deps.settings, period, anchor) });

@@ -8,9 +8,10 @@ import { getAllInRange } from './store.js';
 import type { AgentKpiRow } from './compute.js';
 import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
 
-export type Period = 'week' | 'month';
+export type Period = 'day' | 'week' | 'month';
 
 function startOf(period: Period, anchor: string): string {
+  if (period === 'day') return anchor;
   const d = new Date(`${anchor}T00:00:00Z`);
   if (period === 'month') { d.setUTCDate(1); return d.toISOString().slice(0, 10); }
   const dow = (d.getUTCDay() + 6) % 7;
@@ -26,7 +27,10 @@ export interface AgentPeriodRow {
   accountId: string; agentName: string; tierCode: string; team: string; days: number;
   solved: number;                       // sum over period
   open: number | null; overSla: number | null; noReply: number | null; oldestDays: number | null;
-  qaOverall: number | null; csatAvg: number | null; slaCompliancePct: number | null; ticketsPerHour: number | null;
+  qaOverall: number | null; goldenRulesAvg: number | null; csatAvg: number | null; slaCompliancePct: number | null; ticketsPerHour: number | null;
+  // Leaderboard scoring (P3): each metric normalised to 0–100; composite = mean of available.
+  productivityScore: number | null; slaScore: number | null; qualityScore: number | null;
+  compositeScore: number; points: number;
   rag: Record<string, Rag | null>;
 }
 
@@ -73,13 +77,33 @@ export async function getAgentPeriod(settings: SettingsQueries, period: Period, 
     const noReply = avg(days.map(d => d.noReply));
     const oldestDays = avg(days.map(d => d.oldestDays));
     const qaOverall = avg(nn(days.map(d => d.qaOverall)));
+    const goldenRulesAvg = avg(nn(days.map(d => d.grOverall)));
     const csatAvg = avg(nn(days.map(d => d.csatAvg)));
     const slaCompliancePct = avg(nn(days.map(d => d.slaCompliancePct)));
     const ticketsPerHour = avg(nn(days.map(d => d.ticketsPerHour)));
+    const solved = sum(days.map(d => d.solvedToday));
+
+    // Composite scoring (mirrors the legacy leaderboard): normalise each available
+    // metric to 0–100, average them. Tab scores keep the per-category 0–100 values.
+    const productivityScore = ticketsPerHour != null ? Math.min(ticketsPerHour * 20, 100) : null; // 5 tix/hr = 100
+    const slaScore = slaCompliancePct;                                                             // already 0–100
+    const qualityScore = qaOverall != null ? qaOverall * 20 : null;                                // 0–5 → 0–100
+    const norm: number[] = [];
+    if (productivityScore != null) norm.push(productivityScore);
+    if (slaScore != null) norm.push(slaScore);
+    if (qualityScore != null) norm.push(qualityScore);
+    if (csatAvg != null) norm.push(csatAvg * 20);                                                   // 1–5 → 0–100
+    if (goldenRulesAvg != null) norm.push((goldenRulesAvg / 3) * 100);                              // 1–3 → 0–100
+    const compositeScore = norm.length ? Math.round((norm.reduce((s, v) => s + v, 0) / norm.length) * 100) / 100 : 0;
+    const points = solved
+      + (slaCompliancePct != null && slaCompliancePct >= 95 ? 2 * days.length : 0)
+      + (qaOverall != null && qaOverall >= 4 ? 3 : 0);
+
     agents.push({
       accountId, agentName: last.agentName, tierCode: last.tierCode, team: last.team, days: days.length,
-      solved: sum(days.map(d => d.solvedToday)),
-      open, overSla, noReply, oldestDays, qaOverall, csatAvg, slaCompliancePct, ticketsPerHour,
+      solved,
+      open, overSla, noReply, oldestDays, qaOverall, goldenRulesAvg, csatAvg, slaCompliancePct, ticketsPerHour,
+      productivityScore, slaScore, qualityScore, compositeScore, points,
       rag: {
         productivity: ragHigher(ticketsPerHour, t.productivity),
         csat: ragHigher(csatAvg, t.csat),

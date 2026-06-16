@@ -29,6 +29,7 @@ const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
 const SupportKpiScorecard = lazy(() => import('./components/SupportKpiScorecard.js').then(m => ({ default: m.SupportKpiScorecard })));
 const AgentScorecardRebuild = lazy(() => import('./components/AgentScorecardRebuild.js').then(m => ({ default: m.AgentScorecardRebuild })));
+const LeaderboardRebuild = lazy(() => import('./components/LeaderboardRebuild.js').then(m => ({ default: m.LeaderboardRebuild })));
 const KpiRebuildHistory = lazy(() => import('./components/KpiRebuildHistory.js').then(m => ({ default: m.KpiRebuildHistory })));
 const KpiRebuildLegacy = lazy(() => import('./components/KpiRebuildLegacy.js').then(m => ({ default: m.KpiRebuildLegacy })));
 const OperationalIndicators = lazy(() => import('./components/OperationalIndicators.js').then(m => ({ default: m.OperationalIndicators })));
@@ -109,7 +110,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
-  | 'kpi-rebuild-agents' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'tpj-maintenance'
+  | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'tpj-maintenance'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile'
   | 'training-matrix' | 'training-summary'
@@ -213,6 +214,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'kpi-rebuild-support', label: 'Support' },
       { view: 'kpi-rebuild-agents', label: 'Agents' },
+      { view: 'kpi-rebuild-leaderboard', label: 'Leaderboard' },
       { view: 'kpi-rebuild-history', label: 'Daily History' },
       { view: 'kpi-rebuild-trends', label: 'Trends' },
       { view: 'kpi-rebuild-operational', label: 'Operational Indicators' },
@@ -332,7 +334,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1115,6 +1117,9 @@ export function App() {
           )}
           {view === 'kpi-rebuild-agents' && (
             <AgentScorecardRebuild />
+          )}
+          {view === 'kpi-rebuild-leaderboard' && (
+            <LeaderboardRebuild />
           )}
           {view === 'kpi-rebuild-history' && (
             <KpiRebuildHistory />
