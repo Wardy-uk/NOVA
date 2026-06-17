@@ -8,6 +8,7 @@ import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
 import { extractText } from './shared/adf-utils.js';
 import type { CoachingEngine } from './coach.js';
+import { CommentReviewSchema } from './comment-review.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -48,16 +49,8 @@ const CLOSURE_PATTERNS = [
   'please feel free to reopen',
 ];
 
-const GrResultSchema = z.object({
-  issueKey: z.string(),
-  commentId: z.string(),
-  overallScore: z.number().min(1).max(3),
-  rule1Score: z.number().min(1).max(3),
-  rule2Score: z.number().min(1).max(3),
-  rule3Score: z.number().min(1).max(3),
-  summary: z.string(),
-  suggestedRewrite: z.string(),
-});
+// Schema lives in comment-review.ts so the Golden-Rules rubric is defined once.
+const GrResultSchema = CommentReviewSchema;
 type GrResult = z.infer<typeof GrResultSchema>;
 
 export class GrPipeline {

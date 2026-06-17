@@ -1,5 +1,6 @@
 import { useState, useRef, useImperativeHandle, forwardRef } from 'react';
 import { GlassCard } from '../queue/index.js';
+import { CommentReviewPanel } from './CommentReviewPanel.js';
 
 export interface CommentComposerProps {
   ticketKey: string;
@@ -115,6 +116,14 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
           {busy ? 'Posting...' : 'Post Comment'}
         </button>
       </div>
+      {commentType === 'public' && (
+        <CommentReviewPanel
+          draft={draft}
+          ticketKey={ticketKey}
+          disabled={busy}
+          onUseRewrite={(text) => { setDraft(text); if (aiDraftUsed) setAiDraftUsed(false); }}
+        />
+      )}
     </GlassCard>
   );
 });

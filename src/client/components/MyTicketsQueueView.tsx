@@ -7,6 +7,7 @@ import { AdfCommentBody } from './AdfCommentBody.js';
 import { AIAnalysisPanel } from './AIAnalysisPanel.js';
 import { DeferReasonModal } from './DeferReasonModal.js';
 import { BcAccountBadge } from './BcAccountBadge.js';
+import { CommentReviewPanel } from './ticket-detail/CommentReviewPanel.js';
 import {
   UnifiedQueue,
   type UnifiedQueueConfig,
@@ -426,6 +427,14 @@ function MyTicketDetail({ ticket, actions, onDefer }: {
                 {busy ? 'Posting...' : 'Post Comment'}
               </button>
             </div>
+            {commentType === 'public' && (
+              <CommentReviewPanel
+                draft={commentDraft}
+                ticketKey={ticketKey}
+                disabled={busy}
+                onUseRewrite={(text) => { setCommentDraft(text); if (aiDraftUsed) setAiDraftUsed(false); }}
+              />
+            )}
           </GlassCard>
 
           {/* Activity stream */}

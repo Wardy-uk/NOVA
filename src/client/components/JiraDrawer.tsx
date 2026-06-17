@@ -4,6 +4,7 @@ import { TicketBriefCard, type BriefFields } from './TicketBriefCard.js';
 import { AINextActionCard } from './AINextActionCard.js';
 import { AdfCommentBody } from './AdfCommentBody.js';
 import { BcAccountBadge } from './BcAccountBadge.js';
+import { CommentReviewPanel } from './ticket-detail/CommentReviewPanel.js';
 
 interface Transition {
   id?: number | string;
@@ -61,6 +62,7 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [commentType, setCommentType] = useState<'internal' | 'public'>('internal');
   const [transition, setTransition] = useState('');
   const [comments, setComments] = useState<JiraComment[]>([]);
 
@@ -207,7 +209,7 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
 
       const body: Record<string, unknown> = {};
       if (Object.keys(fieldsPayload).length > 0) body.fields = fieldsPayload;
-      if (comment.trim()) body.comment = comment.trim();
+      if (comment.trim()) { body.comment = comment.trim(); body.commentVisibility = commentType; }
       if (transition) body.transition = transition;
 
       if (Object.keys(body).length === 0) {
@@ -501,6 +503,40 @@ export function JiraDrawer({ task, index, total, onClose, onPrev, onNext }: Prop
               rows={4}
               className="w-full bg-[#2f353d] text-neutral-200 rounded px-2 py-2 border border-[#3a424d] disabled:opacity-50"
             />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={() => setCommentType('internal')}
+                disabled={!canComment}
+                className="px-2.5 py-1 text-[10px] font-semibold rounded-full transition-all disabled:opacity-50"
+                style={{
+                  background: commentType === 'internal' ? 'rgba(245,158,11,0.15)' : 'transparent',
+                  color: commentType === 'internal' ? '#f59e0b' : '#64748b',
+                  border: `1px solid ${commentType === 'internal' ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.05)'}`,
+                }}
+              >
+                Internal
+              </button>
+              <button
+                onClick={() => setCommentType('public')}
+                disabled={!canComment}
+                className="px-2.5 py-1 text-[10px] font-semibold rounded-full transition-all disabled:opacity-50"
+                style={{
+                  background: commentType === 'public' ? 'rgba(16,185,129,0.15)' : 'transparent',
+                  color: commentType === 'public' ? '#10b981' : '#64748b',
+                  border: `1px solid ${commentType === 'public' ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.05)'}`,
+                }}
+              >
+                Public
+              </button>
+            </div>
+            {commentType === 'public' && canComment && (
+              <CommentReviewPanel
+                draft={comment}
+                ticketKey={issueKey}
+                disabled={saving}
+                onUseRewrite={(text) => setComment(text)}
+              />
+            )}
           </div>
         </div>
 

@@ -21,6 +21,7 @@ import { createIntegrationRoutes } from './routes/integrations.js';
 
 import { createActionRoutes } from './routes/actions.js';
 import { createJiraRoutes } from './routes/jira.js';
+import { createCommentReviewRoutes } from './routes/comment-review.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes/team-standup.js';
 import { TeamStandupQueries } from './db/team-standup-queries.js';
@@ -1221,6 +1222,10 @@ async function main() {
     escalationLog,
     jiraClient: agentJiraClient,
   }));
+
+  // ── On-demand Golden-Rules comment review — used by comment composers to
+  // check a draft public reply before it's posted. ──
+  app.use('/api/comments', createCommentReviewRoutes({ llmService }));
 
   // ── Org KPIs (Layer 1 rebuild) — Support/NT scorecard from kpi_org_daily ──
   // New, fully isolated parallel system: reads/computes the agreed Support/NT

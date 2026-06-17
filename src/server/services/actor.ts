@@ -8,6 +8,7 @@ import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { setRequestType } from './close-ticket-helper.js';
+import { reviewComment } from './comment-review.js';
 
 const CriticResultSchema = z.object({
   approved: z.boolean(),
@@ -227,8 +228,44 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       console.error(`[actor] BLOCKED public reply on ${ticketKey}: text looks like structured/JSON data`);
       return { success: false, action: 'public_reply', ticketKey, detail: 'Blocked: response contained structured/JSON data.' };
     }
-    await this.jiraClient.addComment(ticketKey, text, { internal: false });
+    const revised = await this.reviseForGoldenRules(ticketKey, text);
+    await this.jiraClient.addComment(ticketKey, revised, { internal: false });
     return { success: true, action: 'public_reply', ticketKey, detail: 'Posted public reply.' };
+  }
+
+  /**
+   * Self-review a customer-facing draft against the 3 Golden Rules before
+   * posting. If it scores below the configured minimum and a suggested rewrite
+   * is available, swap in the rewrite. Non-fatal: any failure returns the
+   * original text unchanged.
+   */
+  private async reviseForGoldenRules(
+    ticketKey: string,
+    text: string,
+    ctx?: { priority?: string; issueType?: string },
+  ): Promise<string> {
+    if (!this.llmService) return text;
+    if (this.settings.get('agent_self_review_enabled') === 'false') return text;
+    if (!text.trim()) return text;
+
+    const minScore = Number(this.settings.get('agent_self_review_min_score') ?? '3') || 3;
+    try {
+      const review = await reviewComment(this.llmService, {
+        commentBody: text,
+        issueKey: ticketKey,
+        priority: ctx?.priority,
+        issueType: ctx?.issueType,
+      });
+      if (review.overallScore < minScore && review.suggestedRewrite.trim()
+        && !Actor.looksLikeStructuredPayload(review.suggestedRewrite)) {
+        console.log(`[actor] Golden-Rules self-review revised ${ticketKey} (score ${review.overallScore} < ${minScore}): ${review.summary}`);
+        return review.suggestedRewrite.trim();
+      }
+      return text;
+    } catch (err) {
+      console.warn(`[actor] Golden-Rules self-review failed for ${ticketKey}, posting original:`, err instanceof Error ? err.message : err);
+      return text;
+    }
   }
 
   private async transitionTicket(decision: AgentDecision): Promise<ActionResult> {
@@ -342,7 +379,11 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       console.error(`[actor] BLOCKED public chase on ${ticketKey}: text looks like structured/JSON data`);
       return { success: false, action: 'chase', ticketKey, detail: 'Blocked: chase text contained structured/JSON data.' };
     }
-    await this.jiraClient.addComment(ticketKey, chaseText, { internal: false });
+    const revisedChase = await this.reviseForGoldenRules(ticketKey, chaseText, {
+      priority: decision.inputs.priority as string | undefined,
+      issueType: decision.inputs.issuetype as string | undefined,
+    });
+    await this.jiraClient.addComment(ticketKey, revisedChase, { internal: false });
     return { success: true, action: 'chase', ticketKey, detail: `Sent chase message (${daysWaiting} days waiting).` };
   }
 
@@ -369,7 +410,11 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     const draftResponse = decision.output.draft_response as string | undefined;
     if (draftResponse && !Actor.looksLikeStructuredPayload(draftResponse)) {
       try {
-        await this.jiraClient.addComment(decision.ticketKey, draftResponse, { internal: false });
+        const revisedAck = await this.reviseForGoldenRules(decision.ticketKey, draftResponse, {
+          priority: decision.inputs.priority as string | undefined,
+          issueType: decision.inputs.issuetype as string | undefined,
+        });
+        await this.jiraClient.addComment(decision.ticketKey, revisedAck, { internal: false });
         console.log(`[actor] Posted escalation acknowledgement to customer on ${decision.ticketKey}`);
       } catch (err) {
         console.warn(`[actor] Failed to post escalation acknowledgement on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
