@@ -96,7 +96,7 @@ export class PlaudService {
     const recordings = await this.listRecordings(dateString);
     if (!recordings.length) return null;
 
-    const named = recordings.find((r) => /stand\s?up/i.test(r.filename));
+    const named = recordings.find((r) => /stand[\s-]?up/i.test(r.filename));
     if (named) return named;
 
     let best: PlaudRecording | null = null;
