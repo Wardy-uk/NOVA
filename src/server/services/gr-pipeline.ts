@@ -248,26 +248,25 @@ export class GrPipeline {
   private async getAgentKeys(p: sql.ConnectionPool): Promise<{ keys: Set<string>; displayNames: Set<string> }> {
     try {
       const result = await p.request().query(
-        `SELECT AgentKey, DisplayName, JiraAccountId FROM dbo.Agent WHERE IsActive = 1`,
+        `SELECT AgentKey, AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1`,
       );
       const keys = new Set<string>();
       const displayNames = new Set<string>();
       for (const row of result.recordset) {
-        if (row.AgentKey) {
-          keys.add(row.AgentKey);
-          keys.add(row.AgentKey.replace(/:/g, '%3A'));
+        // Comments carry the Jira accountId (e.g. "712020:uuid"); match against AccountId.
+        if (row.AccountId) {
+          keys.add(row.AccountId);
+          keys.add(row.AccountId.replace(/:/g, '%3A'));
         }
-        if (row.JiraAccountId) {
-          keys.add(row.JiraAccountId);
-          keys.add(row.JiraAccountId.replace(/:/g, '%3A'));
-        }
-        if (row.DisplayName) {
-          displayNames.add(row.DisplayName.toLowerCase());
+        // Fallback match by display name, built from AgentName + AgentSurname.
+        const fullName = [row.AgentName, row.AgentSurname].filter(Boolean).join(' ').trim();
+        if (fullName) {
+          displayNames.add(fullName.toLowerCase());
         }
       }
       const sampleKeys = [...keys].slice(0, 5);
       const sampleRow = result.recordset[0];
-      console.log(`[gr-pipeline] Agent lookup: ${result.recordset.length} active agents, ${keys.size} keys. Sample keys: [${sampleKeys.join(', ')}]. Columns present: AgentKey=${!!sampleRow?.AgentKey}, JiraAccountId=${!!sampleRow?.JiraAccountId}, DisplayName=${!!sampleRow?.DisplayName}`);
+      console.log(`[gr-pipeline] Agent lookup: ${result.recordset.length} active agents, ${keys.size} keys, ${displayNames.size} names. Sample keys: [${sampleKeys.join(', ')}]. Columns present: AccountId=${!!sampleRow?.AccountId}, AgentName=${!!sampleRow?.AgentName}`);
       return { keys, displayNames };
     } catch (err) {
       console.warn('[gr-pipeline] getAgentKeys failed:', err instanceof Error ? err.message : err);
@@ -282,7 +281,7 @@ export class GrPipeline {
       const result = await p.request()
         .input('key1', sql.NVarChar, accountId)
         .input('key2', sql.NVarChar, encodedId)
-        .query(`SELECT TOP 1 AgentKey FROM dbo.Agent WHERE AgentKey IN (@key1, @key2)`);
+        .query(`SELECT TOP 1 AgentKey FROM dbo.Agent WHERE AccountId IN (@key1, @key2)`);
       return result.recordset[0]?.AgentKey ?? null;
     } catch {
       return null;

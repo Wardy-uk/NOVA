@@ -263,7 +263,9 @@ export class QaPipeline {
     request.input('closureScore', sql.Float, qa.closureScore);
     request.input('grade', sql.NVarChar, qa.grade);
     request.input('isConcerning', sql.Bit, qa.isConcerning ? 1 : 0);
-    request.input('severity', sql.NVarChar, qa.severity ?? null);
+    // severity column is INT (1=low, 2=medium, 3=high); map the LLM's string label.
+    const severityMap: Record<string, number> = { low: 1, medium: 2, high: 3 };
+    request.input('severity', sql.Int, qa.severity ? (severityMap[qa.severity] ?? null) : null);
     request.input('category', sql.NVarChar, qa.category);
     request.input('issues', sql.NVarChar(2000), (qa.issues ?? '').slice(0, 2000));
     request.input('coachingPoints', sql.NVarChar(2000), null);
