@@ -3563,6 +3563,42 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── Pipeline source toggle (UAT shadow vs live) ──
+  // Each pipeline reads `<name>_pipeline_target` from settings. Writing via
+  // settingsQueries.set() updates the in-memory config cache too, so the change
+  // takes effect on the next scheduled run with no restart.
+  const PIPELINE_TARGET_DEFAULTS: Record<string, 'live' | 'uat'> = {
+    kpi: 'live',   // kpi-pipeline getter defaults to live
+    qa: 'uat',     // qa-pipeline getter defaults to uat
+    gr: 'uat',     // gr-pipeline getter defaults to uat
+  };
+
+  router.get('/pipeline/targets', (_req, res) => {
+    const sq = deps?.settingsQueries;
+    const targets: Record<string, 'live' | 'uat'> = {};
+    for (const [name, def] of Object.entries(PIPELINE_TARGET_DEFAULTS)) {
+      const val = sq?.get(`${name}_pipeline_target`);
+      targets[name] = val === 'live' ? 'live' : val === 'uat' ? 'uat' : def;
+    }
+    res.json({ ok: true, data: targets });
+  });
+
+  router.post('/pipeline/target', requireRole('admin'), (req, res) => {
+    const sq = deps?.settingsQueries;
+    if (!sq) { res.status(503).json({ ok: false, error: 'Settings not available' }); return; }
+    const { pipeline, target } = req.body ?? {};
+    if (!Object.prototype.hasOwnProperty.call(PIPELINE_TARGET_DEFAULTS, pipeline)) {
+      res.status(400).json({ ok: false, error: `pipeline must be one of: ${Object.keys(PIPELINE_TARGET_DEFAULTS).join(', ')}` });
+      return;
+    }
+    if (target !== 'live' && target !== 'uat') {
+      res.status(400).json({ ok: false, error: 'target must be "live" or "uat"' });
+      return;
+    }
+    sq.set(`${pipeline}_pipeline_target`, target);
+    res.json({ ok: true, data: { pipeline, target } });
+  });
+
   // ── WP-62: Drift Detection ──
 
   router.get('/pipeline/drift', async (_req, res) => {
