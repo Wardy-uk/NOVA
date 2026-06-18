@@ -245,7 +245,12 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     ctx?: { priority?: string; issueType?: string },
   ): Promise<string> {
     if (!this.llmService) return text;
-    if (this.settings.get('agent_self_review_enabled') === 'false') return text;
+    // Opt-in only: the GR rewriter targets 3/3/3 (explicit owner + concrete action +
+    // committed timeframe), which makes NOVA fabricate ownership/escalations/deadlines
+    // it can't honour and claim actions the decision pipeline never executed. Leave the
+    // autonomous auto-revise OFF unless explicitly enabled; the human-composer GR review
+    // button is unaffected. See actor.reviseForGoldenRules history.
+    if (this.settings.get('agent_self_review_enabled') !== 'true') return text;
     if (!text.trim()) return text;
 
     const minScore = Number(this.settings.get('agent_self_review_min_score') ?? '3') || 3;
