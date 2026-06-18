@@ -3583,7 +3583,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: targets });
   });
 
-  router.post('/pipeline/target', requireRole('admin'), (req, res) => {
+  router.post('/pipeline/target', requireRole('admin', 'super_admin'), (req, res) => {
     const sq = deps?.settingsQueries;
     if (!sq) { res.status(503).json({ ok: false, error: 'Settings not available' }); return; }
     const { pipeline, target } = req.body ?? {};
