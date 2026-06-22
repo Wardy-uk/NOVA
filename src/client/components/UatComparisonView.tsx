@@ -39,6 +39,12 @@ const TABLES = [
   { value: 'jira_kpi_digest', label: 'KPI Digest', keyCol: 'period + CreatedAt' },
 ];
 
+const PIPELINES: { key: string; label: string; default: 'live' | 'uat' }[] = [
+  { key: 'kpi', label: 'KPI', default: 'live' },
+  { key: 'qa', label: 'QA Scoring', default: 'uat' },
+  { key: 'gr', label: 'Golden Rules', default: 'uat' },
+];
+
 const DATE_RANGES = [
   { value: 1, label: 'Today' },
   { value: 3, label: '3 days' },
@@ -76,7 +82,29 @@ export function UatComparisonView() {
   const [countdown, setCountdown] = useState(0);
   const [allResults, setAllResults] = useState<ComparisonResult[]>([]);
   const [loadingAll, setLoadingAll] = useState(false);
+  const [targets, setTargets] = useState<Record<string, 'live' | 'uat'>>({});
+  const [savingTarget, setSavingTarget] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchTargets = useCallback(async () => {
+    try {
+      const res = await apiJson('/pipeline/targets', 'GET');
+      if (res.ok) setTargets(res.data);
+    } catch { /* ignore */ }
+  }, []);
+
+  const setTarget = useCallback(async (pipeline: string, target: 'live' | 'uat') => {
+    setSavingTarget(pipeline);
+    const prev = targets[pipeline];
+    setTargets(t => ({ ...t, [pipeline]: target })); // optimistic
+    try {
+      const res = await apiJson('/pipeline/target', 'POST', { pipeline, target });
+      if (!res.ok) setTargets(t => ({ ...t, [pipeline]: prev })); // revert on failure
+    } catch {
+      setTargets(t => ({ ...t, [pipeline]: prev }));
+    }
+    setSavingTarget(null);
+  }, [targets]);
 
   const fetchComparison = useCallback(async (table: string, numDays: number) => {
     setLoading(true);
@@ -105,6 +133,8 @@ export function UatComparisonView() {
   useEffect(() => {
     fetchComparison(selectedTable, days);
   }, [selectedTable, days, fetchComparison]);
+
+  useEffect(() => { fetchTargets(); }, [fetchTargets]);
 
   useEffect(() => {
     if (!autoRefresh) {
@@ -140,6 +170,42 @@ export function UatComparisonView() {
         >
           {loadingAll ? 'Comparing all...' : 'Compare All Tables'}
         </button>
+      </div>
+
+      {/* Pipeline source toggles — where each pipeline writes: UAT shadow tables or live n8n tables */}
+      <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-white">Pipeline Source</h3>
+          <span className="text-xs text-neutral-500">Live = writes to the production tables n8n uses. Switching takes effect on the next scheduled run.</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {PIPELINES.map(p => {
+            const current = targets[p.key] ?? p.default;
+            return (
+              <div key={p.key} className="flex items-center gap-2 bg-neutral-900/50 border border-neutral-700/40 rounded px-2.5 py-1.5">
+                <span className="text-xs font-medium text-neutral-300 w-28">{p.label}</span>
+                <div className="flex">
+                  {(['uat', 'live'] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => current !== t && setTarget(p.key, t)}
+                      disabled={savingTarget === p.key}
+                      className={`px-2.5 py-1 text-xs font-medium border first:rounded-l last:rounded-r -ml-px first:ml-0 disabled:opacity-50 ${
+                        current === t
+                          ? t === 'live'
+                            ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40 z-10'
+                            : 'bg-blue-500/25 text-blue-300 border-blue-500/40 z-10'
+                          : 'bg-neutral-800 text-neutral-500 border-neutral-700 hover:text-neutral-300'
+                      }`}
+                    >
+                      {t === 'live' ? 'Live' : 'UAT'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Controls */}
