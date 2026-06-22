@@ -730,6 +730,9 @@ export class AgentLoop {
         // lifecycle-manager stale→close branches. See stale-lifecycle.ts.
         await this.staleLifecycle.sweep(shadowMode);
         await this.runUnassignedSweep();
+        // Backstop: rescue tickets that slipped past the unassigned sweep's filters and
+        // have been stranded on NOVA-Jira for too long (the "stuck since May" cases).
+        await this.runStrandedNovaSweep();
         await this.runPatternExtraction();
 
         // Weekly memory compaction (every ~168th sweep ≈ weekly)
@@ -1288,6 +1291,99 @@ export class AgentLoop {
     } catch (err) {
       console.warn('[agent] Unassigned sweep failed:', err instanceof Error ? err.message : err);
       return { assigned: 0, failed: 0, total: 0 };
+    }
+  }
+
+  /**
+   * Backstop sweep: reassign tickets that have been stranded on NOVA-Jira past a threshold.
+   *
+   * runUnassignedSweep() routes most NOVA-held tickets to humans, but several of its filters
+   * (the TPJ_Feed label exclusion, the TPJ max-age cap, the pending-approval lock, and the
+   * configured-projects restriction) silently `continue`/skip a ticket — and once skipped,
+   * nothing ever forces it off NOVA. That's how tickets end up sitting on NOVA-Jira for weeks.
+   *
+   * This is the catch-all: ANY ticket assigned to NOVA, not done, and untouched by the agent
+   * for longer than `agent_nova_strand_max_hours` (default 48) gets round-robined to a human,
+   * deliberately bypassing those filters. Staleness is judged by `agent_last_updated` (the
+   * "Agent Last Upd" column) AND ticket age, so a ticket NOVA has only just picked up and is
+   * actively working is left alone. assignWithFallback() does a live human-owner check, so a
+   * ticket already moved to a human earlier in the same tick is skipped safely.
+   *
+   * Disable by setting `agent_nova_strand_enabled` to 'false'.
+   */
+  async runStrandedNovaSweep(options?: { maxHours?: number; limit?: number; skipWorkingHoursCheck?: boolean }): Promise<{ reassigned: number; failed: number; total: number }> {
+    if (!this.assignmentEngine) return { reassigned: 0, failed: 0, total: 0 };
+    if (this.settings.get('agent_nova_strand_enabled') === 'false') return { reassigned: 0, failed: 0, total: 0 };
+    // Working-hours only — we're handing tickets to people, don't pile them on overnight.
+    if (!options?.skipWorkingHoursCheck && !this.assignmentEngine.isWorkingTime()) return { reassigned: 0, failed: 0, total: 0 };
+
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
+    if (!novaAccountId) return { reassigned: 0, failed: 0, total: 0 };
+
+    const maxHours = options?.maxHours ?? this.getNumber('agent_nova_strand_max_hours', 48);
+    const limit = options?.limit ?? this.getNumber('agent_nova_strand_limit', 30);
+
+    try {
+      const stranded = await query<{
+        issue_key: string; summary: string; status_name: string;
+        request_type: string | null; current_tier: string | null;
+        labels: string | null; jira_created: string | null;
+      }>(
+        `SELECT TOP (${limit}) c.issue_key, c.summary, c.status_name, c.request_type,
+                c.current_tier, c.labels, c.jira_created
+         FROM jira_issue_cache c
+         WHERE c.assignee_account_id = ?
+           AND c.status_category != 'done'
+           AND (c.current_tier IS NULL OR c.current_tier != 'Development')
+           AND c.jira_created < DATEADD(hour, -${maxHours}, GETUTCDATE())
+           AND (c.agent_last_updated IS NULL OR c.agent_last_updated < DATEADD(hour, -${maxHours}, GETUTCDATE()))
+         ORDER BY c.jira_created ASC`,
+        [novaAccountId],
+      );
+
+      if (stranded.length === 0) return { reassigned: 0, failed: 0, total: 0 };
+      console.warn(`[agent] Stranded-NOVA sweep: ${stranded.length} ticket(s) on NOVA-Jira >${maxHours}h — reassigning to humans`);
+
+      const escalationLog = new EscalationLogService();
+      let reassigned = 0;
+      let failed = 0;
+      for (const ticket of stranded) {
+        const project = this.assignmentEngine.resolveProjectFromTicketKey(ticket.issue_key);
+        const pool = this.determinePoolFromTicket(ticket, project);
+        if (!pool) continue;
+        try {
+          const assignment = await this.assignmentEngine.assignWithFallback(ticket.issue_key, pool, project);
+          if (!assignment) continue; // already human-owned or no agent available (retry queued)
+
+          await this.assignmentEngine.postAssignmentComment(ticket.issue_key, assignment);
+          if (ticket.request_type === 'AI Request') {
+            try { await this.updateRequestTypeFromDecision(ticket.issue_key); }
+            catch (rtErr) { console.warn(`[agent] Stranded sweep: failed to update request type for ${ticket.issue_key}:`, rtErr instanceof Error ? rtErr.message : rtErr); }
+          }
+          try {
+            await escalationLog.log({
+              ticket_key: ticket.issue_key,
+              escalation_type: 'ai_agent',
+              assigned_to: assignment.agent.display_name,
+              reason_code: 'nova_stranded',
+              reason_label: `Stranded on NOVA-Jira >${maxHours}h`,
+              escalated_by: 'NOVA',
+              source: 'stranded-nova-sweep',
+              notes: `Auto-reassigned after sitting on NOVA-Jira unworked for over ${maxHours}h.`,
+            });
+          } catch { /* logging is best-effort */ }
+
+          console.warn(`[agent] Stranded-NOVA sweep: reassigned ${ticket.issue_key} → ${assignment.agent.display_name}`);
+          reassigned++;
+        } catch (err) {
+          console.warn(`[agent] Stranded-NOVA sweep: failed ${ticket.issue_key}:`, err instanceof Error ? err.message : err);
+          failed++;
+        }
+      }
+      return { reassigned, failed, total: stranded.length };
+    } catch (err) {
+      console.warn('[agent] Stranded-NOVA sweep failed:', err instanceof Error ? err.message : err);
+      return { reassigned: 0, failed: 0, total: 0 };
     }
   }
 
