@@ -11,6 +11,7 @@ import { Observer } from './observer.js';
 import { KbSearchService } from './kb-search.js';
 import { LifecycleManager } from './lifecycle-manager.js';
 import { StaleLifecycleService } from './stale-lifecycle.js';
+import { RequestTypeSweep } from './request-type-sweep.js';
 
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { Guardrails, type GuardrailResult } from './guardrails.js';
@@ -29,7 +30,7 @@ import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
-import { prepareTicketForClose, setRequestType } from './close-ticket-helper.js';
+import { prepareTicketForClose, setRequestType, ensureAiRequestTypeIfEmpty } from './close-ticket-helper.js';
 import { addBusinessHours, toSqliteDatetime } from '../utils/business-hours.js';
 import { createHash } from 'crypto';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
@@ -67,6 +68,7 @@ export class AgentLoop {
   private observer: Observer;
   private lifecycleManager: LifecycleManager;
   private staleLifecycle: StaleLifecycleService;
+  private requestTypeSweep: RequestTypeSweep;
 
   private guardrails: Guardrails;
   private queueMonitor: QueueMonitor;
@@ -112,6 +114,7 @@ export class AgentLoop {
     );
     this.reasoner.setLifecycleManager(this.lifecycleManager);
     this.staleLifecycle = new StaleLifecycleService(settings, jiraClient, this.observer, llmService);
+    this.requestTypeSweep = new RequestTypeSweep(jiraClient, settings, llmService);
 
     this.guardrails = new Guardrails(settings);
     this.queueMonitor = new QueueMonitor(jiraClient, settings);
@@ -651,6 +654,13 @@ export class AgentLoop {
                 try {
                   await this.jiraClient.updateFields(event.ticketKey, { assignee: { accountId: novaAccountId } });
                   console.log(`[agent] Self-assigned ${event.ticketKey} to NOVA for processing`);
+                  // Stamp "AI Request" now (only if untyped) so the ticket reflects that NOVA
+                  // is dealing with it from the moment it's claimed — not just on the way out.
+                  try {
+                    await ensureAiRequestTypeIfEmpty(this.jiraClient, this.settings, event.ticketKey);
+                  } catch (rtErr) {
+                    console.warn(`[agent] Failed to stamp AI Request on ${event.ticketKey}:`, rtErr instanceof Error ? rtErr.message : rtErr);
+                  }
                 } catch (err) {
                   console.warn(`[agent] Failed to self-assign ${event.ticketKey}:`, err instanceof Error ? err.message : err);
                 }
@@ -733,6 +743,14 @@ export class AgentLoop {
         // Backstop: rescue tickets that slipped past the unassigned sweep's filters and
         // have been stranded on NOVA-Jira for too long (the "stuck since May" cases).
         await this.runStrandedNovaSweep();
+        // Safety net: any NT ticket with no request type gets one — "AI Request" if NOVA
+        // holds it, otherwise an inferred type (default Incident). Covers email-channel
+        // tickets the front-line triage left unstamped.
+        try {
+          await this.requestTypeSweep.sweep(shadowMode === 'full_shadow');
+        } catch (err) {
+          console.warn('[agent] Request-type sweep failed:', err instanceof Error ? err.message : err);
+        }
         await this.runPatternExtraction();
 
         // Weekly memory compaction (every ~168th sweep ≈ weekly)

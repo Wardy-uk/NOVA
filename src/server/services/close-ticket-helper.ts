@@ -82,6 +82,29 @@ export async function setRequestType(
   }
 }
 
+/**
+ * Stamp "AI Request" on a ticket NOVA is about to work — but ONLY if the request-type
+ * field is currently empty, so we never clobber a type the portal/customer already set.
+ * Called at self-assign so the ticket reads "AI is dealing with it" from the start; the
+ * close/handoff paths later move it to the resolved category via setRequestType().
+ */
+export async function ensureAiRequestTypeIfEmpty(
+  jiraClient: JiraRestClient,
+  settings: SettingsQueries,
+  ticketKey: string,
+): Promise<void> {
+  const field = getRequestTypeField(settings);
+  try {
+    const issue = await jiraClient.getIssue(ticketKey, [field]);
+    const current = (issue?.fields as Record<string, unknown> | undefined)?.[field];
+    if (current != null && current !== '') return; // already typed — leave it
+  } catch (err) {
+    console.warn(`[request-type] Could not read request type on ${ticketKey}, skipping AI Request stamp:`, err instanceof Error ? err.message : err);
+    return;
+  }
+  await setRequestType(jiraClient, settings, ticketKey, undefined, 'AI Request');
+}
+
 const CATEGORY_TO_REQUEST_TYPE: Record<string, string> = {
   'email': 'Emailed request',
   'email_delivery': 'Emailed request',
