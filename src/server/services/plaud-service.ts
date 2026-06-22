@@ -8,7 +8,10 @@
  *
  * MCP tool output shapes (confirmed against the live server):
  *   list_files     -> { type:'list', data:[{ id, name, start_at, duration }] }
- *   get_transcript -> [ { speaker, content|text, start_time? }, … ]  (empty [] if none)
+ *   get_transcript -> [ { data_type:'transaction', data_content:"<json>" }, … ]
+ *                     where data_content is a JSON-encoded array of
+ *                     { start_time(ms), end_time(ms), content, speaker }.
+ *                     (Other blocks: 'outline', 'transaction_polish'.) [] if none.
  *   get_note       -> [ { data_title, data_content }, … ]            (empty [] if none)
  */
 import type { McpClientManager } from './mcp-client.js';
@@ -26,6 +29,23 @@ export interface PlaudRecording {
   filename: string;
   start_time: number; // unix seconds
   duration: number; // ms (as Plaud reports)
+}
+
+/**
+ * Parse a Plaud `start_at`/`created_at` timestamp into a Date.
+ *
+ * Plaud reports these as UTC but WITHOUT a timezone designator, e.g.
+ * "2026-06-22T09:00:36.616000". Bare `new Date()` interprets a tz-less datetime
+ * as *server-local* time (ES spec), so on a UK/BST host the 10:00 standup is read
+ * as 09:00 — an hour adrift, which pushes it outside the standup time window and
+ * makes findStandupRecording() miss it. Appending 'Z' forces UTC. (Recording #2's
+ * Plaud-assigned name reflects UK wall-clock while its start_at is one hour earlier
+ * — confirming start_at is UTC.)
+ */
+function parsePlaudDate(s: string): Date {
+  if (!s) return new Date(NaN);
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s.trim());
+  return new Date(hasTz ? s : `${s}Z`);
 }
 
 /** Unwrap an MCP CallToolResult into parsed JSON (or the raw text / value). */
@@ -51,9 +71,9 @@ export class PlaudService {
     return this.mcp.getServerTools(PLAUD_SERVER).length > 0;
   }
 
-  /** YYYY-MM-DD for a Plaud start_at (local ISO, no tz) in UK time. */
+  /** YYYY-MM-DD for a Plaud start_at (UTC ISO, no tz) in UK time. */
   private ukDate(startAt: string): string {
-    return new Date(startAt).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+    return parsePlaudDate(startAt).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
 
   /** List recordings whose start falls on the given UK calendar date (YYYY-MM-DD). */
@@ -69,7 +89,7 @@ export class PlaudService {
         return {
           id: String(r.id ?? r.file_id ?? ''),
           filename: String(r.name ?? r.filename ?? r.title ?? ''),
-          start_time: startAt ? Math.floor(new Date(startAt).getTime() / 1000) : 0,
+          start_time: startAt ? Math.floor(parsePlaudDate(startAt).getTime() / 1000) : 0,
           duration: Number(r.duration ?? 0),
           _startAt: startAt as string,
         };
@@ -113,12 +133,30 @@ export class PlaudService {
   async getTranscript(recordingId: string): Promise<string> {
     const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'get_transcript', { file_id: recordingId }));
     if (typeof raw === 'string') return raw;
-    const segments: any[] = Array.isArray(raw) ? raw : (raw?.paragraphs ?? raw?.data ?? []);
+
+    // The live server returns an array of "blocks"; the transcript proper is a
+    // JSON-encoded array of segments inside the `data_content` of the
+    // 'transaction' block. Fall back to treating the items as segments directly
+    // (the older documented shape) if no such block is present.
+    const top: any[] = Array.isArray(raw) ? raw : (raw?.paragraphs ?? raw?.data ?? []);
+    let segments: any[] = top;
+    const txBlock = top.find(
+      (b) => b?.data_type === 'transaction' ||
+        (typeof b?.data_content === 'string' && b.data_content.trim().startsWith('[')),
+    );
+    if (txBlock?.data_content) {
+      try { segments = JSON.parse(txBlock.data_content); } catch { segments = []; }
+    }
     if (!segments.length) return '';
+
     return segments
       .map((s) => {
-        const t = Number(s.start_time ?? s.timestamp ?? NaN);
-        const stamp = Number.isFinite(t) ? `[${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}] ` : '';
+        // Plaud reports segment start times in milliseconds.
+        const ms = Number(s.start_time ?? s.timestamp ?? NaN);
+        const secs = Number.isFinite(ms) ? Math.floor(ms / 1000) : NaN;
+        const stamp = Number.isFinite(secs)
+          ? `[${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}] `
+          : '';
         const speaker = s.speaker ? `${s.speaker}: ` : '';
         const text = (s.content ?? s.text ?? '').toString().trim();
         return `${stamp}${speaker}${text}`.trim();

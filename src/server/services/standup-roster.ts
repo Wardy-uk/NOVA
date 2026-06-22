@@ -41,7 +41,9 @@ export async function getStandupRoster(settings: SettingsQueries, force = false)
     .map((r) => ({
       name: [r.AgentName?.trim(), r.AgentSurname?.trim()].filter(Boolean).join(' '),
       email: r.AgentKey?.trim() || null,
-      team: (r.Team ?? '').toLowerCase().trim(),
+      // Strip ALL whitespace, not just trim, so "Customer Care" / "Digital Design"
+      // normalise to the keys in STANDUP_TEAMS regardless of how dbo.Agent spells them.
+      team: (r.Team ?? '').toLowerCase().replace(/\s+/g, ''),
       accountId: r.AccountId ? decodeURIComponent(r.AccountId) : null,
     }))
     .filter((a) => a.name && STANDUP_TEAMS.has(a.team));

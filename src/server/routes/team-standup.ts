@@ -127,10 +127,11 @@ export function createTeamStandupRoutes(deps: StandupDeps): Router {
       const session = await standupQueries.ensureSession(date);
       const submissions = await standupQueries.getSubmissions(session.id);
       const commitments = await standupQueries.getCommitments(session.id);
+      const carriedOver = await standupQueries.getOutstandingCommitmentsBefore(date);
       const report = await buildAccountabilityReport(date, deps);
       const brief = session.brief_json ? JSON.parse(session.brief_json) : null;
       const roster = await deps.getRoster().catch(() => []);
-      res.json({ ok: true, data: { session: { ...session, brief_json: undefined }, brief, submissions, commitments, report, roster: roster.map((a) => a.name) } });
+      res.json({ ok: true, data: { session: { ...session, brief_json: undefined }, brief, submissions, commitments, carriedOver, report, roster: roster.map((a) => a.name) } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

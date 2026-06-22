@@ -166,6 +166,22 @@ export class TeamStandupQueries {
     return queryOne<StandupCommitment>(`SELECT * FROM standup_commitments WHERE id = ?`, [id]);
   }
 
+  /**
+   * Still-pending commitments from sessions BEFORE the given date — the carry-over
+   * review list, so open commitments don't fall through the cracks when reviewing a
+   * later standup. Each row carries its originating session date for labelling.
+   */
+  async getOutstandingCommitmentsBefore(date: string): Promise<Array<StandupCommitment & { session_date: string }>> {
+    return query<StandupCommitment & { session_date: string }>(
+      `SELECT c.*, s.date AS session_date
+       FROM standup_commitments c
+       JOIN standup_sessions s ON s.id = c.session_id
+       WHERE c.status = 'pending' AND s.date < ?
+       ORDER BY s.date ASC, c.agent_name ASC, c.id ASC`,
+      [date],
+    );
+  }
+
   /** Replace all commitments for a submission with the supplied list (re-explode on re-submit). */
   async replaceCommitments(
     submissionId: number,

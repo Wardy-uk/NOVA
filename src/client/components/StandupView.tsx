@@ -13,6 +13,7 @@ interface Submission {
 interface Commitment {
   id: number; agent_name: string; commitment_text: string; status: CommitmentStatus; review_note: string | null;
 }
+interface CarriedCommitment extends Commitment { session_date: string; }
 interface BriefTicket {
   key: string; summary: string; assignee: string; tier: string; category: BriefCategory;
   status: string; ageDays: number | null; over5: boolean;
@@ -27,6 +28,7 @@ interface SessionDetail {
   brief: Brief | null;
   submissions: Submission[];
   commitments: Commitment[];
+  carriedOver: CarriedCommitment[];
   report: { stats: { total: number; delivered: number; missed: number; excused: number; pending: number; deliveryRate: number } } | null;
   roster: string[];
 }
@@ -128,7 +130,11 @@ export function StandupView({ token }: { token: string }) {
   async function updateCommitment(id: number, status: CommitmentStatus, review_note?: string) {
     const r = await fetch(`/api/standup/commitments/${id}`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ status, review_note: review_note ?? null }) }).then((x) => x.json());
     if (r.ok) {
-      setDetail((prev) => prev ? { ...prev, commitments: prev.commitments.map((c) => c.id === id ? { ...c, status, review_note: review_note ?? c.review_note } : c) } : prev);
+      setDetail((prev) => prev ? {
+        ...prev,
+        commitments: prev.commitments.map((c) => c.id === id ? { ...c, status, review_note: review_note ?? c.review_note } : c),
+        carriedOver: prev.carriedOver.map((c) => c.id === id ? { ...c, status, review_note: review_note ?? c.review_note } : c),
+      } : prev);
     }
   }
   async function markAllDelivered(agent: string) {
@@ -166,6 +172,19 @@ export function StandupView({ token }: { token: string }) {
     }
     return map;
   }, [detail]);
+
+  // Still-open commitments carried over from earlier sessions, grouped by agent.
+  const carriedByAgent = useMemo(() => {
+    const map = new Map<string, CarriedCommitment[]>();
+    for (const c of detail?.carriedOver ?? []) {
+      if (c.status !== 'pending') continue; // drop as they're reviewed
+      const list = map.get(c.agent_name) ?? [];
+      list.push(c);
+      map.set(c.agent_name, list);
+    }
+    return map;
+  }, [detail]);
+  const carriedCount = useMemo(() => [...carriedByAgent.values()].reduce((n, l) => n + l.length, 0), [carriedByAgent]);
 
   const stats = detail?.report?.stats;
 
@@ -341,8 +360,29 @@ export function StandupView({ token }: { token: string }) {
             </div>
           )}
         </div>
+        {carriedCount > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">Carried over — to review</span>
+              <span className="text-[11px] text-neutral-500">{carriedCount} open from earlier sessions</span>
+            </div>
+            <div className="space-y-4">
+              {[...carriedByAgent.entries()].map(([agent, items]) => (
+                <div key={agent}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-bold">{agentInitials(agent)}</span>
+                    <span className="text-sm text-neutral-200 font-medium">{agent}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((c) => <CommitmentRow key={c.id} c={c} onUpdate={updateCommitment} fromDate={c.session_date} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {(detail?.commitments?.length ?? 0) === 0 ? (
-          <p className="text-sm text-neutral-500">No commitments captured for this session.</p>
+          <p className="text-sm text-neutral-500">{carriedCount > 0 ? 'No new commitments captured for this session.' : 'No commitments captured for this session.'}</p>
         ) : (
           <div className="space-y-4">
             {[...commitmentsByAgent.entries()].map(([agent, items]) => (
@@ -366,7 +406,7 @@ export function StandupView({ token }: { token: string }) {
   );
 }
 
-function CommitmentRow({ c, onUpdate }: { c: Commitment; onUpdate: (id: number, s: CommitmentStatus, note?: string) => void }) {
+function CommitmentRow({ c, onUpdate, fromDate }: { c: Commitment; onUpdate: (id: number, s: CommitmentStatus, note?: string) => void; fromDate?: string }) {
   const [noteFor, setNoteFor] = useState<CommitmentStatus | null>(null);
   const [note, setNote] = useState('');
   const badge = STATUS_BADGE[c.status];
@@ -383,7 +423,10 @@ function CommitmentRow({ c, onUpdate }: { c: Commitment; onUpdate: (id: number, 
   return (
     <div className="rounded border border-[#3a424d]/60 bg-[#272C33] px-3 py-2">
       <div className="flex items-center gap-2">
-        <span className="flex-1 text-sm text-neutral-200">{c.commitment_text}</span>
+        <span className="flex-1 text-sm text-neutral-200">
+          {c.commitment_text}
+          {fromDate && <span className="ml-2 text-[10px] text-amber-400/80">· {niceDate(fromDate)}</span>}
+        </span>
         <span style={{ background: badge.bg, color: badge.fg, border: `1px solid ${badge.fg}40` }} className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0">{badge.label}</span>
       </div>
       <div className="flex items-center gap-1.5 mt-2">
