@@ -64,6 +64,19 @@ function normalizePool(team: string | null): Pool {
   return TEAM_TO_POOL[key] ?? 'cc';
 }
 
+/**
+ * Resolve an agent's round-robin pool from the KPI dbo.Agent row. The Tier 2 desk is
+ * authoritatively `TierCode = 'T2' AND Team = 'Support'` — both are required because the
+ * DigitalDesign agents also carry TierCode 'T2' but belong to the `digital` pool, not t2.
+ * Everything else falls back to the team-based mapping (cc / tpj / digital).
+ */
+function resolvePool(tierCode: string | null, team: string | null): Pool {
+  const tc = (tierCode ?? '').trim().toUpperCase();
+  const tm = (team ?? '').trim().toLowerCase();
+  if (tc === 'T2' && tm === 'support') return 't2';
+  return normalizePool(team);
+}
+
 export class AssignmentEngine {
   private kpiPool: sql.ConnectionPool | null = null;
   private workingDayClock: WorkingDayClock;
@@ -426,7 +439,7 @@ export class AssignmentEngine {
   private async getAllAgentsFromKpi(pool?: Pool): Promise<RosterAgent[]> {
     const p = await this.getKpiPool();
     const result = await p.request().query(`
-      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
              Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
@@ -451,7 +464,7 @@ export class AssignmentEngine {
     const req = p.request();
     req.input('agentId', sql.Int, id);
     const result = await req.query(`
-      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
              Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
@@ -475,7 +488,7 @@ export class AssignmentEngine {
     const req = p.request();
     req.input('accountId', sql.NVarChar, jiraAccountId);
     const result = await req.query(`
-      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team,
+      SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
              Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
@@ -825,7 +838,7 @@ export class AssignmentEngine {
       jira_account_id: decodeURIComponent(row.AccountId ?? ''),
       display_name: name || `Agent ${row.AgentId}`,
       email: row.AgentKey?.trim() || null,
-      pool: normalizePool(row.Team),
+      pool: resolvePool(row.TierCode, row.Team),
       department: row.Department?.trim() || null,
       skills: null,
       max_capacity: row.MaxTickets ?? 10,
