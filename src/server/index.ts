@@ -138,7 +138,7 @@ import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
-import { upsertIssueCard } from './services/issue-router-store.js';
+import { upsertIssueCard, getAtRiskCustomersFromIssues } from './services/issue-router-store.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -3309,8 +3309,8 @@ ${body}
           return { metric: String(onFire), metricLabel: 'on fire', sub: `${atRisk} at risk`, color: onFire > 0 ? '#ef4444' : atRisk > 0 ? '#f59e0b' : '#10b981' };
         }),
         guard('Strategic (SLT)', '/wallboard/strategic', async () => {
-          const r = await query<{ hi: number }>(`SELECT COUNT(*) AS hi FROM agent_account_risk WHERE risk_tier >= 3`);
-          const hi = r[0]?.hi ?? 0;
+          // High-risk = AgentBrain at-risk customers in tier 3+ (issue-card inversion).
+          const hi = (await getAtRiskCustomersFromIssues()).filter(c => c.tier >= 3).length;
           return { metric: String(hi), metricLabel: 'high-risk accounts', sub: 'End-of-day SLT view', color: hi > 0 ? '#f59e0b' : '#10b981' };
         }),
       ];
@@ -3771,67 +3771,62 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         rollSection('Oldest actionable (days)', 'oldest', Q7),
       ].join('');
 
-      // ── RIGHT TOP: Key Account Risks (agent_account_risk, top 5 Watch+ tiers) ──
-      // In-panel = compact top-5; expanded = the WHY (active risk signals from
-      // agent_account_risk_signals: complaints, terminations, refunds, escalations).
+      // ── RIGHT TOP: Key Account Risks (AgentBrain issue-card inversion, top 5 tier 2+) ──
+      // Source: getAtRiskCustomersFromIssues() inverts AgentBrain's cross-customer issue
+      // cards into a per-customer at-risk league table. In-panel = compact top-5; expanded
+      // = the WHY (the specific cross-customer issues each account is caught up in).
       let riskSummaryHtml = '', riskDetailHtml = '';
       const badgeStyle = (high: boolean) => `background:${high ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'};color:${high ? '#ef4444' : '#f59e0b'};border:1px solid ${high ? '#ef444455' : '#f59e0b55'}`;
-      const SIGNAL_LABELS: Record<string, string> = {
-        formal_complaint: 'Formal complaint', termination: 'Termination / cancellation',
-        formal_escalation: 'Formal escalation', refund: 'Refund request', compensation: 'Compensation request',
+      const ROUTE_LABELS: Record<string, string> = {
+        bug_external: 'External bug', bug_internal: 'Internal bug', ux_friction: 'UX friction',
+        missing_feature: 'Missing feature', docs_gap: 'Docs gap', uncertain: 'Uncertain',
       };
-      const sigLabel = (t: string) => SIGNAL_LABELS[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       try {
-        const risks = await query<{ customer_ref: string; customer_name: string | null; bc_number: string | null; risk_score: number; risk_tier: number; total_ticket_count: number; last_ticket_date: Date | string | null; has_formal_complaint: number; has_termination: number; has_active_refund: number; has_open_escalation: number }>(
-          `SELECT TOP 5 customer_ref, customer_name, bc_number, risk_score, risk_tier, total_ticket_count, last_ticket_date,
-                  has_formal_complaint, has_termination, has_active_refund, has_open_escalation
-           FROM agent_account_risk WHERE risk_tier >= 2 ORDER BY risk_score DESC, total_ticket_count DESC`);
-        if (!risks.length) {
-          riskSummaryHtml = `<div class="empty">No accounts currently flagged</div>`;
+        const atRisk = (await getAtRiskCustomersFromIssues()).filter(c => c.tier >= 2).slice(0, 5);
+        if (!atRisk.length) {
+          riskSummaryHtml = `<div class="empty">No accounts currently flagged &mdash; waiting on AgentBrain issue feed</div>`;
           riskDetailHtml = riskSummaryHtml;
         } else {
-          const refs = risks.map(r => r.customer_ref).filter(Boolean);
-          const sigByRef = new Map<string, Array<{ ticket_key: string; signal_type: string; evidence_text: string | null }>>();
-          if (refs.length) {
-            const ph = refs.map(() => '?').join(',');
-            const sigs = await query<{ customer_ref: string; ticket_key: string; signal_type: string; evidence_text: string | null }>(
-              `SELECT customer_ref, ticket_key, signal_type, evidence_text FROM agent_account_risk_signals
-               WHERE is_active = 1 AND customer_ref IN (${ph}) ORDER BY signal_weight DESC`, refs);
-            for (const s of sigs) {
-              if (!sigByRef.has(s.customer_ref)) sigByRef.set(s.customer_ref, []);
-              sigByRef.get(s.customer_ref)!.push(s);
+          // Pull the issues affecting these customers for the WHY panel.
+          const names = atRisk.map(c => c.customer).filter(Boolean);
+          const issuesByCust = new Map<string, Array<{ title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>>();
+          if (names.length) {
+            const ph = names.map(() => '?').join(',');
+            const rows = await query<{ customer: string; title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>(
+              `SELECT ic.customer, c.title, c.route, c.trend, c.customer_count, ic.ticket_count
+               FROM agent_issue_customers ic JOIN agent_issue_cards c ON c.signature = ic.signature
+               WHERE ic.customer IN (${ph}) ORDER BY c.customer_count DESC`, names);
+            for (const r of rows) {
+              if (!issuesByCust.has(r.customer)) issuesByCust.set(r.customer, []);
+              issuesByCust.get(r.customer)!.push(r);
             }
           }
-          const meta = (a: typeof risks[number]) => {
-            const since = a.last_ticket_date ? Math.max(0, Math.floor((now.getTime() - new Date(a.last_ticket_date).getTime()) / 86400000)) : null;
-            return `${a.total_ticket_count} open${since != null ? ` &middot; ${since}d since update` : ''}`;
-          };
-          riskSummaryHtml = risks.map(a => {
-            const high = a.risk_tier >= 3;
+          const meta = (c: typeof atRisk[number]) =>
+            `${c.issue_count} issue${c.issue_count === 1 ? '' : 's'} &middot; ${c.ticket_total} ticket${c.ticket_total === 1 ? '' : 's'}${c.growing ? ` &middot; ${c.growing} growing` : ''}`;
+          riskSummaryHtml = atRisk.map(c => {
+            const high = c.tier >= 3;
             return `<div class="rrow">
-              <div class="rname">${esc(a.customer_name || 'Unknown account')}</div>
-              <div class="rmeta">${meta(a)}</div>
+              <div class="rname">${esc(c.customer || 'Unknown account')}</div>
+              <div class="rmeta">${meta(c)}</div>
               <div class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</div>
             </div>`;
           }).join('');
-          riskDetailHtml = risks.map(a => {
-            const high = a.risk_tier >= 3;
-            const flags = [
-              a.has_formal_complaint ? 'Complaint' : null, a.has_termination ? 'Termination' : null,
-              a.has_active_refund ? 'Refund' : null, a.has_open_escalation ? 'Escalation' : null,
-            ].filter(Boolean).map(f => `<span class="chip">${f}</span>`).join('');
-            const sigs = sigByRef.get(a.customer_ref) || [];
-            const sigHtml = sigs.length ? sigs.map(s => `<a class="sig" href="${jiraBase}/browse/${esc(s.ticket_key)}" target="_blank">
-                <span class="sig-t">${esc(sigLabel(s.signal_type))}</span>
-                <span class="sig-k">${esc(s.ticket_key)}</span>
-                ${s.evidence_text ? `<span class="sig-e">&ldquo;${esc(s.evidence_text.length > 160 ? s.evidence_text.slice(0, 159) + '…' : s.evidence_text)}&rdquo;</span>` : ''}
-              </a>`).join('') : `<div class="muted">No active signals recorded — risk driven by ticket volume / SLA.</div>`;
-            const name = a.customer_name || 'Unknown account';
+          riskDetailHtml = atRisk.map(c => {
+            const high = c.tier >= 3;
+            const issues = issuesByCust.get(c.customer) || [];
+            const issHtml = issues.length ? issues.map(i => {
+              const jql = encodeURIComponent(`text ~ "${(i.title || '').replace(/"/g, '')}" ORDER BY updated DESC`);
+              return `<a class="sig" href="${jiraBase}/issues/?jql=${jql}" target="_blank">
+                <span class="sig-t">${esc(i.title || 'Untitled issue')}</span>
+                <span class="sig-k">${esc(ROUTE_LABELS[i.route || ''] || i.route || 'Uncertain')}${i.trend && i.trend !== 'stable' ? ` &middot; ${esc(i.trend)}` : ''}</span>
+                <span class="sig-e">${i.customer_count ?? 0} customers affected${i.ticket_count ? ` &middot; ${i.ticket_count} from this account` : ''}</span>
+              </a>`;
+            }).join('') : `<div class="muted">No issue detail recorded for this account.</div>`;
+            const name = c.customer || 'Unknown account';
             const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
             return `<div class="why">
-              <div class="why-h"><span class="why-name">${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(a)} &middot; score ${a.risk_score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
-              ${flags ? `<div class="why-flags">${flags}</div>` : ''}
-              <div class="why-sigs">${sigHtml}</div>
+              <div class="why-h"><span class="why-name">${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(c)} &middot; score ${c.score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
+              <div class="why-sigs">${issHtml}</div>
             </div>`;
           }).join('');
         }

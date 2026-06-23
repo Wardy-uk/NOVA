@@ -8,7 +8,7 @@ import { query, execute } from './database.js';
 export interface IssueCardPayload {
   signature: string;
   action?: string;            // send_dashboard | update_dashboard
-  route?: string;             // bug_external | ux_friction | missing_feature | docs_gap | uncertain
+  route?: string;             // bug_external | bug_internal | ux_friction | missing_feature | docs_gap | uncertain
   confidence?: number;        // 0.0-1.0
   severity?: string;          // optional
   title?: string;
@@ -120,7 +120,7 @@ export async function getIssueSummary(): Promise<IssueSummary> {
 
 // Route severity weights — used to lift a customer's score for the more serious issue types.
 const ROUTE_WEIGHT: Record<string, number> = {
-  bug_external: 3, missing_feature: 2, ux_friction: 2, docs_gap: 1, uncertain: 1,
+  bug_external: 3, bug_internal: 3, missing_feature: 2, ux_friction: 2, docs_gap: 1, uncertain: 1,
 };
 
 export interface AtRiskCustomer {
