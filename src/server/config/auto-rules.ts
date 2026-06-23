@@ -216,6 +216,24 @@ const RULES_RAW: unknown[] = [
     },
   },
   {
+    // LSL/BriefYourMarket overnight welcome-trigger import failure alerts (from n8n).
+    // Title varies by brand (YourMove, ReedsRains, …) and date, so match the stable
+    // distinctive phrase. Time-critical: feed must be reprocessed before 12pm — escalate
+    // straight to Tier 2 as a Critical Incident. Mirrors mwu-tier-2 (sibling DW alert).
+    id: 'lsl-welcome-trigger-low',
+    match: {
+      subject: { contains: 'Low welcome trigger contacts' },
+    },
+    action: {
+      type: 'set_tier',
+      tier: 'Tier 2',
+      requestType: 'Incident',
+      priority: 'Critical',
+      assignToPool: 't2',
+      note: 'LSL welcome-trigger contact import LOW — overnight BYM feed failure. Escalated to Tier 2 for reprocess before 12pm (runbook: LSL Preference Reprocess).',
+    },
+  },
+  {
     id: 'cia-letter-dedup',
     match: {
       subject: { equals: 'CIA Letter Alerting' },
