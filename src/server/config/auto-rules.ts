@@ -375,6 +375,13 @@ const RULES_RAW: unknown[] = [
   },
 
   {
+    id: 'bym-pmta-domains',
+    match: {
+      subject: { regex: '^BYM Domains (?:Removed From|Will be Removed From) PMTA$' },
+    },
+    action: { type: 'close', resolution: 'No Fault Found', note: 'Automated PMTA domain notification — informational, no action required.' },
+  },
+  {
     id: 'product-cancellation',
     match: {
       subject: {
