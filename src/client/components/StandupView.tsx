@@ -80,6 +80,7 @@ export function StandupView({ token }: { token: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [displayOrder, setDisplayOrder] = useState<string[] | null>(null);
   const [shuffling, setShuffling] = useState(false);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | BriefCategory | 'over5'>('all');
   const [search, setSearch] = useState('');
 
@@ -286,10 +287,11 @@ export function StandupView({ token }: { token: string }) {
           const briefAgent = briefByName.get(name);
           const commits = commitmentsByAgent.get(name) ?? [];
           const carried = carriedByAgent.get(name) ?? [];
+          const open = expandedAgent === name;
           return (
             <div key={name} className={`rounded-lg border overflow-hidden transition-all duration-200 ease-out ${shuffling ? 'animate-pulse scale-[0.98] ring-1 ring-[#5ec1ca]/40' : ''} ${submitted ? 'border-[#3a424d] bg-[#2f353d]' : 'border-[#3a424d]/50 bg-[#2f353d]/40'}`}>
-              {/* Header — retains submission summary detail */}
-              <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[#3a424d]">
+              {/* Header — retains submission summary detail; toggles the card */}
+              <button onClick={() => setExpandedAgent(open ? null : name)} className={`w-full flex items-center gap-2.5 px-4 py-3 text-left hover:bg-[#363d47] ${open ? 'border-b border-[#3a424d]' : ''}`}>
                 <span className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold ${submitted ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-neutral-700/40 text-neutral-500'}`}>{agentInitials(name)}</span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm text-neutral-100 truncate">{name}</span>
@@ -298,8 +300,10 @@ export function StandupView({ token }: { token: string }) {
                     : <span className="block text-[11px] text-neutral-500">Not submitted</span>}
                 </span>
                 <span className={submitted ? 'text-emerald-400' : 'text-amber-400'}>{submitted ? '✓' : '◷'}</span>
-              </div>
+                <span className={`text-neutral-500 transition-transform text-xs ${open ? 'rotate-90' : ''}`}>▸</span>
+              </button>
 
+              {open && (
               <div className="grid grid-cols-1 lg:grid-cols-3 lg:divide-x divide-[#3a424d]/70">
                 {/* Submission */}
                 <div className="p-4 space-y-2">
@@ -371,6 +375,7 @@ export function StandupView({ token }: { token: string }) {
                   )}
                 </div>
               </div>
+              )}
             </div>
           );
         })}
