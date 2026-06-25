@@ -211,6 +211,54 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     }
   }
 
+  /**
+   * Post a comment while preserving the ticket's current status.
+   * Some Jira automations fire on any comment event and change the status (e.g. "Waiting on Requester" → "Work in Progress").
+   * If NOVA is not explicitly changing status, we detect and revert that drift.
+   */
+  private async addCommentPreservingStatus(
+    ticketKey: string,
+    comment: string,
+    options: { internal: boolean },
+  ): Promise<void> {
+    const before = await this.jiraClient.getIssue(ticketKey, ['status']);
+    const beforeStatus = (before?.fields as Record<string, unknown> | undefined)?.status as { name: string } | undefined;
+    const beforeStatusName = beforeStatus?.name;
+
+    await this.jiraClient.addComment(ticketKey, comment, options);
+
+    if (!beforeStatusName) return;
+
+    // Wait for Jira automations to fire before checking
+    await new Promise(r => setTimeout(r, 2500));
+
+    const after = await this.jiraClient.getIssue(ticketKey, ['status']);
+    const afterStatus = (after?.fields as Record<string, unknown> | undefined)?.status as { name: string } | undefined;
+    const afterStatusName = afterStatus?.name;
+
+    if (afterStatusName && afterStatusName !== beforeStatusName) {
+      console.log(`[actor] Status drift on ${ticketKey}: "${beforeStatusName}" → "${afterStatusName}". Reverting.`);
+      try {
+        const result = await this.jiraClient.getTransitionsWithFields(ticketKey);
+        const transitions = (result as Record<string, unknown>)?.transitions as Array<{ id: string; name: string; to?: { name: string } }> | undefined;
+        const revert = transitions?.find(t => t.to?.name?.toLowerCase() === beforeStatusName.toLowerCase());
+        if (revert) {
+          await this.jiraClient.transitionIssue(ticketKey, revert.id);
+          await this.jiraClient.addComment(
+            ticketKey,
+            `[AI Agent — Status Guard] A Jira automation changed this ticket from "${beforeStatusName}" to "${afterStatusName}" after NOVA added a comment. Status reverted to "${beforeStatusName}".`,
+            { internal: true },
+          );
+          console.log(`[actor] Reverted ${ticketKey} to "${beforeStatusName}"`);
+        } else {
+          console.warn(`[actor] Status drift on ${ticketKey} — no transition to "${beforeStatusName}" available after change to "${afterStatusName}"`);
+        }
+      } catch (err) {
+        console.warn(`[actor] Status guard failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
   private async postComment(decision: AgentDecision): Promise<ActionResult> {
     const text = (decision.output.draft_response as string) ?? (decision.output.response as string) ?? (decision.output.comment as string) ?? decision.reasoning;
     // GUARDRAIL: Actor must NEVER post public comments via this method. Public replies use postPublicReply() only.
@@ -218,7 +266,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       console.error(`[actor] BLOCKED internal postComment on ${decision.ticketKey}: text looks like structured/JSON data`);
       return { success: false, action: decision.action, ticketKey: decision.ticketKey, detail: 'Blocked: comment text contained structured/JSON data.' };
     }
-    await this.jiraClient.addComment(decision.ticketKey, text, { internal: true });
+    await this.addCommentPreservingStatus(decision.ticketKey, text, { internal: true });
 
     return { success: true, action: decision.action, ticketKey: decision.ticketKey, detail: 'Posted internal comment.' };
   }
@@ -229,7 +277,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       return { success: false, action: 'public_reply', ticketKey, detail: 'Blocked: response contained structured/JSON data.' };
     }
     const revised = await this.reviseForGoldenRules(ticketKey, text);
-    await this.jiraClient.addComment(ticketKey, revised, { internal: false });
+    await this.addCommentPreservingStatus(ticketKey, revised, { internal: false });
     return { success: true, action: 'public_reply', ticketKey, detail: 'Posted public reply.' };
   }
 
@@ -388,7 +436,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       priority: decision.inputs.priority as string | undefined,
       issueType: decision.inputs.issuetype as string | undefined,
     });
-    await this.jiraClient.addComment(ticketKey, revisedChase, { internal: false });
+    await this.addCommentPreservingStatus(ticketKey, revisedChase, { internal: false });
     return { success: true, action: 'chase', ticketKey, detail: `Sent chase message (${daysWaiting} days waiting).` };
   }
 
