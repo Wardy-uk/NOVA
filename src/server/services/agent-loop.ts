@@ -652,6 +652,16 @@ export class AgentLoop {
             if (event.eventType === 'ticket_created' || event.eventType === 'backfill') {
               if (!event.assignee) {
                 try {
+                  // Live check — the sync cache may lag behind a self-assignment made after
+                  // the ticket was captured (e.g. reporter assigns themselves immediately after
+                  // creating). NT-22689: Zoe created + self-assigned before the next sync
+                  // cycle, cache still showed assignee=null, NOVA overwrote her.
+                  const liveIssue = await this.jiraClient.getIssue(event.ticketKey, ['assignee']);
+                  const liveAssigneeId = (liveIssue?.fields?.assignee as { accountId?: string } | null)?.accountId;
+                  if (liveAssigneeId && liveAssigneeId !== novaAccountId) {
+                    console.log(`[agent] Skipping self-assign for ${event.ticketKey} — already assigned to a human (cache lag). Not overwriting.`);
+                    continue;
+                  }
                   await this.jiraClient.updateFields(event.ticketKey, { assignee: { accountId: novaAccountId } });
                   console.log(`[agent] Self-assigned ${event.ticketKey} to NOVA for processing`);
                   // Stamp "AI Request" now (only if untyped) so the ticket reflects that NOVA
@@ -1044,14 +1054,13 @@ export class AgentLoop {
   private async tryAutoAssign(decision: import('./agent-types.js').AgentDecision): Promise<void> {
     if (!this.assignmentEngine) return;
 
-    // Guard: skip if already assigned to a human agent
+    // Guard: skip if already assigned to a human agent.
+    // Use live Jira (not cache) — cache may lag behind a recent self-assignment.
     const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
-    const current = await queryOne<{ assignee_account_id: string | null }>(
-      `SELECT assignee_account_id FROM jira_issue_cache WHERE issue_key = ?`,
-      [decision.ticketKey],
-    );
-    if (current?.assignee_account_id && current.assignee_account_id !== novaAccountId) {
-      console.log(`[agent] Skipping assignment for ${decision.ticketKey} — already assigned to ${current.assignee_account_id}`);
+    const liveIssue = await this.jiraClient.getIssue(decision.ticketKey, ['assignee']).catch(() => null);
+    const liveAssigneeId = (liveIssue?.fields?.assignee as { accountId?: string } | null)?.accountId ?? null;
+    if (liveAssigneeId && liveAssigneeId !== novaAccountId) {
+      console.log(`[agent] Skipping assignment for ${decision.ticketKey} — already assigned to a human (live check)`);
       return;
     }
 
