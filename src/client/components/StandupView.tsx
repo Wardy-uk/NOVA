@@ -56,6 +56,14 @@ function niceDate(d: string): string {
   try { return new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
   catch { return d; }
 }
+function shuffleArr<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 export function StandupView({ token }: { token: string }) {
   const dateFromHash = (() => {
@@ -70,9 +78,8 @@ export function StandupView({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const [briefOpen, setBriefOpen] = useState(true);
-  const [expandedBriefAgent, setExpandedBriefAgent] = useState<string | null>(null);
+  const [displayOrder, setDisplayOrder] = useState<string[] | null>(null);
+  const [shuffling, setShuffling] = useState(false);
   const [filter, setFilter] = useState<'all' | BriefCategory | 'over5'>('all');
   const [search, setSearch] = useState('');
 
@@ -126,6 +133,23 @@ export function StandupView({ token }: { token: string }) {
       await fetch(`/api/standup/sessions/${date}`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ status }) });
       await load();
     } finally { setBusy(null); }
+  }
+  async function startStandup() {
+    const names = detail?.roster ?? [];
+    if (names.length > 1) {
+      setShuffling(true);
+      await new Promise<void>((resolve) => {
+        let ticks = 0;
+        const maxTicks = 12;
+        const iv = setInterval(() => {
+          ticks += 1;
+          setDisplayOrder(shuffleArr(names));
+          if (ticks >= maxTicks) { clearInterval(iv); resolve(); }
+        }, 110);
+      });
+      setShuffling(false);
+    }
+    await setStatus('active');
   }
   async function updateCommitment(id: number, status: CommitmentStatus, review_note?: string) {
     const r = await fetch(`/api/standup/commitments/${id}`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ status, review_note: review_note ?? null }) }).then((x) => x.json());
@@ -186,10 +210,19 @@ export function StandupView({ token }: { token: string }) {
   }, [detail]);
   const carriedCount = useMemo(() => [...carriedByAgent.values()].reduce((n, l) => n + l.length, 0), [carriedByAgent]);
 
+  // Filtered brief agents keyed by name for the per-agent merged cards.
+  const briefByName = useMemo(() => new Map(filteredBriefAgents.map((a) => [a.agent_name, a])), [filteredBriefAgents]);
+
+  // Card order — shuffled on Start standup, otherwise roster order.
+  const displayRoster = useMemo(() => {
+    if (displayOrder && displayOrder.length === roster.length && displayOrder.every((n) => roster.includes(n))) return displayOrder;
+    return roster;
+  }, [displayOrder, roster]);
+
   const stats = detail?.report?.stats;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-5 space-y-6">
+    <div className="max-w-[94rem] mx-auto px-4 py-5 space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -211,7 +244,7 @@ export function StandupView({ token }: { token: string }) {
       {/* Action bar */}
       <div className="flex flex-wrap gap-2">
         <button onClick={sendPrompts} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#2f353d] text-neutral-200 hover:bg-[#363d47] disabled:opacity-50">{busy === 'prompts' ? 'Sending…' : 'Send prompts'}</button>
-        {detail?.session?.status === 'pending' && <button onClick={() => setStatus('active')} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">Start standup</button>}
+        {detail?.session?.status === 'pending' && <button onClick={startStandup} disabled={!!busy || shuffling} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">{shuffling ? '🎲 Shuffling…' : 'Start standup'}</button>}
         {detail?.session?.status === 'active' && <button onClick={() => setStatus('complete')} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">Complete</button>}
         {detail?.session?.status === 'complete' && <button onClick={() => setStatus('pending')} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] disabled:opacity-50">Reopen</button>}
       </div>
@@ -219,109 +252,131 @@ export function StandupView({ token }: { token: string }) {
       {toast && <div className="text-xs text-[#5ec1ca] bg-[#5ec1ca]/10 border border-[#5ec1ca]/30 rounded-lg px-3 py-2">{toast}</div>}
       {loading && <div className="text-sm text-neutral-500">Loading…</div>}
 
-      {/* Submission tracker */}
-      <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
-          Submissions — {submittedNames.size}/{roster.length}
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-          {roster.map((name) => {
-            const sub = submissionByName.get(name);
-            const submitted = !!sub;
-            const open = expandedAgent === name;
-            let commitmentCount = 0;
-            try { commitmentCount = sub?.commitments_json ? JSON.parse(sub.commitments_json).length : 0; } catch { /* */ }
-            return (
-              <div key={name} className={`rounded-lg border transition-colors ${submitted ? 'border-[#3a424d] bg-[#2f353d]' : 'border-[#3a424d]/50 bg-[#2f353d]/40'} ${open ? 'sm:col-span-2 lg:col-span-2' : ''}`}>
-                <button onClick={() => submitted && setExpandedAgent(open ? null : name)} className="w-full flex items-center gap-2.5 p-3 text-left">
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold ${submitted ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-neutral-700/40 text-neutral-500'}`}>{agentInitials(name)}</span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm text-neutral-100 truncate">{name}</span>
-                    {submitted
-                      ? <span className="block text-[11px] text-neutral-400">{sub!.ticket_count ?? '–'} tickets · {sub!.over_5_count ?? '–'} over 5 · {commitmentCount} commit.</span>
-                      : <span className="block text-[11px] text-neutral-500">Not submitted</span>}
-                  </span>
-                  <span className={submitted ? 'text-emerald-400' : 'text-amber-400'}>{submitted ? '✓' : '◷'}</span>
-                </button>
-                {open && sub && (
-                  <div className="px-3 pb-3 pt-0 text-xs space-y-2 border-t border-[#3a424d] mt-1">
-                    <div className="grid grid-cols-2 gap-2 pt-2">
-                      <div><span className="text-neutral-500">Oldest:</span> <span className="text-neutral-200">{sub.oldest_ticket ?? '–'} {sub.oldest_age != null ? `(${sub.oldest_age}d)` : ''}</span></div>
-                    </div>
-                    {sub.blockers && <div><span className="text-neutral-500">Blockers:</span> <span className="text-neutral-200">{sub.blockers}</span></div>}
-                    {commitmentCount > 0 && (
-                      <div>
-                        <span className="text-neutral-500">Commitments:</span>
-                        <ul className="mt-1 space-y-1 list-disc list-inside text-neutral-200">
-                          {(() => { try { return JSON.parse(sub.commitments_json!) as string[]; } catch { return []; } })().map((c, i) => <li key={i}>{c}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {sub.notes && <div><span className="text-neutral-500">Notes:</span> <span className="text-neutral-200">{sub.notes}</span></div>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Jira brief */}
-      <section className="rounded-lg border border-[#3a424d] bg-[#2f353d] overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3">
-          <button onClick={() => setBriefOpen((o) => !o)} className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#5ec1ca]">
-            <span className={`transition-transform ${briefOpen ? 'rotate-90' : ''}`}>▸</span>
-            Pre-standup Jira brief {detail?.brief && `(${detail.brief.total_tickets})`}
-          </button>
-          <button onClick={refreshBrief} disabled={!!busy} className="px-2.5 py-1 text-[11px] rounded bg-[#272C33] text-neutral-300 hover:bg-[#363d47] disabled:opacity-50">{busy === 'brief' ? 'Loading…' : detail?.brief ? 'Refresh' : 'Load brief'}</button>
-        </div>
-        {briefOpen && (
-          <div className="px-4 pb-4">
-            {!detail?.brief ? (
-              <p className="text-sm text-neutral-500 py-2">No brief loaded yet. Click "Load brief" to pull the current NT queue from Jira.</p>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  {FILTERS.map((f) => (
-                    <button key={f.key} onClick={() => setFilter(f.key)} className={`px-2.5 py-1 text-[11px] rounded-full border ${filter === f.key ? 'bg-[#5ec1ca] text-[#272C33] border-[#5ec1ca] font-semibold' : 'bg-[#272C33] text-neutral-400 border-[#3a424d] hover:text-neutral-200'}`}>{f.label}</button>
-                  ))}
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search key or summary…" className="ml-auto bg-[#272C33] border border-[#3a424d] rounded px-2.5 py-1 text-xs text-neutral-200 placeholder-neutral-500 w-48" />
-                </div>
-                <div className="space-y-1.5">
-                  {filteredBriefAgents.length === 0 && <p className="text-sm text-neutral-500 py-2">No tickets match.</p>}
-                  {filteredBriefAgents.map((a) => {
-                    const open = expandedBriefAgent === a.agent_name;
-                    return (
-                      <div key={a.agent_name} className="rounded border border-[#3a424d]/60">
-                        <button onClick={() => setExpandedBriefAgent(open ? null : a.agent_name)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[#363d47]">
-                          <span className={`text-neutral-500 transition-transform text-xs ${open ? 'rotate-90' : ''}`}>▸</span>
-                          <span className="text-sm text-neutral-200 flex-1">{a.agent_name}</span>
-                          {a.over5_count > 0 && <span className="w-2 h-2 rounded-full bg-red-500" title={`${a.over5_count} over 5 days`} />}
-                          <span className="text-[11px] text-neutral-500">{a.tickets.length} ticket{a.tickets.length !== 1 ? 's' : ''}</span>
-                        </button>
-                        {open && (
-                          <div className="px-3 pb-2 space-y-1">
-                            {a.tickets.map((t) => (
-                              <div key={t.key} className="flex items-center gap-2 text-xs py-1 border-t border-[#3a424d]/40">
-                                {t.over5 && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
-                                <a href={`https://nurtur.atlassian.net/browse/${t.key}`} target="_blank" rel="noreferrer" className="text-[#5ec1ca] hover:underline shrink-0">{t.key}</a>
-                                <span className="text-neutral-300 flex-1 truncate">{t.summary}</span>
-                                <span className="text-neutral-500 shrink-0">{t.ageDays != null ? `${t.ageDays}d` : ''}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+      {/* Controls — submission tally, brief filters/search, accountability stats */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mr-1">
+          Agents — {submittedNames.size}/{roster.length} submitted
+        </span>
+        {detail?.brief && FILTERS.map((f) => (
+          <button key={f.key} onClick={() => setFilter(f.key)} className={`px-2.5 py-1 text-[11px] rounded-full border ${filter === f.key ? 'bg-[#5ec1ca] text-[#272C33] border-[#5ec1ca] font-semibold' : 'bg-[#272C33] text-neutral-400 border-[#3a424d] hover:text-neutral-200'}`}>{f.label}</button>
+        ))}
+        {detail?.brief && (
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search key or summary…" className="bg-[#272C33] border border-[#3a424d] rounded px-2.5 py-1 text-xs text-neutral-200 placeholder-neutral-500 w-44" />
+        )}
+        <button onClick={refreshBrief} disabled={!!busy} className="px-2.5 py-1 text-[11px] rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] disabled:opacity-50">{busy === 'brief' ? 'Loading…' : detail?.brief ? 'Refresh brief' : 'Load brief'}</button>
+        {stats && (
+          <div className="ml-auto flex items-center gap-3 text-xs">
+            <span className="text-neutral-400">{stats.total} total</span>
+            <span className="text-emerald-400">{stats.delivered} delivered</span>
+            <span className="text-red-400">{stats.missed} missed</span>
+            <span className="text-amber-400">{stats.pending} pending</span>
+            <span className="text-neutral-300 font-semibold">{stats.deliveryRate}%</span>
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Plaud import */}
+      {/* Merged per-agent cards: submission · Jira brief · accountability */}
+      <div className="space-y-3">
+        {displayRoster.map((name) => {
+          const sub = submissionByName.get(name);
+          const submitted = !!sub;
+          let commitmentCount = 0;
+          let commitmentList: string[] = [];
+          try { commitmentList = sub?.commitments_json ? JSON.parse(sub.commitments_json) as string[] : []; commitmentCount = commitmentList.length; } catch { /* */ }
+          const briefAgent = briefByName.get(name);
+          const commits = commitmentsByAgent.get(name) ?? [];
+          const carried = carriedByAgent.get(name) ?? [];
+          return (
+            <div key={name} className={`rounded-lg border overflow-hidden transition-all duration-200 ease-out ${shuffling ? 'animate-pulse scale-[0.98] ring-1 ring-[#5ec1ca]/40' : ''} ${submitted ? 'border-[#3a424d] bg-[#2f353d]' : 'border-[#3a424d]/50 bg-[#2f353d]/40'}`}>
+              {/* Header — retains submission summary detail */}
+              <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[#3a424d]">
+                <span className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold ${submitted ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-neutral-700/40 text-neutral-500'}`}>{agentInitials(name)}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-neutral-100 truncate">{name}</span>
+                  {submitted
+                    ? <span className="block text-[11px] text-neutral-400">{sub!.ticket_count ?? '–'} tickets · {sub!.over_5_count ?? '–'} over 5 · {commitmentCount} commit.</span>
+                    : <span className="block text-[11px] text-neutral-500">Not submitted</span>}
+                </span>
+                <span className={submitted ? 'text-emerald-400' : 'text-amber-400'}>{submitted ? '✓' : '◷'}</span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 lg:divide-x divide-[#3a424d]/70">
+                {/* Submission */}
+                <div className="p-4 space-y-2">
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Submission</h4>
+                  {submitted ? (
+                    <div className="text-xs space-y-2">
+                      <div><span className="text-neutral-500">Oldest:</span> <span className="text-neutral-200">{sub!.oldest_ticket ?? '–'} {sub!.oldest_age != null ? `(${sub!.oldest_age}d)` : ''}</span></div>
+                      {sub!.blockers && <div><span className="text-neutral-500">Blockers:</span> <span className="text-neutral-200">{sub!.blockers}</span></div>}
+                      {commitmentCount > 0 && (
+                        <div>
+                          <span className="text-neutral-500">Commitments:</span>
+                          <ul className="mt-1 space-y-1 list-disc list-inside text-neutral-200">
+                            {commitmentList.map((c, i) => <li key={i}>{c}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {sub!.notes && <div><span className="text-neutral-500">Notes:</span> <span className="text-neutral-200">{sub!.notes}</span></div>}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500">Not submitted yet.</p>
+                  )}
+                </div>
+
+                {/* Jira brief */}
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Jira brief</h4>
+                    {briefAgent && briefAgent.over5_count > 0 && <span className="w-2 h-2 rounded-full bg-red-500" title={`${briefAgent.over5_count} over 5 days`} />}
+                    {briefAgent && <span className="text-[11px] text-neutral-500 ml-auto">{briefAgent.tickets.length} ticket{briefAgent.tickets.length !== 1 ? 's' : ''}</span>}
+                  </div>
+                  {!detail?.brief ? (
+                    <p className="text-xs text-neutral-500">No brief loaded. Use "Load brief".</p>
+                  ) : briefAgent ? (
+                    <div className="space-y-1">
+                      {briefAgent.tickets.map((t) => (
+                        <div key={t.key} className="flex items-center gap-2 text-xs py-1 border-t border-[#3a424d]/40 first:border-t-0">
+                          {t.over5 && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
+                          <a href={`https://nurtur.atlassian.net/browse/${t.key}`} target="_blank" rel="noreferrer" className="text-[#5ec1ca] hover:underline shrink-0">{t.key}</a>
+                          <span className="text-neutral-300 flex-1 truncate">{t.summary}</span>
+                          <span className="text-neutral-500 shrink-0">{t.ageDays != null ? `${t.ageDays}d` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500">No tickets match.</p>
+                  )}
+                </div>
+
+                {/* Accountability */}
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Accountability</h4>
+                    {commits.some((c) => c.status === 'pending') && (
+                      <button onClick={() => markAllDelivered(name)} className="ml-auto text-[11px] text-[#5ec1ca] hover:underline">Mark all delivered</button>
+                    )}
+                  </div>
+                  {carried.length > 0 && (
+                    <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2 space-y-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Carried over — to review</span>
+                      {carried.map((c) => <CommitmentRow key={c.id} c={c} onUpdate={updateCommitment} fromDate={c.session_date} />)}
+                    </div>
+                  )}
+                  {commits.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {commits.map((c) => <CommitmentRow key={c.id} c={c} onUpdate={updateCommitment} />)}
+                    </div>
+                  ) : (
+                    carried.length === 0 && <p className="text-xs text-neutral-500">No commitments captured.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Plaud import — stays underneath */}
       <section className="rounded-lg border border-[#3a424d] bg-[#2f353d] p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Plaud recording</h2>
@@ -343,63 +398,6 @@ export function StandupView({ token }: { token: string }) {
             <summary className="text-xs text-[#5ec1ca] cursor-pointer">Transcript</summary>
             <pre className="mt-2 text-xs text-neutral-400 whitespace-pre-wrap font-sans bg-[#272C33] rounded p-3 max-h-72 overflow-auto">{detail.session.transcript_text}</pre>
           </details>
-        )}
-      </section>
-
-      {/* Accountability */}
-      <section className="rounded-lg border border-[#3a424d] bg-[#2f353d] p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Accountability</h2>
-          {stats && (
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-neutral-400">{stats.total} total</span>
-              <span className="text-emerald-400">{stats.delivered} delivered</span>
-              <span className="text-red-400">{stats.missed} missed</span>
-              <span className="text-amber-400">{stats.pending} pending</span>
-              <span className="text-neutral-300 font-semibold">{stats.deliveryRate}%</span>
-            </div>
-          )}
-        </div>
-        {carriedCount > 0 && (
-          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">Carried over — to review</span>
-              <span className="text-[11px] text-neutral-500">{carriedCount} open from earlier sessions</span>
-            </div>
-            <div className="space-y-4">
-              {[...carriedByAgent.entries()].map(([agent, items]) => (
-                <div key={agent}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-bold">{agentInitials(agent)}</span>
-                    <span className="text-sm text-neutral-200 font-medium">{agent}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {items.map((c) => <CommitmentRow key={c.id} c={c} onUpdate={updateCommitment} fromDate={c.session_date} />)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {(detail?.commitments?.length ?? 0) === 0 ? (
-          <p className="text-sm text-neutral-500">{carriedCount > 0 ? 'No new commitments captured for this session.' : 'No commitments captured for this session.'}</p>
-        ) : (
-          <div className="space-y-4">
-            {[...commitmentsByAgent.entries()].map(([agent, items]) => (
-              <div key={agent}>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="w-6 h-6 rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] flex items-center justify-center text-[10px] font-bold">{agentInitials(agent)}</span>
-                  <span className="text-sm text-neutral-200 font-medium">{agent}</span>
-                  {items.some((c) => c.status === 'pending') && (
-                    <button onClick={() => markAllDelivered(agent)} className="ml-auto text-[11px] text-[#5ec1ca] hover:underline">Mark all delivered</button>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  {items.map((c) => <CommitmentRow key={c.id} c={c} onUpdate={updateCommitment} />)}
-                </div>
-              </div>
-            ))}
-          </div>
         )}
       </section>
     </div>
