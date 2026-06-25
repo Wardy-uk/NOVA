@@ -1255,11 +1255,17 @@ export class AgentLoop {
            AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation'))
            AND (c.labels IS NULL OR c.labels NOT LIKE '%TPJ_Feed%')
            AND NOT EXISTS (
+             -- Only block assignment when NOVA is the active assignee AND has a pending approval
+             -- (i.e. NOVA is mid-flight on this ticket). An unassigned ticket with a stale
+             -- pending approval (e.g. after a CC→T2 escalation clears the assignee) must still
+             -- be picked up — otherwise it sits unassigned indefinitely. NT-22557.
              SELECT 1 FROM approval_queue aq
-             WHERE aq.ticket_id = c.issue_key AND aq.status = 'pending'
+             WHERE aq.ticket_id = c.issue_key
+               AND aq.status = 'pending'
+               AND c.assignee_account_id = ?
            )
          ORDER BY c.created_at ASC`,
-        [novaAccountId, ...projects],
+        [novaAccountId, ...projects, novaAccountId],
       );
 
       if (unassigned.length === 0) return { assigned: 0, failed: 0, total: 0 };
