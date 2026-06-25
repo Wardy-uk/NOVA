@@ -167,16 +167,17 @@ export class TeamStandupQueries {
   }
 
   /**
-   * Still-pending commitments from sessions BEFORE the given date — the carry-over
-   * review list, so open commitments don't fall through the cracks when reviewing a
-   * later standup. Each row carries its originating session date for labelling.
+   * Open commitments from sessions BEFORE the given date — the carry-over review
+   * list, so they don't fall through the cracks when reviewing a later standup.
+   * 'pending' (never reviewed) and 'missed' (reviewed but not done) both carry over;
+   * only 'delivered'/'excused' drop off. Each row carries its originating session date.
    */
   async getOutstandingCommitmentsBefore(date: string): Promise<Array<StandupCommitment & { session_date: string }>> {
     return query<StandupCommitment & { session_date: string }>(
       `SELECT c.*, s.date AS session_date
        FROM standup_commitments c
        JOIN standup_sessions s ON s.id = c.session_id
-       WHERE c.status = 'pending' AND s.date < ?
+       WHERE c.status IN ('pending', 'missed') AND s.date < ?
        ORDER BY s.date ASC, c.agent_name ASC, c.id ASC`,
       [date],
     );

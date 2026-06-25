@@ -751,8 +751,13 @@ export function App() {
   const canSeeArea = (area: Area): boolean => {
     if (area === 'ai-agent' || area === 'wallboards') return true;
     if (area === 'kpi-rebuild') return true;
-    // Standup manager view is admin-only (Nick's view)
-    if (area === 'standup') return userRole.split(',').map(r => r.trim()).some(r => r === 'admin' || r === 'super_admin');
+    // Standup — admins, or Support-role users who are also on the Support team.
+    if (area === 'standup') {
+      const roles = userRole.split(',').map(r => r.trim().toLowerCase());
+      if (roles.includes('admin') || roles.includes('super_admin')) return true;
+      const onSupportTeam = (auth.user?.teams ?? []).some(tm => tm.toLowerCase() === 'support');
+      return roles.includes('support') && onSupportTeam;
+    }
     // Board MI gated by the 'mi' permission area
     if (area === 'board') return (areaAccess['mi'] || 'hidden') !== 'hidden';
     // Dev Review — standard area permission (configured in Admin > Permissions)

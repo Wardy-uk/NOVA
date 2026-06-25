@@ -202,7 +202,8 @@ export function StandupView({ token }: { token: string }) {
   const carriedByAgent = useMemo(() => {
     const map = new Map<string, CarriedCommitment[]>();
     for (const c of detail?.carriedOver ?? []) {
-      if (c.status !== 'pending') continue; // drop as they're reviewed
+      // 'pending' (unreviewed) and 'missed' (not done) carry over; delivered/excused drop.
+      if (c.status !== 'pending' && c.status !== 'missed') continue;
       const list = map.get(c.agent_name) ?? [];
       list.push(c);
       map.set(c.agent_name, list);
