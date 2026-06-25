@@ -85,8 +85,13 @@ export class QuickWinExecutor {
       // not carry a comment, otherwise the same text would be posted twice.
       // spam/vendor = internal team note; everything else = public customer comment.
       if (qw.type === 'kba_match') {
-        const kba = qw.suggested_kba || 'a relevant knowledge base article';
-        const comment = `This question is covered by our knowledge base: ${kba}. Please take a look and let us know if you need further help. If we don't hear back within 5 working days, we'll close this ticket.`;
+        // Find the best KB match URL from the inputs (stored by reasoner alongside the decision)
+        const kbMatches = (decision.inputs.kb_matches as Array<{ title: string; url: string; relevance: number }> | undefined) ?? [];
+        const bestMatch = kbMatches.length > 0 ? kbMatches.reduce((a, b) => (b.relevance > a.relevance ? b : a)) : null;
+        const articleTitle = bestMatch?.title ?? qw.suggested_kba ?? 'our knowledge base';
+        const articleUrl = bestMatch?.url;
+        const articleRef = articleUrl ? `[${articleTitle}](${articleUrl})` : articleTitle;
+        const comment = `This question is covered by our knowledge base article: ${articleRef}. Please take a look — it should have everything you need. We're closing this ticket now, but if you need further help just raise a new request.`;
         await this.jiraClient.addComment(ticketKey, comment, { internal: false });
       } else if (SILENT_CANCEL_TYPES.has(qw.type)) {
         await this.jiraClient.addComment(ticketKey, INTERNAL_CLOSE_COMMENTS[qw.type], { internal: true });
@@ -96,7 +101,7 @@ export class QuickWinExecutor {
       }
 
       // Find and execute transition — try primary name, then fallbacks
-      const targetTransition = SILENT_CANCEL_TYPES.has(qw.type) ? 'cancel' : qw.type === 'kba_match' ? 'waiting' : 'resolve';
+      const targetTransition = SILENT_CANCEL_TYPES.has(qw.type) ? 'cancel' : 'resolve';
       const transitionId = await this.findTransitionId(ticketKey, targetTransition)
         || (targetTransition !== 'resolve' ? await this.findTransitionId(ticketKey, 'resolve') : null);
 
