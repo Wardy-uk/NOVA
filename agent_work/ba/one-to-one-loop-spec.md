@@ -4,8 +4,10 @@ Bring the **Standup** feature's closed-loop principles to the **1-2-1** feature
 (People → My Team). Schedule → auto-prep → two-way email → click-through session →
 Plaud auto-import → action tracking → weekly KPI nudge.
 
-Status: **AGREED** — core decisions D1–D5 (§3) and BA items B1/B2/B4/B5/B6 (§8) signed off
-with Nick. Only B3 remains (an engineering check, not a decision). Ready for build cards.
+Status: **SHIPPED** — all 6 phases delivered (§9), v1.1.290–1.1.295. Core decisions D1–D5
+(§3) and BA items B1–B6 (§8) all signed off. The full closed loop is live: schedule →
+day-before prep + two emails → agent submission → 5-stage click-through → Plaud attach →
+complete + auto-reschedule, plus the Friday weekly KPI email and best-effort Outlook mirror.
 The **My Team** roster grid ([AgentRosterView.tsx](../../src/client/components/AgentRosterView.tsx))
 must look and behave the same — we add to it, we don't redesign it.
 
@@ -252,5 +254,12 @@ auto-bind — present all matching notes for the manager to pick.**
    reuses `getAgentKpis` + survey/training queries); template `one21WeeklyKpiHtml`; manual
    trigger `POST /api/121/run-weekly-kpi`.
 6. **Outlook two-way mirror** (best-effort; last because it's the least trusted).
+   **✅ SHIPPED (2026-06-26).** Setting/rescheduling the next 1-2-1 date
+   (`POST /api/people/agent/:name/next-121`) now also mirrors a "1-2-1 — {agent}" event to
+   Outlook via MS Graph MCP (`create-calendar-event`; reschedule = delete old + create new),
+   storing `outlook_event_id`. Cancelling deletes the mirrored event(s). Every Graph call is
+   wrapped and non-fatal — the NOVA date always stands even if the mirror fails. NOVA never
+   reads the calendar back as authoritative ([people.ts](../../src/server/routes/people.ts)
+   `mirrorNext121ToOutlook`).
 
 Each phase ships independently; the My Team grid keeps working throughout.

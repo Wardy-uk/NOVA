@@ -338,6 +338,34 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
   // Source of truth for the cycle. Manually set here; calendar is only a mirror (Phase 6).
   const OPEN_121_STATUSES = "('scheduled','prep_sent','awaiting_agent','ready','in_progress')";
 
+  // Phase 6 — best-effort Outlook mirror. NOVA's date is authoritative; this never
+  // blocks or overrides it. On reschedule we delete the old event and create a fresh
+  // one (avoids guessing the update tool's body-merge semantics). Returns the new
+  // event id (or null). All failures are swallowed and logged.
+  async function mirrorNext121ToOutlook(agentName: string, isoDate: string, existingEventId: string | null): Promise<string | null> {
+    try {
+      const tools = mcpManager.getServerTools('msgraph');
+      if (!tools.includes('create-calendar-event')) return existingEventId;
+
+      if (existingEventId && tools.includes('delete-calendar-event')) {
+        await mcpManager.callTool('msgraph', 'delete-calendar-event', { eventId: existingEventId }).catch(() => {});
+      }
+
+      const result = await mcpManager.callTool('msgraph', 'create-calendar-event', {
+        subject: `1-2-1 — ${agentName}`,
+        start: { dateTime: `${isoDate}T10:00:00`, timeZone: 'GMT Standard Time' },
+        end: { dateTime: `${isoDate}T10:30:00`, timeZone: 'GMT Standard Time' },
+        body: { contentType: 'text', content: `Monthly 1-2-1 with ${agentName}. Scheduled via N.O.V.A.` },
+      });
+      const text = (result as any)?.content?.[0]?.text;
+      if (text) { try { const ev = JSON.parse(text); if (ev?.id) return String(ev.id); } catch { /* ignore */ } }
+      return null;
+    } catch (err: any) {
+      console.warn(`[people] Outlook 1-2-1 mirror failed for ${agentName}:`, err?.message ?? err);
+      return existingEventId;
+    }
+  }
+
   // Batch: per-agent next (open) + last (completed) 1-2-1 dates for the My Team grid.
   router.get('/roster/sessions', async (req: Request, res: Response) => {
     try {
@@ -408,8 +436,8 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
 
-      const existing = await queryOne<{ id: number }>(`
-        SELECT TOP 1 id FROM agent_121_sessions
+      const existing = await queryOne<{ id: number; outlook_event_id: string | null }>(`
+        SELECT TOP 1 id, outlook_event_id FROM agent_121_sessions
         WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
         ORDER BY scheduled_date ASC
       `, [agentName]);
@@ -430,6 +458,10 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         `, [agentName, date]);
       }
 
+      // Best-effort Outlook mirror — never blocks the NOVA-authoritative date.
+      const eventId = await mirrorNext121ToOutlook(agentName, date, existing?.outlook_event_id ?? null);
+      await execute(`UPDATE agent_121_sessions SET outlook_event_id = ? WHERE id = ?`, [eventId, id]).catch(() => {});
+
       res.json({ ok: true, data: { id, scheduled_date: date } });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -444,6 +476,19 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
       const agentName = decodeURIComponent(String(req.params.agentName));
+      // Remove any mirrored Outlook events for the open session(s) being cancelled.
+      const openWithEvents = await query<{ outlook_event_id: string | null }>(`
+        SELECT outlook_event_id FROM agent_121_sessions
+        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES} AND outlook_event_id IS NOT NULL
+      `, [agentName]);
+      const tools = mcpManager.getServerTools('msgraph');
+      if (tools.includes('delete-calendar-event')) {
+        for (const row of openWithEvents) {
+          if (row.outlook_event_id) {
+            await mcpManager.callTool('msgraph', 'delete-calendar-event', { eventId: row.outlook_event_id }).catch(() => {});
+          }
+        }
+      }
       await execute(`
         UPDATE agent_121_sessions SET status = 'cancelled'
         WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
