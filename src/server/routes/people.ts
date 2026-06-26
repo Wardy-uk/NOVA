@@ -334,6 +334,126 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
     }
   });
 
+  // ── 1-2-1 scheduling (NOVA-authoritative next/last date) ──
+  // Source of truth for the cycle. Manually set here; calendar is only a mirror (Phase 6).
+  const OPEN_121_STATUSES = "('scheduled','prep_sent','awaiting_agent','ready','in_progress')";
+
+  // Batch: per-agent next (open) + last (completed) 1-2-1 dates for the My Team grid.
+  router.get('/roster/sessions', async (req: Request, res: Response) => {
+    try {
+      if (!req.user || !isAdmin(req.user.role)) {
+        res.status(403).json({ ok: false, error: 'Admin only' });
+        return;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+
+      const open = await query<{ agent_name: string; id: number; scheduled_date: string; status: string }>(`
+        SELECT s.agent_name, s.id, s.scheduled_date, s.status
+        FROM agent_121_sessions s
+        INNER JOIN (
+          SELECT agent_name, MIN(scheduled_date) AS d
+          FROM agent_121_sessions
+          WHERE status IN ${OPEN_121_STATUSES}
+          GROUP BY agent_name
+        ) m ON m.agent_name = s.agent_name AND m.d = s.scheduled_date
+        WHERE s.status IN ${OPEN_121_STATUSES}
+      `);
+
+      const last = await query<{ agent_name: string; last_date: string }>(`
+        SELECT agent_name, MAX(scheduled_date) AS last_date
+        FROM agent_121_sessions
+        WHERE status = 'complete'
+        GROUP BY agent_name
+      `);
+
+      const result: Record<string, {
+        nextSessionId: number | null; nextDate: string | null; status: string | null;
+        overdue: boolean; lastDate: string | null;
+      }> = {};
+
+      for (const row of open) {
+        result[row.agent_name] = {
+          nextSessionId: row.id,
+          nextDate: row.scheduled_date,
+          status: row.status,
+          overdue: row.scheduled_date < today,
+          lastDate: null,
+        };
+      }
+      for (const row of last) {
+        if (!result[row.agent_name]) {
+          result[row.agent_name] = { nextSessionId: null, nextDate: null, status: null, overdue: false, lastDate: row.last_date };
+        } else {
+          result[row.agent_name].lastDate = row.last_date;
+        }
+      }
+
+      res.json({ ok: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Set / reschedule the next 1-2-1 date (upsert the agent's single open session).
+  router.post('/agent/:agentName/next-121', async (req: Request, res: Response) => {
+    try {
+      if (!req.user || !isAdmin(req.user.role)) {
+        res.status(403).json({ ok: false, error: 'Admin only' });
+        return;
+      }
+      const agentName = decodeURIComponent(String(req.params.agentName));
+      const date = String(req.body?.date ?? '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        res.status(400).json({ ok: false, error: 'date (YYYY-MM-DD) required' });
+        return;
+      }
+
+      const existing = await queryOne<{ id: number }>(`
+        SELECT TOP 1 id FROM agent_121_sessions
+        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
+        ORDER BY scheduled_date ASC
+      `, [agentName]);
+
+      let id: number;
+      if (existing) {
+        // Reschedule: NOVA value always wins. Reset to 'scheduled' so day-before prep re-fires.
+        await execute(`
+          UPDATE agent_121_sessions
+          SET scheduled_date = ?, status = 'scheduled'
+          WHERE id = ?
+        `, [date, existing.id]);
+        id = existing.id;
+      } else {
+        id = await executeAndGetId(`
+          INSERT INTO agent_121_sessions (agent_name, scheduled_date, status)
+          VALUES (?, ?, 'scheduled')
+        `, [agentName, date]);
+      }
+
+      res.json({ ok: true, data: { id, scheduled_date: date } });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Cancel the agent's open 1-2-1 (clears the next date).
+  router.post('/agent/:agentName/next-121/cancel', async (req: Request, res: Response) => {
+    try {
+      if (!req.user || !isAdmin(req.user.role)) {
+        res.status(403).json({ ok: false, error: 'Admin only' });
+        return;
+      }
+      const agentName = decodeURIComponent(String(req.params.agentName));
+      await execute(`
+        UPDATE agent_121_sessions SET status = 'cancelled'
+        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
+      `, [agentName]);
+      res.json({ ok: true, data: {} });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── Survey satisfaction scores (per agent) ──
 
   router.get('/roster/survey-scores', async (req: Request, res: Response) => {

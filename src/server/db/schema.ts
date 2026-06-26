@@ -563,6 +563,56 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE agent_121_actions ADD CONSTRAINT FK_agent_actions_snapshot
        FOREIGN KEY (snapshot_id) REFERENCES agent_121_snapshots(id) ON DELETE SET NULL;`,
 
+    // ── 1-2-1 Closed Loop (sessions / scheduling) ──
+    // Canonical agent key = agent_development_plans.agent_name (full display name).
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_sessions') AND type = 'U')
+     CREATE TABLE agent_121_sessions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_name NVARCHAR(200) NOT NULL,
+       scheduled_date NVARCHAR(20) NOT NULL,
+       status NVARCHAR(30) NOT NULL DEFAULT 'scheduled',
+       prep_snapshot_id INT NULL,
+       agent_submission_json NVARCHAR(MAX) NULL,
+       agent_submitted_at DATETIME2 NULL,
+       outlook_event_id NVARCHAR(200) NULL,
+       plaud_recording_id NVARCHAR(200) NULL,
+       notes_text NVARCHAR(MAX) NULL,
+       completed_at DATETIME2 NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_121_sessions_agent')
+     CREATE INDEX IX_agent_121_sessions_agent ON agent_121_sessions (agent_name, scheduled_date DESC);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_121_sessions_status')
+     CREATE INDEX IX_agent_121_sessions_status ON agent_121_sessions (status, scheduled_date);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_agent_121_sessions_snapshot')
+     ALTER TABLE agent_121_sessions ADD CONSTRAINT FK_agent_121_sessions_snapshot
+       FOREIGN KEY (prep_snapshot_id) REFERENCES agent_121_snapshots(id) ON DELETE SET NULL;`,
+
+    // Tie actions to a session cycle (in addition to the snapshot FK).
+    `IF COL_LENGTH('agent_121_actions', 'session_id') IS NULL
+     ALTER TABLE agent_121_actions ADD session_id INT NULL;`,
+
+    // Per-agent 1-2-1 cadence in days (default monthly). Override per agent in §B2.
+    `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL
+     ALTER TABLE agent_development_plans ADD one21_cadence_days INT NULL;`,
+
+    // Idempotent email dedup (mirrors standup_email_log).
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_email_log') AND type = 'U')
+     CREATE TABLE agent_121_email_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       session_id INT NULL,
+       agent_name NVARCHAR(200) NOT NULL,
+       kind NVARCHAR(40) NOT NULL,
+       dedup_key NVARCHAR(100) NOT NULL,
+       sent_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_121_email_log_dedup')
+     CREATE UNIQUE INDEX UX_agent_121_email_log_dedup ON agent_121_email_log (kind, dedup_key);`,
+
     // ── Jira Issue Cache ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND type = 'U')
      CREATE TABLE jira_issue_cache (

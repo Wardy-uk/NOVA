@@ -24,6 +24,14 @@ interface CalendarEntry {
   start: string;
 }
 
+interface SessionEntry {
+  nextSessionId: number | null;
+  nextDate: string | null;
+  status: string | null;
+  overdue: boolean;
+  lastDate: string | null;
+}
+
 type ManagerStatus = 'SOLID' | 'WATCH' | 'AT RISK' | 'NEW';
 const MANAGER_STATUSES: ManagerStatus[] = ['SOLID', 'WATCH', 'AT RISK', 'NEW'];
 
@@ -62,6 +70,9 @@ interface AgentCard {
   ticketsPerHourAvg: number | null;
   satisfactionAvg: number | null;
   next121Date: string | null;
+  next121SessionId: number | null;
+  next121Overdue: boolean;
+  last121Date: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -191,6 +202,9 @@ export function AgentRosterView({ onSelectAgent }: {
   const [kpiRows, setKpiRows] = useState<AgentDailyRow[]>([]);
   const [surveyScores, setSurveyScores] = useState<Record<string, number>>({});
   const [calendarData, setCalendarData] = useState<Record<string, CalendarEntry | null>>({});
+  const [sessionsData, setSessionsData] = useState<Record<string, SessionEntry>>({});
+  const [editingDate, setEditingDate] = useState<string | null>(null);
+  const [savingDate, setSavingDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [snapshotting, setSnapshotting] = useState<string | null>(null);
   const [generatingPrepFor, setGeneratingPrepFor] = useState<string | null>(null);
@@ -201,20 +215,23 @@ export function AgentRosterView({ onSelectAgent }: {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [rosterRes, kpiRes, surveyRes, calRes] = await Promise.all([
+      const [rosterRes, kpiRes, surveyRes, calRes, sessRes] = await Promise.all([
         fetch('/api/people/roster'),
         fetch('/api/kpi-data/agent-kpis?env=live&days=30'),
         fetch('/api/people/roster/survey-scores'),
         fetch('/api/people/roster/calendar'),
+        fetch('/api/people/roster/sessions'),
       ]);
       const rosterJson = await rosterRes.json();
       const kpiJson = await kpiRes.json();
       const surveyJson = await surveyRes.json();
       const calJson = await calRes.json();
+      const sessJson = await sessRes.json();
       if (rosterJson.ok) setRoster(rosterJson.data || []);
       if (kpiJson.ok) setKpiRows(kpiJson.data || []);
       if (surveyJson.ok) setSurveyScores(surveyJson.data || {});
       if (calJson.ok) setCalendarData(calJson.data || {});
+      if (sessJson.ok) setSessionsData(sessJson.data || {});
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -251,13 +268,15 @@ export function AgentRosterView({ onSelectAgent }: {
       const kpi = kpiByAgent.get(r.agent_name);
       const satScore = surveyScores[r.agent_name] ?? null;
       const cal = calendarData[r.agent_name];
-      const calStart = cal?.start ?? null;
+      const sess = sessionsData[r.agent_name];
+      // NOVA-stored date is authoritative; calendar is only a fallback hint.
+      const next121 = sess?.nextDate ?? cal?.start ?? null;
       const kH = kpi ? kpiRag(kpi.sla, kpi.tph) : 'grey' as Rag;
       const qaH = kpi ? qaRag(kpi.qa) : 'grey' as Rag;
       const grH = kpi ? grRag(kpi.gr) : 'grey' as Rag;
       const trH = trainingRag(r.training_done, r.training_total, r.training_overdue ?? 0, r.training_due_soon ?? 0);
       const saH = satisfactionRag(satScore);
-      const n1H = next121Rag(calStart);
+      const n1H = sess?.overdue ? 'red' as Rag : next121Rag(next121);
       return {
         name: r.agent_name,
         roleTitle: r.role_title || '',
@@ -278,14 +297,37 @@ export function AgentRosterView({ onSelectAgent }: {
         goldenRulesAvg: kpi?.gr ?? null,
         ticketsPerHourAvg: kpi?.tph ?? null,
         satisfactionAvg: satScore,
-        next121Date: calStart,
+        next121Date: next121,
+        next121SessionId: sess?.nextSessionId ?? null,
+        next121Overdue: sess?.overdue ?? false,
+        last121Date: sess?.lastDate ?? null,
       };
     });
-  }, [roster, kpiByAgent, surveyScores, calendarData]);
+  }, [roster, kpiByAgent, surveyScores, calendarData, sessionsData]);
 
   const teams = useMemo(() => [...new Set(cards.map(c => c.functionName).filter(Boolean))].sort(), [cards]);
 
   const filtered = filterTeam === 'all' ? cards : cards.filter(c => c.functionName === filterTeam);
+
+  const saveNext121 = useCallback(async (agentName: string, date: string) => {
+    setSavingDate(agentName);
+    try {
+      if (date) {
+        await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/next-121`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date }),
+        });
+      } else {
+        await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/next-121/cancel`, { method: 'POST' });
+      }
+      const res = await fetch('/api/people/roster/sessions');
+      const json = await res.json();
+      if (json.ok) setSessionsData(json.data || {});
+    } catch { /* ignore */ }
+    setSavingDate(null);
+    setEditingDate(null);
+  }, []);
 
   const createSnapshot = useCallback(async (agentName: string) => {
     setSnapshotting(agentName);
@@ -535,9 +577,37 @@ export function AgentRosterView({ onSelectAgent }: {
               <div style={{ textAlign: 'center' }}>
                 {ragDot(card.next121Health)}
                 <div style={{ fontSize: 8, color: C.text3, marginTop: 3 }}>1-2-1</div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.text2 }}>
-                  {card.next121Date ? new Date(card.next121Date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
-                </div>
+                {editingDate === card.name ? (
+                  <input
+                    type="date"
+                    autoFocus
+                    defaultValue={card.next121Date ? new Date(card.next121Date).toISOString().slice(0, 10) : ''}
+                    disabled={savingDate === card.name}
+                    onClick={e => e.stopPropagation()}
+                    onBlur={() => setEditingDate(null)}
+                    onChange={e => { e.stopPropagation(); saveNext121(card.name, e.target.value); }}
+                    style={{
+                      width: 96, marginTop: 1, padding: '1px 2px', fontSize: 9,
+                      background: C.bg2, color: C.text1, border: `1px solid ${C.teal}`,
+                      borderRadius: 4, colorScheme: 'dark',
+                    }}
+                  />
+                ) : (
+                  <div
+                    onClick={e => { e.stopPropagation(); setEditingDate(card.name); }}
+                    title={[
+                      card.next121Overdue ? '⚠ Overdue — click to reschedule' : 'Click to set the next 1-2-1 date',
+                      card.last121Date ? `Last 1-2-1: ${new Date(card.last121Date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'No previous 1-2-1',
+                    ].join('\n')}
+                    style={{
+                      fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                      color: card.next121Overdue ? C.red : C.text2,
+                      textDecoration: 'underline dotted', textUnderlineOffset: 2,
+                    }}
+                  >
+                    {savingDate === card.name ? '…' : card.next121Date ? new Date(card.next121Date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '+ set'}
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: 'center' }}>
                 {ragDot(card.compositeRag)}
