@@ -10,7 +10,7 @@ import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { getKpiPool } from './kpi-pipeline.js';
 import { generatePrepForAgent } from '../routes/people.js';
 import { getPrepQuestions, prepEmailIntro, managerSummaryIntro } from '../config/one21-config.js';
-import { one21PrepAgentHtml, one21PrepManagerHtml } from './email-templates.js';
+import { one21PrepAgentHtml, one21PrepManagerHtml, one21WeeklyKpiHtml } from './email-templates.js';
 import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
@@ -307,6 +307,147 @@ export async function completeSession(sessionId: number, nextDate?: string): Pro
     VALUES (?, ?, 'scheduled')
   `, [session.agent_name, resolvedNext]);
   return { nextSessionId, nextDate: resolvedNext };
+}
+
+// ── Weekly KPI email (Phase 5) — Friday PM, agent only, mirrors the My Team card ──
+
+type Rag = 'green' | 'amber' | 'red' | 'grey';
+
+function kpiRag(sla: number | null, tph: number | null): Rag {
+  if (sla === null && tph === null) return 'grey';
+  const slaOk = sla !== null && sla >= 95;
+  const slaWarn = sla !== null && sla >= 85;
+  const tphOk = tph !== null && tph >= 1.5;
+  if (slaOk && tphOk) return 'green';
+  if ((!slaWarn && sla !== null) || (!slaOk && !tphOk)) return 'red';
+  return 'amber';
+}
+const qaRag = (s: number | null): Rag => s === null ? 'grey' : s >= 8 ? 'green' : s >= 6.5 ? 'amber' : 'red';
+const grRag = (s: number | null): Rag => s === null ? 'grey' : s >= 2.5 ? 'green' : s >= 2.0 ? 'amber' : 'red';
+const satRag = (s: number | null): Rag => s === null ? 'grey' : s >= 4 ? 'green' : s >= 3 ? 'amber' : 'red';
+function trainingRag(done: number, total: number, overdue: number, dueSoon: number): Rag {
+  if (total === 0) return 'grey';
+  if (done >= total) return 'green';
+  if (overdue > 0) return 'red';
+  if (dueSoon > 0) return 'amber';
+  return done > 0 ? 'green' : 'amber';
+}
+
+/** ISO week key like "2026-W26", used to dedup the weekly send. */
+function isoWeekKey(): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+/** Latest survey's per-agent satisfaction scores (mirrors /roster/survey-scores). */
+async function getSurveyScores(): Promise<Record<string, number>> {
+  const survey = await queryOne<{ id: number }>(
+    `SELECT TOP 1 id FROM surveys WHERE status IN ('active','closed') ORDER BY created_at DESC`);
+  if (!survey) return {};
+  const questions = await query<{ id: number }>(
+    `SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [survey.id]);
+  if (questions.length === 0) return {};
+  const qIds = new Set(questions.map((q) => q.id));
+  const rows = await query<{ display_name: string; answers: string }>(`
+    SELECT sr.display_name, resp.answers FROM survey_responses resp
+    JOIN survey_recipients sr ON sr.token = resp.token AND sr.survey_id = resp.survey_id
+    WHERE resp.survey_id = ?`, [survey.id]);
+  const acc: Record<string, { sum: number; count: number }> = {};
+  for (const row of rows) {
+    try {
+      const answers = JSON.parse(row.answers) as Array<{ question_id: number; value: string | number }>;
+      for (const a of answers) {
+        if (qIds.has(a.question_id)) {
+          const v = Number(a.value);
+          if (!isNaN(v) && v >= 1 && v <= 5) {
+            acc[row.display_name] ??= { sum: 0, count: 0 };
+            acc[row.display_name].sum += v;
+            acc[row.display_name].count++;
+          }
+        }
+      }
+    } catch { /* skip bad JSON */ }
+  }
+  const out: Record<string, number> = {};
+  for (const [name, { sum, count }] of Object.entries(acc)) out[name] = Math.round((sum / count) * 100) / 100;
+  return out;
+}
+
+export interface WeeklyKpiResult { sent: number; skipped: number; noEmail: string[]; noData: string[] }
+
+/**
+ * Friday-PM weekly KPI email to each rostered agent (their own card metrics, RAG-coloured).
+ * Idempotent per ISO week via agent_121_email_log (kind 'weekly_kpi').
+ */
+export async function runWeeklyKpiEmail(deps: One21Deps): Promise<WeeklyKpiResult> {
+  const result: WeeklyKpiResult = { sent: 0, skipped: 0, noEmail: [], noData: [] };
+  if (!deps.emailService.isConfigured()) return result;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  const plans = await query<{
+    agent_name: string; training_done: number; training_total: number; training_overdue: number; training_due_soon: number;
+  }>(`
+    SELECT p.agent_name,
+      (SELECT COUNT(*) FROM agent_training_items t WHERE t.plan_id = p.id AND t.completed = 1) AS training_done,
+      (SELECT COUNT(*) FROM agent_training_items t WHERE t.plan_id = p.id) AS training_total,
+      (SELECT COUNT(*) FROM agent_training_items t WHERE t.plan_id = p.id AND t.completed = 0 AND t.target_date IS NOT NULL AND t.target_date < ?) AS training_overdue,
+      (SELECT COUNT(*) FROM agent_training_items t WHERE t.plan_id = p.id AND t.completed = 0 AND t.target_date IS NOT NULL AND t.target_date >= ? AND t.target_date <= ?) AS training_due_soon
+    FROM agent_development_plans p WHERE p.status IN ('active','deferred') ORDER BY p.agent_name
+  `, [today, today, soon]);
+
+  const surveyScores = await getSurveyScores().catch(() => ({} as Record<string, number>));
+  const weekKey = isoWeekKey();
+  const weekDisplay = `week ${weekKey.split('-W')[1]}`;
+  const fmt1 = (v: number | null) => (v == null || isNaN(v) ? '—' : v.toFixed(1));
+  const fmtPct = (v: number | null) => (v == null || isNaN(v) ? '—' : `${v.toFixed(1)}%`);
+
+  for (const p of plans) {
+    const dedupKey = `${p.agent_name}:${weekKey}`;
+    if (await emailAlreadySent('weekly_kpi', dedupKey)) { result.skipped++; continue; }
+
+    const kpis = await getAgentKpis(deps.settingsQueries, p.agent_name);
+    const s = kpis?.summary ?? {};
+    const sla = (s.slaCompliancePct ?? null) as number | null;
+    const tph = (s.ticketsPerHourAvg ?? null) as number | null;
+    const qa = (s.qaOverallAvg ?? null) as number | null;
+    const gr = (s.goldenRulesAvg ?? null) as number | null;
+    const sat = surveyScores[p.agent_name] ?? null;
+
+    const hasAnyKpi = sla !== null || qa !== null || gr !== null || tph !== null;
+    if (!hasAnyKpi && p.training_total === 0 && sat === null) { result.noData.push(p.agent_name); continue; }
+
+    const to = await getAgentEmail(deps.settingsQueries, p.agent_name);
+    if (!to) { result.noEmail.push(p.agent_name); continue; }
+
+    const rows = [
+      { label: 'KPI health', value: fmtPct(sla), rag: kpiRag(sla, tph) },
+      { label: 'QA average', value: fmt1(qa), rag: qaRag(qa) },
+      { label: 'Golden rules', value: fmt1(gr), rag: grRag(gr) },
+      { label: 'Tickets / hour', value: tph == null ? '—' : tph.toFixed(2), rag: (tph != null && tph >= 1.5 ? 'green' : tph != null && tph >= 1 ? 'amber' : tph != null ? 'red' : 'grey') as Rag },
+      { label: 'Training', value: `${p.training_done}/${p.training_total}`, rag: trainingRag(p.training_done, p.training_total, p.training_overdue, p.training_due_soon) },
+      { label: 'Satisfaction', value: fmt1(sat), rag: satRag(sat) },
+    ];
+
+    try {
+      await deps.emailService.send({
+        to,
+        subject: `Your KPIs — ${weekDisplay}`,
+        text: rows.map((r) => `${r.label}: ${r.value} (${r.rag})`).join('\n'),
+        html: one21WeeklyKpiHtml({ name: p.agent_name.split(' ')[0], weekDisplay, rows, openUrl: novaBaseUrl() }),
+      });
+      await logEmailSent(null, p.agent_name, 'weekly_kpi', dedupKey);
+      result.sent++;
+    } catch (err) {
+      console.warn(`[121] weekly KPI email to ${p.agent_name} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return result;
 }
 
 // ── Plaud attach (Phase 4) — list matching notes, manager picks (no auto-bind) ──

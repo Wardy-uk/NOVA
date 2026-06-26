@@ -2,7 +2,8 @@ import { Router } from 'express';
 import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
-  completeSession, getPlaudCandidates, attachPlaudNote, ACTION_REVIEW_STATUSES, type One21Deps,
+  completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail,
+  ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -74,6 +75,16 @@ export function createOne21Routes(deps: One21Deps): Router {
     try {
       const date = typeof req.body?.date === 'string' && DATE_RE.test(req.body.date) ? req.body.date : undefined;
       const result = await runDayBeforePrep(deps, date);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Manually run the weekly KPI email (Phase 5). Handy for testing.
+  router.post('/run-weekly-kpi', async (_req, res) => {
+    try {
+      const result = await runWeeklyKpiEmail(deps);
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });

@@ -244,7 +244,13 @@ auto-bind — present all matching notes for the manager to pick.**
    `GET /api/121/session/:id/plaud-candidates`, `POST /session/:id/plaud-attach`;
    `PlaudService.listRecordingsRange`. **The §5 "121 Plaud surface" cron was dropped** —
    attaching is a manual in-session action, so a pre-emptive surfacing job adds no value.
-5. **Weekly Friday KPI email.**
+5. **Weekly Friday KPI email.** **✅ SHIPPED (2026-06-26).** Job `one21-weekly-kpi`
+   (Fri 16:00 UK) emails each rostered agent their own card metrics — KPI health, QA, Golden
+   Rules, Tickets/hour, Training, Satisfaction — RAG-coloured, mirroring the My Team card.
+   Agent only (Nick not copied). Idempotent per ISO week via `agent_121_email_log`
+   (kind `weekly_kpi`). `runWeeklyKpiEmail` ([one21-service.ts](../../src/server/services/one21-service.ts),
+   reuses `getAgentKpis` + survey/training queries); template `one21WeeklyKpiHtml`; manual
+   trigger `POST /api/121/run-weekly-kpi`.
 6. **Outlook two-way mirror** (best-effort; last because it's the least trusted).
 
 Each phase ships independently; the My Team grid keeps working throughout.

@@ -25,7 +25,7 @@ import { createCommentReviewRoutes } from './routes/comment-review.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes/team-standup.js';
 import { createOne21PublicRoutes, createOne21Routes } from './routes/one21-public.js';
-import { runDayBeforePrep as runOne21Prep, ukTomorrow as one21UkTomorrow, type One21Deps } from './services/one21-service.js';
+import { runDayBeforePrep as runOne21Prep, runWeeklyKpiEmail as runOne21WeeklyKpi, ukTomorrow as one21UkTomorrow, type One21Deps } from './services/one21-service.js';
 import { TeamStandupQueries } from './db/team-standup-queries.js';
 import { PlaudService } from './services/plaud-service.js';
 import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
@@ -1116,6 +1116,17 @@ async function main() {
       if (r.processed > 0) {
         console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
       }
+    }
+  }, 5 * 60 * 1000);
+
+  jobRegistry.register('one21-weekly-kpi', '1-2-1 weekly KPI email to agents (Fri 16:00)', async () => {
+    const now = new Date();
+    const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+    const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+    const ukWeekday = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
+    if (ukWeekday === 'Fri' && ukHour === 16 && ukMin < 5) {
+      const r = await runOne21WeeklyKpi(one21Deps);
+      console.log(`[121] weekly KPI email: sent ${r.sent}, skipped ${r.skipped}, no-email ${r.noEmail.length}, no-data ${r.noData.length}`);
     }
   }, 5 * 60 * 1000);
   const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
