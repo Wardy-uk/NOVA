@@ -223,7 +223,17 @@ auto-bind — present all matching notes for the manager to pick.**
    Service: [one21-service.ts](../../src/server/services/one21-service.ts). Weekly-KPI email
    template also pre-built for Phase 5.
 3. **5-stage click-through UI** — new session view (the only net-new sizeable UI), wired to
-   actions/KPIs/prep answers/notes.
+   actions/KPIs/prep answers/notes. **✅ SHIPPED (2026-06-26).** Full-screen wizard
+   [OneToOneSessionView.tsx](../../src/client/components/OneToOneSessionView.tsx) launched
+   via a "Run 1-2-1" button on the agent profile (My Team grid untouched). Stages:
+   outstanding actions (delivered/missed/carried_over) → KPI review (30-day averages + prep
+   highlights) → their prep answers → discussion notes → next-month commitments + next date.
+   Backend: `startSession`/`getSessionDetail`/`updateActionStatus`/`addSessionAction`/
+   `updateSessionNotes`/`completeSession` ([one21-service.ts](../../src/server/services/one21-service.ts));
+   routes `POST /api/121/session/start`, `GET /session/:id`, `PATCH /action/:id`,
+   `POST /session/:id/action`, `PATCH /session/:id/notes`, `POST /session/:id/complete`.
+   Completing schedules the next session at the agent's cadence (or a manual date);
+   carried-over actions resurface in the next session's stage 1.
 4. **Plaud auto-import + manual attach.**
 5. **Weekly Friday KPI email.**
 6. **Outlook two-way mirror** (best-effort; last because it's the least trusted).

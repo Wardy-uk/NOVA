@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { OneToOneSessionView } from './OneToOneSessionView.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -501,6 +502,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
   const [dateRange, setDateRange] = useState<'7' | '30' | '90'>('30');
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [actions, setActions] = useState<Action121[]>([]);
+  const [running121, setRunning121] = useState(false);
   const [nextMeeting, setNextMeeting] = useState<CalendarEvent | null>(null);
   const [expandedSnapshot, setExpandedSnapshot] = useState<number | null>(null);
   const [generatingPrep, setGeneratingPrep] = useState(false);
@@ -822,6 +824,15 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
           {isAdmin && (
             <>
               <button
+                onClick={() => resolvedAgent && setRunning121(true)}
+                disabled={!resolvedAgent}
+                style={{
+                  padding: '6px 14px', borderRadius: 20, border: `1px solid ${C.teal}`,
+                  cursor: resolvedAgent ? 'pointer' : 'not-allowed', fontSize: 11, fontWeight: 700,
+                  background: C.teal, color: C.bg1, opacity: resolvedAgent ? 1 : 0.5,
+                }}
+              >Run 1-2-1</button>
+              <button
                 onClick={generatePrep}
                 disabled={generatingPrep}
                 style={{
@@ -860,6 +871,14 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
           background: `${C.red}15`, border: `1px solid ${C.red}30`,
           color: C.red, fontSize: 13, fontWeight: 500,
         }}>{error}</div>
+      )}
+
+      {running121 && resolvedAgent && (
+        <OneToOneSessionView
+          agentName={resolvedAgent}
+          onClose={() => setRunning121(false)}
+          onCompleted={() => { fetchSnapshots(resolvedAgent); fetchActions(resolvedAgent); }}
+        />
       )}
 
       {/* Two-panel layout */}

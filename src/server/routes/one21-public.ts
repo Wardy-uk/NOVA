@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import { getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep, type One21Deps } from '../services/one21-service.js';
+import {
+  getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
+  startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
+  completeSession, ACTION_REVIEW_STATUSES, type One21Deps,
+} from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
@@ -70,6 +74,95 @@ export function createOne21Routes(deps: One21Deps): Router {
     try {
       const date = typeof req.body?.date === 'string' && DATE_RE.test(req.body.date) ? req.body.date : undefined;
       const result = await runDayBeforePrep(deps, date);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // ── Click-through session (Phase 3) ──
+
+  // Start (or resume) the click-through for an agent → marks the session in_progress.
+  router.post('/session/start', async (req, res) => {
+    try {
+      const agent = String(req.body?.agent ?? '').trim();
+      if (!agent) { res.status(400).json({ ok: false, error: 'agent required' }); return; }
+      const sessionId = await startSession(deps.settingsQueries, agent);
+      res.json({ ok: true, data: { sessionId } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Full session detail for all 5 stages.
+  router.get('/session/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const detail = await getSessionDetail(deps.settingsQueries, id);
+      if (!detail) { res.status(404).json({ ok: false, error: 'Session not found' }); return; }
+      res.json({ ok: true, data: detail });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 1 — review an outstanding action (delivered | missed | carried_over | pending).
+  router.patch('/action/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const status = String(req.body?.status ?? '');
+      if (!Number.isInteger(id) || !ACTION_REVIEW_STATUSES.has(status)) {
+        res.status(400).json({ ok: false, error: 'Invalid id or status' });
+        return;
+      }
+      await updateActionStatus(id, status);
+      res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 5 — add a new commitment/action for the coming month.
+  router.post('/session/:id/action', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const description = String(req.body?.description ?? '').trim();
+      const agent = String(req.body?.agent ?? '').trim();
+      if (!Number.isInteger(id) || !description || !agent) {
+        res.status(400).json({ ok: false, error: 'id, agent and description required' });
+        return;
+      }
+      const actionId = await addSessionAction(id, agent, {
+        description,
+        owner: req.body?.owner ? String(req.body.owner) : null,
+        due_date: req.body?.due_date ? String(req.body.due_date) : null,
+      });
+      res.json({ ok: true, data: { id: actionId } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 4 — save discussion notes.
+  router.patch('/session/:id/notes', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      await updateSessionNotes(id, String(req.body?.notes_text ?? ''));
+      res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Complete the session and schedule the next one.
+  router.post('/session/:id/complete', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const nextDate = typeof req.body?.next_date === 'string' && DATE_RE.test(req.body.next_date) ? req.body.next_date : undefined;
+      const result = await completeSession(id, nextDate);
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
