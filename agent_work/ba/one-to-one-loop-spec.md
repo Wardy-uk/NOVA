@@ -70,7 +70,11 @@ The My Team grid stays as-is, gains a real **Next / Last 1-2-1** date (from NOVA
   (KPI health, QA, Golden Rules, training, satisfaction — RAG-coloured, same as the My Team
   card). Nick is **not** copied (he already sees the whole team on screen). Reuses standup
   cron + email infra.
-- **D5 — Prep questions + email copy are configurable** (BA detail in §8).
+- **D5 — Prep questions + email copy are configurable** (BA detail in §8). **✅ UI SHIPPED
+  (2026-06-26).** Admin-only **People → 1-2-1 Setup** tab
+  ([OneToOneSetupView.tsx](../../src/client/components/OneToOneSetupView.tsx)) edits the prep
+  questions (add/remove/reorder) and the two email intro lines, writing the `one21_*`
+  settings keys via `PUT /api/settings/:key`. No more hand-editing settings.json.
 
 ---
 

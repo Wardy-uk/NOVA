@@ -88,6 +88,7 @@ const KbGapsView = lazy(() => import('./components/KbGapsView.js').then(m => ({ 
 const AgentLearningsView = lazy(() => import('./components/AgentLearningsView.js').then(m => ({ default: m.AgentLearningsView })));
 const ManagerDashboardView = lazy(() => import('./components/ManagerDashboardView.js').then(m => ({ default: m.ManagerDashboardView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
+const OneToOneSetupView = lazy(() => import('./components/OneToOneSetupView.js').then(m => ({ default: m.OneToOneSetupView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
 const KbHealthView = lazy(() => import('./components/KbHealthView.js').then(m => ({ default: m.KbHealthView })));
 const TrainingSignalsView = lazy(() => import('./components/TrainingSignalsView.js').then(m => ({ default: m.TrainingSignalsView })));
@@ -115,7 +116,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
   | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'tpj-maintenance'
   | 'backfill-status'
-  | 'surveys' | 'people-roster' | 'people-profile'
+  | 'surveys' | 'people-roster' | 'people-profile' | 'people-121-setup'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
@@ -146,6 +147,7 @@ const DEFAULT_AREA_ACCESS: AreaAccess = {
 
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
   'people-roster': 'admin',
+  'people-121-setup': 'admin',
   'agent-manager': 'admin',
 };
 
@@ -195,6 +197,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'people-roster', label: 'My Team' },
       { view: 'people-profile', label: 'My Performance' },
       { view: 'surveys', label: 'Team Surveys' },
+      { view: 'people-121-setup', label: '1-2-1 Setup' },
     ],
   },
   kpis: {
@@ -1280,6 +1283,9 @@ export function App() {
           )}
           {view === 'surveys' && (
             <SurveyAdminView userRole={auth.user?.role} />
+          )}
+          {view === 'people-121-setup' && (
+            <OneToOneSetupView />
           )}
 
           {/* Training */}
