@@ -211,6 +211,17 @@ auto-bind — present all matching notes for the manager to pick.**
    My Team card 1-2-1 cell now editable, NOVA date authoritative over calendar, overdue =
    red, last 1-2-1 in tooltip ([AgentRosterView.tsx](../../src/client/components/AgentRosterView.tsx)).
 2. **Day-before prep + agent submission loop** — cron prep job, two emails, public submit form.
+   **✅ SHIPPED (2026-06-26).** Daily 07:00 UK job `one21-day-before-prep` processes
+   sessions scheduled for tomorrow: generates the prep snapshot (reuses
+   `generatePrepForAgent`), emails the agent their configurable prep questions (token-gated
+   form link) + the manager the summary, advances status `scheduled → awaiting_agent`.
+   Idempotent via `agent_121_email_log`. Config `one21-config.ts` (8 default questions,
+   editable via `one21_prep_questions`). Public form at `/121/submit/:token`
+   ([OneToOneSubmitForm.tsx](../../src/client/components/OneToOneSubmitForm.tsx)); answers
+   land in `agent_submission_json`, status → `ready`. Routes `GET /api/121/public/:token`,
+   `POST /api/121/submit` (public), `POST /api/121/run-prep` (admin manual trigger).
+   Service: [one21-service.ts](../../src/server/services/one21-service.ts). Weekly-KPI email
+   template also pre-built for Phase 5.
 3. **5-stage click-through UI** — new session view (the only net-new sizeable UI), wired to
    actions/KPIs/prep answers/notes.
 4. **Plaud auto-import + manual attach.**

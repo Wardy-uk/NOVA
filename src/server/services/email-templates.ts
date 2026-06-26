@@ -156,6 +156,83 @@ export function standupAccountabilityHtml(opts: {
   `);
 }
 
+export function one21PrepAgentHtml(opts: {
+  name: string;
+  dateDisplay: string;
+  intro: string;
+  questions: string[];
+  submitUrl: string;
+}): string {
+  const questionRows = opts.questions
+    .map((q) => `<tr><td style="padding:6px 0;color:#a0a0a0;font-size:13px">• ${q}</td></tr>`)
+    .join('');
+  return wrap(`
+    <p style="margin:0 0 16px;color:#e5e5e5;font-size:15px">Hi ${opts.name},</p>
+    <p style="margin:0 0 12px;color:#a0a0a0;font-size:13px">Your 1-2-1 is on <strong style="color:#e5e5e5">${opts.dateDisplay}</strong>.</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">${opts.intro}</p>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px;width:100%">
+      ${questionRows}
+    </table>
+    ${button(opts.submitUrl, 'Add my answers')}
+    <p style="margin:16px 0 0;color:#a0a0a0;font-size:13px">Your answers come straight back to me before we meet — thank you.</p>
+  `);
+}
+
+export function one21PrepManagerHtml(opts: {
+  agentName: string;
+  dateDisplay: string;
+  intro: string;
+  summary: string | null;
+  whatsImproved: string[];
+  needsAttention: string[];
+  talkingPoints: string[];
+  openUrl: string;
+}): string {
+  const list = (items: string[]) =>
+    items.length
+      ? items.map((i) => `<tr><td style="padding:5px 0;color:#a0a0a0;font-size:13px">• ${i}</td></tr>`).join('')
+      : '<tr><td style="padding:5px 0;color:#6b7280;font-size:13px">—</td></tr>';
+  const section = (title: string, color: string, items: string[]) => `
+    <p style="margin:16px 0 4px;color:${color};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600">${title}</p>
+    <table cellpadding="0" cellspacing="0" width="100%">${list(items)}</table>`;
+  return wrap(`
+    <p style="margin:0 0 8px;color:#e5e5e5;font-size:15px;font-weight:600">1-2-1 prep — ${opts.agentName}</p>
+    <p style="margin:0 0 6px;color:#a0a0a0;font-size:13px">Scheduled for <strong style="color:#e5e5e5">${opts.dateDisplay}</strong>.</p>
+    <p style="margin:0 0 16px;color:#a0a0a0;font-size:13px">${opts.intro}</p>
+    ${opts.summary ? `<p style="margin:0 0 8px;color:#e5e5e5;font-size:14px">${opts.summary}</p>` : '<p style="margin:0 0 8px;color:#f59e0b;font-size:13px">Auto-prep summary was unavailable — open NOVA for the latest numbers.</p>'}
+    ${section("What's improved", '#10b981', opts.whatsImproved)}
+    ${section('Needs attention', '#ef4444', opts.needsAttention)}
+    ${section('Talking points', '#5ec1ca', opts.talkingPoints)}
+    <div style="height:8px"></div>
+    ${button(opts.openUrl, 'Open in N.O.V.A')}
+  `);
+}
+
+export function one21WeeklyKpiHtml(opts: {
+  name: string;
+  weekDisplay: string;
+  rows: Array<{ label: string; value: string; rag: 'green' | 'amber' | 'red' | 'grey' }>;
+  openUrl: string;
+}): string {
+  const ragColor: Record<string, string> = { green: '#10b981', amber: '#f59e0b', red: '#ef4444', grey: '#6b7280' };
+  const rows = opts.rows
+    .map((r) => `<tr>
+      <td style="padding:7px 0;color:#a0a0a0;font-size:13px;width:160px">${r.label}</td>
+      <td style="padding:7px 8px;color:#e5e5e5;font-size:13px;font-weight:600;text-align:right">${r.value}</td>
+      <td style="padding:7px 0 7px 10px;text-align:right"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${ragColor[r.rag]}"></span></td>
+    </tr>`)
+    .join('');
+  return wrap(`
+    <p style="margin:0 0 8px;color:#e5e5e5;font-size:15px">Hi ${opts.name},</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">Here's your KPI summary for <strong style="color:#e5e5e5">${opts.weekDisplay}</strong> (rolling 30-day averages).</p>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px;width:100%">
+      ${rows}
+    </table>
+    ${button(opts.openUrl, 'Open in N.O.V.A')}
+    <p style="margin:16px 0 0;color:#6b7280;font-size:11px">Questions about any of these? Bring them to your next 1-2-1.</p>
+  `);
+}
+
 export function trainingReminderHtml(opts: {
   displayName: string;
   completionPct: number;

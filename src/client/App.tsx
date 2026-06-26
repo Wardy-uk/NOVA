@@ -48,6 +48,7 @@ const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').the
 const PortalAdminView = lazy(() => import('./components/PortalAdminView.js'));
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { StandupSubmitForm } from './components/StandupSubmitForm.js';
+import { OneToOneSubmitForm } from './components/OneToOneSubmitForm.js';
 const StandupView = lazy(() => import('./components/StandupView.js').then(m => ({ default: m.StandupView })));
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
@@ -405,6 +406,10 @@ export function App() {
   // Public standup submission form — no NOVA auth (agents submit from their phones)
   const standupMatch = window.location.pathname.match(/^\/standup\/submit\/(\d{4}-\d{2}-\d{2})$/);
   if (standupMatch) return <StandupSubmitForm date={standupMatch[1]} />;
+
+  // Public 1-2-1 prep submission form — no NOVA auth (token-gated, emailed the day before)
+  const one21Match = window.location.pathname.match(/^\/121\/submit\/([a-f0-9]{32,64})$/);
+  if (one21Match) return <OneToOneSubmitForm token={one21Match[1]} />;
 
   // Public wallboard — no auth required
   if (window.location.hash === '#wallboard') {

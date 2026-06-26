@@ -599,6 +599,10 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL
      ALTER TABLE agent_development_plans ADD one21_cadence_days INT NULL;`,
 
+    // Unguessable token for the agent's day-before prep submission form (Phase 2).
+    `IF COL_LENGTH('agent_121_sessions', 'submit_token') IS NULL
+     ALTER TABLE agent_121_sessions ADD submit_token NVARCHAR(64) NULL;`,
+
     // Idempotent email dedup (mirrors standup_email_log).
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_email_log') AND type = 'U')
      CREATE TABLE agent_121_email_log (

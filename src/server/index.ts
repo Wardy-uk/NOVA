@@ -24,6 +24,8 @@ import { createJiraRoutes } from './routes/jira.js';
 import { createCommentReviewRoutes } from './routes/comment-review.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes/team-standup.js';
+import { createOne21PublicRoutes, createOne21Routes } from './routes/one21-public.js';
+import { runDayBeforePrep as runOne21Prep, ukTomorrow as one21UkTomorrow, type One21Deps } from './services/one21-service.js';
 import { TeamStandupQueries } from './db/team-standup-queries.js';
 import { PlaudService } from './services/plaud-service.js';
 import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
@@ -594,6 +596,13 @@ async function main() {
     auditQueries,
   };
 
+  // 1-2-1 closed loop — shared deps for the day-before prep job + manual trigger.
+  const one21Deps: One21Deps = {
+    settingsQueries,
+    notificationQueries,
+    emailService: new EmailService(() => settingsQueries.getAll()),
+  };
+
   // Jira cache layer — single background sync replaces per-consumer live API calls
   const jiraCacheQueries = new JiraCacheQueries();
   let jiraSyncService: JiraSyncService | null = null;
@@ -662,6 +671,10 @@ async function main() {
   // Team standup — public agent submission endpoints (form has no NOVA login).
   // Mounted before auth; unmatched paths fall through to the authed manager router.
   app.use('/api/standup', createTeamStandupPublicRoutes(standupDeps));
+
+  // 1-2-1 prep — public agent submission form (token-gated, no NOVA login).
+  // Mounted before auth; unmatched paths fall through to the authed router below.
+  app.use('/api/121', createOne21PublicRoutes(settingsQueries));
 
   // Plaud hosted-MCP OAuth callback — public (browser redirect carries no NOVA JWT).
   app.get('/api/public/plaud/oauth/callback', async (req, res) => {
@@ -1066,6 +1079,7 @@ async function main() {
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
   // Team standup — authenticated manager routes (Nick's view).
   app.use('/api/standup', requireAreaAccess('nova_features', 'view'), createTeamStandupRoutes(standupDeps));
+  app.use('/api/121', requireAreaAccess('nova_features', 'view'), createOne21Routes(one21Deps));
 
   // ── Daily team standup jobs (poll every 5 min; gated to UK weekday mornings) ──
   jobRegistry.register('standup-morning-prompts', 'Standup morning prompts (Mon–Fri 09:00)', async () => {
@@ -1089,6 +1103,18 @@ async function main() {
     if (ukHour === 9 && ukMin >= 15 && ukMin < 20) {
       const r = await runStandupReport(standupUkDaysAgo(1), standupDeps);
       console.log(`[standup] accountability report for ${standupUkDaysAgo(1)}: ${r.ok ? 'sent' : 'no session'}`);
+    }
+  }, 5 * 60 * 1000);
+
+  jobRegistry.register('one21-day-before-prep', '1-2-1 day-before prep + emails (daily 07:00)', async () => {
+    const now = new Date();
+    const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+    const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+    if (ukHour === 7 && ukMin < 5) {
+      const r = await runOne21Prep(one21Deps, one21UkTomorrow());
+      if (r.processed > 0) {
+        console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
+      }
     }
   }, 5 * 60 * 1000);
   const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
