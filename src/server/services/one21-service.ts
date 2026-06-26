@@ -15,11 +15,13 @@ import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { EmailService } from './email.js';
+import type { PlaudService } from './plaud-service.js';
 
 export interface One21Deps {
   settingsQueries: FileSettingsQueries;
   notificationQueries: NotificationQueries;
   emailService: EmailService;
+  plaudService: PlaudService;
 }
 
 export interface One21Session {
@@ -305,6 +307,81 @@ export async function completeSession(sessionId: number, nextDate?: string): Pro
     VALUES (?, ?, 'scheduled')
   `, [session.agent_name, resolvedNext]);
   return { nextSessionId, nextDate: resolvedNext };
+}
+
+// ── Plaud attach (Phase 4) — list matching notes, manager picks (no auto-bind) ──
+
+export interface PlaudCandidate {
+  id: string;
+  filename: string;
+  start_time: number;
+  duration: number;
+  matchedByName: boolean;
+}
+
+/** N days either side of an ISO date, as YYYY-MM-DD (UK). */
+function dateOffset(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}
+
+/**
+ * Candidate Plaud recordings for a session. Primary filter: title contains the team
+ * member's name (Nick's decision — no auto-bind). Falls back to all recordings in a
+ * ±2-day window around the scheduled date so a mis-named note can still be attached.
+ */
+export async function getPlaudCandidates(deps: One21Deps, sessionId: number): Promise<{
+  configured: boolean; matchedByName: boolean; candidates: PlaudCandidate[];
+}> {
+  if (!deps.plaudService.isConfigured()) return { configured: false, matchedByName: false, candidates: [] };
+  const session = await queryOne<{ agent_name: string; scheduled_date: string }>(
+    `SELECT agent_name, scheduled_date FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+  if (!session) return { configured: true, matchedByName: false, candidates: [] };
+
+  const from = dateOffset(session.scheduled_date, -2);
+  const to = dateOffset(session.scheduled_date, 2);
+  const recordings = await deps.plaudService.listRecordingsRange(from, to).catch(() => []);
+
+  const parts = session.agent_name.toLowerCase().split(/\s+/).filter((p) => p.length >= 2);
+  const named = recordings.filter((r) => {
+    const f = r.filename.toLowerCase();
+    return parts.some((p) => f.includes(p));
+  });
+
+  const source = named.length > 0 ? named : recordings;
+  const matchedByName = named.length > 0;
+  return {
+    configured: true,
+    matchedByName,
+    candidates: source
+      .map((r) => ({ ...r, matchedByName: parts.some((p) => r.filename.toLowerCase().includes(p)) }))
+      .sort((a, b) => b.start_time - a.start_time),
+  };
+}
+
+/** Attach a chosen Plaud note: pull its summary + transcript and merge into the session. */
+export async function attachPlaudNote(deps: One21Deps, sessionId: number, recordingId: string): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
+  const session = await queryOne<{ notes_text: string | null }>(
+    `SELECT notes_text FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+  if (!session) return { ok: false, notes_text: null, error: 'Session not found' };
+
+  try {
+    const [notes] = await Promise.all([deps.plaudService.getNotes(recordingId)]);
+    const existing = session.notes_text ?? '';
+    // Don't clobber manual discussion notes — append the Plaud summary under a heading.
+    const block = notes ? `## Plaud summary\n${notes}` : '## Plaud summary\n_(no summary available yet)_';
+    const merged = existing.includes('## Plaud summary')
+      ? existing.replace(/## Plaud summary[\s\S]*$/, block)
+      : (existing ? `${existing.trim()}\n\n${block}` : block);
+
+    await execute(
+      `UPDATE agent_121_sessions SET plaud_recording_id = ?, notes_text = ? WHERE id = ?`,
+      [recordingId, merged, sessionId]);
+    return { ok: true, notes_text: merged };
+  } catch (err) {
+    return { ok: false, notes_text: session.notes_text, error: err instanceof Error ? err.message : 'Plaud error' };
+  }
 }
 
 // ── Day-before prep job ──

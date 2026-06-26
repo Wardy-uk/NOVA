@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
-  completeSession, ACTION_REVIEW_STATUSES, type One21Deps,
+  completeSession, getPlaudCandidates, attachPlaudNote, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -151,6 +151,32 @@ export function createOne21Routes(deps: One21Deps): Router {
       if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       await updateSessionNotes(id, String(req.body?.notes_text ?? ''));
       res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 4 — list candidate Plaud notes (title contains the agent's name; no auto-bind).
+  router.get('/session/:id/plaud-candidates', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const result = await getPlaudCandidates(deps, id);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 4 — attach a chosen Plaud note (merges its summary into the discussion notes).
+  router.post('/session/:id/plaud-attach', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const recordingId = String(req.body?.recordingId ?? '').trim();
+      if (!Number.isInteger(id) || !recordingId) { res.status(400).json({ ok: false, error: 'id and recordingId required' }); return; }
+      const result = await attachPlaudNote(deps, id, recordingId);
+      if (!result.ok) { res.status(502).json({ ok: false, error: result.error }); return; }
+      res.json({ ok: true, data: { notes_text: result.notes_text } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

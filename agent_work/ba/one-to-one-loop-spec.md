@@ -234,7 +234,16 @@ auto-bind — present all matching notes for the manager to pick.**
    `POST /session/:id/action`, `PATCH /session/:id/notes`, `POST /session/:id/complete`.
    Completing schedules the next session at the agent's cadence (or a manual date);
    carried-over actions resurface in the next session's stage 1.
-4. **Plaud auto-import + manual attach.**
+4. **Plaud attach (manual pick — no auto-import).** **✅ SHIPPED (2026-06-26).** On the
+   discussion stage, "Find recordings" lists Plaud notes within ±2 days of the scheduled
+   date whose **title contains the agent's name** (falls back to all recordings in the
+   window if no name match, clearly labelled). Manager clicks "Attach" → the note's summary
+   merges into the discussion notes under a `## Plaud summary` heading (never clobbers manual
+   notes) and `plaud_recording_id` is stored. `getPlaudCandidates`/`attachPlaudNote`
+   ([one21-service.ts](../../src/server/services/one21-service.ts)); routes
+   `GET /api/121/session/:id/plaud-candidates`, `POST /session/:id/plaud-attach`;
+   `PlaudService.listRecordingsRange`. **The §5 "121 Plaud surface" cron was dropped** —
+   attaching is a manual in-session action, so a pre-emptive surfacing job adds no value.
 5. **Weekly Friday KPI email.**
 6. **Outlook two-way mirror** (best-effort; last because it's the least trusted).
 

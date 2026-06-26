@@ -99,6 +99,26 @@ export class PlaudService {
       .map(({ _startAt, ...rec }) => rec);
   }
 
+  /** List recordings whose start falls between two UK calendar dates (inclusive). */
+  async listRecordingsRange(dateFrom: string, dateTo: string): Promise<PlaudRecording[]> {
+    const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'list_files', {
+      date_from: dateFrom,
+      date_to: dateTo,
+    }));
+    const list: any[] = Array.isArray(raw) ? raw : (raw?.data ?? raw?.data_file_list ?? raw?.files ?? []);
+    return list
+      .map((r) => {
+        const startAt = r.start_at ?? r.start_time ?? r.created_at ?? '';
+        return {
+          id: String(r.id ?? r.file_id ?? ''),
+          filename: String(r.name ?? r.filename ?? r.title ?? ''),
+          start_time: startAt ? Math.floor(parsePlaudDate(startAt).getTime() / 1000) : 0,
+          duration: Number(r.duration ?? 0),
+        };
+      })
+      .filter((r) => r.id);
+  }
+
   /** UK minutes-since-midnight for a unix-seconds timestamp. */
   private ukMinutesOfDay(unixSeconds: number): number {
     const d = new Date(unixSeconds * 1000);

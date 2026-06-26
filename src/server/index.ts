@@ -601,6 +601,7 @@ async function main() {
     settingsQueries,
     notificationQueries,
     emailService: new EmailService(() => settingsQueries.getAll()),
+    plaudService: new PlaudService(mcpManager),
   };
 
   // Jira cache layer — single background sync replaces per-consumer live API calls
