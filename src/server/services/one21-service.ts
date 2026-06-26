@@ -309,6 +309,104 @@ export async function completeSession(sessionId: number, nextDate?: string): Pro
   return { nextSessionId, nextDate: resolvedNext };
 }
 
+// ── Manager overview ──
+
+export interface One21OverviewAgent {
+  agent_name: string;
+  nextDate: string | null;
+  nextStatus: string | null;
+  overdue: boolean;
+  dueThisWeek: boolean;
+  awaitingPrep: boolean;     // emailed prep questions, agent hasn't submitted yet
+  prepSubmitted: boolean;    // agent has submitted for the open session
+  lastDate: string | null;
+  outstandingActions: number;
+  delivered: number;
+  missed: number;
+  deliveryRate: number | null;
+}
+
+export interface One21Overview {
+  agents: One21OverviewAgent[];
+  summary: {
+    total: number; scheduled: number; overdue: number; dueThisWeek: number;
+    awaitingPrep: number; neverScheduled: number; deliveryRate: number | null;
+  };
+}
+
+/** Whole-team 1-2-1 health for the manager overview dashboard. */
+export async function getOne21Overview(): Promise<One21Overview> {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const weekAhead = new Date(Date.now() + 7 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+
+  const plans = await query<{ agent_name: string }>(
+    `SELECT agent_name FROM agent_development_plans WHERE status IN ('active','deferred') ORDER BY agent_name`);
+
+  const openSessions = await query<{ agent_name: string; scheduled_date: string; status: string; agent_submitted_at: string | null }>(`
+    SELECT s.agent_name, s.scheduled_date, s.status, s.agent_submitted_at
+    FROM agent_121_sessions s
+    INNER JOIN (
+      SELECT agent_name, MIN(scheduled_date) AS d FROM agent_121_sessions
+      WHERE status IN (${OPEN_STATUSES.map(() => '?').join(',')}) GROUP BY agent_name
+    ) m ON m.agent_name = s.agent_name AND m.d = s.scheduled_date
+    WHERE s.status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+  `, [...OPEN_STATUSES, ...OPEN_STATUSES]);
+  const openByAgent = new Map(openSessions.map((s) => [s.agent_name, s]));
+
+  const lastRows = await query<{ agent_name: string; last_date: string }>(
+    `SELECT agent_name, MAX(scheduled_date) AS last_date FROM agent_121_sessions WHERE status = 'complete' GROUP BY agent_name`);
+  const lastByAgent = new Map(lastRows.map((r) => [r.agent_name, r.last_date]));
+
+  const actionRows = await query<{ agent_name: string; status: string; n: number }>(
+    `SELECT agent_name, status, COUNT(*) AS n FROM agent_121_actions GROUP BY agent_name, status`);
+  const actionsByAgent = new Map<string, Record<string, number>>();
+  for (const r of actionRows) {
+    const m = actionsByAgent.get(r.agent_name) ?? {};
+    m[r.status] = r.n;
+    actionsByAgent.set(r.agent_name, m);
+  }
+
+  const agents: One21OverviewAgent[] = plans.map((p) => {
+    const open = openByAgent.get(p.agent_name) ?? null;
+    const a = actionsByAgent.get(p.agent_name) ?? {};
+    const outstanding = (a['pending'] ?? 0) + (a['open'] ?? 0) + (a['in_progress'] ?? 0) + (a['carried_over'] ?? 0);
+    const delivered = a['delivered'] ?? 0;
+    const missed = a['missed'] ?? 0;
+    const reviewed = delivered + missed;
+    const submitted = !!open?.agent_submitted_at;
+    return {
+      agent_name: p.agent_name,
+      nextDate: open?.scheduled_date ?? null,
+      nextStatus: open?.status ?? null,
+      overdue: !!open && open.scheduled_date < today,
+      dueThisWeek: !!open && open.scheduled_date >= today && open.scheduled_date <= weekAhead,
+      awaitingPrep: open?.status === 'awaiting_agent' && !submitted,
+      prepSubmitted: submitted,
+      lastDate: lastByAgent.get(p.agent_name) ?? null,
+      outstandingActions: outstanding,
+      delivered, missed,
+      deliveryRate: reviewed > 0 ? Math.round((delivered / reviewed) * 100) : null,
+    };
+  });
+
+  const totalDelivered = agents.reduce((s, x) => s + x.delivered, 0);
+  const totalMissed = agents.reduce((s, x) => s + x.missed, 0);
+  const totalReviewed = totalDelivered + totalMissed;
+
+  return {
+    agents,
+    summary: {
+      total: agents.length,
+      scheduled: agents.filter((x) => x.nextDate && !x.overdue).length,
+      overdue: agents.filter((x) => x.overdue).length,
+      dueThisWeek: agents.filter((x) => x.dueThisWeek).length,
+      awaitingPrep: agents.filter((x) => x.awaitingPrep).length,
+      neverScheduled: agents.filter((x) => !x.nextDate && !x.lastDate).length,
+      deliveryRate: totalReviewed > 0 ? Math.round((totalDelivered / totalReviewed) * 100) : null,
+    },
+  };
+}
+
 // ── Weekly KPI email (Phase 5) — Friday PM, agent only, mirrors the My Team card ──
 
 type Rag = 'green' | 'amber' | 'red' | 'grey';

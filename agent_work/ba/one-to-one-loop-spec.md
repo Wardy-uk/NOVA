@@ -267,3 +267,13 @@ auto-bind — present all matching notes for the manager to pick.**
    `mirrorNext121ToOutlook`).
 
 Each phase ships independently; the My Team grid keeps working throughout.
+
+## 10. Post-spec additions
+
+- **1-2-1 Setup (config UI)** — admin tab to edit prep questions + email copy (see D5). ✅
+- **1-2-1 Overview (manager dashboard)** — **✅ SHIPPED (2026-06-26).** Admin-only People tab
+  ([OneToOneOverviewView.tsx](../../src/client/components/OneToOneOverviewView.tsx)): summary
+  tiles (overdue / awaiting prep / due this week / scheduled / never scheduled / team action
+  delivery rate) + per-agent table (next, last, status chip, open actions, delivery rate,
+  sorted by urgency). Backend `getOne21Overview` ([one21-service.ts](../../src/server/services/one21-service.ts)),
+  route `GET /api/121/overview`. Read-only — the My Team grid stays the place to act.

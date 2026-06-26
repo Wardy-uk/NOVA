@@ -89,6 +89,7 @@ const AgentLearningsView = lazy(() => import('./components/AgentLearningsView.js
 const ManagerDashboardView = lazy(() => import('./components/ManagerDashboardView.js').then(m => ({ default: m.ManagerDashboardView })));
 const AgentRosterView = lazy(() => import('./components/AgentRosterView.js').then(m => ({ default: m.AgentRosterView })));
 const OneToOneSetupView = lazy(() => import('./components/OneToOneSetupView.js').then(m => ({ default: m.OneToOneSetupView })));
+const OneToOneOverviewView = lazy(() => import('./components/OneToOneOverviewView.js').then(m => ({ default: m.OneToOneOverviewView })));
 const BacklogKanbanView = lazy(() => import('./components/BacklogKanbanView.js').then(m => ({ default: m.BacklogKanbanView })));
 const KbHealthView = lazy(() => import('./components/KbHealthView.js').then(m => ({ default: m.KbHealthView })));
 const TrainingSignalsView = lazy(() => import('./components/TrainingSignalsView.js').then(m => ({ default: m.TrainingSignalsView })));
@@ -116,7 +117,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
   | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'tpj-maintenance'
   | 'backfill-status'
-  | 'surveys' | 'people-roster' | 'people-profile' | 'people-121-setup'
+  | 'surveys' | 'people-roster' | 'people-profile' | 'people-121-setup' | 'people-121-overview'
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
@@ -148,6 +149,7 @@ const DEFAULT_AREA_ACCESS: AreaAccess = {
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
   'people-roster': 'admin',
   'people-121-setup': 'admin',
+  'people-121-overview': 'admin',
   'agent-manager': 'admin',
 };
 
@@ -195,6 +197,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'people-profile',
     tabs: [
       { view: 'people-roster', label: 'My Team' },
+      { view: 'people-121-overview', label: '1-2-1 Overview' },
       { view: 'people-profile', label: 'My Performance' },
       { view: 'surveys', label: 'Team Surveys' },
       { view: 'people-121-setup', label: '1-2-1 Setup' },
@@ -348,7 +351,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'backlog-board', 'standup-board']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1286,6 +1289,9 @@ export function App() {
           )}
           {view === 'people-121-setup' && (
             <OneToOneSetupView />
+          )}
+          {view === 'people-121-overview' && (
+            <OneToOneOverviewView />
           )}
 
           {/* Training */}

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
-  completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail,
+  completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
   ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
@@ -76,6 +76,15 @@ export function createOne21Routes(deps: One21Deps): Router {
       const date = typeof req.body?.date === 'string' && DATE_RE.test(req.body.date) ? req.body.date : undefined;
       const result = await runDayBeforePrep(deps, date);
       res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Manager overview — whole-team 1-2-1 health.
+  router.get('/overview', async (_req, res) => {
+    try {
+      res.json({ ok: true, data: await getOne21Overview() });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
