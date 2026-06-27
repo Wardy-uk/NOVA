@@ -6,6 +6,7 @@ import {
   ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
+import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
 /**
@@ -69,6 +70,16 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  */
 export function createOne21Routes(deps: One21Deps): Router {
   const router = Router();
+
+  // All manager 1-2-1 actions are admin-only. The agent-facing form is the separate
+  // public router (token-gated); nothing here is for non-admins.
+  router.use((req, res, next) => {
+    if (!(req as any).user || !isAdmin((req as any).user.role)) {
+      res.status(403).json({ ok: false, error: 'Admin only' });
+      return;
+    }
+    next();
+  });
 
   // Manually run the day-before prep job for a date (default tomorrow). Handy for testing.
   router.post('/run-prep', async (req, res) => {
