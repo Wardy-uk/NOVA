@@ -253,7 +253,7 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
                         <Metric label="QA average" value={fmt(detail.kpis.summary.qaOverallAvg)} />
                         <Metric label="Golden rules" value={fmt(detail.kpis.summary.goldenRulesAvg)} />
                         <Metric label="Tickets/hour" value={fmt(detail.kpis.summary.ticketsPerHourAvg, 2)} />
-                        <Metric label="FRT compliance" value={fmtPct(detail.kpis.summary.frtCompliancePct)} />
+                        <Metric label="CSAT" value={fmt(detail.kpis.summary.csatAvg)} />
                         <Metric label="Solved (period)" value={fmt(detail.kpis.summary.solvedTotal, 0)} />
                       </div>
                       {detail.prep && (

@@ -157,7 +157,8 @@ async function getAgentKpis(settings: FileSettingsQueries, agentName: string): P
     const pool = await getKpiPool(settings);
     const r = await pool.request().input('agent', agentName).query(`
       SELECT TOP 30 ReportDate, TierCode, Team, TicketsPerHour, SolvedTickets_Today,
-             QAOverallAvg, GoldenRulesAvg, SLABreachedCount, FrtCompliancePercent, ResolutionSlaPercent
+             QAOverallAvg, GoldenRulesAvg, SLABreachedCount, SLACompliancePct,
+             CSATAverage, OldestTicketDays
       FROM dbo.jira_agent_kpi_daily
       WHERE AgentName = @agent
       ORDER BY ReportDate DESC
@@ -176,8 +177,8 @@ async function getAgentKpis(settings: FileSettingsQueries, agentName: string): P
         qaOverallAvg: avg('QAOverallAvg'),
         goldenRulesAvg: avg('GoldenRulesAvg'),
         ticketsPerHourAvg: avg('TicketsPerHour'),
-        frtCompliancePct: avg('FrtCompliancePercent'),
-        resolutionSlaPct: avg('ResolutionSlaPercent'),
+        csatAvg: avg('CSATAverage'),
+        oldestTicketDays: avg('OldestTicketDays'),
         solvedTotal,
         periodDays: rows.length,
       },
