@@ -3,7 +3,8 @@ import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
-  getPlaudCandidatesForAgent, attachPlaudForAgent, ACTION_REVIEW_STATUSES, type One21Deps,
+  getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
+  ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
@@ -111,6 +112,29 @@ export function createOne21Routes(deps: One21Deps): Router {
       const result = await attachPlaudForAgent(deps, agent, recordingId, recordedAt);
       if (!result.ok) { res.status(result.error?.includes('No 1-2-1') ? 409 : 502).json({ ok: false, error: result.error }); return; }
       res.json({ ok: true, data: { notes_text: result.notes_text } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Scan all of Plaud for 1-2-1 recordings to triage + assign to agents.
+  router.get('/plaud/scan', async (_req, res) => {
+    try {
+      res.json({ ok: true, data: await scanPlaudForOneToOnes(deps) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  router.post('/plaud/assign', async (req, res) => {
+    try {
+      const agent = String(req.body?.agentName ?? '').trim();
+      const recordingId = String(req.body?.recordingId ?? '').trim();
+      const recordedAt = Number(req.body?.recordedAt) || undefined;
+      if (!agent || !recordingId) { res.status(400).json({ ok: false, error: 'agentName and recordingId required' }); return; }
+      const result = await assignPlaudToAgent(deps, agent, recordingId, recordedAt);
+      if (!result.ok) { res.status(409).json({ ok: false, error: result.error }); return; }
+      res.json({ ok: true, data: {} });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

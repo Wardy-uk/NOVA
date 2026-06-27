@@ -619,6 +619,66 @@ export async function getPlaudCandidatesForAgent(deps: One21Deps, agentName: str
   return { ...res, sessionId: latest?.id ?? null, hasSession: !!latest };
 }
 
+// ── Scan-all: triage every 1-2-1 recording in Plaud and assign to agents ──
+
+const ONE21_TITLE_RE = /1-?2-?1|1\s*:\s*1|one[\s-]?to[\s-]?one|catch[\s-]?up/i;
+
+export interface ScannedRecording { id: string; filename: string; start_time: number; suggestedAgent: string | null; }
+
+/**
+ * Scan the whole of Plaud for 1-2-1 recordings not yet attached to a session. A recording
+ * is included if its title matches a 1-2-1 keyword OR contains a roster agent's name (which
+ * is also pre-suggested). Lets the manager assign each to the right agent.
+ */
+export async function scanPlaudForOneToOnes(deps: One21Deps): Promise<{
+  configured: boolean; recordings: ScannedRecording[]; agents: string[];
+}> {
+  if (!deps.plaudService.isConfigured()) return { configured: false, recordings: [], agents: [] };
+
+  const recordings = await deps.plaudService.listRecordingsRange('2020-01-01', ukTodayStr()).catch(() => []);
+  const attachedRows = await query<{ plaud_recording_id: string }>(
+    `SELECT plaud_recording_id FROM agent_121_sessions WHERE plaud_recording_id IS NOT NULL`);
+  const attached = new Set(attachedRows.map((r) => r.plaud_recording_id));
+  const agentRows = await query<{ agent_name: string }>(
+    `SELECT agent_name FROM agent_development_plans WHERE status IN ('active','deferred') ORDER BY agent_name`);
+  const agents = agentRows.map((r) => r.agent_name);
+  const agentParts = agents.map((a) => ({ name: a, parts: a.toLowerCase().split(/\s+/).filter((p) => p.length >= 2) }));
+
+  const out: ScannedRecording[] = [];
+  for (const r of recordings) {
+    if (attached.has(r.id)) continue;
+    const f = r.filename.toLowerCase();
+    const suggested = agentParts.find((a) => a.parts.some((p) => f.includes(p)))?.name ?? null;
+    if (suggested || ONE21_TITLE_RE.test(r.filename)) {
+      out.push({ id: r.id, filename: r.filename, start_time: r.start_time, suggestedAgent: suggested });
+    }
+  }
+  out.sort((a, b) => b.start_time - a.start_time);
+  return { configured: true, recordings: out, agents };
+}
+
+/** Assign a scanned recording to an agent: create a completed session dated to the
+ *  recording and attach its summary. Idempotent — a recording is never assigned twice. */
+export async function assignPlaudToAgent(deps: One21Deps, agentName: string, recordingId: string, recordedAt?: number): Promise<{ ok: boolean; error?: string }> {
+  if (!agentName.trim()) return { ok: false, error: 'agent required' };
+  const dup = await queryOne<{ id: number }>(
+    `SELECT TOP 1 id FROM agent_121_sessions WHERE plaud_recording_id = ?`, [recordingId]);
+  if (dup) return { ok: false, error: 'This recording is already assigned.' };
+
+  const recDate = recordedAt && Number.isFinite(recordedAt)
+    ? new Date(recordedAt * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+    : ukTodayStr();
+  const id = await executeAndGetId(
+    `INSERT INTO agent_121_sessions (agent_name, scheduled_date, status) VALUES (?, ?, 'scheduled')`,
+    [agentName, recDate]);
+  const r = await attachPlaudNote(deps, id, recordingId, recordedAt); // backfills date + marks complete
+  if (!r.ok) {
+    await execute(`DELETE FROM agent_121_sessions WHERE id = ?`, [id]).catch(() => {});
+    return { ok: false, error: r.error };
+  }
+  return { ok: true };
+}
+
 /** Attach a Plaud note to the agent's latest 1-2-1 session. `recordedAt` is the
  *  recording's start time (unix seconds) — used to backfill the held date. */
 export async function attachPlaudForAgent(deps: One21Deps, agentName: string, recordingId: string, recordedAt?: number): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {

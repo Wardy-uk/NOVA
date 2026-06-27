@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { PlaudScanModal } from './PlaudScanModal.js';
 
 /* 1-2-1 Overview — manager dashboard of whole-team 1-2-1 health. Read-only summary;
    the My Team grid and click-through stay the place to act. People → 1-2-1 Overview. */
@@ -24,6 +25,7 @@ const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateStrin
 export function OneToOneOverviewView() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -48,8 +50,13 @@ export function OneToOneOverviewView() {
           <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text1, margin: 0 }}>1-2-1 Overview</h2>
           <p style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>{data.summary.total} agents · whole-team 1-2-1 health at a glance</p>
         </div>
-        <button onClick={load} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.glass, color: C.text2, cursor: 'pointer', fontSize: 15 }} title="Refresh">↻</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => setScanOpen(true)} style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${C.teal}`, background: `${C.teal}18`, color: C.teal, cursor: 'pointer', fontSize: 12, fontWeight: 600 }} title="Scan all of Plaud for 1-2-1 recordings">🎙 Scan Plaud</button>
+          <button onClick={load} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.glass, color: C.text2, cursor: 'pointer', fontSize: 15 }} title="Refresh">↻</button>
+        </div>
       </div>
+
+      {scanOpen && <PlaudScanModal onClose={() => setScanOpen(false)} onAssigned={load} />}
 
       {/* Summary tiles */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
