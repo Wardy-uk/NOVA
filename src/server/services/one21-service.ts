@@ -619,41 +619,54 @@ export async function getPlaudCandidatesForAgent(deps: One21Deps, agentName: str
   return { ...res, sessionId: latest?.id ?? null, hasSession: !!latest };
 }
 
-// ── Scan-all: triage every 1-2-1 recording in Plaud and assign to agents ──
-
-const ONE21_TITLE_RE = /1-?2-?1|1\s*:\s*1|one[\s-]?to[\s-]?one|catch[\s-]?up/i;
+// ── Scan-all: triage Plaud recordings and assign 1-2-1s to agents ──
+// Plaud auto-names recordings by timestamp, so titles rarely identify a 1-2-1. We therefore
+// return ALL recordings (minus already-assigned + dismissed) and let the manager triage:
+// assign the 1-2-1s, dismiss the rest. Agent name is pre-suggested when it's in the title.
 
 export interface ScannedRecording { id: string; filename: string; start_time: number; suggestedAgent: string | null; }
 
-/**
- * Scan the whole of Plaud for 1-2-1 recordings not yet attached to a session. A recording
- * is included if its title matches a 1-2-1 keyword OR contains a roster agent's name (which
- * is also pre-suggested). Lets the manager assign each to the right agent.
- */
-export async function scanPlaudForOneToOnes(deps: One21Deps): Promise<{
+const IGNORED_KEY = 'one21_plaud_ignored';
+function getIgnored(deps: One21Deps): Set<string> {
+  const raw = deps.settingsQueries.getAll()[IGNORED_KEY];
+  try { const a = raw ? JSON.parse(raw) : []; return new Set(Array.isArray(a) ? a.map(String) : []); } catch { return new Set(); }
+}
+
+export function dismissRecording(deps: One21Deps, recordingId: string): void {
+  const ignored = getIgnored(deps);
+  ignored.add(recordingId);
+  deps.settingsQueries.set(IGNORED_KEY, JSON.stringify([...ignored]));
+}
+
+/** Scan Plaud for recordings to assign as 1-2-1s. `sinceDays` limits the look-back
+ *  (0/undefined = everything back to 2020). */
+export async function scanPlaudForOneToOnes(deps: One21Deps, sinceDays?: number): Promise<{
   configured: boolean; recordings: ScannedRecording[]; agents: string[];
 }> {
   if (!deps.plaudService.isConfigured()) return { configured: false, recordings: [], agents: [] };
 
-  const recordings = await deps.plaudService.listRecordingsRange('2020-01-01', ukTodayStr()).catch(() => []);
+  const from = sinceDays && sinceDays > 0
+    ? new Date(Date.now() - sinceDays * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' })
+    : '2020-01-01';
+  const recordings = await deps.plaudService.listRecordingsRange(from, ukTodayStr()).catch(() => []);
+
   const attachedRows = await query<{ plaud_recording_id: string }>(
     `SELECT plaud_recording_id FROM agent_121_sessions WHERE plaud_recording_id IS NOT NULL`);
-  const attached = new Set(attachedRows.map((r) => r.plaud_recording_id));
+  const excluded = new Set(attachedRows.map((r) => r.plaud_recording_id));
+  for (const id of getIgnored(deps)) excluded.add(id);
+
   const agentRows = await query<{ agent_name: string }>(
     `SELECT agent_name FROM agent_development_plans WHERE status IN ('active','deferred') ORDER BY agent_name`);
   const agents = agentRows.map((r) => r.agent_name);
   const agentParts = agents.map((a) => ({ name: a, parts: a.toLowerCase().split(/\s+/).filter((p) => p.length >= 2) }));
 
-  const out: ScannedRecording[] = [];
-  for (const r of recordings) {
-    if (attached.has(r.id)) continue;
-    const f = r.filename.toLowerCase();
-    const suggested = agentParts.find((a) => a.parts.some((p) => f.includes(p)))?.name ?? null;
-    if (suggested || ONE21_TITLE_RE.test(r.filename)) {
-      out.push({ id: r.id, filename: r.filename, start_time: r.start_time, suggestedAgent: suggested });
-    }
-  }
-  out.sort((a, b) => b.start_time - a.start_time);
+  const out: ScannedRecording[] = recordings
+    .filter((r) => !excluded.has(r.id))
+    .map((r) => {
+      const f = r.filename.toLowerCase();
+      return { id: r.id, filename: r.filename, start_time: r.start_time, suggestedAgent: agentParts.find((a) => a.parts.some((p) => f.includes(p)))?.name ?? null };
+    })
+    .sort((a, b) => b.start_time - a.start_time);
   return { configured: true, recordings: out, agents };
 }
 

@@ -10,7 +10,15 @@ const C = {
 };
 
 interface Rec { id: string; filename: string; start_time: number; suggestedAgent: string | null; }
-type RowState = { agent: string; status: 'idle' | 'saving' | 'done' | 'error'; msg?: string };
+type RowState = { agent: string; status: 'idle' | 'saving' | 'done' | 'dismissed' | 'error'; msg?: string };
+
+const RANGES: Array<{ label: string; days: number }> = [
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'Last 6 months', days: 180 },
+  { label: 'Last year', days: 365 },
+  { label: 'Everything', days: 0 },
+];
 
 export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; onAssigned?: () => void }) {
   const [loading, setLoading] = useState(true);
@@ -18,12 +26,16 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
   const [recs, setRecs] = useState<Rec[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, RowState>>({});
+  const [days, setDays] = useState(90);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const res = await fetch('/api/121/plaud/scan');
+        const res = await fetch(`/api/121/plaud/scan?days=${days}`);
         const json = await res.json();
+        if (cancelled) return;
         if (json.ok) {
           setConfigured(json.data.configured);
           setRecs(json.data.recordings ?? []);
@@ -33,11 +45,19 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
           setRows(init);
         }
       } catch { /* ignore */ }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [days]);
 
   const setAgent = (id: string, agent: string) => setRows((s) => ({ ...s, [id]: { ...s[id], agent, status: 'idle', msg: undefined } }));
+
+  const dismiss = async (id: string) => {
+    setRows((s) => ({ ...s, [id]: { ...s[id], status: 'dismissed' } }));
+    try {
+      await fetch('/api/121/plaud/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recordingId: id }) });
+    } catch { /* ignore */ }
+  };
 
   const assign = async (rec: Rec) => {
     const row = rows[rec.id];
@@ -54,17 +74,23 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
     } catch { setRows((s) => ({ ...s, [rec.id]: { ...s[rec.id], status: 'error', msg: 'Network error' } })); }
   };
 
-  const pending = recs.filter((r) => rows[r.id]?.status !== 'done');
+  const visible = recs.filter((r) => rows[r.id]?.status !== 'dismissed');
+  const pending = visible.filter((r) => rows[r.id]?.status !== 'done');
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: C.bg0, backdropFilter: 'blur(2px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ width: 'min(820px,100%)', maxHeight: '88vh', background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '18px 24px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.text1 }}>Scan Plaud for 1-2-1s</div>
-            <div style={{ fontSize: 11, color: C.text3 }}>{loading ? 'Scanning…' : `${pending.length} unassigned recording${pending.length !== 1 ? 's' : ''}`}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text1 }}>Scan Plaud recordings</div>
+            <div style={{ fontSize: 11, color: C.text3 }}>{loading ? 'Scanning…' : `${pending.length} recording${pending.length !== 1 ? 's' : ''} to triage · assign the 1-2-1s, dismiss the rest`}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 22, cursor: 'pointer' }}>×</button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 8px', fontSize: 12 }}>
+              {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
+            </select>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 22, cursor: 'pointer' }}>×</button>
+          </div>
         </div>
 
         <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
@@ -72,9 +98,9 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
             <div style={{ textAlign: 'center', color: C.text3, padding: 40 }}>Searching all of Plaud…</div>
           ) : !configured ? (
             <div style={{ textAlign: 'center', color: C.text3, padding: 40 }}>Plaud isn't connected.</div>
-          ) : recs.length === 0 ? (
-            <div style={{ textAlign: 'center', color: C.text3, padding: 40 }}>No unassigned 1-2-1 recordings found.</div>
-          ) : recs.map((rec) => {
+          ) : visible.length === 0 ? (
+            <div style={{ textAlign: 'center', color: C.text3, padding: 40 }}>No recordings to triage in this range.</div>
+          ) : visible.map((rec) => {
             const row = rows[rec.id];
             const done = row?.status === 'done';
             return (
@@ -103,6 +129,11 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
                       disabled={row?.status === 'saving'}
                       style={{ padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', background: C.teal, color: C.bg1 }}
                     >{row?.status === 'saving' ? '…' : 'Assign'}</button>
+                    <button
+                      onClick={() => dismiss(rec.id)}
+                      title="Not a 1-2-1 — hide from the scan"
+                      style={{ padding: '6px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.border}`, background: 'transparent', color: C.text3 }}
+                    >Dismiss</button>
                   </>
                 )}
                 {row?.status === 'error' && <span style={{ fontSize: 11, color: C.red }}>{row.msg}</span>}

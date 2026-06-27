@@ -4,7 +4,7 @@ import {
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
-  ACTION_REVIEW_STATUSES, type One21Deps,
+  dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
@@ -117,10 +117,23 @@ export function createOne21Routes(deps: One21Deps): Router {
     }
   });
 
-  // Scan all of Plaud for 1-2-1 recordings to triage + assign to agents.
-  router.get('/plaud/scan', async (_req, res) => {
+  // Scan all of Plaud for recordings to triage + assign as 1-2-1s. ?days limits look-back.
+  router.get('/plaud/scan', async (req, res) => {
     try {
-      res.json({ ok: true, data: await scanPlaudForOneToOnes(deps) });
+      const days = Number(req.query.days) || 0;
+      res.json({ ok: true, data: await scanPlaudForOneToOnes(deps, days) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Dismiss a recording so it stops showing in the scan (not a 1-2-1).
+  router.post('/plaud/dismiss', async (req, res) => {
+    try {
+      const recordingId = String(req.body?.recordingId ?? '').trim();
+      if (!recordingId) { res.status(400).json({ ok: false, error: 'recordingId required' }); return; }
+      dismissRecording(deps, recordingId);
+      res.json({ ok: true, data: {} });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
