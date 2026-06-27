@@ -517,7 +517,8 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
     onboarding: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
   } | null>(null);
 
-  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  // Roles are a comma-separated string (e.g. "super_admin,admin") — parse, don't exact-match.
+  const isAdmin = (userRole ?? '').split(',').map(r => r.trim()).some(r => r === 'admin' || r === 'super_admin');
 
   // Fetch KPI data for this agent
   const fetchKpis = useCallback(async (name: string) => {
