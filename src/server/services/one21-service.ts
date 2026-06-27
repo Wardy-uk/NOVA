@@ -599,11 +599,14 @@ export async function getPlaudCandidates(deps: One21Deps, sessionId: number): Pr
 
 const ukTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
-/** The agent's most recent 1-2-1 session (any status) — the one a recording attaches to. */
-export async function getLatestSession(agentName: string): Promise<{ id: number; scheduled_date: string; status: string; plaud_recording_id: string | null } | null> {
-  return (await queryOne<{ id: number; scheduled_date: string; status: string; plaud_recording_id: string | null }>(
-    `SELECT TOP 1 id, scheduled_date, status, plaud_recording_id FROM agent_121_sessions
-     WHERE agent_name = ? ORDER BY scheduled_date DESC, id DESC`, [agentName])) ?? null;
+/** The agent's most recent *held* 1-2-1 session — the one a recording attaches to.
+ *  Excludes future-only 'scheduled' sessions so a recording binds to the meeting that
+ *  actually happened, not the next one on the calendar. */
+export async function getLatestSession(agentName: string): Promise<{ id: number; scheduled_date: string; status: string; completed_at: string | null; plaud_recording_id: string | null } | null> {
+  return (await queryOne<{ id: number; scheduled_date: string; status: string; completed_at: string | null; plaud_recording_id: string | null }>(
+    `SELECT TOP 1 id, scheduled_date, status, completed_at, plaud_recording_id FROM agent_121_sessions
+     WHERE agent_name = ? AND (scheduled_date <= ? OR status IN ('in_progress','ready','complete'))
+     ORDER BY scheduled_date DESC, id DESC`, [agentName, ukTodayStr()])) ?? null;
 }
 
 /** Plaud candidates for an agent (anchored to their latest 1-2-1, else today). */
@@ -616,21 +619,24 @@ export async function getPlaudCandidatesForAgent(deps: One21Deps, agentName: str
   return { ...res, sessionId: latest?.id ?? null, hasSession: !!latest };
 }
 
-/** Attach a Plaud note to the agent's latest 1-2-1 session. */
-export async function attachPlaudForAgent(deps: One21Deps, agentName: string, recordingId: string): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
+/** Attach a Plaud note to the agent's latest 1-2-1 session. `recordedAt` is the
+ *  recording's start time (unix seconds) — used to backfill the held date. */
+export async function attachPlaudForAgent(deps: One21Deps, agentName: string, recordingId: string, recordedAt?: number): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
   const latest = await getLatestSession(agentName);
   if (!latest) return { ok: false, notes_text: null, error: 'No 1-2-1 session for this agent yet — run a 1-2-1 first.' };
-  return attachPlaudNote(deps, latest.id, recordingId);
+  return attachPlaudNote(deps, latest.id, recordingId, recordedAt);
 }
 
-/** Attach a chosen Plaud note: pull its summary + transcript and merge into the session. */
-export async function attachPlaudNote(deps: One21Deps, sessionId: number, recordingId: string): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
-  const session = await queryOne<{ notes_text: string | null }>(
-    `SELECT notes_text FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+/** Attach a chosen Plaud note: pull its summary + merge into the session. If the session
+ *  hasn't been completed yet (no "last 1-2-1" date recorded), the recording's own date is
+ *  used to mark the 1-2-1 as held — i.e. attaching a recording dates the 1-2-1. */
+export async function attachPlaudNote(deps: One21Deps, sessionId: number, recordingId: string, recordedAt?: number): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
+  const session = await queryOne<{ notes_text: string | null; completed_at: string | null }>(
+    `SELECT notes_text, completed_at FROM agent_121_sessions WHERE id = ?`, [sessionId]);
   if (!session) return { ok: false, notes_text: null, error: 'Session not found' };
 
   try {
-    const [notes] = await Promise.all([deps.plaudService.getNotes(recordingId)]);
+    const notes = await deps.plaudService.getNotes(recordingId);
     const existing = session.notes_text ?? '';
     // Don't clobber manual discussion notes — append the Plaud summary under a heading.
     const block = notes ? `## Plaud summary\n${notes}` : '## Plaud summary\n_(no summary available yet)_';
@@ -641,6 +647,14 @@ export async function attachPlaudNote(deps: One21Deps, sessionId: number, record
     await execute(
       `UPDATE agent_121_sessions SET plaud_recording_id = ?, notes_text = ? WHERE id = ?`,
       [recordingId, merged, sessionId]);
+
+    // Backfill the held date from the recording when the 1-2-1 hasn't been completed yet.
+    if (recordedAt && Number.isFinite(recordedAt) && !session.completed_at) {
+      const recDate = new Date(recordedAt * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      await execute(
+        `UPDATE agent_121_sessions SET scheduled_date = ?, completed_at = ?, status = 'complete' WHERE id = ?`,
+        [recDate, recDate, sessionId]);
+    }
     return { ok: true, notes_text: merged };
   } catch (err) {
     return { ok: false, notes_text: session.notes_text, error: err instanceof Error ? err.message : 'Plaud error' };

@@ -34,13 +34,14 @@ export function PlaudAttachButton({ agentName, compact, onAttached }: {
     setLoading(false);
   };
 
-  const attach = async (e: React.MouseEvent, id: string) => {
+  const attach = async (e: React.MouseEvent, c: Candidate) => {
     e.stopPropagation();
+    const id = c.id;
     setAttaching(id); setMsg(null);
     try {
       const res = await fetch(`/api/121/agent/${encodeURIComponent(agentName)}/plaud-attach`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId: id }),
+        body: JSON.stringify({ recordingId: id, recordedAt: c.start_time }),
       });
       const json = await res.json();
       if (json.ok) { setMsg('Attached ✓'); onAttached?.(); setTimeout(() => setOpen(false), 1000); }
@@ -100,7 +101,7 @@ export function PlaudAttachButton({ agentName, compact, onAttached }: {
                       </div>
                     </div>
                     <button
-                      onClick={(e) => attach(e, c.id)}
+                      onClick={(e) => attach(e, c)}
                       disabled={attaching === c.id}
                       style={{ padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.teal}`, background: `${C.teal}20`, color: C.teal }}
                     >{attaching === c.id ? '…' : 'Attach'}</button>

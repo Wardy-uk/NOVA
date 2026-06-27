@@ -107,7 +107,8 @@ export function createOne21Routes(deps: One21Deps): Router {
       const agent = decodeURIComponent(String(req.params.agentName));
       const recordingId = String(req.body?.recordingId ?? '').trim();
       if (!recordingId) { res.status(400).json({ ok: false, error: 'recordingId required' }); return; }
-      const result = await attachPlaudForAgent(deps, agent, recordingId);
+      const recordedAt = Number(req.body?.recordedAt) || undefined;
+      const result = await attachPlaudForAgent(deps, agent, recordingId, recordedAt);
       if (!result.ok) { res.status(result.error?.includes('No 1-2-1') ? 409 : 502).json({ ok: false, error: result.error }); return; }
       res.json({ ok: true, data: { notes_text: result.notes_text } });
     } catch (err) {
