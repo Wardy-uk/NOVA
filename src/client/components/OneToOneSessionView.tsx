@@ -45,11 +45,6 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
   const [completing, setCompleting] = useState(false);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
 
-  // Stage 4 — Plaud
-  const [plaud, setPlaud] = useState<{ configured: boolean; matchedByName: boolean; candidates: Array<{ id: string; filename: string; start_time: number; duration: number; matchedByName: boolean }> } | null>(null);
-  const [plaudLoading, setPlaudLoading] = useState(false);
-  const [attaching, setAttaching] = useState<string | null>(null);
-
   const loadDetail = useCallback(async (id: number) => {
     const res = await fetch(`/api/121/session/${id}`);
     const json = await res.json();
@@ -109,34 +104,6 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
     });
     setDraftDesc(''); setDraftOwner(''); setDraftDue('');
     if (sessionId) await loadDetail(sessionId);
-  };
-
-  const findPlaud = async () => {
-    if (!sessionId) return;
-    setPlaudLoading(true);
-    try {
-      const res = await fetch(`/api/121/session/${sessionId}/plaud-candidates`);
-      const json = await res.json();
-      if (json.ok) setPlaud(json.data);
-    } catch { /* ignore */ }
-    setPlaudLoading(false);
-  };
-
-  const attachPlaud = async (recordingId: string) => {
-    if (!sessionId) return;
-    setAttaching(recordingId);
-    try {
-      const res = await fetch(`/api/121/session/${sessionId}/plaud-attach`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
-      });
-      const json = await res.json();
-      if (json.ok) { setNotes(json.data.notes_text ?? notes); setNotesSaved(true); }
-      else setError(json.error || 'Could not attach the recording.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Network error.');
-    }
-    setAttaching(null);
   };
 
   const complete = async () => {
@@ -286,43 +253,7 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
               {/* Stage 4 — Discussion */}
               {stage === 3 && (
                 <div>
-                  <StageTitle n={4} title="Discussion notes" hint="Capture the conversation, or attach the Plaud recording to pull its summary in." />
-
-                  {/* Plaud attach */}
-                  <div style={{ marginBottom: 16, padding: 14, background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text2 }}>Plaud recording</div>
-                      {btn(plaudLoading ? 'Searching…' : 'Find recordings', findPlaud, 'ghost', { fontSize: 11, padding: '5px 12px' })}
-                    </div>
-                    {plaud && (
-                      <div style={{ marginTop: 12 }}>
-                        {!plaud.configured ? (
-                          <div style={{ fontSize: 12, color: C.text3 }}>Plaud isn't connected.</div>
-                        ) : plaud.candidates.length === 0 ? (
-                          <div style={{ fontSize: 12, color: C.text3 }}>No recordings found near this date.</div>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: 11, color: C.text3, marginBottom: 8 }}>
-                              {plaud.matchedByName ? `Matched by name (${agentName}):` : 'No name match — showing all recordings near this date:'}
-                            </div>
-                            {plaud.candidates.map((c) => (
-                              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', marginBottom: 6, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, color: C.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {c.matchedByName && <span style={{ color: C.teal }}>● </span>}{c.filename || '(untitled)'}
-                                  </div>
-                                  <div style={{ fontSize: 10, color: C.text3 }}>
-                                    {c.start_time ? new Date(c.start_time * 1000).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
-                                  </div>
-                                </div>
-                                <Pill label={attaching === c.id ? 'Attaching…' : 'Attach'} active={false} color={C.teal} onClick={() => attachPlaud(c.id)} />
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <StageTitle n={4} title="Discussion notes" hint="Capture the conversation. The Plaud recording is attached afterwards from the agent's card / profile." />
 
                   <textarea
                     value={notes}

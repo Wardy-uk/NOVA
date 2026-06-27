@@ -250,6 +250,11 @@ auto-bind — present all matching notes for the manager to pick.**
    `GET /api/121/session/:id/plaud-candidates`, `POST /session/:id/plaud-attach`;
    `PlaudService.listRecordingsRange`. **The §5 "121 Plaud surface" cron was dropped** —
    attaching is a manual in-session action, so a pre-emptive surfacing job adds no value.
+   **REVISED (2026-06-27):** the Plaud recording *is* the 1-2-1, so attaching is a
+   **post-meeting** action — moved OUT of the click-through Discussion stage and onto the
+   **agent's My Team card + profile** (`PlaudAttachButton.tsx`, binds to the agent's most
+   recent session). Agent-scoped routes `GET/POST /api/121/agent/:name/plaud-candidates|plaud-attach`
+   (`getPlaudCandidatesForAgent`/`attachPlaudForAgent`).
 5. **Weekly Friday KPI email.** **✅ SHIPPED (2026-06-26).** Job `one21-weekly-kpi`
    (Fri 16:00 UK) emails each rostered agent their own card metrics — KPI health, QA, Golden
    Rules, Tickets/hour, Training, Satisfaction — RAG-coloured, mirroring the My Team card.

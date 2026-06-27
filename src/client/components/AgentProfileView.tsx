@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { OneToOneSessionView } from './OneToOneSessionView.js';
+import { PlaudAttachButton } from './PlaudAttachButton.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -833,6 +834,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                   background: C.teal, color: C.bg1, opacity: resolvedAgent ? 1 : 0.5,
                 }}
               >Run 1-2-1</button>
+              {resolvedAgent && <PlaudAttachButton agentName={resolvedAgent} onAttached={() => { fetchSnapshots(resolvedAgent); }} />}
               <button
                 onClick={generatePrep}
                 disabled={generatingPrep}

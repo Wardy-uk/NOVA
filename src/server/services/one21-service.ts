@@ -571,33 +571,56 @@ function dateOffset(isoDate: string, days: number): string {
  * member's name (Nick's decision — no auto-bind). Falls back to all recordings in a
  * ±2-day window around the scheduled date so a mis-named note can still be attached.
  */
-export async function getPlaudCandidates(deps: One21Deps, sessionId: number): Promise<{
+async function listCandidatesByName(deps: One21Deps, agentName: string, anchorDate: string): Promise<{
   configured: boolean; matchedByName: boolean; candidates: PlaudCandidate[];
 }> {
   if (!deps.plaudService.isConfigured()) return { configured: false, matchedByName: false, candidates: [] };
-  const session = await queryOne<{ agent_name: string; scheduled_date: string }>(
-    `SELECT agent_name, scheduled_date FROM agent_121_sessions WHERE id = ?`, [sessionId]);
-  if (!session) return { configured: true, matchedByName: false, candidates: [] };
-
-  const from = dateOffset(session.scheduled_date, -2);
-  const to = dateOffset(session.scheduled_date, 2);
-  const recordings = await deps.plaudService.listRecordingsRange(from, to).catch(() => []);
-
-  const parts = session.agent_name.toLowerCase().split(/\s+/).filter((p) => p.length >= 2);
-  const named = recordings.filter((r) => {
-    const f = r.filename.toLowerCase();
-    return parts.some((p) => f.includes(p));
-  });
-
+  const recordings = await deps.plaudService.listRecordingsRange(dateOffset(anchorDate, -2), dateOffset(anchorDate, 2)).catch(() => []);
+  const parts = agentName.toLowerCase().split(/\s+/).filter((p) => p.length >= 2);
+  const named = recordings.filter((r) => parts.some((p) => r.filename.toLowerCase().includes(p)));
   const source = named.length > 0 ? named : recordings;
-  const matchedByName = named.length > 0;
   return {
     configured: true,
-    matchedByName,
+    matchedByName: named.length > 0,
     candidates: source
       .map((r) => ({ ...r, matchedByName: parts.some((p) => r.filename.toLowerCase().includes(p)) }))
       .sort((a, b) => b.start_time - a.start_time),
   };
+}
+
+export async function getPlaudCandidates(deps: One21Deps, sessionId: number): Promise<{
+  configured: boolean; matchedByName: boolean; candidates: PlaudCandidate[];
+}> {
+  const session = await queryOne<{ agent_name: string; scheduled_date: string }>(
+    `SELECT agent_name, scheduled_date FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+  if (!session) return { configured: true, matchedByName: false, candidates: [] };
+  return listCandidatesByName(deps, session.agent_name, session.scheduled_date);
+}
+
+const ukTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+
+/** The agent's most recent 1-2-1 session (any status) — the one a recording attaches to. */
+export async function getLatestSession(agentName: string): Promise<{ id: number; scheduled_date: string; status: string; plaud_recording_id: string | null } | null> {
+  return (await queryOne<{ id: number; scheduled_date: string; status: string; plaud_recording_id: string | null }>(
+    `SELECT TOP 1 id, scheduled_date, status, plaud_recording_id FROM agent_121_sessions
+     WHERE agent_name = ? ORDER BY scheduled_date DESC, id DESC`, [agentName])) ?? null;
+}
+
+/** Plaud candidates for an agent (anchored to their latest 1-2-1, else today). */
+export async function getPlaudCandidatesForAgent(deps: One21Deps, agentName: string): Promise<{
+  configured: boolean; matchedByName: boolean; candidates: PlaudCandidate[]; sessionId: number | null; hasSession: boolean;
+}> {
+  const latest = await getLatestSession(agentName);
+  const anchor = latest?.scheduled_date ?? ukTodayStr();
+  const res = await listCandidatesByName(deps, agentName, anchor);
+  return { ...res, sessionId: latest?.id ?? null, hasSession: !!latest };
+}
+
+/** Attach a Plaud note to the agent's latest 1-2-1 session. */
+export async function attachPlaudForAgent(deps: One21Deps, agentName: string, recordingId: string): Promise<{ ok: boolean; notes_text: string | null; error?: string }> {
+  const latest = await getLatestSession(agentName);
+  if (!latest) return { ok: false, notes_text: null, error: 'No 1-2-1 session for this agent yet — run a 1-2-1 first.' };
+  return attachPlaudNote(deps, latest.id, recordingId);
 }
 
 /** Attach a chosen Plaud note: pull its summary + transcript and merge into the session. */

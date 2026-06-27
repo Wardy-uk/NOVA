@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { PlaudAttachButton } from './PlaudAttachButton.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -644,6 +645,9 @@ export function AgentRosterView({ onSelectAgent }: {
                   transition: 'all 0.2s',
                 }}
               >{snapshotting === card.name ? 'Saving...' : '1-2-1 Snapshot'}</button>
+            </div>
+            <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
+              <PlaudAttachButton agentName={card.name} compact onAttached={fetchData} />
             </div>
           </div>
         ))}

@@ -3,7 +3,7 @@ import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
-  ACTION_REVIEW_STATUSES, type One21Deps,
+  getPlaudCandidatesForAgent, attachPlaudForAgent, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
@@ -87,6 +87,29 @@ export function createOne21Routes(deps: One21Deps): Router {
       const date = typeof req.body?.date === 'string' && DATE_RE.test(req.body.date) ? req.body.date : undefined;
       const result = await runDayBeforePrep(deps, date);
       res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Attach a Plaud recording to an agent's latest 1-2-1 (used from the My Team card + profile).
+  router.get('/agent/:agentName/plaud-candidates', async (req, res) => {
+    try {
+      const agent = decodeURIComponent(String(req.params.agentName));
+      res.json({ ok: true, data: await getPlaudCandidatesForAgent(deps, agent) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  router.post('/agent/:agentName/plaud-attach', async (req, res) => {
+    try {
+      const agent = decodeURIComponent(String(req.params.agentName));
+      const recordingId = String(req.body?.recordingId ?? '').trim();
+      if (!recordingId) { res.status(400).json({ ok: false, error: 'recordingId required' }); return; }
+      const result = await attachPlaudForAgent(deps, agent, recordingId);
+      if (!result.ok) { res.status(result.error?.includes('No 1-2-1') ? 409 : 502).json({ ok: false, error: result.error }); return; }
+      res.json({ ok: true, data: { notes_text: result.notes_text } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
