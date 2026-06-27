@@ -33,6 +33,20 @@ function safeUser(u: { id: number; username: string; display_name: string | null
 import type { CustomRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 
+// Hardcoded super-admins — these accounts ALWAYS keep super_admin, regardless of what
+// Azure/O365 group mappings resolve to. SSO controls everyone else's roles, but it must
+// never be able to strip this elevation. Matched case-insensitively by email or username.
+const FORCED_SUPER_ADMINS = new Set(['nickw@nurtur.tech', 'nickw']);
+
+/** Force super_admin to the front of a role string for hardcoded super-admins. */
+function enforceSuperAdmin(identity: { email?: string | null; username?: string | null }, role: string): string {
+  const email = identity.email?.toLowerCase() ?? '';
+  const username = identity.username?.toLowerCase() ?? '';
+  if (!FORCED_SUPER_ADMINS.has(email) && !FORCED_SUPER_ADMINS.has(username)) return role;
+  const rest = parseRoles(role).filter(r => r !== 'super_admin');
+  return ['super_admin', ...rest].join(',');
+}
+
 const DEFAULT_CUSTOM_ROLES: CustomRole[] = [
   { id: 'editor', name: 'Editor', areas: { command: 'edit', nova_features: 'edit', servicedesk: 'edit', sales: 'edit', onboarding: 'edit', accounts: 'edit', people: 'view', kpis: 'edit', training: 'edit' } },
   { id: 'design', name: 'Design', areas: { command: 'view', nova_features: 'view', servicedesk: 'view', sales: 'hidden', onboarding: 'edit', accounts: 'view', people: 'view', azdo_push: 'edit', kpis: 'view', training: 'edit' } },
@@ -460,15 +474,20 @@ export function createAuthRoutes(
       if (user) {
         ssoLogger.log('user_resolved', `Matched existing user by OID`, { userId: user.id, username: user.username });
         // Update role from group mapping on each login (if mapping is active)
+        let nextRole = user.role;
         if (resolvedRole) {
           // Preserve any manually-assigned roles that aren't managed by SSO group mappings
           const ssoManagedRoles = new Set(groupMappings.map(m => m.novaRole));
           const existingRoles = parseRoles(user.role);
           const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
-          const mergedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
-          await userQueries.update(user.id, { role: mergedRole });
+          nextRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
+        }
+        // Hardcoded super-admins keep super_admin no matter what O365 resolves.
+        nextRole = enforceSuperAdmin({ email: user.email ?? claims.email, username: user.username }, nextRole);
+        if (nextRole !== user.role) {
+          await userQueries.update(user.id, { role: nextRole });
           user = await userQueries.getById(user.id);
-          ssoLogger.log('user_resolved', `Role merged (SSO + manual)`, { resolvedRole, manualRoles, mergedRole });
+          ssoLogger.log('user_resolved', `Role updated (SSO + manual + forced super-admin)`, { resolvedRole, nextRole });
         }
       }
 
@@ -478,19 +497,20 @@ export function createAuthRoutes(
         if (existing) {
           ssoLogger.log('user_linked', `Linking existing local account by email`, { userId: existing.id, username: existing.username, email: claims.email });
           // Link existing account to Entra, update role from group mapping (preserve manual roles)
-          let linkedRole: string | undefined;
+          let linkedRole = existing.role;
           if (resolvedRole) {
             const ssoManagedRoles = new Set(groupMappings.map(m => m.novaRole));
             const existingRoles = parseRoles(existing.role);
             const manualRoles = existingRoles.filter(r => !ssoManagedRoles.has(r) && r !== 'admin');
             linkedRole = [...new Set([...parseRoles(resolvedRole), ...manualRoles])].join(',');
           }
+          linkedRole = enforceSuperAdmin({ email: claims.email, username: existing.username }, linkedRole);
           await userQueries.update(existing.id, {
             auth_provider: 'entra',
             provider_id: claims.oid,
             email: claims.email,
             display_name: claims.name || existing.display_name,
-            ...(linkedRole ? { role: linkedRole } : {}),
+            role: linkedRole,
           });
           user = await userQueries.getById(existing.id);
         } else {
@@ -506,7 +526,8 @@ export function createAuthRoutes(
         }
 
         const isFirstUser = (await userQueries.count()) === 0;
-        const newRole = isFirstUser ? 'admin' : (resolvedRole || 'viewer');
+        const newRole = enforceSuperAdmin({ email: claims.email, username },
+          isFirstUser ? 'admin' : (resolvedRole || 'viewer'));
         ssoLogger.log('user_created', `Auto-provisioning new user`, { username, email: claims.email, role: newRole });
         const id = await userQueries.create({
           username,
