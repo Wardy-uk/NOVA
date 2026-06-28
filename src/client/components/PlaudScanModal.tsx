@@ -9,7 +9,7 @@ const C = {
   text1: '#e2e8f0', text2: '#94a3b8', text3: '#64748b',
 };
 
-interface Rec { id: string; filename: string; start_time: number; suggestedAgent: string | null; }
+interface Rec { id: string; filename: string; start_time: number; suggestedAgent: string | null; isOneToOne?: boolean; }
 type RowState = { agent: string; status: 'idle' | 'saving' | 'done' | 'dismissed' | 'error'; msg?: string };
 
 const RANGES: Array<{ label: string; days: number }> = [
@@ -106,7 +106,10 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
             return (
               <div key={rec.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 8, background: C.bg2, border: `1px solid ${done ? `${C.green}40` : C.border}`, borderRadius: 10, opacity: done ? 0.6 : 1 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: C.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rec.filename || '(untitled)'}</div>
+                  <div style={{ fontSize: 13, color: C.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {rec.isOneToOne && <span style={{ fontSize: 9, fontWeight: 700, color: C.teal, background: `${C.teal}22`, border: `1px solid ${C.teal}55`, borderRadius: 4, padding: '1px 5px', marginRight: 6 }}>1-2-1</span>}
+                    {rec.filename || '(untitled)'}
+                  </div>
                   <div style={{ fontSize: 10, color: C.text3 }}>
                     {rec.start_time ? new Date(rec.start_time * 1000).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                     {rec.suggestedAgent && <span style={{ color: C.teal }}> · suggested: {rec.suggestedAgent}</span>}

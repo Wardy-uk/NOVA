@@ -624,7 +624,22 @@ export async function getPlaudCandidatesForAgent(deps: One21Deps, agentName: str
 // return ALL recordings (minus already-assigned + dismissed) and let the manager triage:
 // assign the 1-2-1s, dismiss the rest. Agent name is pre-suggested when it's in the title.
 
-export interface ScannedRecording { id: string; filename: string; start_time: number; suggestedAgent: string | null; }
+export interface ScannedRecording { id: string; filename: string; start_time: number; suggestedAgent: string | null; isOneToOne: boolean; }
+
+// Standardised Plaud title produced by the NOVA template: "1-2-1 | <Agent Name> | <date>".
+const ONE21_PREFIX_RE = /^\s*1\s*-?\s*2\s*-?\s*1\b/i;
+function parseStdTitle(filename: string, agents: string[]): { isOneToOne: boolean; agent: string | null } {
+  if (!ONE21_PREFIX_RE.test(filename)) return { isOneToOne: false, agent: null };
+  const segs = filename.split('|').map((s) => s.trim()).filter(Boolean);
+  let agent: string | null = null;
+  if (segs.length >= 2) {
+    const cand = segs[1].toLowerCase();
+    agent = agents.find((a) => a.toLowerCase() === cand)
+      ?? agents.find((a) => cand.includes(a.toLowerCase()) || a.toLowerCase().includes(cand))
+      ?? null;
+  }
+  return { isOneToOne: true, agent };
+}
 
 const IGNORED_KEY = 'one21_plaud_ignored';
 function getIgnored(deps: One21Deps): Set<string> {
@@ -663,10 +678,13 @@ export async function scanPlaudForOneToOnes(deps: One21Deps, sinceDays?: number)
   const out: ScannedRecording[] = recordings
     .filter((r) => !excluded.has(r.id))
     .map((r) => {
+      const std = parseStdTitle(r.filename, agents);
       const f = r.filename.toLowerCase();
-      return { id: r.id, filename: r.filename, start_time: r.start_time, suggestedAgent: agentParts.find((a) => a.parts.some((p) => f.includes(p)))?.name ?? null };
+      const nameMatch = agentParts.find((a) => a.parts.some((p) => f.includes(p)))?.name ?? null;
+      return { id: r.id, filename: r.filename, start_time: r.start_time, isOneToOne: std.isOneToOne, suggestedAgent: std.agent ?? nameMatch };
     })
-    .sort((a, b) => b.start_time - a.start_time);
+    // Confirmed 1-2-1s (standardised title) first, then newest.
+    .sort((a, b) => (Number(b.isOneToOne) - Number(a.isOneToOne)) || (b.start_time - a.start_time));
   return { configured: true, recordings: out, agents };
 }
 
