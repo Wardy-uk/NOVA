@@ -15,7 +15,7 @@ import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { EmailService } from './email.js';
-import type { PlaudService } from './plaud-service.js';
+import { PlaudService } from './plaud-service.js';
 
 export interface One21Deps {
   settingsQueries: FileSettingsQueries;
@@ -727,7 +727,11 @@ export async function attachPlaudNote(deps: One21Deps, sessionId: number, record
   if (!session) return { ok: false, notes_text: null, error: 'Session not found' };
 
   try {
-    const notes = await deps.plaudService.getNotes(recordingId);
+    // A recording may carry several notes (one per Plaud template). Prefer the NOVA
+    // template note (has the NOVA-1-2-1 marker); only merge all if none is marked.
+    const blocks = await deps.plaudService.getNoteBlocks(recordingId);
+    const novaBlocks = blocks.filter((b) => /NOVA-1-2-1/i.test(b.content) || /NOVA-1-2-1/i.test(b.title));
+    const notes = PlaudService.blocksToMarkdown(novaBlocks.length ? novaBlocks : blocks);
     const existing = session.notes_text ?? '';
     // Don't clobber manual discussion notes — append the Plaud summary under a heading.
     const block = notes ? `## Plaud summary\n${notes}` : '## Plaud summary\n_(no summary available yet)_';

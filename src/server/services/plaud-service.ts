@@ -185,20 +185,24 @@ export class PlaudService {
       .join('\n');
   }
 
-  /** AI-generated notes/summary as markdown. '' if not summarised yet. */
-  async getNotes(recordingId: string): Promise<string> {
+  /** Raw note blocks for a recording. A recording can carry several (one per applied
+   *  template); callers can then pick the relevant one rather than merging them all. */
+  async getNoteBlocks(recordingId: string): Promise<Array<{ title: string; content: string }>> {
     const raw = unwrap(await this.mcp.callTool(PLAUD_SERVER, 'get_note', { file_id: recordingId }));
-    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'string') return raw.trim() ? [{ title: '', content: raw.trim() }] : [];
     const blocks: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-    if (!blocks.length) return '';
     return blocks
-      .map((b) => {
-        const title = (b.data_title ?? b.title ?? '').toString().trim();
-        const content = (b.data_content ?? b.content ?? '').toString().trim();
-        if (!content) return '';
-        return title ? `### ${title}\n${content}` : content;
-      })
-      .filter(Boolean)
-      .join('\n\n');
+      .map((b) => ({ title: (b.data_title ?? b.title ?? '').toString().trim(), content: (b.data_content ?? b.content ?? '').toString().trim() }))
+      .filter((b) => b.content);
+  }
+
+  /** Render note blocks to markdown. */
+  static blocksToMarkdown(blocks: Array<{ title: string; content: string }>): string {
+    return blocks.map((b) => (b.title ? `### ${b.title}\n${b.content}` : b.content)).join('\n\n');
+  }
+
+  /** AI-generated notes/summary as markdown (all blocks merged). '' if not summarised yet. */
+  async getNotes(recordingId: string): Promise<string> {
+    return PlaudService.blocksToMarkdown(await this.getNoteBlocks(recordingId));
   }
 }
