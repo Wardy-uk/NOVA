@@ -116,6 +116,7 @@ const AREA_DEFS = [
   { id: 'training', label: 'Training Matrix' },
   { id: 'mi', label: 'Board MI' },
   { id: 'devreview', label: 'Dev Review' },
+  { id: 'standup', label: 'Standup' },
 ] as const;
 
 const ACCESS_LEVELS = ['hidden', 'view', 'edit'] as const;

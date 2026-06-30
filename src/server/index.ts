@@ -1078,8 +1078,9 @@ async function main() {
   app.use('/api/actions', createActionRoutes(taskQueries, settingsQueries, userSettingsQueries));
   app.use('/api/jira', createJiraRoutes(taskQueries, buildOnboardingJiraClient, () => settingsQueries.getAll(), userSettingsQueries, jiraUserClientFactory));
   app.use('/api/standups', requireAreaAccess('nova_features', 'view'), createStandupRoutes(taskQueries, settingsQueries, ritualQueries, userSettingsQueries));
-  // Team standup — authenticated manager routes (Nick's view).
-  app.use('/api/standup', requireAreaAccess('nova_features', 'view'), createTeamStandupRoutes(standupDeps));
+  // Team standup — authenticated manager routes, gated by the 'standup' permission
+  // area (admins always pass; others need a role granting it).
+  app.use('/api/standup', requireAreaAccess('standup', 'view'), createTeamStandupRoutes(standupDeps));
   app.use('/api/121', requireAreaAccess('nova_features', 'view'), createOne21Routes(one21Deps));
 
   // ── Daily team standup jobs (poll every 5 min; gated to UK weekday mornings) ──

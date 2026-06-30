@@ -143,7 +143,7 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   nova_features: 'view',
-  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view',
+  servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view', standup: 'hidden',
 };
 
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
@@ -766,6 +766,8 @@ export function App() {
     if (area === 'standup') {
       const roles = userRole.split(',').map(r => r.trim().toLowerCase());
       if (roles.includes('admin') || roles.includes('super_admin')) return true;
+      // Any role granted the 'standup' area in Admin > Permissions
+      if ((areaAccess['standup'] || 'hidden') !== 'hidden') return true;
       const onSupportTeam = (auth.user?.teams ?? []).some(tm => tm.toLowerCase() === 'support');
       return roles.includes('support') && onSupportTeam;
     }

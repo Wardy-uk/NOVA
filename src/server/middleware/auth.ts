@@ -10,6 +10,7 @@ const AREA_DEFAULTS: Record<string, string> = {
   wallboards: 'view',
   mi: 'hidden',
   devreview: 'hidden',
+  standup: 'hidden', // admins always pass; others need a role granting it
 };
 
 export interface AuthPayload {
