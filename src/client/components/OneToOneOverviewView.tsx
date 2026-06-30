@@ -26,22 +26,57 @@ export function OneToOneOverviewView() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanOpen, setScanOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<'urgency' | 'next' | 'last'>('urgency');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [savingDate, setSavingDate] = useState<string | null>(null);
 
-  const load = () => {
-    setLoading(true);
+  const load = (keepLoading = false) => {
+    if (!keepLoading) setLoading(true);
     fetch('/api/121/overview').then((r) => r.json()).then((j) => { if (j.ok) setData(j.data); }).finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
+
+  const toggleSort = (key: 'next' | 'last') => {
+    if (sortBy === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortBy(key); setSortDir('asc'); }
+  };
+
+  const saveNext = async (agentName: string, date: string) => {
+    setSavingDate(agentName);
+    try {
+      if (date) {
+        await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/next-121`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }),
+        });
+      } else {
+        await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/next-121/cancel`, { method: 'POST' });
+      }
+      load(true);
+    } catch { /* ignore */ }
+    setSavingDate(null);
+    setEditing(null);
+  };
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>Loading…</div>;
   if (!data) return <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>No data.</div>;
 
+  const dir = sortDir === 'asc' ? 1 : -1;
   const sorted = [...data.agents].sort((a, b) => {
+    if (sortBy === 'next' || sortBy === 'last') {
+      const key = sortBy === 'next' ? 'nextDate' : 'lastDate';
+      const av = a[key], bv = b[key];
+      if (!av && !bv) return a.agent_name.localeCompare(b.agent_name);
+      if (!av) return 1;   // nulls always last regardless of direction
+      if (!bv) return -1;
+      return av.localeCompare(bv) * dir;
+    }
     const rank = (x: OverviewAgent) => x.overdue ? 0 : x.awaitingPrep ? 1 : x.dueThisWeek ? 2 : x.nextDate ? 3 : 4;
     const r = rank(a) - rank(b);
     if (r !== 0) return r;
     return (a.nextDate ?? '9999').localeCompare(b.nextDate ?? '9999');
   });
+  const sortArrow = (key: 'next' | 'last') => (sortBy === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
 
   return (
     <div style={{ padding: '4px 4px 40px' }}>
@@ -71,12 +106,31 @@ export function OneToOneOverviewView() {
       {/* Per-agent table */}
       <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          <div>Agent</div><div>Next 1-2-1</div><div>Last</div><div>Status</div><div>Open actions</div><div>Delivery</div>
+          <div>Agent</div>
+          <div onClick={() => toggleSort('next')} style={{ cursor: 'pointer', color: sortBy === 'next' ? C.teal : C.text3, userSelect: 'none' }}>Next 1-2-1{sortArrow('next')}</div>
+          <div onClick={() => toggleSort('last')} style={{ cursor: 'pointer', color: sortBy === 'last' ? C.teal : C.text3, userSelect: 'none' }}>Last{sortArrow('last')}</div>
+          <div>Status</div><div>Open actions</div><div>Delivery</div>
         </div>
         {sorted.map((a) => (
           <div key={a.agent_name} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr', gap: 8, padding: '11px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center', fontSize: 13 }}>
             <div style={{ color: C.text1, fontWeight: 600 }}>{a.agent_name}</div>
-            <div style={{ color: a.overdue ? C.red : C.text2, fontWeight: a.overdue ? 700 : 400 }}>{d(a.nextDate)}</div>
+            {editing === a.agent_name ? (
+              <input
+                type="date"
+                autoFocus
+                defaultValue={a.nextDate ?? ''}
+                disabled={savingDate === a.agent_name}
+                onBlur={() => setEditing(null)}
+                onChange={(e) => saveNext(a.agent_name, e.target.value)}
+                style={{ width: 130, padding: '3px 6px', fontSize: 12, background: C.bg2, color: C.text1, border: `1px solid ${C.teal}`, borderRadius: 5, colorScheme: 'dark' }}
+              />
+            ) : (
+              <div
+                onClick={() => setEditing(a.agent_name)}
+                title="Click to set / reschedule the next 1-2-1"
+                style={{ cursor: 'pointer', color: a.overdue ? C.red : (a.nextDate ? C.text2 : C.teal), fontWeight: a.overdue ? 700 : 400, textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+              >{savingDate === a.agent_name ? '…' : (a.nextDate ? d(a.nextDate) : '+ set')}</div>
+            )}
             <div style={{ color: C.text3 }}>{d(a.lastDate)}</div>
             <div>{statusChip(a)}</div>
             <div style={{ color: a.outstandingActions > 0 ? C.text1 : C.text3 }}>{a.outstandingActions || '—'}</div>
