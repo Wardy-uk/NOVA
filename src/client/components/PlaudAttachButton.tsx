@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /* Attach the Plaud recording of a 1-2-1 to the agent's most recent session. Lists notes
    whose title contains the agent's name (no auto-bind — you pick). Used on the My Team
@@ -62,13 +63,17 @@ export function PlaudAttachButton({ agentName, compact, onAttached }: {
         title="Attach the Plaud recording of this 1-2-1"
       >🎙 {compact ? 'Attach Recording' : 'Attach 1-2-1 Recording'}</button>
 
-      {open && (
+      {open && createPortal((
+        <div
+          onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 50, width: 320,
-            background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            width: 'min(400px, 100%)', maxHeight: '80vh', overflowY: 'auto',
+            background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -112,7 +117,8 @@ export function PlaudAttachButton({ agentName, compact, onAttached }: {
           )}
           {msg && <div style={{ fontSize: 11, color: msg.includes('✓') ? C.green : C.amber, marginTop: 8 }}>{msg}</div>}
         </div>
-      )}
+        </div>
+      ), document.body)}
     </div>
   );
 }
