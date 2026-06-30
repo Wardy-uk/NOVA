@@ -27,6 +27,10 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
   const [agents, setAgents] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [days, setDays] = useState(90);
+  const [assignedAny, setAssignedAny] = useState(false);
+
+  // Refresh the overview behind us only on close — refreshing per-assign remounts this modal.
+  const handleClose = () => { if (assignedAny) onAssigned?.(); onClose(); };
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +73,7 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
         body: JSON.stringify({ recordingId: rec.id, agentName: row.agent, recordedAt: rec.start_time }),
       });
       const json = await res.json();
-      if (json.ok) { setRows((s) => ({ ...s, [rec.id]: { ...s[rec.id], status: 'done' } })); onAssigned?.(); }
+      if (json.ok) { setRows((s) => ({ ...s, [rec.id]: { ...s[rec.id], status: 'done' } })); setAssignedAny(true); }
       else setRows((s) => ({ ...s, [rec.id]: { ...s[rec.id], status: 'error', msg: json.error || 'Failed' } }));
     } catch { setRows((s) => ({ ...s, [rec.id]: { ...s[rec.id], status: 'error', msg: 'Network error' } })); }
   };
@@ -78,7 +82,7 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
   const pending = visible.filter((r) => rows[r.id]?.status !== 'done');
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: C.bg0, backdropFilter: 'blur(2px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: C.bg0, backdropFilter: 'blur(2px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={handleClose}>
       <div style={{ width: 'min(820px,100%)', maxHeight: '88vh', background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '18px 24px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -89,7 +93,7 @@ export function PlaudScanModal({ onClose, onAssigned }: { onClose: () => void; o
             <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 7, padding: '6px 8px', fontSize: 12 }}>
               {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
             </select>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 22, cursor: 'pointer' }}>×</button>
+            <button onClick={handleClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 22, cursor: 'pointer' }}>×</button>
           </div>
         </div>
 
