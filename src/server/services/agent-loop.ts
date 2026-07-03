@@ -1301,8 +1301,8 @@ export class AgentLoop {
     // CC pool and (with no cross-tier fallback) fail to assign. Matches n8n's hard switch.
     if (project === 'NTPJ') return 'tpj';
 
-    // int_setup label is a routing rule → TPJ
-    if (ticket?.labels && ticket.labels.includes('int_setup')) return 'tpj';
+    // int_setup label is a routing rule → Tier 2 (integration-setup is T2 work, not TPJ maintenance)
+    if (ticket?.labels && ticket.labels.includes('int_setup')) return 't2';
 
     // Development-tier tickets are never auto-assigned
     if (ticket?.current_tier && ticket.current_tier.trim() === 'Development') return null;
@@ -1520,9 +1520,9 @@ export class AgentLoop {
     // tier "Customer Care" and would otherwise mis-route to CC and fail. Matches n8n.
     if (project === 'NTPJ') return 'tpj';
 
-    // int_setup label → TPJ pool (matches n8n routing)
+    // int_setup label → Tier 2 pool (integration-setup is T2 work, not TPJ maintenance)
     const labels = ticket.labels || '';
-    if (labels.includes('int_setup')) return 'tpj';
+    if (labels.includes('int_setup')) return 't2';
 
     const tier = (ticket.current_tier || '').trim();
     if (tier === 'Development') return null;

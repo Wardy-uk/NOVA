@@ -72,7 +72,7 @@ export class LifecycleManager {
   /** Pool routing for a timed-out ticket: NTPJ by project, CC by default, T2 only if the tier is authoritative. */
   private poolForTier(project: string, currentTier: string | null, labels: string | null): Pool | null {
     if (project === 'NTPJ') return 'tpj'; // TPJ Maintenance routes by project, not tier
-    if (labels && labels.includes('int_setup')) return 'tpj';
+    if (labels && labels.includes('int_setup')) return 't2'; // integration-setup is T2 work, not TPJ maintenance
     const tier = (currentTier || '').trim();
     if (tier === 'Development') return null; // never auto-assign Development
     if (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier)) return 't2';

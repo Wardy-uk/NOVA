@@ -2116,7 +2116,7 @@ async function main() {
             const labels = (t.labels || '').toLowerCase();
             const tier = (t.current_tier || '').trim();
             const pool = labels.includes('int_setup')
-              ? 'tpj'
+              ? 't2' // integration-setup is T2 work, not TPJ maintenance
               : (['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production'].includes(tier) ? 't2' : 'cc');
             await retryQueries.insert(t.issue_key, pool, t.project_key, 'cold-start scan');
             queued++;

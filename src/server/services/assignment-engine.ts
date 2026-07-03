@@ -611,7 +611,8 @@ export class AssignmentEngine {
 
       const labels = (row.labels || '').toLowerCase();
       if (labels.includes('int_setup')) {
-        b.tpj += row.cnt;
+        // int_setup routes to the Tier 2 pool, so its open load counts against T2/T3 capacity.
+        b.t2t3 += row.cnt;
       } else {
         const tier = (row.current_tier || '').trim().toLowerCase();
         if (tier === '' || tier === 'customer care' || tier === 't1' || tier.startsWith('tier 1') || tier.startsWith('tier1')) {
