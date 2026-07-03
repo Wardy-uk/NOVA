@@ -2,7 +2,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { LlmService } from './llm-service.js';
 import type { ApprovalQueries } from '../db/queries.js';
-import type { AgentState, AgentStatus, AgentDecision, AgentMode, AgentShadowMode, AssignedTicketMode } from './agent-types.js';
+import type { AgentState, AgentStatus, AgentDecision, AgentMode, AgentShadowMode, AssignedTicketMode, TicketEvent } from './agent-types.js';
 import type { KbEmbedder } from './kb-embedder.js';
 import { Perceiver } from './perceiver.js';
 import { Reasoner } from './reasoner.js';
@@ -49,6 +49,12 @@ const FALLBACK_INTERVAL_MS = 60_000;
 const FALLBACK_REDUCED_INTERVAL_MS = 5 * 60_000;
 const HEALTH_STALE_THRESHOLD_MS = 10 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_TICKS = 30; // sweep every 30th tick (~30 min at 1 min interval)
+
+// Escalation short-circuit defaults (overridable via settings). Nick Ward is the
+// default escalation owner; escalation tickets are assigned straight to him.
+const DEFAULT_ESCALATION_ASSIGNEE_ACCOUNT_ID = '712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65';
+const DEFAULT_ESCALATION_ACK_MESSAGE =
+  'Thank you for getting in touch. We can confirm we’ve received your escalation and it has been passed straight to the team for review. We’ll be in contact shortly with an update.';
 
 export class AgentLoop {
   private state: AgentState = 'stopped';
@@ -512,6 +518,82 @@ export class AgentLoop {
     return this.getShadowMode() === 'full_shadow';
   }
 
+  /**
+   * Escalation short-circuit. Inbound tickets whose Request Type is "Escalation"
+   * (configurable via `agent_escalation_request_types`) must NOT be triaged by the
+   * AI. They are assigned straight to the escalation owner with a short, polite
+   * acknowledgement confirming receipt and escalation. Returns the set of
+   * "ticketKey:eventType" keys handled so the caller can drop them before the
+   * self-assign + triage steps run.
+   */
+  private async routeEscalationTickets(events: TicketEvent[], shadowMode: AgentShadowMode): Promise<Set<string>> {
+    const handled = new Set<string>();
+    if (this.settings.get('agent_escalation_routing_enabled') === 'false') return handled;
+
+    const typesRaw = this.settings.get('agent_escalation_request_types') || 'Escalation';
+    const escalationTypes = typesRaw.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (escalationTypes.length === 0) return handled;
+
+    const assigneeAccountId = this.settings.get('escalation_assignee_account_id') || DEFAULT_ESCALATION_ASSIGNEE_ACCOUNT_ID;
+    const ackMessage = this.settings.get('escalation_ack_message') || DEFAULT_ESCALATION_ACK_MESSAGE;
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+
+    for (const event of events) {
+      if (event.eventType !== 'ticket_created' && event.eventType !== 'backfill') continue;
+      if (!escalationTypes.includes((event.requestType || '').toLowerCase())) continue;
+
+      // Once identified as an escalation, this ticket must never reach AI triage —
+      // mark it handled regardless of what happens below.
+      handled.add(`${event.ticketKey}:${event.eventType}`);
+
+      if (shadowMode === 'full_shadow') {
+        console.log(`[agent] [SHADOW] ${event.ticketKey}: escalation (${event.requestType}) — would acknowledge + assign to escalation owner, no triage`);
+        continue;
+      }
+
+      try {
+        // Don't stomp a human who already grabbed it — but still skip triage + acknowledge.
+        const liveIssue = await this.jiraClient.getIssue(event.ticketKey, ['assignee']);
+        const liveAssigneeId = (liveIssue?.fields?.assignee as { accountId?: string } | null)?.accountId;
+        const humanOwned = liveAssigneeId && liveAssigneeId !== novaAccountId && liveAssigneeId !== assigneeAccountId;
+
+        // Polite customer-facing acknowledgement confirming receipt + escalation.
+        await this.jiraClient.addComment(event.ticketKey, ackMessage, { internal: false });
+
+        if (humanOwned) {
+          console.log(`[agent] Escalation ${event.ticketKey}: already owned by a human (${liveAssigneeId}) — acknowledged, left assignment untouched, skipped triage`);
+        } else if (assigneeAccountId) {
+          await this.jiraClient.updateFields(event.ticketKey, { assignee: { accountId: assigneeAccountId } });
+          console.log(`[agent] Escalation ${event.ticketKey} (${event.requestType}): acknowledged + assigned to escalation owner, skipped triage`);
+        } else {
+          console.warn(`[agent] Escalation ${event.ticketKey}: no escalation_assignee_account_id configured — acknowledged but left unassigned`);
+        }
+
+        try {
+          await new EscalationLogService().log({
+            ticket_key: event.ticketKey,
+            escalation_type: 'manual',
+            assigned_to: humanOwned ? undefined : (assigneeAccountId ? 'Escalation owner' : undefined),
+            reason_code: 'inbound_escalation',
+            reason_label: `Inbound ticket with Request Type "${event.requestType}" — routed to escalation owner without AI triage`,
+            escalated_by: 'NOVA',
+            source: 'escalation-routing',
+          });
+        } catch (logErr) {
+          console.warn(`[agent] Escalation ${event.ticketKey}: failed to log escalation:`, logErr instanceof Error ? logErr.message : logErr);
+        }
+
+        this.recentlyProcessedTickets.set(`${event.ticketKey}:${event.eventType}`, Date.now());
+        this.ticketsProcessed++;
+      } catch (err) {
+        console.error(`[agent] Escalation routing failed for ${event.ticketKey}:`, err instanceof Error ? err.message : err);
+        // Stays in `handled` — an escalation must not fall through to AI triage.
+      }
+    }
+
+    return handled;
+  }
+
   private async tick(): Promise<void> {
     if (this.processing) return;
     if (this.state !== 'running') return;
@@ -642,6 +724,16 @@ export class AgentLoop {
           }
         }
         dedupedLlmEvents.push(event);
+      }
+
+      // 1.85 ESCALATION SHORT-CIRCUIT — tickets raised as "Escalation" skip AI triage
+      // entirely: acknowledge the customer and assign straight to the escalation owner.
+      const escalationHandled = await this.routeEscalationTickets(dedupedLlmEvents, this.getShadowMode());
+      if (escalationHandled.size > 0) {
+        for (let i = dedupedLlmEvents.length - 1; i >= 0; i--) {
+          const key = `${dedupedLlmEvents[i].ticketKey}:${dedupedLlmEvents[i].eventType}`;
+          if (escalationHandled.has(key)) dedupedLlmEvents.splice(i, 1);
+        }
       }
 
       // 1.9 NOVA SELF-ASSIGN — claim tickets before triage so they're never in limbo
