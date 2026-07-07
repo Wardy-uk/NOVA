@@ -21,6 +21,17 @@ function normalisePriorityName(raw: string | null): string | null {
 // in agent-loop.ts). An escalation into any of these should trigger reassignment.
 const T2_POOL_TIERS = new Set(['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production']);
 
+// Map a CurrentTier (+ labels) to its round-robin pool. Mirrors determinePoolFromTicket in
+// agent-loop.ts: int_setup → t2, T2/T3/Production → t2, Development → skip, everything else
+// (incl. Customer Care / T1 / blank) → cc. Returns null when the ticket must not be auto-assigned.
+function poolForTier(tier: string | null, labels: string | null): Pool | null {
+  if ((labels ?? '').includes('int_setup')) return 't2';
+  const t = (tier ?? '').trim();
+  if (t === 'Development') return null;
+  if (T2_POOL_TIERS.has(t)) return 't2';
+  return 'cc';
+}
+
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
@@ -469,17 +480,25 @@ export class JiraSyncService {
       } catch (err) {
         console.warn(`[jira-sync] Failed to log tier change for ${issue.key}:`, err instanceof Error ? err.message : err);
       }
+    }
 
-      // Event-driven round-robin: a CC→T2 escalation clears the assignee, but nothing
-      // re-places the ticket until the periodic unassigned sweep happens to run — so
-      // escalated tickets can sit unassigned in the T2 pool indefinitely. Fire the
-      // assignment engine immediately on the escalation transition (assignee just cleared),
-      // rather than waiting on the sweep. Fire-and-forget; assignWithFallback does its own
-      // live human-owner check and queues a retry if no agent is free.
-      const statusCat = (status?.statusCategory?.key as string) ?? null;
-      if (statusCat !== 'done' && (assignee?.accountId == null)) {
-        this.maybeReassignOnEscalation(issue.key, oldRow.current_tier, currentTier, labels)
-          .catch(err => console.warn(`[jira-sync] Escalation reassign failed for ${issue.key}:`, err instanceof Error ? err.message : err));
+    // Event-driven round-robin safety net: when a ticket becomes unassigned via a
+    // transition — an escalation/de-escalation that clears the assignee, or a human
+    // unassigning it — re-place it immediately rather than waiting on the periodic sweep.
+    // Fires only on the transition itself (assignee just cleared, or tier just changed
+    // while unassigned) so an already-unassigned ticket isn't re-processed every sync,
+    // and brand-new untriaged tickets (no oldRow) are left to the triage path.
+    // Fire-and-forget; assignWithFallback keeps its live human-owner check + retry fallback.
+    if (
+      oldRow && this.assignmentEngine &&
+      (status?.statusCategory?.key as string) !== 'done' &&
+      assignee?.accountId == null
+    ) {
+      const assigneeJustCleared = oldRow.assignee_display != null;
+      const tierJustChanged = currentTier !== oldRow.current_tier;
+      if (assigneeJustCleared || tierJustChanged) {
+        this.maybeReassignUnassigned(issue.key, currentTier, labels, oldRow.current_tier)
+          .catch(err => console.warn(`[jira-sync] Reassign-on-unassign failed for ${issue.key}:`, err instanceof Error ? err.message : err));
       }
     }
 
@@ -532,31 +551,28 @@ export class JiraSyncService {
     }
   }
 
-  /** Round-robin a freshly-escalated, now-unassigned ticket into the T2 pool immediately,
-   *  closing the gap where escalated tickets sit unassigned until the periodic sweep runs.
-   *  Scoped to the T2 pool (the demonstrated failure); NTPJ and CC use other paths. */
-  private async maybeReassignOnEscalation(
-    issueKey: string, fromTier: string | null, toTier: string | null, labels: string | null,
+  /** Round-robin a now-unassigned ticket into the pool implied by its current tier
+   *  (CC or T2) immediately, closing the gap where escalated/de-escalated/unassigned
+   *  tickets sit idle until the periodic sweep runs. NTPJ routes by project on its own
+   *  paths; Development tier is never auto-assigned. */
+  private async maybeReassignUnassigned(
+    issueKey: string, toTier: string | null, labels: string | null, fromTier: string | null,
   ): Promise<void> {
     if (!this.assignmentEngine) return;
     if (this.settings.get('agent_escalation_reassign_enabled') === 'false') return;
 
-    // Act only when the ticket has landed in a T2-pool tier — via CurrentTier or the
-    // int_setup label. Initial CC assignment already works through triage; NTPJ routes
-    // by project on its own paths.
-    const tier = (toTier ?? '').trim();
-    const isInt = (labels ?? '').includes('int_setup');
-    if (!isInt && !T2_POOL_TIERS.has(tier)) return;
-
     const project = this.assignmentEngine.resolveProjectFromTicketKey(issueKey);
     if (project === 'NTPJ') return;
+
+    const pool = poolForTier(toTier, labels);
+    if (!pool) return; // Development / not auto-assignable
+
     if (!this.assignmentEngine.isWorkingTime()) return; // don't hand tickets to people out of hours
 
-    const pool: Pool = 't2';
     const result = await this.assignmentEngine.assignWithFallback(issueKey, pool, project);
     if (result) {
       await this.assignmentEngine.postAssignmentComment(issueKey, result);
-      console.log(`[jira-sync] Escalation reassign: ${issueKey} (${fromTier} → ${toTier}) → ${result.agent.display_name}`);
+      console.log(`[jira-sync] Reassigned ${issueKey} (${fromTier ?? '—'} → ${toTier ?? '—'}, pool ${pool}) → ${result.agent.display_name}`);
     }
   }
 
