@@ -185,7 +185,6 @@ function slaRemainingText(fieldsJson: string | null): { remaining: string; breac
 export async function sendEvidenceEmail(deps: KpiEmailDeps): Promise<{ sent: boolean; noReply: number; overSla: number }> {
   const { settings, email } = deps;
   const now = new Date();
-  const endToday = new Date(now); endToday.setUTCHours(23, 59, 59, 999);
   const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
 
   const rows = await query<{
@@ -219,8 +218,8 @@ export async function sendEvidenceEmail(deps: KpiEmailDeps): Promise<{ sent: boo
     }
     const actionable = !NOT_ACTIONABLE.has(status);
     if (actionable && slaBreached(t.fields_json, 'customfield_14048', true) === true) {
-      const dueOk = !t.due_date || new Date(t.due_date) <= endToday;
-      if (dueOk && !/development/i.test(tier)) {
+      // Due date no longer suppresses the breach — the SLA is authoritative.
+      if (!/development/i.test(tier)) {
         (overSlaByTier.get(tier) ?? overSlaByTier.set(tier, []).get(tier)!).push(ticket);
       }
     }

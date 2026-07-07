@@ -357,8 +357,6 @@ export class KpiPipeline {
       }
 
       const targets = await this.loadTargets(p);
-      const endOfToday = new Date(now);
-      endOfToday.setUTCHours(23, 59, 59, 999);
 
       // Step 1: Load all open tickets from local MSSQL cache (multi-project)
       const pf = this.projectInClause();
@@ -458,9 +456,8 @@ export class KpiPipeline {
           if (ageDays > stats.oldestActionableDays) stats.oldestActionableDays = ageDays;
         }
 
-        const dueDateOk = !t.due_date || new Date(t.due_date) <= endOfToday;
         if (t.resBreached === true) {
-          if (t.slaActionable && dueDateOk) stats.resBreachedActionable++;
+          if (t.slaActionable) stats.resBreachedActionable++;
           else if (!t.excluded && !t.slaActionable) stats.resBreachedNotActionable++;
         }
         if (t.frtBreached === true) {
@@ -1032,9 +1029,6 @@ export class KpiPipeline {
         OldestTicketKey: string | null;
       }>();
 
-      const todayDate = new Date();
-      todayDate.setUTCHours(0, 0, 0, 0);
-      const todayStr = todayDate.toISOString().slice(0, 10);
       const SLA_EXCLUDED = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
 
       // "Not Updated" counts open tickets the agent can actually ACTION that have had no
@@ -1072,12 +1066,11 @@ export class KpiPipeline {
 
         agg.OpenTickets_Total++;
 
-        // SLA breach: use parseSlaField + isSlaBreached with status/due_date operational filters
+        // SLA breach: use parseSlaField + isSlaBreached with status operational filter.
+        // Due date no longer suppresses a resolution-SLA breach — the SLA is authoritative.
         const statusLower = (ticket.status_name || '').toLowerCase();
         const statusPassesSlaFilter = !SLA_EXCLUDED.includes(statusLower);
-        const dueStr = ticket.due_date ? new Date(ticket.due_date as any).toISOString().slice(0, 10) : null;
-        const dueDatePassesFilter = !dueStr || dueStr <= todayStr;
-        if (statusPassesSlaFilter && dueDatePassesFilter) {
+        if (statusPassesSlaFilter) {
           const slaField = parseSlaField(ticket.fields_json, 'customfield_14048');
           if (isSlaBreached(slaField)) {
             agg.OpenTickets_Over2Hours++;

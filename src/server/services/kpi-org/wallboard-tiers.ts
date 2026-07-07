@@ -5,7 +5,7 @@
 // (NT open-filter, isNoReply, resolution-SLA-breached + actionable). 60s-cached.
 
 import type { JiraRestClient } from '../jira-client.js';
-import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RES_BREACHED, DUE_GATE } from './registry.js';
+import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RES_BREACHED } from './registry.js';
 import { countNoReply } from './nt-compute.js';
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
@@ -60,7 +60,7 @@ export function tierTileJql(bucketKey: string, stat: TierStatKind, cohort: Cohor
   if (!b) return null;
   const cohortClause = COHORT_FILTER[cohort] ? ` AND ${COHORT_FILTER[cohort]}` : '';
   const base = `${NT_OPEN} AND ${b.filter}${cohortClause}`;
-  if (stat === 'overSla') return `${base} AND ${RES_BREACHED} AND ${ACTIONABLE} AND ${DUE_GATE}`;
+  if (stat === 'overSla') return `${base} AND ${RES_BREACHED} AND ${ACTIONABLE}`;
   return base; // active + noReply both start from the open base
 }
 

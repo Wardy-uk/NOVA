@@ -145,7 +145,6 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
     FROM jira_issue_cache
     WHERE project_key = 'NT' AND status_category <> 'Done' AND assignee_account_id IS NOT NULL
   `);
-  const endToday = new Date(now); endToday.setUTCHours(23, 59, 59, 999);
   const stats1 = new Map<string, Stat1>();
   for (const t of openRows) {
     const acc = t.assignee_account_id!;
@@ -153,10 +152,10 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
     s.open++;
     const status = (t.status_name || '').toLowerCase();
     const actionable = !NOT_ACTIONABLE.has(status);
-    // over-SLA (actionable): resolution SLA breached + actionable + due-date gate
+    // over-SLA (actionable): resolution SLA breached + actionable.
+    // Due date no longer suppresses the breach — the SLA is authoritative.
     if (actionable && slaBreached(t.fields_json, 'customfield_14048', true) === true) {
-      const dueOk = !t.due_date || new Date(t.due_date) <= endToday;
-      if (dueOk) s.overSla++;
+      s.overSla++;
     }
     if (isNoReply(t.status_name, parseDate(t.jira_created), parseDate(t.agent_last_updated), parseDate(t.agent_next_update), now)) s.noReply++;
     if (actionable && t.jira_created) {

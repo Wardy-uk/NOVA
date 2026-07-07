@@ -6,7 +6,7 @@
 // (Previously tiles read n8n's jira_kpi_daily snapshot while the drill queried
 // live Jira — two sources, so counts drifted, e.g. tile 6 vs drill 7.)
 
-import { isOverdueUpdate, isResolutionSlaBreached, dueDateDefersBreach } from './jira-sla.js';
+import { isOverdueUpdate, isResolutionSlaBreached } from './jira-sla.js';
 
 /** Minimal shape we need off an aggregator NormalizedTask. */
 export interface DrillTicket {
@@ -147,9 +147,6 @@ export function buildKpiFilter(kpiName: string, now: Date): ((t: TicketWithMeta)
 
       if (!tierMatch) return false;
       if (!isResolutionSlaBreached(t.issue)) return false;
-      // A future due date defers the breach (re-dated/escalated tickets) — keep the
-      // KPI "over SLA" drill list in step with the board's per-agent counts.
-      if (dueDateDefersBreach(t.issue, now)) return false;
       const statusLower = t.status.toLowerCase();
       if (EXCLUDED_STATUSES.has(statusLower)) return false;
       return actionable === isActionableSla(statusLower);
@@ -182,13 +179,13 @@ function toDate(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** n8n isOverSla: resolution SLA breached, excluding done/closed/resolved/waiting, with duedate guard.
- *  Shares the single breach definition (isResolutionSlaBreached + dueDateDefersBreach) from jira-sla
- *  so the per-agent board counts and the drill-down ticket lists can never drift. */
-export function isOverSlaResolution(issue: Record<string, unknown>, now: Date): boolean {
+/** Resolution SLA breached, excluding done/closed/resolved/waiting statuses.
+ *  Shares the single breach definition (isResolutionSlaBreached) from jira-sla so
+ *  the per-agent board counts and the drill-down ticket lists can never drift. A
+ *  future due date no longer suppresses the breach — the SLA is authoritative. */
+export function isOverSlaResolution(issue: Record<string, unknown>, _now?: Date): boolean {
   const status = rawStatusName(issue);
   if (SLA_EXCLUDED_STATUSES.has(status)) return false;
-  if (dueDateDefersBreach(issue, now)) return false;
   return isResolutionSlaBreached(issue);
 }
 

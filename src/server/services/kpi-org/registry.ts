@@ -112,10 +112,6 @@ export const RESOLUTION_SLA_NAME = 'Resolution';
 export const RES_BREACHED = `cf[14048] = breached()`;
 export const FRT_BREACHED = `cf[14046] = breached()`;
 
-/** Legacy due-date gate for over-SLA (ACTIONABLE only): count only tickets whose
- *  due date has passed (or have none). Matches the SLA Breach Board / n8n report. */
-export const DUE_GATE = `(duedate is EMPTY OR duedate <= endOfDay())`;
-
 /** NOVA-Jira service account — splits Solved by Team vs NOVA. */
 export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
@@ -182,13 +178,13 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_incidents_sla_actionable', label: 'Number of Incident tickets over SLA (actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest',
     rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${INCIDENT_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${INCIDENT_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL}` },
   },
   {
     key: 'nt_production_sla_actionable', label: 'Number of Production tickets over SLA (actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest',
     rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${PRODUCTION_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${PRODUCTION_BUCKET} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL}` },
   },
   {
     key: 'nt_incidents_sla_not_actionable', label: 'Number of Incident tickets over SLA (Not actionable)', team: 'Support', colA: 'Support', jiraSpace: 'NT',
@@ -487,7 +483,7 @@ for (const t of LEGACY_TIERS) {
       compute: { kind: 'no_reply', bucketJql: t.bucket } },
     { key: `nt_lg_oversla_${slug}`, label: t.overSla, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
       unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 0, amberMax: 5 },
-      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL} AND ${DUE_GATE}` } },
+      compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${ACTIONABLE_JQL}` } },
     { key: `nt_lg_oversla_notact_${slug}`, label: t.notAct, team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
       unit: 'count', direction: 'lower-better', dailyTarget: 20, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 20, amberMax: 30 },
       compute: { kind: 'jql_count', jql: () => `${t.bucket} AND ${RES_BREACHED} AND ${NOT_ACTIONABLE_JQL}` } },

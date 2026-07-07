@@ -161,29 +161,6 @@ export function isResolutionSlaBreached(issue: Record<string, unknown>): boolean
 }
 
 /**
- * True when the ticket's due date defers a resolution-SLA breach into the future.
- *
- * A ticket can carry a *completed* SLA cycle that breached — e.g. it blew an
- * earlier target, was then escalated/re-dated, and now has a fresh deadline. The
- * old cycle stays `breached: true` in completedCycles forever, but if the due
- * date is later than the end of today the live deadline is still in the future,
- * so it is NOT a current breach. Mirrors the n8n "isOverSla" due-date guard so
- * the SLA Breach board's counts and its drill-down ticket lists agree.
- *
- * @example
- * - duedate null → false (no due date defers nothing)
- * - duedate = today → false (today's tickets can still breach)
- * - duedate = tomorrow or later → true (live deadline is in the future)
- */
-export function dueDateDefersBreach(issue: Record<string, unknown>, now: Date = new Date()): boolean {
-  const dueRaw = field(issue, 'duedate');
-  if (!dueRaw) return false;
-  const due = toDate(`${dueRaw}T23:59:59.999`);
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return !!due && due > endOfToday;
-}
-
-/**
  * Extract remaining milliseconds from the ongoing SLA cycle.
  * Returns null if no SLA data, negative if breached.
  */
@@ -273,9 +250,9 @@ export function computeUrgencyScore(
   let score = 0;
   const actionable = !SLA_NON_ACTIONABLE_STATUSES.has(getStatusName(issue));
 
-  // Factor 1: SLA Breached (30 pts) — only when the breach is actionable AND
-  // not deferred by a future due date (re-dated/escalated tickets).
-  if (actionable && !dueDateDefersBreach(issue, now) && isResolutionSlaBreached(issue)) {
+  // Factor 1: SLA Breached (30 pts) — actionable resolution-SLA breach.
+  // A future due date no longer defers the breach; the SLA itself is authoritative.
+  if (actionable && isResolutionSlaBreached(issue)) {
     score += 30;
   } else if (actionable) {
     // Factor 2: SLA Approaching (20 pts) — only if not already breached
@@ -331,7 +308,7 @@ export function evaluateAttention(issue: Record<string, unknown>, now: Date = ne
   const actionable = !SLA_NON_ACTIONABLE_STATUSES.has(getStatusName(issue));
 
   if (isOverdueUpdate(issue, now)) reasons.push('overdue_update');
-  if (actionable && !dueDateDefersBreach(issue, now) && isResolutionSlaBreached(issue)) reasons.push('sla_breached');
+  if (actionable && isResolutionSlaBreached(issue)) reasons.push('sla_breached');
   if (actionable && isSlaNearBreach(issue)) reasons.push('sla_approaching');
 
   const urgencyScore = computeUrgencyScore(issue, priority, now);
