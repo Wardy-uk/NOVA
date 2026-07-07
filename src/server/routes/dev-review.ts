@@ -33,6 +33,16 @@ const CF_EXPECTED_OUTCOME = 'customfield_13214';
 const CF_ISSUE_ENVIRONMENT = 'customfield_13213';
 const CF_NURTUR_PRODUCT = 'customfield_13183';
 const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
+const CF_STORY_TYPE = 'customfield_15014';
+
+// Story Type — mandatory on the dev Bug create screen (EP, APPS). The
+// reviewer picks one in the Accept modal; option id → allowed set.
+const STORY_TYPE_OPTIONS: Record<string, string> = {
+  '14231': 'New Feature',
+  '14232': 'Tech Debt',
+  '14233': 'Keeping Lights On',
+  '14234': 'Discovery / Spike',
+};
 
 // Tier 3 option id for CurrentTier
 const TIER_ID_T3 = '13063';
@@ -699,6 +709,7 @@ export function createDevReviewRoutes(
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
     const workItemComment = String(req.body?.workItemComment || '').trim();
+    const storyType = String(req.body?.storyType || '').trim();
     const display = await userDisplay(req);
 
     if (!tldr) {
@@ -707,6 +718,10 @@ export function createDevReviewRoutes(
     }
     if (!developmentDetails) {
       res.status(400).json({ ok: false, error: 'Development Details is required by the Escalate to Development screen' });
+      return;
+    }
+    if (!STORY_TYPE_OPTIONS[storyType]) {
+      res.status(400).json({ ok: false, error: 'Story Type is required — select one before accepting into development' });
       return;
     }
 
@@ -918,7 +933,7 @@ export function createDevReviewRoutes(
           summary: `[Support] ${brief.summary}`,
           description: adfDoc(brief.text),
           customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
-          customfield_15014: { id: '14233' }, // Story Type: Keeping Lights On (now mandatory on dev Bug screen)
+          [CF_STORY_TYPE]: { id: storyType }, // Story Type — reviewer-selected, mandatory on dev Bug screen
         };
         // Mirror the support ticket's Nurtur Product onto the Bug when set.
         // If the field/option isn't valid for the target project, fall back to
