@@ -1303,6 +1303,8 @@ async function main() {
     assignmentEngine.seedPoolCapsFromKpi().catch(() => {});
     agentLoop.getAutoRulesEngine().setAssignmentEngine(assignmentEngine);
     agentLoop.setAssignmentEngine(assignmentEngine);
+    // Event-driven round-robin on tier escalation (assignee cleared → straight to T2 pool)
+    jiraSyncService?.setAssignmentEngine(assignmentEngine);
 
     const availabilityService = new AgentAvailabilityService(settingsQueries);
 
