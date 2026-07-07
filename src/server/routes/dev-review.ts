@@ -918,6 +918,7 @@ export function createDevReviewRoutes(
           summary: `[Support] ${brief.summary}`,
           description: adfDoc(brief.text),
           customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
+          customfield_15014: { id: '14233' }, // Story Type: Keeping Lights On (now mandatory on dev Bug screen)
         };
         // Mirror the support ticket's Nurtur Product onto the Bug when set.
         // If the field/option isn't valid for the target project, fall back to
