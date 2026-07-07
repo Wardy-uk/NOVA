@@ -2069,6 +2069,11 @@ async function main() {
           );
 
           if (result) {
+            // Post the round-robin comment so retry-queue assignments are visible on the
+            // ticket, matching the initial-triage and unassigned-sweep paths. Without this,
+            // retry-placed tickets got an assignee with no NOVA comment (looked untouched).
+            try { await assignmentEngine.postAssignmentComment(item.ticket_key, result); }
+            catch (err) { console.warn(`[retry-sweep] Failed to post assignment comment for ${item.ticket_key}:`, err instanceof Error ? err.message : err); }
             console.log(`[retry-sweep] Assigned ${item.ticket_key} → ${result.agent.display_name} (attempt ${item.retry_count + 1})`);
             assigned++;
           } else {
