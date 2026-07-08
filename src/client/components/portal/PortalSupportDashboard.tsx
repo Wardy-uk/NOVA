@@ -3,7 +3,7 @@ import type { SupportDashboardResponse, SupportDashboardRow } from '../../../sha
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-type Filter = 'all' | 'stale' | 'sla' | 'critical' | 'awaiting';
+type Filter = 'all' | 'stale' | 'sla' | 'critical' | 'awaiting' | 'support' | 't3' | 'development';
 
 interface KpiDef {
   key: Filter; label: string; value: (s: SupportDashboardResponse['summary']) => number;
@@ -16,7 +16,7 @@ const icon = (d: string) => (
   </svg>
 );
 
-const KPIS: KpiDef[] = [
+const TOP_KPIS: KpiDef[] = [
   { key: 'all', label: 'Open tickets', value: s => s.total, accent: 'text-slate-700 dark:text-slate-200', ring: 'ring-slate-300',
     icon: icon('M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2') },
   { key: 'stale', label: 'No update 3+ days', value: s => s.stale, accent: 'text-amber-600', ring: 'ring-amber-400',
@@ -25,9 +25,20 @@ const KPIS: KpiDef[] = [
     icon: icon('M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z') },
   { key: 'critical', label: 'Business critical', value: s => s.businessCritical, accent: 'text-red-600', ring: 'ring-red-500',
     icon: icon('M13 10V3L4 14h7v7l9-11h-7z') },
+];
+
+const TIER_KPIS: KpiDef[] = [
+  { key: 'support', label: 'Support (CC + Tier 2)', value: s => s.tierSupport, accent: 'text-teal-600', ring: 'ring-teal-400',
+    icon: icon('M18.364 5.636a9 9 0 010 12.728m-3.536-3.536a4 4 0 010-5.656M12 12h.01') },
+  { key: 't3', label: 'Tier 3', value: s => s.tierT3, accent: 'text-indigo-600', ring: 'ring-indigo-400',
+    icon: icon('M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z') },
+  { key: 'development', label: 'Development', value: s => s.tierDevelopment, accent: 'text-sky-600', ring: 'ring-sky-400',
+    icon: icon('M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4') },
   { key: 'awaiting', label: 'Awaiting sprint', value: s => s.awaitingSprint, accent: 'text-violet-600', ring: 'ring-violet-400',
     icon: icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
 ];
+
+const ALL_KPIS = [...TOP_KPIS, ...TIER_KPIS];
 
 const TYPE_COLORS = ['#0d9488', '#6366f1', '#f59e0b', '#ec4899', '#64748b', '#0ea5e9'];
 
@@ -64,6 +75,9 @@ export default function PortalSupportDashboard() {
       case 'sla': return all.filter(r => r.overSla);
       case 'critical': return all.filter(r => r.businessCritical);
       case 'awaiting': return all.filter(r => r.sprintState === 'awaiting');
+      case 'support': return all.filter(r => r.tierGroup === 'support');
+      case 't3': return all.filter(r => r.tierGroup === 't3');
+      case 'development': return all.filter(r => r.tierGroup === 'development');
       default: return all;
     }
   }, [data, filter]);
@@ -98,24 +112,26 @@ export default function PortalSupportDashboard() {
         </button>
       </div>
 
-      {/* KPI hero cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {KPIS.map(k => {
-          const active = filter === k.key;
-          return (
-            <button
-              key={k.key}
-              onClick={() => { setFilter(k.key); setExpanded(true); }}
-              aria-pressed={active}
-              className={`group relative text-left bg-white rounded-2xl border border-gray-200 p-4 transition-all hover:shadow-md hover:-translate-y-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? `ring-2 ${k.ring} shadow-sm` : ''}`}
-            >
-              <div className={`inline-flex items-center justify-center w-9 h-9 rounded-xl bg-gray-50 ${k.accent} mb-3`}>{k.icon}</div>
-              <div className={`text-3xl font-bold tabular-nums ${k.accent}`}>{loading ? '—' : k.value(s ?? {} as any)}</div>
-              <div className="text-xs text-gray-500 mt-1">{k.label}</div>
-            </button>
-          );
-        })}
-      </div>
+      {/* KPI cards — row 1: health, row 2: tier breakdown */}
+      {[TOP_KPIS, TIER_KPIS].map((groupCards, gi) => (
+        <div key={gi} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {groupCards.map(k => {
+            const active = filter === k.key;
+            return (
+              <button
+                key={k.key}
+                onClick={() => { setFilter(k.key); setExpanded(true); }}
+                aria-pressed={active}
+                className={`group relative text-left bg-white rounded-2xl border border-gray-200 p-4 transition-all hover:shadow-md hover:-translate-y-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? `ring-2 ${k.ring} shadow-sm` : ''}`}
+              >
+                <div className={`inline-flex items-center justify-center w-9 h-9 rounded-xl bg-gray-50 ${k.accent} mb-3`}>{k.icon}</div>
+                <div className={`text-3xl font-bold tabular-nums ${k.accent}`}>{loading ? '—' : k.value(s ?? {} as any)}</div>
+                <div className="text-xs text-gray-500 mt-1">{k.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      ))}
 
       {/* Type distribution bar */}
       {!loading && total > 0 && (
@@ -149,7 +165,7 @@ export default function PortalSupportDashboard() {
           className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <span className="text-sm font-semibold text-gray-700">
-            Ticket list <span className="text-gray-400 font-normal">({rows.length}{filter !== 'all' ? ` ${KPIS.find(k => k.key === filter)?.label.toLowerCase()}` : ''})</span>
+            Ticket list <span className="text-gray-400 font-normal">({rows.length}{filter !== 'all' ? ` ${ALL_KPIS.find(k => k.key === filter)?.label.toLowerCase()}` : ''})</span>
           </span>
           <svg className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -158,7 +174,7 @@ export default function PortalSupportDashboard() {
         {expanded && (<div className="border-t border-gray-100">
         {filter !== 'all' && (
           <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between text-sm">
-            <span className="text-gray-600">Filtered: <span className="font-medium">{KPIS.find(k => k.key === filter)?.label}</span> ({rows.length})</span>
+            <span className="text-gray-600">Filtered: <span className="font-medium">{ALL_KPIS.find(k => k.key === filter)?.label}</span> ({rows.length})</span>
             <button onClick={() => setFilter('all')} className="text-brand hover:underline text-xs">Clear</button>
           </div>
         )}

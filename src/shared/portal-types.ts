@@ -441,6 +441,7 @@ export interface SupportDashboardRow {
   businessCritical: boolean;  // Priority = Blocker
   priority: string;
   sprintState: 'allocated' | 'awaiting' | 'na';
+  tierGroup: 'support' | 't3' | 'development' | 'other'; // Support = Customer Care + Tier 2
 }
 
 export interface SupportDashboardSummary {
@@ -450,6 +451,9 @@ export interface SupportDashboardSummary {
   businessCritical: number;
   awaitingSprint: number;
   allocatedSprint: number;
+  tierSupport: number;        // current tier = Customer Care or Tier 2
+  tierT3: number;             // current tier = Tier 3
+  tierDevelopment: number;    // current tier = Development
 }
 
 export interface SupportDashboardResponse {

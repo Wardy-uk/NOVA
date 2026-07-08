@@ -34,6 +34,11 @@ const JIRA_FIELDS = [
 const DEFAULT_EXCLUDE_STATUSES = ['Closed', 'Done', 'Released', 'Resolved', 'Promoted', 'Declined', 'Cancelled'];
 const DEFAULT_ONBOARDING_TOKENS = ['onboard', 'delivery'];
 const DEFAULT_TPJ_PROJECTS = ['tpj', 'ntpj'];
+// Tier buckets for the second KPI row (current tier = cf12981)
+const DEFAULT_TIER_SUPPORT = ['customer care', 'tier 2', 'tier2', 't2', 'tier 1', 't1'];
+const DEFAULT_TIER_T3 = ['tier 3', 'tier3', 't3'];
+const DEFAULT_TIER_DEVELOPMENT = ['development'];
+
 const DEFAULT_DEV_STATUSES = [
   'waiting on development', 'in development', 'development', 'backlog',
   'selected for development', 'ready for development', 'to do', 'awaiting sprint',
@@ -248,6 +253,14 @@ export class PortalDashboardService {
     return devStatuses.includes(iss.status.toLowerCase()) ? 'awaiting' : 'na';
   }
 
+  private tierGroup(iss: NormalisedIssue, support: string[], t3: string[], dev: string[]): SupportDashboardRow['tierGroup'] {
+    const t = (iss.tier || '').toLowerCase();
+    if (t3.includes(t)) return 't3';
+    if (dev.includes(t)) return 'development';
+    if (support.includes(t) || t === '') return 'support'; // blank tier defaults to Customer Care
+    return 'other';
+  }
+
   async getSupportDashboard(orgId: number): Promise<SupportDashboardResponse> {
     const scope = await this.getOrgScope(orgId);
     if (!scope.bcAccount && !scope.reporters.length) {
@@ -259,6 +272,9 @@ export class PortalDashboardService {
       .map(t => t.toLowerCase());
     const devStatuses = parseList(this.setting('portal_dev_statuses'), DEFAULT_DEV_STATUSES)
       .map(t => t.toLowerCase());
+    const tierSupport = parseList(this.setting('portal_tier_support'), DEFAULT_TIER_SUPPORT).map(t => t.toLowerCase());
+    const tierT3 = parseList(this.setting('portal_tier_t3'), DEFAULT_TIER_T3).map(t => t.toLowerCase());
+    const tierDev = parseList(this.setting('portal_tier_development'), DEFAULT_TIER_DEVELOPMENT).map(t => t.toLowerCase());
 
     const issues = await this.getOpenIssues(orgId, scope);
     const rows: SupportDashboardRow[] = issues
@@ -279,6 +295,7 @@ export class PortalDashboardService {
           businessCritical: i.priority.toLowerCase() === 'blocker',
           priority: i.priority,
           sprintState: this.sprintState(i, devStatuses),
+          tierGroup: this.tierGroup(i, tierSupport, tierT3, tierDev),
         };
       });
 
@@ -289,6 +306,9 @@ export class PortalDashboardService {
       businessCritical: rows.filter(r => r.businessCritical).length,
       awaitingSprint: rows.filter(r => r.sprintState === 'awaiting').length,
       allocatedSprint: rows.filter(r => r.sprintState === 'allocated').length,
+      tierSupport: rows.filter(r => r.tierGroup === 'support').length,
+      tierT3: rows.filter(r => r.tierGroup === 't3').length,
+      tierDevelopment: rows.filter(r => r.tierGroup === 'development').length,
     };
     return { summary, rows, bcAccountNumber: scope.bcAccount };
   }
@@ -307,5 +327,5 @@ function emptyOnboardingSummary() {
 }
 
 function emptySupportSummary() {
-  return { total: 0, stale: 0, overSla: 0, businessCritical: 0, awaitingSprint: 0, allocatedSprint: 0 };
+  return { total: 0, stale: 0, overSla: 0, businessCritical: 0, awaitingSprint: 0, allocatedSprint: 0, tierSupport: 0, tierT3: 0, tierDevelopment: 0 };
 }
