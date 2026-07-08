@@ -1,6 +1,6 @@
 import { query, queryOne } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import type { JiraRestClient } from './jira-client.js';
+import { JiraRestClient } from './jira-client.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import type {
   PortalTicketSummary,
@@ -656,7 +656,18 @@ export class PortalJiraService {
     reporterEmail?: string;
     bcAccount?: string;
   }): Promise<string> {
-    if (!this.jiraClient) throw new Error('Jira client not configured');
+    // The JSM Service Desk API must be called on the DIRECT site URL with Basic
+    // auth — the api.atlassian.com/ex/jira/{cloudId} gateway (used by the injected
+    // onboarding client) rejects /rest/servicedeskapi/* for API tokens with
+    // "Unauthorized; scope does not match". Build a direct-site client from the
+    // service-desk credentials for this call.
+    const siteUrl = (this.settings.get('jira_url') || '').replace(/\/+$/, '');
+    const sdEmail = this.settings.get('jira_username');
+    const sdToken = this.settings.get('jira_token');
+    const sdClient = (siteUrl && sdEmail && sdToken)
+      ? new JiraRestClient({ baseUrl: siteUrl, email: sdEmail, apiToken: sdToken })
+      : this.jiraClient;
+    if (!sdClient) throw new Error('Jira client not configured');
 
     const serviceDeskId = this.settings.get('portal_nt_service_desk_id') || '50';
     const requestTypeId = params.requestType === 'broken'
@@ -682,7 +693,7 @@ export class PortalJiraService {
     const requestFieldValues: Record<string, unknown> = { summary: params.summary, description };
     let created: { issueKey: string; issueId: string };
     try {
-      created = await this.jiraClient.createServiceDeskRequest({
+      created = await sdClient.createServiceDeskRequest({
         serviceDeskId,
         requestTypeId,
         requestFieldValues,
@@ -693,7 +704,7 @@ export class PortalJiraService {
       // retry once without it (ticket is then reported by the service account).
       if (params.reporterEmail) {
         console.warn('[portal-jira] Network request raiseOnBehalfOf failed, retrying without reporter:', err instanceof Error ? err.message : err);
-        created = await this.jiraClient.createServiceDeskRequest({ serviceDeskId, requestTypeId, requestFieldValues });
+        created = await sdClient.createServiceDeskRequest({ serviceDeskId, requestTypeId, requestFieldValues });
       } else {
         throw err;
       }
@@ -718,7 +729,7 @@ export class PortalJiraService {
       extraFields.customfield_12981 = { id: tier3Id }; // Current Tier = Tier 3
     }
     try {
-      await this.jiraClient.updateFields(created.issueKey, extraFields);
+      await sdClient.updateFields(created.issueKey, extraFields);
     } catch (err) {
       // Non-fatal: the ticket exists; log and still return the key.
       console.warn('[portal-jira] Failed to set extra fields on', created.issueKey, ':', err instanceof Error ? err.message : err);
