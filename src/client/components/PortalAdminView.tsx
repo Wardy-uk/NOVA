@@ -670,6 +670,25 @@ function OrgRow({ org, onSaved }: {
     }
   };
 
+  const hasBranding = !!(brand.websiteUrl || brand.logoUrl || brand.primary || brand.secondary || brand.font);
+
+  const removeBranding = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/org-mapping/${org.id}`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ branding: { websiteUrl: null, logoUrl: null, primary: null, secondary: null, font: null } }),
+      });
+      const d = await res.json();
+      if (d.ok) { setBrand({ websiteUrl: '', logoUrl: '', primary: '', secondary: '', font: '' }); onSaved(); }
+    } catch (err) {
+      console.error('Failed to remove branding:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <tr className="text-gray-300 align-top">
       <td className="px-4 py-2">{org.name}</td>
@@ -760,6 +779,15 @@ function OrgRow({ org, onSaved }: {
             placeholder="Font (e.g. Inter)"
             className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
+          {hasBranding && (
+            <button
+              onClick={removeBranding}
+              disabled={saving}
+              className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-50"
+            >
+              Remove branding
+            </button>
+          )}
         </div>
       </td>
       <td className="px-4 py-2">{org.user_count}</td>
