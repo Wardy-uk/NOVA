@@ -340,9 +340,16 @@ export class PortalIntakeService {
   ): Promise<{ ticketKey: string }> {
     await trackEvent('form_completed', portalUserId, orgId, { category: 'network_request' });
 
+    // BC Account Number from the org's Customer Scope (Portal Admin → Orgs).
+    const org = await queryOne<{ bc_account_number: string | null }>(
+      `SELECT bc_account_number FROM portal_organisations WHERE id = ?`,
+      [orgId],
+    );
+
     let ticketKey: string;
     try {
       ticketKey = await this.portalJira.createNetworkRequest({
+        bcAccount: org?.bc_account_number?.trim() || undefined,
         network: input.network,
         summary: input.summary,
         agentNameBranch: input.agentNameBranch,

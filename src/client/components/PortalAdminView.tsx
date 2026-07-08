@@ -541,7 +541,7 @@ function OrgsPanel() {
   const { data: orgs, loading } = useFetch<Array<{
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
-    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number;
+    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
   }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
@@ -575,29 +575,30 @@ function OrgsPanel() {
   );
 }
 
-const FEATURE_DEFS: Array<{ key: 'getHelp' | 'kb' | 'support' | 'onboarding'; label: string }> = [
+const FEATURE_DEFS: Array<{ key: 'getHelp' | 'kb' | 'support' | 'onboarding' | 'raiseTicket'; label: string }> = [
   { key: 'getHelp', label: 'Get Help' },
   { key: 'kb', label: 'Knowledge Base' },
   { key: 'support', label: 'Support' },
   { key: 'onboarding', label: 'Onboarding' },
+  { key: 'raiseTicket', label: 'Raise a Ticket' },
 ];
 
 function OrgRow({ org, onSaved }: {
   org: {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
-    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number;
+    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
   };
   onSaved: () => void;
 }) {
   const [bc, setBc] = useState(org.bc_account_number || '');
   const [reporters, setReporters] = useState(org.scope_reporters || '');
   const [features, setFeatures] = useState({
-    getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding,
+    getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
   });
   const [saving, setSaving] = useState(false);
 
-  const origFeatures = { getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding };
+  const origFeatures = { getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket };
   const dirty =
     (bc.trim() || null) !== (org.bc_account_number || null) ||
     (reporters.trim() || null) !== (org.scope_reporters || null) ||

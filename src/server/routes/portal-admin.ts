@@ -272,11 +272,12 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         feat_kb: number;
         feat_support: number;
         feat_onboarding: number;
+        feat_raise_ticket: number;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
-                po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding,
+                po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -346,9 +347,9 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         const bit = (v: unknown) => (v ? 1 : 0);
         await execute(
           `UPDATE portal_organisations
-           SET feat_get_help = ?, feat_kb = ?, feat_support = ?, feat_onboarding = ?, updated_at = GETUTCDATE()
+           SET feat_get_help = ?, feat_kb = ?, feat_support = ?, feat_onboarding = ?, feat_raise_ticket = ?, updated_at = GETUTCDATE()
            WHERE id = ?`,
-          [bit(features.getHelp), bit(features.kb), bit(features.support), bit(features.onboarding), orgId],
+          [bit(features.getHelp), bit(features.kb), bit(features.support), bit(features.onboarding), bit(features.raiseTicket), orgId],
         );
       }
       res.json({ ok: true });

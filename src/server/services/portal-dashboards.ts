@@ -112,9 +112,8 @@ export class PortalDashboardService {
   // Per-org feature toggles. If the org has no row (e.g. internal admin, orgId 0)
   // everything is visible so we never hide features from staff.
   async getOrgFeatures(orgId: number): Promise<PortalOrgFeatures> {
-    const raiseTicket = this.isRaiseTicketOrg(orgId);
-    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number }>(
-      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding FROM portal_organisations WHERE id = ?`,
+    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number }>(
+      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
     // No org row (internal staff, orgId 0) → everything visible so we can test it.
@@ -124,16 +123,8 @@ export class PortalDashboardService {
       kb: !!row.feat_kb,
       support: !!row.feat_support,
       onboarding: !!row.feat_onboarding,
-      raiseTicket,
+      raiseTicket: !!row.feat_raise_ticket,
     };
-  }
-
-  // "Raise a ticket" (Guild / Fine & Country) is enabled per-org via a settings
-  // allowlist of org ids — e.g. portal_raise_ticket_org_ids = "5,12".
-  private isRaiseTicketOrg(orgId: number): boolean {
-    const raw = this.setting('portal_raise_ticket_org_ids') || '';
-    const ids = raw.split(',').map(s => s.trim()).filter(Boolean);
-    return ids.includes(String(orgId));
   }
 
   async getOrgScope(orgId: number): Promise<OrgScope> {

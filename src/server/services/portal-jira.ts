@@ -654,6 +654,7 @@ export class PortalJiraService {
     notes?: string;
     triagedForDevelopment: boolean;
     reporterEmail?: string;
+    bcAccount?: string;
   }): Promise<string> {
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
@@ -706,7 +707,9 @@ export class PortalJiraService {
       priority: { id: priorityId },
       labels: [networkLabel, params.requestType === 'broken' ? 'incident' : 'change-request'],
     };
-    const bcAccount = this.settings.get('portal_nt_network_bc_account') || 'CU0002362';
+    // BC Account Number comes from the org's Customer Scope (portal admin); the
+    // setting is only a last-resort override if the org has none configured.
+    const bcAccount = (params.bcAccount || this.settings.get('portal_nt_network_bc_account') || '').trim();
     if (bcAccount) {
       extraFields.customfield_14626 = bcAccount; // BC Account Number
     }

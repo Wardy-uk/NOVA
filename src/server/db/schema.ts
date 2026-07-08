@@ -1992,6 +1992,9 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE portal_organisations ADD feat_support BIT NOT NULL CONSTRAINT DF_portal_org_support DEFAULT 0;`,
     `IF COL_LENGTH('portal_organisations', 'feat_onboarding') IS NULL
      ALTER TABLE portal_organisations ADD feat_onboarding BIT NOT NULL CONSTRAINT DF_portal_org_onboarding DEFAULT 0;`,
+    // Guild / Fine & Country "Raise a Ticket" intake — opt-in per customer.
+    `IF COL_LENGTH('portal_organisations', 'feat_raise_ticket') IS NULL
+     ALTER TABLE portal_organisations ADD feat_raise_ticket BIT NOT NULL CONSTRAINT DF_portal_org_raise_ticket DEFAULT 0;`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
