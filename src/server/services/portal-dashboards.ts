@@ -212,6 +212,109 @@ export class PortalDashboardService {
     return jsm;
   }
 
+  private async resolveAccountId(email: string): Promise<string | null> {
+    if (!this.jira || !email) return null;
+    try {
+      const users = await this.jira.searchUsers(email, 10);
+      const exact = users.find(u => (u.emailAddress || '').toLowerCase() === email.toLowerCase());
+      return (exact || users[0])?.accountId || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ── My Tickets listing (role-scoped) ──
+  // scope 'mine' = reporter is the current user; scope 'org' = the org's BC-Account
+  // + reporter scope (same population the Support dashboard uses). JSM only.
+  async listTickets(opts: {
+    orgId: number; userEmail: string; scope: 'mine' | 'org';
+    status?: 'all' | 'open' | 'resolved'; search?: string;
+  }): Promise<import('../../shared/portal-types.js').PortalOrgTicket[]> {
+    if (!this.jira) return [];
+
+    let scopeClause: string;
+    if (opts.scope === 'mine') {
+      const accountId = await this.resolveAccountId(opts.userEmail);
+      if (!accountId) return [];
+      scopeClause = `reporter = "${accountId}"`;
+    } else {
+      const scope = await this.getOrgScope(opts.orgId);
+      const branches: string[] = [];
+      if (scope.reporters.length) {
+        branches.push(`reporter in (${scope.reporters.map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r)).join(', ')})`);
+      }
+      if (scope.bcAccount) branches.push(`cf[14626] ~ ${JSON.stringify(scope.bcAccount)}`);
+      if (!branches.length) return [];
+      scopeClause = `(${branches.join(' OR ')})`;
+    }
+
+    const statusClause = opts.status === 'open' ? 'statusCategory != Done'
+      : opts.status === 'resolved' ? 'statusCategory = Done' : null;
+    const searchClause = opts.search ? `summary ~ ${JSON.stringify(opts.search)}` : null;
+    const jql = [scopeClause, statusClause, searchClause].filter(Boolean).join(' AND ') + ' ORDER BY created DESC';
+
+    const result = await this.jira.searchJqlAll(jql, JIRA_FIELDS, 200);
+    const allowedTypes = parseList(this.setting('portal_dashboard_project_types'), ['service_desk']).map(t => t.toLowerCase());
+    const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
+
+    return (result.issues || [])
+      .map((iss: any) => {
+        const f = iss.fields ?? {};
+        const requestType = [f[CF_JSM_REQUEST_TYPE]?.requestType?.name, cfValue(f[CF_SLA_REQUEST_TYPE])].filter(Boolean).join(' ');
+        return {
+          key: iss.key,
+          summary: f.summary || '',
+          status: f.status?.name || 'Unknown',
+          priority: f.priority?.name || 'Medium',
+          requestType,
+          reporter: f.reporter?.emailAddress || f.reporter?.displayName || null,
+          assignee: f.assignee?.displayName || null,
+          created: f.created || '',
+          updated: f.updated || f.created || '',
+          isEscalation: escalationTokens.some(t => requestType.toLowerCase().includes(t)),
+          _projectType: (f.project?.projectTypeKey || '').toLowerCase(),
+        };
+      })
+      .filter((t: any) => allowedTypes.includes(t._projectType))
+      .map(({ _projectType, ...t }: any) => t);
+  }
+
+  // ── Escalate a ticket ──
+  // Creates a new Escalation request (JSM Request Type = Escalation) linked back
+  // to the original ticket. Manager-only (enforced at the route).
+  async escalateTicket(originalKey: string, reason: string, byEmail: string): Promise<{ key: string }> {
+    if (!this.jira) throw new Error('Jira is not configured');
+    const serviceDeskId = this.setting('portal_escalation_service_desk_id') || '50';
+    const requestTypeId = this.setting('portal_escalation_request_type_id') || '1237';
+    const linkType = this.setting('portal_escalation_link_type') || 'Relates';
+
+    const orig = await this.jira.getIssue(originalKey, ['summary']);
+    const origSummary = (orig?.fields as any)?.summary || originalKey;
+    const raiseOnBehalfOf = await this.resolveAccountId(byEmail);
+
+    const created = await this.jira.createServiceDeskRequest({
+      serviceDeskId,
+      requestTypeId,
+      requestFieldValues: {
+        summary: `ESCALATION - ${originalKey} - ${origSummary}`.slice(0, 250),
+        description: `Escalated from ${originalKey} by ${byEmail}.\n\nReason:\n${reason}`,
+      },
+      ...(raiseOnBehalfOf ? { raiseOnBehalfOf } : {}),
+    });
+
+    try {
+      await this.jira.createIssueLink({
+        type: { name: linkType },
+        inwardIssue: { key: created.issueKey },
+        outwardIssue: { key: originalKey },
+      });
+    } catch (err) {
+      console.warn(`[portal-escalate] created ${created.issueKey} but link to ${originalKey} failed:`, err instanceof Error ? err.message : err);
+    }
+
+    return { key: created.issueKey };
+  }
+
   private isOnboarding(iss: NormalisedIssue, tokens: string[]): boolean {
     const rt = iss.requestType.toLowerCase();
     const it = iss.issuetype.toLowerCase();

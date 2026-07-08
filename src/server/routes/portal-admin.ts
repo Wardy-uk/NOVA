@@ -5,6 +5,11 @@ import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
 
+const VALID_PORTAL_ROLES = ['requester', 'leader', 'manager', 'org_admin', 'admin'];
+function normalisePortalRole(role: unknown): string {
+  return typeof role === 'string' && VALID_PORTAL_ROLES.includes(role) ? role : 'requester';
+}
+
 export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
   const router = Router();
 
@@ -122,7 +127,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
            (external_id, org_id, email, display_name, role, password_hash, auth_type, access_state)
          OUTPUT INSERTED.id
          VALUES (?, ?, ?, ?, ?, ?, 'local', 'active')`,
-        [`local-user-${crypto.randomUUID()}`, resolvedOrgId, normalizedEmail, display_name.trim(), role === 'admin' ? 'admin' : role === 'org_admin' ? 'org_admin' : 'requester', passwordHash],
+        [`local-user-${crypto.randomUUID()}`, resolvedOrgId, normalizedEmail, display_name.trim(), normalisePortalRole(role), passwordHash],
       );
       res.json({ ok: true, data: { id: result!.id } });
     } catch (err) {
@@ -190,8 +195,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
       sets.push('display_name = ?'); params.push(display_name.trim());
     }
     if (typeof role === 'string') {
-      const normRole = role === 'admin' ? 'admin' : role === 'org_admin' ? 'org_admin' : 'requester';
-      sets.push('role = ?'); params.push(normRole);
+      sets.push('role = ?'); params.push(normalisePortalRole(role));
     }
     if (typeof org_id === 'number' && org_id > 0) {
       sets.push('org_id = ?'); params.push(org_id);

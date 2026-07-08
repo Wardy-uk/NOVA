@@ -324,6 +324,8 @@ function UsersPanel() {
               className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
             >
               <option value="requester">Requester</option>
+              <option value="leader">Leader (view all org tickets)</option>
+              <option value="manager">Manager (leader + escalate)</option>
               <option value="org_admin">Organisation admin</option>
               <option value="admin">Portal admin</option>
             </select>
@@ -475,6 +477,8 @@ function UsersPanel() {
                           className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100"
                         >
                           <option value="requester">Requester</option>
+                          <option value="leader">Leader (view all org tickets)</option>
+                          <option value="manager">Manager (leader + escalate)</option>
                           <option value="org_admin">Organisation admin</option>
                           <option value="admin">Portal admin</option>
                         </select>

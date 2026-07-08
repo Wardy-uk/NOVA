@@ -42,9 +42,31 @@ export interface PortalOrganisation {
 
 // ── Portal User ──
 
-export type PortalUserRole = 'requester' | 'org_admin' | 'admin';
+// Hierarchy: requester ⊂ leader ⊂ manager ⊂ org_admin ⊂ admin.
+// - requester: own tickets only
+// - leader: + view all org tickets
+// - manager: + escalate a ticket
+export type PortalUserRole = 'requester' | 'leader' | 'manager' | 'org_admin' | 'admin';
 export type PortalUserAuthType = 'oidc' | 'local' | 'internal';
 export type PortalUserAccessState = 'active' | 'disabled' | 'removed';
+
+export const PORTAL_ROLE_RANK: Record<PortalUserRole, number> = {
+  requester: 1,
+  leader: 2,
+  manager: 3,
+  org_admin: 4,
+  admin: 5,
+};
+
+/** Leader and above can see every ticket in their organisation, not just their own. */
+export function canViewAllOrgTickets(role: PortalUserRole | undefined): boolean {
+  return !!role && PORTAL_ROLE_RANK[role] >= PORTAL_ROLE_RANK.leader;
+}
+
+/** Manager and above can escalate a ticket (creates a linked Escalation request). */
+export function canEscalateTicket(role: PortalUserRole | undefined): boolean {
+  return !!role && PORTAL_ROLE_RANK[role] >= PORTAL_ROLE_RANK.manager;
+}
 
 export interface PortalUser {
   id: number;
@@ -196,6 +218,28 @@ export interface PortalOrgJiraMapping {
   org_id: number;
   jira_organisation_id: string | null;
   jira_email_domain: string | null;
+}
+
+// ── My Tickets / org ticket listing (live Jira, role-scoped) ──
+
+export interface PortalOrgTicket {
+  key: string;
+  summary: string;
+  status: string;        // raw Jira status
+  priority: string;
+  requestType: string;
+  reporter: string | null;
+  assignee: string | null;
+  created: string;
+  updated: string;
+  isEscalation: boolean;
+}
+
+export interface PortalMyTicketsResponse {
+  tickets: PortalOrgTicket[];
+  scope: 'mine' | 'org';
+  canViewOrg: boolean;
+  canEscalate: boolean;
 }
 
 // ── Portal Ticket (view model for API responses) ──

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import type { PortalTicketSummary } from '../../../shared/portal-types.js';
+import type { PortalOrgTicket, PortalMyTicketsResponse } from '../../../shared/portal-types.js';
+import { showPortalToast } from './PortalToast.js';
 
 interface Props {
   onViewTicket: (key: string) => void;
@@ -8,115 +9,78 @@ interface Props {
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
 export default function PortalTicketList({ onViewTicket }: Props) {
-  const [tickets, setTickets] = useState<PortalTicketSummary[]>([]);
-  const [total, setTotal] = useState(0);
+  const [tickets, setTickets] = useState<PortalOrgTicket[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('all');
+  const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('open');
+  const [scope, setScope] = useState<'mine' | 'org'>('mine');
+  const [canViewOrg, setCanViewOrg] = useState(false);
+  const [canEscalate, setCanEscalate] = useState(false);
   const [search, setSearch] = useState('');
-  const [mine, setMine] = useState(false);
-  const [priority, setPriority] = useState('all');
-  const [dateRange, setDateRange] = useState<'all' | 'today' | 'week' | 'month'>('all');
-  const pageSize = 20;
+  const [escalating, setEscalating] = useState<PortalOrgTicket | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        status,
-        page: String(page),
-        pageSize: String(pageSize),
-        ...(search ? { search } : {}),
-        ...(mine ? { mine: 'true' } : {}),
-        ...(priority !== 'all' ? { priority } : {}),
-        ...(dateRange !== 'all' ? { dateRange } : {}),
-      });
-      const res = await pf(`/api/portal/tickets?${params}`);
-      const data = await res.json();
-      if (data.ok) {
-        setTickets(data.data.tickets || []);
-        setTotal(data.data.total || 0);
+      const params = new URLSearchParams({ scope, status, ...(search ? { search } : {}) });
+      const res = await pf(`/api/portal/my-tickets?${params}`);
+      const body = await res.json();
+      if (body.ok) {
+        const data = body.data as PortalMyTicketsResponse;
+        setTickets(data.tickets || []);
+        setCanViewOrg(data.canViewOrg);
+        setCanEscalate(data.canEscalate);
+        // If the server downgraded scope (e.g. requester asked for org), reflect it.
+        if (data.scope !== scope) setScope(data.scope);
       }
     } catch (err) {
       console.error('Failed to load tickets:', err);
     } finally {
       setLoading(false);
     }
-  }, [page, status, search, mine, priority, dateRange]);
+  }, [scope, status, search]);
 
   useEffect(() => { load(); }, [load]);
 
   const statusColor = (s: string) => {
-    switch (s) {
-      case 'Submitted': return 'bg-gray-100 text-gray-700';
-      case 'Reviewed': return 'bg-blue-100 text-blue-700';
-      case 'In Progress': return 'bg-amber-100 text-amber-700';
-      case 'Awaiting Your Response': return 'bg-red-100 text-red-700';
-      case 'Awaiting Third Party': return 'bg-purple-100 text-purple-700';
-      case 'Resolved': return 'bg-green-100 text-green-700';
-      case 'Closed': return 'bg-slate-100 text-slate-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
+    const l = s.toLowerCase();
+    if (l.includes('closed') || l.includes('done') || l.includes('resolved')) return 'bg-slate-100 text-slate-700';
+    if (l.includes('progress') || l.includes('development')) return 'bg-amber-100 text-amber-700';
+    if (l.includes('wait')) return 'bg-purple-100 text-purple-700';
+    if (l.includes('open') || l.includes('new')) return 'bg-blue-100 text-blue-700';
+    return 'bg-gray-100 text-gray-700';
   };
-
-  const priorityColor = (p: string) => {
-    const lower = p.toLowerCase();
-    if (lower === 'highest' || lower === 'critical') return 'text-red-600';
-    if (lower === 'high') return 'text-orange-600';
-    return 'text-gray-500';
-  };
-
-  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
+      {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
+        {canViewOrg && (
+          <div className="flex bg-gray-100 rounded-lg p-0.5" role="group" aria-label="Scope">
+            {(['mine', 'org'] as const).map(sc => (
+              <button
+                key={sc}
+                onClick={() => setScope(sc)}
+                aria-pressed={scope === sc}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${scope === sc ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                {sc === 'mine' ? 'My tickets' : 'All org tickets'}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex bg-gray-100 rounded-lg p-0.5" role="group" aria-label="Filter by status">
           {(['all', 'open', 'resolved'] as const).map(s => (
             <button
               key={s}
-              onClick={() => { setStatus(s); setPage(1); }}
+              onClick={() => setStatus(s)}
               aria-pressed={status === s}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none ${
-                status === s ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900'
-              }`}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${status === s ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
             >
               {s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
         </div>
-
-        <label className="flex items-center gap-2 text-sm text-gray-600">
-          <input type="checkbox" checked={mine} onChange={e => { setMine(e.target.checked); setPage(1); }}
-            className="rounded border-gray-300 text-brand focus:ring-brand" />
-          My tickets only
-        </label>
-
-        <select
-          value={priority}
-          onChange={e => { setPriority(e.target.value); setPage(1); }}
-          aria-label="Filter by priority"
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
-        >
-          <option value="all">All priorities</option>
-          <option value="Highest">Highest</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
-        </select>
-
-        <select
-          value={dateRange}
-          onChange={e => { setDateRange(e.target.value as typeof dateRange); setPage(1); }}
-          aria-label="Filter by date range"
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
-        >
-          <option value="all">All time</option>
-          <option value="today">Today</option>
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-        </select>
 
         <div className="flex-1" />
 
@@ -125,7 +89,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
           placeholder="Search tickets..."
           aria-label="Search tickets"
           value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
+          onChange={e => setSearch(e.target.value)}
           className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
         />
       </div>
@@ -136,84 +100,129 @@ export default function PortalTicketList({ onViewTicket }: Props) {
           <div className="divide-y divide-gray-100">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="px-6 py-4 animate-pulse flex items-center gap-4">
-                <div className="h-4 w-16 bg-gray-200 rounded" />
-                <div className="h-4 flex-1 bg-gray-100 rounded" />
-                <div className="h-5 w-20 bg-gray-200 rounded-full" />
+                <div className="h-4 w-16 bg-gray-200 rounded" /><div className="h-4 flex-1 bg-gray-100 rounded" /><div className="h-5 w-20 bg-gray-200 rounded-full" />
               </div>
             ))}
           </div>
         ) : tickets.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-600">
             <p className="text-lg mb-2">No tickets found</p>
-            <p className="text-sm">Try adjusting your filters or search query.</p>
+            <p className="text-sm">{scope === 'mine' ? 'You have no tickets matching these filters.' : 'No org tickets match these filters.'}</p>
           </div>
         ) : (
-          <>
+          <div className="overflow-x-auto">
             <table className="w-full text-sm" aria-label="Tickets">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Key</th>
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Summary</th>
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Status</th>
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Priority</th>
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Assignee</th>
-                  <th scope="col" className="text-left px-6 py-3 font-medium text-gray-600">Updated</th>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
+                  <th scope="col" className="text-left px-5 py-3 font-medium">Ticket</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Status</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Priority</th>
+                  {scope === 'org' && <th scope="col" className="text-left px-4 py-3 font-medium">Reporter</th>}
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Updated</th>
+                  {canEscalate && <th scope="col" className="text-right px-5 py-3 font-medium">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {tickets.map(t => (
-                  <tr
-                    key={t.key}
-                    onClick={() => onViewTicket(t.key)}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewTicket(t.key); }}}
-                    tabIndex={0}
-                    role="row"
-                    aria-label={`Ticket ${t.key}: ${t.summary}`}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
-                  >
-                    <td className="px-6 py-3 font-mono text-gray-600">{t.key}</td>
-                    <td className="px-6 py-3 text-gray-900 max-w-md truncate">{t.summary}</td>
-                    <td className="px-6 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(t.status)}`}>
-                        {t.status}
-                      </span>
+                  <tr key={t.key} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-5 py-3 cursor-pointer" onClick={() => onViewTicket(t.key)}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-gray-500 text-xs">{t.key}</span>
+                        {t.isEscalation && <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-100 text-pink-700 font-semibold uppercase tracking-wide">Escalation</span>}
+                      </div>
+                      <div className="text-gray-900 max-w-md truncate">{t.summary}</div>
                     </td>
-                    <td className={`px-6 py-3 ${priorityColor(t.priority)}`}>{t.priority}</td>
-                    <td className="px-6 py-3 text-gray-600">{t.assignee || '-'}</td>
-                    <td className="px-6 py-3 text-gray-600">{new Date(t.updated).toLocaleDateString()}</td>
+                    <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(t.status)}`}>{t.status}</span></td>
+                    <td className="px-4 py-3 text-gray-600">{t.priority}</td>
+                    {scope === 'org' && <td className="px-4 py-3 text-gray-600">{t.reporter || '-'}</td>}
+                    <td className="px-4 py-3 text-gray-500">{t.updated ? new Date(t.updated).toLocaleDateString() : '-'}</td>
+                    {canEscalate && (
+                      <td className="px-5 py-3 text-right">
+                        {!t.isEscalation && (
+                          <button
+                            onClick={() => setEscalating(t)}
+                            className="px-2.5 py-1 text-xs rounded-lg border border-pink-300 text-pink-700 hover:bg-pink-50 font-medium"
+                          >
+                            Escalate
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
-                <span className="text-sm text-gray-600">
-                  Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    disabled={page <= 1}
-                    onClick={() => setPage(p => p - 1)}
-                    aria-label={`Previous page`}
-                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    disabled={page >= totalPages}
-                    onClick={() => setPage(p => p + 1)}
-                    aria-label={`Next page`}
-                    className="px-3 py-1 text-sm rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
+      </div>
+
+      {escalating && (
+        <EscalateModal
+          ticket={escalating}
+          onClose={() => setEscalating(null)}
+          onDone={(newKey) => {
+            setEscalating(null);
+            showPortalToast(`Escalation ${newKey} created for ${escalating.key}`, newKey);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EscalateModal({ ticket, onClose, onDone }: { ticket: PortalOrgTicket; onClose: () => void; onDone: (newKey: string) => void }) {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!reason.trim()) { setError('Please give a reason for the escalation.'); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await pf(`/api/portal/tickets/${ticket.key}/escalate`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const body = await res.json();
+      if (body.ok) onDone(body.data.key);
+      else setError(body.error || 'Escalation failed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Escalation failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Escalate ticket</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            <span className="font-mono">{ticket.key}</span> — {ticket.summary}
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Reason for escalation</label>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            rows={4}
+            autoFocus
+            placeholder="Why does this need escalating?"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <p className="text-xs text-gray-400 mt-1">Creates a new Escalation ticket linked to this one.</p>
+        </div>
+        {error && <div className="text-sm text-rose-600">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={submit} disabled={submitting} className="px-4 py-2 text-sm rounded-lg bg-pink-600 text-white hover:bg-pink-700 disabled:opacity-50 font-medium">
+            {submitting ? 'Escalating…' : 'Escalate'}
+          </button>
+        </div>
       </div>
     </div>
   );
