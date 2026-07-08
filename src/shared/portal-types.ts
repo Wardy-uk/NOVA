@@ -390,3 +390,61 @@ export interface PortalMetrics {
   portalAdoption: number;
   repeatDeflection: number;
 }
+
+// ── Customer Dashboards (Onboarding + Support) ──
+// Scoped per-customer by BC Account Number. Built from jira_issue_cache.
+
+export interface OnboardingDashboardRow {
+  key: string;
+  summary: string;
+  stage: string;              // Jira status = current stage (v1)
+  owner: string | null;       // Jira assignee
+  created: string;            // logged date
+  ageDays: number;            // whole days since logged
+  ageBucket: 'ok' | 'over7' | 'over14' | 'over21' | 'breach'; // >30 = SLA breach
+}
+
+export interface OnboardingDashboardSummary {
+  total: number;
+  over7: number;
+  over14: number;
+  over21: number;   // escalation trigger
+  breach: number;   // over 30 days = SLA breach
+}
+
+export interface OnboardingDashboardResponse {
+  summary: OnboardingDashboardSummary;
+  rows: OnboardingDashboardRow[];
+  bcAccountNumber: string | null;
+}
+
+export interface SupportDashboardRow {
+  key: string;
+  summary: string;
+  owner: string | null;       // Jira assignee
+  type: string;               // resolved: Tier 2/3, Starberry, TPJ, etc.
+  status: string;             // raw Jira status = current stage
+  created: string;            // logged date
+  ageDays: number;
+  daysSinceUpdate: number;    // whole days since last Jira update
+  stale: boolean;             // no update for 3+ days
+  overSla: boolean;           // SLA breached
+  businessCritical: boolean;  // Priority = Blocker
+  priority: string;
+  sprintState: 'allocated' | 'awaiting' | 'na';
+}
+
+export interface SupportDashboardSummary {
+  total: number;
+  stale: number;              // 3+ days no update
+  overSla: number;
+  businessCritical: number;
+  awaitingSprint: number;
+  allocatedSprint: number;
+}
+
+export interface SupportDashboardResponse {
+  summary: SupportDashboardSummary;
+  rows: SupportDashboardRow[];
+  bcAccountNumber: string | null;
+}

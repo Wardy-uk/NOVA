@@ -1971,6 +1971,11 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_analytics_event')
      CREATE INDEX IX_portal_analytics_event ON portal_analytics(event_type, created_at);`,
 
+    // BC Account Number on portal_organisations — customer key for the
+    // Onboarding/Support dashboards. Scopes jira_issue_cache by customfield_14626.
+    `IF COL_LENGTH('portal_organisations', 'bc_account_number') IS NULL
+     ALTER TABLE portal_organisations ADD bc_account_number NVARCHAR(100) NULL;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
        id INT IDENTITY(1,1) PRIMARY KEY,

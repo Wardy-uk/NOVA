@@ -208,10 +208,11 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         name: string;
         domain: string | null;
         external_id: string;
+        bc_account_number: string | null;
         user_count: number;
         ticket_count: number;
       }>(
-        `SELECT po.id, po.name, po.domain, po.external_id,
+        `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -228,10 +229,14 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
   // Org → Jira mapping
   router.get('/org-mapping', async (_req: Request, res: Response) => {
     try {
+      // Left join from organisations so orgs without a mapping row still appear
+      // (bc_account_number lives on portal_organisations).
       const mappings = await query(
-        `SELECT m.*, po.name AS org_name
-         FROM portal_org_jira_mapping m
-         JOIN portal_organisations po ON m.org_id = po.id`,
+        `SELECT po.id AS org_id, po.name AS org_name, po.bc_account_number,
+                m.jira_organisation_id, m.jira_email_domain
+         FROM portal_organisations po
+         LEFT JOIN portal_org_jira_mapping m ON m.org_id = po.id
+         ORDER BY po.name`,
       );
       res.json({ ok: true, data: mappings });
     } catch (err) {
@@ -241,7 +246,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -256,6 +261,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         await execute(
           `INSERT INTO portal_org_jira_mapping (org_id, jira_organisation_id, jira_email_domain) VALUES (?, ?, ?)`,
           [orgId, jira_organisation_id || null, jira_email_domain || null],
+        );
+      }
+      // BC Account Number is the customer key for the Onboarding/Support dashboards.
+      if (bc_account_number !== undefined) {
+        await execute(
+          `UPDATE portal_organisations SET bc_account_number = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [bc_account_number ? String(bc_account_number).trim() : null, orgId],
         );
       }
       res.json({ ok: true });

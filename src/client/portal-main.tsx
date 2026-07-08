@@ -13,8 +13,10 @@ const PortalNewRequest = lazy(() => import('./components/portal/PortalNewRequest
 const PortalKnowledgeBase = lazy(() => import('./components/portal/PortalKnowledgeBase.js'));
 const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
 const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
+const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalOnboardingDashboard.js'));
+const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
@@ -366,6 +368,8 @@ function PortalApp() {
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
         {view === 'kb' && <PortalKnowledgeBase onNavigate={setView} />}
         {view === 'chat' && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
+        {view === 'support-dashboard' && <PortalSupportDashboard />}
+        {view === 'onboarding-dashboard' && <PortalOnboardingDashboard />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>

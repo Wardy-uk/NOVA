@@ -424,9 +424,10 @@ function UsersPanel() {
 }
 
 function OrgsPanel() {
+  const [reloadKey, setReloadKey] = useState(0);
   const { data: orgs, loading } = useFetch<Array<{
-    id: number; name: string; domain: string | null; user_count: number;
-  }>>(`${API}/organisations`);
+    id: number; name: string; domain: string | null; user_count: number; bc_account_number: string | null;
+  }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
@@ -437,23 +438,76 @@ function OrgsPanel() {
           <tr className="border-b border-gray-700">
             <th className="text-left px-4 py-2 text-gray-400">Organisation</th>
             <th className="text-left px-4 py-2 text-gray-400">Domain</th>
+            <th className="text-left px-4 py-2 text-gray-400">BC Account #</th>
             <th className="text-left px-4 py-2 text-gray-400">Users</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-700">
           {(orgs || []).map(o => (
-            <tr key={o.id} className="text-gray-300">
-              <td className="px-4 py-2">{o.name}</td>
-              <td className="px-4 py-2 font-mono text-xs">{o.domain || '-'}</td>
-              <td className="px-4 py-2">{o.user_count}</td>
-            </tr>
+            <OrgRow key={o.id} org={o} onSaved={() => setReloadKey(k => k + 1)} />
           ))}
         </tbody>
       </table>
       {(!orgs || orgs.length === 0) && (
         <div className="px-4 py-8 text-center text-gray-500">No organisations yet</div>
       )}
+      <p className="px-4 py-2 text-xs text-gray-500 border-t border-gray-700">
+        BC Account # is the customer key (Jira customfield_14626) that scopes the customer Onboarding &amp; Support dashboards.
+      </p>
     </div>
+  );
+}
+
+function OrgRow({ org, onSaved }: {
+  org: { id: number; name: string; domain: string | null; user_count: number; bc_account_number: string | null };
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState(org.bc_account_number || '');
+  const [saving, setSaving] = useState(false);
+  const dirty = (value.trim() || null) !== (org.bc_account_number || null);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/org-mapping/${org.id}`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ bc_account_number: value.trim() || null }),
+      });
+      const d = await res.json();
+      if (d.ok) onSaved();
+    } catch (err) {
+      console.error('Failed to save BC account number:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr className="text-gray-300">
+      <td className="px-4 py-2">{org.name}</td>
+      <td className="px-4 py-2 font-mono text-xs">{org.domain || '-'}</td>
+      <td className="px-4 py-2">
+        <div className="flex items-center gap-2">
+          <input
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder="e.g. CU0001155"
+            className="w-32 px-2 py-1 text-xs font-mono bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          />
+          {dirty && (
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-2 py-1 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
+            >
+              {saving ? '…' : 'Save'}
+            </button>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-2">{org.user_count}</td>
+    </tr>
   );
 }
 
