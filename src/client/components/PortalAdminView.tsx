@@ -143,6 +143,8 @@ function UsersPanel() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ display_name: '', role: 'requester', org_id: '', password: '' });
   const [form, setForm] = useState({
     email: '',
     display_name: '',
@@ -211,6 +213,38 @@ function UsersPanel() {
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEdit = (u: { id: number; display_name: string; role: string; org_id: number }) => {
+    setEditingId(u.id);
+    setEditForm({ display_name: u.display_name, role: u.role, org_id: String(u.org_id), password: '' });
+    setError(null);
+  };
+
+  const saveEdit = async (id: number) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {
+        display_name: editForm.display_name,
+        role: editForm.role,
+      };
+      if (editForm.org_id) body.org_id = Number(editForm.org_id);
+      if (editForm.password) body.password = editForm.password;
+      const res = await fetch(`${API}/users/${id}`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to update user');
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user');
     } finally {
       setSaving(false);
     }
@@ -367,7 +401,8 @@ function UsersPanel() {
           </thead>
           <tbody className="divide-y divide-gray-700">
             {(users || []).map(u => (
-              <tr key={u.id} className="text-gray-300">
+              <React.Fragment key={u.id}>
+              <tr className="text-gray-300">
                 <td className="px-4 py-2">{u.display_name}</td>
                 <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
                 <td className="px-4 py-2">{u.org_name}</td>
@@ -390,28 +425,102 @@ function UsersPanel() {
                 <td className="px-4 py-2">{u.role}</td>
                 <td className="px-4 py-2">{u.last_login ? new Date(u.last_login).toLocaleDateString() : '-'}</td>
                 <td className="px-4 py-2">
-                  {u.auth_type === 'local' && u.access_state !== 'removed' ? (
+                  {u.access_state !== 'removed' ? (
                     <div className="flex gap-2">
                       <button
-                        onClick={() => changeAccess(u.id, u.access_state === 'disabled' ? 'active' : 'disabled')}
+                        onClick={() => startEdit(u)}
                         className="px-2 py-1 rounded bg-gray-700 text-xs text-gray-100 hover:bg-gray-600"
                       >
-                        {u.access_state === 'disabled' ? 'Re-enable' : 'Disable'}
+                        Edit
                       </button>
-                      <button
-                        onClick={() => removeUser(u.id)}
-                        className="px-2 py-1 rounded bg-red-900/50 text-xs text-red-200 hover:bg-red-900/70"
-                      >
-                        Remove
-                      </button>
+                      {u.auth_type === 'local' && (
+                        <>
+                          <button
+                            onClick={() => changeAccess(u.id, u.access_state === 'disabled' ? 'active' : 'disabled')}
+                            className="px-2 py-1 rounded bg-gray-700 text-xs text-gray-100 hover:bg-gray-600"
+                          >
+                            {u.access_state === 'disabled' ? 'Re-enable' : 'Disable'}
+                          </button>
+                          <button
+                            onClick={() => removeUser(u.id)}
+                            className="px-2 py-1 rounded bg-red-900/50 text-xs text-red-200 hover:bg-red-900/70"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      )}
                     </div>
                   ) : (
-                    <span className="text-xs text-gray-500">
-                      {u.auth_type === 'local' ? 'Removed' : 'Managed by existing auth'}
-                    </span>
+                    <span className="text-xs text-gray-500">Removed</span>
                   )}
                 </td>
               </tr>
+              {editingId === u.id && (
+                <tr className="bg-gray-900/60">
+                  <td colSpan={8} className="px-4 py-3">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <label className="flex flex-col gap-1 text-xs text-gray-400">
+                        Display name
+                        <input
+                          value={editForm.display_name}
+                          onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))}
+                          className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-gray-400">
+                        Role
+                        <select
+                          value={editForm.role}
+                          onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                          className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100"
+                        >
+                          <option value="requester">Requester</option>
+                          <option value="org_admin">Organisation admin</option>
+                          <option value="admin">Portal admin</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-gray-400">
+                        Organisation
+                        <select
+                          value={editForm.org_id}
+                          onChange={e => setEditForm(f => ({ ...f, org_id: e.target.value }))}
+                          className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100"
+                        >
+                          {(orgs || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                      </label>
+                      {u.auth_type === 'local' && (
+                        <label className="flex flex-col gap-1 text-xs text-gray-400">
+                          New password (optional)
+                          <input
+                            type="password"
+                            value={editForm.password}
+                            onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
+                            placeholder="Leave blank to keep"
+                            className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100"
+                          />
+                        </label>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveEdit(u.id)}
+                          disabled={saving}
+                          className="px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="px-3 py-1.5 text-sm rounded bg-gray-700 text-gray-100 hover:bg-gray-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
             ))}
           </tbody>
         </table>

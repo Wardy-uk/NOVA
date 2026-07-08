@@ -4283,7 +4283,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
   app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
-  app.use('/api/portal', portalGate, portalAuth, createPortalDashboardRoutes(settingsQueries));
+  app.use('/api/portal', portalGate, portalAuth, createPortalDashboardRoutes(settingsQueries, portalJiraClient));
 
   // Widget routes (public, CORS-gated, own auth via email identification)
   app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));

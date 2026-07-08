@@ -166,6 +166,60 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
     res.json({ ok: true });
   });
 
+  // Edit a portal user: display name, role, organisation, and optional password reset.
+  router.put('/users/:id', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    const { display_name, role, org_id, password } = req.body ?? {};
+    if (!id) {
+      res.status(400).json({ ok: false, error: 'Valid user ID is required' });
+      return;
+    }
+
+    const user = await queryOne<{ id: number; auth_type: string }>(
+      `SELECT id, auth_type FROM portal_users WHERE id = ?`,
+      [id],
+    );
+    if (!user) {
+      res.status(404).json({ ok: false, error: 'Portal user not found' });
+      return;
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (typeof display_name === 'string' && display_name.trim()) {
+      sets.push('display_name = ?'); params.push(display_name.trim());
+    }
+    if (typeof role === 'string') {
+      const normRole = role === 'admin' ? 'admin' : role === 'org_admin' ? 'org_admin' : 'requester';
+      sets.push('role = ?'); params.push(normRole);
+    }
+    if (typeof org_id === 'number' && org_id > 0) {
+      sets.push('org_id = ?'); params.push(org_id);
+    }
+    if (typeof password === 'string' && password.length > 0) {
+      if (password.length < 8) {
+        res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
+        return;
+      }
+      if (user.auth_type !== 'local') {
+        res.status(400).json({ ok: false, error: 'Only local portal users can have a password set here' });
+        return;
+      }
+      sets.push('password_hash = ?'); params.push(await bcrypt.hash(password, 10));
+    }
+    if (!sets.length) {
+      res.status(400).json({ ok: false, error: 'Nothing to update' });
+      return;
+    }
+    params.push(id);
+    try {
+      await execute(`UPDATE portal_users SET ${sets.join(', ')} WHERE id = ?`, params);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update user' });
+    }
+  });
+
   router.delete('/users/:id', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);
     if (!id) {

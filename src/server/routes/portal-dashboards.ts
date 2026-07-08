@@ -1,12 +1,14 @@
 import { Router, type Request, type Response } from 'express';
 import { PortalDashboardService } from '../services/portal-dashboards.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
+import type { JiraRestClient } from '../services/jira-client.js';
 
 // Customer-facing Onboarding + Support dashboards, scoped to the portal user's
-// organisation (→ BC Account Number). Mounted behind portalGate + portalAuth.
-export function createPortalDashboardRoutes(settings?: FileSettingsQueries): Router {
+// organisation (→ BC Account Number OR reporter set). Queries Jira live so it
+// spans every project. Mounted behind portalGate + portalAuth.
+export function createPortalDashboardRoutes(settings: FileSettingsQueries | undefined, jira: JiraRestClient | null): Router {
   const router = Router();
-  const service = new PortalDashboardService(settings);
+  const service = new PortalDashboardService(settings, jira);
 
   router.get('/dashboards/onboarding', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
