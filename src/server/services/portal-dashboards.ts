@@ -113,7 +113,12 @@ export class PortalDashboardService {
   private buildJql(scope: OrgScope): string | null {
     const branches: string[] = [];
     if (scope.reporters.length) {
-      branches.push(`reporter in (${scope.reporters.join(', ')})`);
+      // Account ids / qm: ids are safe unquoted (Jira accepts ':' and '-').
+      // Anything with a reserved char (e.g. '@' in an email) must be quoted.
+      const list = scope.reporters
+        .map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r))
+        .join(', ');
+      branches.push(`reporter in (${list})`);
     }
     if (scope.bcAccount) {
       branches.push(`cf[14626] ~ ${JSON.stringify(scope.bcAccount)}`);
