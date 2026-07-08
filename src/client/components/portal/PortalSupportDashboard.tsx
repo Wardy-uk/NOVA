@@ -7,8 +7,21 @@ type Filter = 'all' | 'stale' | 'sla' | 'critical' | 'escalation' | 'awaiting' |
 
 interface KpiDef {
   key: Filter; label: string; value: (s: SupportDashboardResponse['summary']) => number;
-  accent: string; ring: string; icon: React.ReactNode;
+  color: string; ring: string; icon: React.ReactNode;
 }
+
+// One palette shared by the tier/type cards and the "by ticket type" bar so a
+// category is the same colour everywhere (e.g. Development is green in both).
+const CATEGORY_COLORS: Record<string, string> = {
+  development: '#16a34a',      // green
+  'customer care': '#0d9488',  // teal
+  'tier 2': '#0891b2',         // cyan
+  'tier 3': '#6366f1',         // indigo
+  escalations: '#db2777',      // pink
+  production: '#64748b',       // slate
+};
+const FALLBACK_COLOR = '#94a3b8';
+const colorForType = (t: string) => CATEGORY_COLORS[t.toLowerCase()] ?? FALLBACK_COLOR;
 
 const icon = (d: string) => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -17,26 +30,26 @@ const icon = (d: string) => (
 );
 
 const TOP_KPIS: KpiDef[] = [
-  { key: 'all', label: 'Open tickets', value: s => s.total, accent: 'text-slate-700 dark:text-slate-200', ring: 'ring-slate-300',
+  { key: 'all', label: 'Open tickets', value: s => s.total, color: '#334155', ring: 'ring-slate-300',
     icon: icon('M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2') },
-  { key: 'stale', label: 'No update 3+ days', value: s => s.stale, accent: 'text-amber-600', ring: 'ring-amber-400',
+  { key: 'stale', label: 'No update 3+ days', value: s => s.stale, color: '#d97706', ring: 'ring-amber-400',
     icon: icon('M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z') },
-  { key: 'sla', label: 'Over SLA', value: s => s.overSla, accent: 'text-rose-600', ring: 'ring-rose-400',
+  { key: 'sla', label: 'Over SLA', value: s => s.overSla, color: '#e11d48', ring: 'ring-rose-400',
     icon: icon('M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z') },
-  { key: 'critical', label: 'Business critical', value: s => s.businessCritical, accent: 'text-red-600', ring: 'ring-red-500',
+  { key: 'critical', label: 'Business critical', value: s => s.businessCritical, color: '#dc2626', ring: 'ring-red-500',
     icon: icon('M13 10V3L4 14h7v7l9-11h-7z') },
-  { key: 'escalation', label: 'Escalations', value: s => s.escalations, accent: 'text-fuchsia-600', ring: 'ring-fuchsia-400',
+  { key: 'escalation', label: 'Escalations', value: s => s.escalations, color: CATEGORY_COLORS.escalations, ring: 'ring-pink-400',
     icon: icon('M13 7h8m0 0v8m0-8l-8 8-4-4-6 6') },
 ];
 
 const TIER_KPIS: KpiDef[] = [
-  { key: 'support', label: 'Support (CC + Tier 2)', value: s => s.tierSupport, accent: 'text-teal-600', ring: 'ring-teal-400',
+  { key: 'support', label: 'Support (CC + Tier 2)', value: s => s.tierSupport, color: CATEGORY_COLORS['customer care'], ring: 'ring-teal-400',
     icon: icon('M18.364 5.636a9 9 0 010 12.728m-3.536-3.536a4 4 0 010-5.656M12 12h.01') },
-  { key: 't3', label: 'Tier 3', value: s => s.tierT3, accent: 'text-indigo-600', ring: 'ring-indigo-400',
+  { key: 't3', label: 'Tier 3', value: s => s.tierT3, color: CATEGORY_COLORS['tier 3'], ring: 'ring-indigo-400',
     icon: icon('M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z') },
-  { key: 'development', label: 'Development', value: s => s.tierDevelopment, accent: 'text-sky-600', ring: 'ring-sky-400',
+  { key: 'development', label: 'Development', value: s => s.tierDevelopment, color: CATEGORY_COLORS.development, ring: 'ring-green-400',
     icon: icon('M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4') },
-  { key: 'awaiting', label: 'Awaiting sprint', value: s => s.awaitingSprint, accent: 'text-violet-600', ring: 'ring-violet-400',
+  { key: 'awaiting', label: 'Awaiting sprint', value: s => s.awaitingSprint, color: '#7c3aed', ring: 'ring-violet-400',
     icon: icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
 ];
 
@@ -130,8 +143,8 @@ export default function PortalSupportDashboard() {
                 aria-pressed={active}
                 className={`group relative text-left bg-white rounded-2xl border border-gray-200 p-4 transition-all hover:shadow-md hover:-translate-y-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? `ring-2 ${k.ring} shadow-sm` : ''}`}
               >
-                <div className={`inline-flex items-center justify-center w-9 h-9 rounded-xl bg-gray-50 ${k.accent} mb-3`}>{k.icon}</div>
-                <div className={`text-3xl font-bold tabular-nums ${k.accent}`}>{loading ? '—' : k.value(s ?? {} as any)}</div>
+                <div className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-gray-50 mb-3" style={{ color: k.color }}>{k.icon}</div>
+                <div className="text-3xl font-bold tabular-nums" style={{ color: k.color }}>{loading ? '—' : k.value(s ?? {} as any)}</div>
                 <div className="text-xs text-gray-500 mt-1">{k.label}</div>
               </button>
             );
@@ -147,15 +160,15 @@ export default function PortalSupportDashboard() {
             <span className="text-xs text-gray-400">{total} open</span>
           </div>
           <div className="flex h-3 rounded-full overflow-hidden bg-gray-100">
-            {typeBreakdown.map(([type, count], i) => (
-              <div key={type} style={{ width: `${(count / total) * 100}%`, background: TYPE_COLORS[i % TYPE_COLORS.length] }}
+            {typeBreakdown.map(([type, count]) => (
+              <div key={type} style={{ width: `${(count / total) * 100}%`, background: colorForType(type) }}
                 title={`${type}: ${count}`} />
             ))}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
-            {typeBreakdown.map(([type, count], i) => (
+            {typeBreakdown.map(([type, count]) => (
               <span key={type} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: TYPE_COLORS[i % TYPE_COLORS.length] }} />
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: colorForType(type) }} />
                 {type} <span className="text-gray-400 tabular-nums">{count}</span>
               </span>
             ))}

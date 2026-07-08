@@ -19,7 +19,8 @@ import type {
 const MS_PER_DAY = 86_400_000;
 
 // Jira custom fields (discovered from the live instance)
-const CF_REQUEST_TYPE = 'customfield_13482';
+const CF_JSM_REQUEST_TYPE = 'customfield_12800'; // JSM customer Request Type (Escalation, Onboarding, Delivery QA…) — nested {requestType:{name}}
+const CF_SLA_REQUEST_TYPE = 'customfield_13482'; // "SLA Request Type" (Incident/Service Request…) — secondary
 const CF_TIER = 'customfield_12981';
 const CF_BC_ACCOUNT = 'customfield_14626';
 const CF_SPRINT = 'customfield_10007';
@@ -28,7 +29,7 @@ const CF_RESOLUTION_SLA = 'customfield_12805'; // "Time to resolution"
 const JIRA_FIELDS = [
   'summary', 'status', 'assignee', 'reporter', 'created', 'updated',
   'priority', 'issuetype', 'project', 'labels',
-  CF_REQUEST_TYPE, CF_TIER, CF_BC_ACCOUNT, CF_SPRINT, CF_RESOLUTION_SLA,
+  CF_JSM_REQUEST_TYPE, CF_SLA_REQUEST_TYPE, CF_TIER, CF_BC_ACCOUNT, CF_SPRINT, CF_RESOLUTION_SLA,
 ];
 
 const DEFAULT_EXCLUDE_STATUSES = ['Closed', 'Done', 'Released', 'Resolved', 'Promoted', 'Declined', 'Cancelled'];
@@ -180,7 +181,10 @@ export class PortalDashboardService {
         project: f.project?.key || '',
         projectType: f.project?.projectTypeKey || '',
         labels: Array.isArray(f.labels) ? f.labels.join(' ') : '',
-        requestType: cfValue(f[CF_REQUEST_TYPE]) || '',
+        // JSM request type is nested ({requestType:{name}}); combine with the SLA
+        // request type so onboarding/escalation detection sees both taxonomies.
+        requestType: [f[CF_JSM_REQUEST_TYPE]?.requestType?.name, cfValue(f[CF_SLA_REQUEST_TYPE])]
+          .filter(Boolean).join(' '),
         tier: cfValue(f[CF_TIER]),
         hasSprint: Array.isArray(sprint) ? sprint.length > 0 : !!sprint,
         slaBreached,
@@ -272,6 +276,7 @@ export class PortalDashboardService {
       .map(t => t.toLowerCase());
     const devStatuses = parseList(this.setting('portal_dev_statuses'), DEFAULT_DEV_STATUSES)
       .map(t => t.toLowerCase());
+    // Escalations = JSM Request Type contains "Escalation" (configurable).
     const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
     const tierSupport = parseList(this.setting('portal_tier_support'), DEFAULT_TIER_SUPPORT).map(t => t.toLowerCase());
     const tierT3 = parseList(this.setting('portal_tier_t3'), DEFAULT_TIER_T3).map(t => t.toLowerCase());
