@@ -203,10 +203,22 @@ export class PortalDashboardService {
     return jsm;
   }
 
+  // The JSM Service Desk API + customer user-search must use the DIRECT site URL
+  // with Basic auth — the api.atlassian.com/ex/jira/{cloudId} gateway client
+  // rejects servicedeskapi and doesn't resolve portal customer accounts.
+  private directServiceDeskClient(): JiraRestClient | null {
+    const siteUrl = (this.setting('jira_url') || '').replace(/\/+$/, '');
+    const email = this.setting('jira_username');
+    const token = this.setting('jira_token');
+    if (siteUrl && email && token) return new JiraRestClient({ baseUrl: siteUrl, email, apiToken: token });
+    return null;
+  }
+
   private async resolveAccountId(email: string): Promise<string | null> {
-    if (!this.jira || !email) return null;
+    const client = this.directServiceDeskClient() ?? this.jira;
+    if (!client || !email) return null;
     try {
-      const users = await this.jira.searchUsers(email, 10);
+      const users = await client.searchUsers(email, 10);
       const exact = users.find(u => (u.emailAddress || '').toLowerCase() === email.toLowerCase());
       return (exact || users[0])?.accountId || null;
     } catch {
@@ -283,26 +295,31 @@ export class PortalDashboardService {
     const origSummary = (orig?.fields as any)?.summary || originalKey;
     const raiseOnBehalfOf = await this.resolveAccountId(byEmail);
 
-    // The JSM Service Desk API must be called on the DIRECT site URL with Basic
-    // auth — the api.atlassian.com/ex/jira/{cloudId} gateway rejects
-    // /rest/servicedeskapi/* for API tokens ("scope does not match"). Build a
-    // direct-site client from the service-desk credentials for the create.
-    const siteUrl = (this.setting('jira_url') || '').replace(/\/+$/, '');
-    const sdEmail = this.setting('jira_username');
-    const sdToken = this.setting('jira_token');
-    const sdClient = (siteUrl && sdEmail && sdToken)
-      ? new JiraRestClient({ baseUrl: siteUrl, email: sdEmail, apiToken: sdToken })
-      : this.jira;
+    // Service Desk API must be called on the direct site URL (see helper note).
+    const sdClient = this.directServiceDeskClient() ?? this.jira;
 
-    const created = await sdClient.createServiceDeskRequest({
-      serviceDeskId,
-      requestTypeId,
-      requestFieldValues: {
-        summary: `ESCALATION - ${originalKey} - ${origSummary}`.slice(0, 250),
-        description: `Escalated from ${originalKey} by ${byEmail}.\n\nReason:\n${reason}`,
-      },
-      ...(raiseOnBehalfOf ? { raiseOnBehalfOf } : {}),
-    });
+    const requestFieldValues = {
+      summary: `ESCALATION - ${originalKey} - ${origSummary}`.slice(0, 250),
+      description: `Escalated from ${originalKey} by ${byEmail}.\n\nReason:\n${reason}`,
+    };
+    let created: { issueKey: string; issueId: string };
+    try {
+      created = await sdClient.createServiceDeskRequest({
+        serviceDeskId,
+        requestTypeId,
+        requestFieldValues,
+        ...(raiseOnBehalfOf ? { raiseOnBehalfOf } : {}),
+      });
+    } catch (err) {
+      // The Escalation request type is agent-only, so raising it on behalf of a
+      // customer is rejected ("requestTypeNotFound"). Retry as the agent account.
+      if (raiseOnBehalfOf) {
+        console.warn(`[portal-escalate] raiseOnBehalfOf rejected for ${originalKey}, retrying as agent:`, err instanceof Error ? err.message : err);
+        created = await sdClient.createServiceDeskRequest({ serviceDeskId, requestTypeId, requestFieldValues });
+      } else {
+        throw err;
+      }
+    }
 
     try {
       await this.jira.createIssueLink({
