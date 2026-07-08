@@ -272,6 +272,7 @@ export class PortalDashboardService {
       .map(t => t.toLowerCase());
     const devStatuses = parseList(this.setting('portal_dev_statuses'), DEFAULT_DEV_STATUSES)
       .map(t => t.toLowerCase());
+    const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
     const tierSupport = parseList(this.setting('portal_tier_support'), DEFAULT_TIER_SUPPORT).map(t => t.toLowerCase());
     const tierT3 = parseList(this.setting('portal_tier_t3'), DEFAULT_TIER_T3).map(t => t.toLowerCase());
     const tierDev = parseList(this.setting('portal_tier_development'), DEFAULT_TIER_DEVELOPMENT).map(t => t.toLowerCase());
@@ -296,6 +297,7 @@ export class PortalDashboardService {
           priority: i.priority,
           sprintState: this.sprintState(i, devStatuses),
           tierGroup: this.tierGroup(i, tierSupport, tierT3, tierDev),
+          escalation: escalationTokens.some(t => i.requestType.toLowerCase().includes(t)),
         };
       });
 
@@ -306,6 +308,7 @@ export class PortalDashboardService {
       businessCritical: rows.filter(r => r.businessCritical).length,
       awaitingSprint: rows.filter(r => r.sprintState === 'awaiting').length,
       allocatedSprint: rows.filter(r => r.sprintState === 'allocated').length,
+      escalations: rows.filter(r => r.escalation).length,
       tierSupport: rows.filter(r => r.tierGroup === 'support').length,
       tierT3: rows.filter(r => r.tierGroup === 't3').length,
       tierDevelopment: rows.filter(r => r.tierGroup === 'development').length,
@@ -327,5 +330,5 @@ function emptyOnboardingSummary() {
 }
 
 function emptySupportSummary() {
-  return { total: 0, stale: 0, overSla: 0, businessCritical: 0, awaitingSprint: 0, allocatedSprint: 0, tierSupport: 0, tierT3: 0, tierDevelopment: 0 };
+  return { total: 0, stale: 0, overSla: 0, businessCritical: 0, awaitingSprint: 0, allocatedSprint: 0, escalations: 0, tierSupport: 0, tierT3: 0, tierDevelopment: 0 };
 }

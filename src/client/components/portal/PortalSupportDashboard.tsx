@@ -3,7 +3,7 @@ import type { SupportDashboardResponse, SupportDashboardRow } from '../../../sha
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-type Filter = 'all' | 'stale' | 'sla' | 'critical' | 'awaiting' | 'support' | 't3' | 'development';
+type Filter = 'all' | 'stale' | 'sla' | 'critical' | 'escalation' | 'awaiting' | 'support' | 't3' | 'development';
 
 interface KpiDef {
   key: Filter; label: string; value: (s: SupportDashboardResponse['summary']) => number;
@@ -25,6 +25,8 @@ const TOP_KPIS: KpiDef[] = [
     icon: icon('M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z') },
   { key: 'critical', label: 'Business critical', value: s => s.businessCritical, accent: 'text-red-600', ring: 'ring-red-500',
     icon: icon('M13 10V3L4 14h7v7l9-11h-7z') },
+  { key: 'escalation', label: 'Escalations', value: s => s.escalations, accent: 'text-fuchsia-600', ring: 'ring-fuchsia-400',
+    icon: icon('M13 7h8m0 0v8m0-8l-8 8-4-4-6 6') },
 ];
 
 const TIER_KPIS: KpiDef[] = [
@@ -74,6 +76,7 @@ export default function PortalSupportDashboard() {
       case 'stale': return all.filter(r => r.stale);
       case 'sla': return all.filter(r => r.overSla);
       case 'critical': return all.filter(r => r.businessCritical);
+      case 'escalation': return all.filter(r => r.escalation);
       case 'awaiting': return all.filter(r => r.sprintState === 'awaiting');
       case 'support': return all.filter(r => r.tierGroup === 'support');
       case 't3': return all.filter(r => r.tierGroup === 't3');
@@ -112,10 +115,13 @@ export default function PortalSupportDashboard() {
         </button>
       </div>
 
-      {/* KPI cards — row 1: health, row 2: tier breakdown */}
-      {[TOP_KPIS, TIER_KPIS].map((groupCards, gi) => (
-        <div key={gi} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {groupCards.map(k => {
+      {/* KPI cards — row 1: health (5), row 2: tier breakdown (4) */}
+      {[
+        { cards: TOP_KPIS, cls: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' },
+        { cards: TIER_KPIS, cls: 'grid-cols-2 sm:grid-cols-4' },
+      ].map((group, gi) => (
+        <div key={gi} className={`grid gap-3 ${group.cls}`}>
+          {group.cards.map(k => {
             const active = filter === k.key;
             return (
               <button

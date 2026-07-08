@@ -442,6 +442,7 @@ export interface SupportDashboardRow {
   priority: string;
   sprintState: 'allocated' | 'awaiting' | 'na';
   tierGroup: 'support' | 't3' | 'development' | 'other'; // Support = Customer Care + Tier 2
+  escalation: boolean;        // Request Type = Escalation
 }
 
 export interface SupportDashboardSummary {
@@ -451,6 +452,7 @@ export interface SupportDashboardSummary {
   businessCritical: number;
   awaitingSprint: number;
   allocatedSprint: number;
+  escalations: number;        // Request Type = Escalation
   tierSupport: number;        // current tier = Customer Care or Tier 2
   tierT3: number;             // current tier = Tier 3
   tierDevelopment: number;    // current tier = Development
