@@ -193,7 +193,18 @@ export class JiraRestClient {
     body?: unknown,
     retries = 2
   ): Promise<T> {
-    const url = `${this.baseUrl}/rest/api/3/${path}`;
+    return this.send<T>(method, `/rest/api/3/${path}`, body, retries);
+  }
+
+  /** Low-level request to any Jira REST base path (absolute after the site base URL,
+   *  e.g. `/rest/api/3/issue` or `/rest/servicedeskapi/request`). */
+  private async send<T>(
+    method: string,
+    absolutePath: string,
+    body?: unknown,
+    retries = 2
+  ): Promise<T> {
+    const url = `${this.baseUrl}${absolutePath}`;
     const maskedAuth = this.authHeader.startsWith('Basic ')
       ? `Basic ${this.authHeader.slice(6, 10)}...${this.authHeader.slice(-4)}`
       : `Bearer ${this.authHeader.slice(7, 11)}...${this.authHeader.slice(-4)}`;
@@ -217,7 +228,7 @@ export class JiraRestClient {
       const retryAfter = parseInt(res.headers.get('Retry-After') ?? '5', 10);
       console.warn(`[JiraClient] Rate limited, retrying in ${retryAfter}s...`);
       await new Promise(r => setTimeout(r, retryAfter * 1000));
-      return this.request<T>(method, path, body, retries - 1);
+      return this.send<T>(method, absolutePath, body, retries - 1);
     }
 
     // No content
@@ -330,6 +341,19 @@ export class JiraRestClient {
 
   async createIssue(payload: { fields: Record<string, unknown> }): Promise<JiraCreatedIssue> {
     return this.request<JiraCreatedIssue>('POST', 'issue', payload);
+  }
+
+  /** Create a JSM customer request via the Service Desk API. Unlike the platform
+   *  `createIssue`, this sets the customer request type natively (the `vp-origin`
+   *  field can't be set through /rest/api/3/issue) and can set the reporter via
+   *  `raiseOnBehalfOf`. Returns the created issue key/id. */
+  async createServiceDeskRequest(payload: {
+    serviceDeskId: string;
+    requestTypeId: string;
+    requestFieldValues: Record<string, unknown>;
+    raiseOnBehalfOf?: string;
+  }): Promise<{ issueId: string; issueKey: string }> {
+    return this.send<{ issueId: string; issueKey: string }>('POST', '/rest/servicedeskapi/request', payload);
   }
 
   async createIssueLink(payload: {

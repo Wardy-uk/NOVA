@@ -10,13 +10,14 @@ const PortalHome = lazy(() => import('./components/portal/PortalHome.js'));
 const PortalTicketList = lazy(() => import('./components/portal/PortalTicketList.js'));
 const PortalTicketDetail = lazy(() => import('./components/portal/PortalTicketDetail.js'));
 const PortalNewRequest = lazy(() => import('./components/portal/PortalNewRequest.js'));
+const PortalRaiseTicket = lazy(() => import('./components/portal/PortalRaiseTicket.js'));
 const PortalKnowledgeBase = lazy(() => import('./components/portal/PortalKnowledgeBase.js'));
 const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
 const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
 const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalOnboardingDashboard.js'));
 const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
@@ -296,6 +297,7 @@ function PortalApp() {
     if (!features) return;
     if ((view === 'support-dashboard' && !features.support) ||
         (view === 'onboarding-dashboard' && !features.onboarding) ||
+        (view === 'raise-ticket' && !features.raiseTicket) ||
         (view === 'kb' && !features.kb) ||
         (view === 'chat' && !features.getHelp)) {
       setView('home');
@@ -393,6 +395,7 @@ function PortalApp() {
           <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} onRefreshRef={ticketRefreshRef} />
         )}
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
+        {view === 'raise-ticket' && resolvedFeatures.raiseTicket && <PortalRaiseTicket onCreated={(key) => { handleViewTicket(key); }} />}
         {view === 'kb' && resolvedFeatures.kb && <PortalKnowledgeBase onNavigate={setView} />}
         {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
         {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}

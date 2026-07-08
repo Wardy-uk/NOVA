@@ -638,6 +638,92 @@ export class PortalJiraService {
     return issue.key;
   }
 
+  /** Raise a Guild / Fine & Country network request into NT via the JSM Service
+   *  Desk API. Sets the customer request type (Incident/Service Request) natively,
+   *  reports on behalf of the portal user, then applies priority, network label,
+   *  and — when triaged for development — Current Tier = Tier 3. */
+  async createNetworkRequest(params: {
+    network: 'Guild' | 'Fine & Country';
+    summary: string;
+    agentNameBranch: string;
+    agentOfficeId?: string;
+    detail: string;
+    priority: 'Low' | 'Medium' | 'High';
+    requestType: 'broken' | 'change';
+    hubspotLink?: string;
+    notes?: string;
+    triagedForDevelopment: boolean;
+    reporterEmail?: string;
+  }): Promise<string> {
+    if (!this.jiraClient) throw new Error('Jira client not configured');
+
+    const serviceDeskId = this.settings.get('portal_nt_service_desk_id') || '50';
+    const requestTypeId = params.requestType === 'broken'
+      ? (this.settings.get('portal_nt_rt_incident_id') || '243')
+      : (this.settings.get('portal_nt_rt_service_request_id') || '598');
+
+    const requestTypeLabel = params.requestType === 'broken' ? 'Something is broken' : 'Something needs changing';
+    const descLines = [
+      `Network: ${params.network}`,
+      `Agent Name & Branch: ${params.agentNameBranch}`,
+      `Agent Office ID: ${params.agentOfficeId || '—'}`,
+      '',
+      'Detailed description of Issue:',
+      params.detail,
+      '',
+      `Request type: ${requestTypeLabel}`,
+      `Link to originating ${params.network} Support Hubspot ticket (For Dev team's reference): ${params.hubspotLink || '—'}`,
+    ];
+    if (params.notes) { descLines.push('', `Notes: ${params.notes}`); }
+    const description = descLines.join('\n');
+
+    // 1) Create the JSM customer request (sets request type + reporter natively).
+    const requestFieldValues: Record<string, unknown> = { summary: params.summary, description };
+    let created: { issueKey: string; issueId: string };
+    try {
+      created = await this.jiraClient.createServiceDeskRequest({
+        serviceDeskId,
+        requestTypeId,
+        requestFieldValues,
+        raiseOnBehalfOf: params.reporterEmail || undefined,
+      });
+    } catch (err) {
+      // raiseOnBehalfOf can be rejected if the email isn't an eligible customer —
+      // retry once without it (ticket is then reported by the service account).
+      if (params.reporterEmail) {
+        console.warn('[portal-jira] Network request raiseOnBehalfOf failed, retrying without reporter:', err instanceof Error ? err.message : err);
+        created = await this.jiraClient.createServiceDeskRequest({ serviceDeskId, requestTypeId, requestFieldValues });
+      } else {
+        throw err;
+      }
+    }
+
+    // 2) Set fields the request form doesn't cover: priority, network label,
+    //    and (for dev triage) Current Tier = Tier 3.
+    const priorityId = params.priority === 'Low' ? '4' : params.priority === 'High' ? '3' : '10100'; // Minor / Major / Normal
+    const networkLabel = params.network === 'Guild' ? 'guild' : 'fine-and-country';
+    const extraFields: Record<string, unknown> = {
+      priority: { id: priorityId },
+      labels: [networkLabel, params.requestType === 'broken' ? 'incident' : 'change-request'],
+    };
+    const bcAccount = this.settings.get('portal_nt_network_bc_account') || 'CU0002362';
+    if (bcAccount) {
+      extraFields.customfield_14626 = bcAccount; // BC Account Number
+    }
+    if (params.triagedForDevelopment) {
+      const tier3Id = this.settings.get('jira_nt_tier3_option_id') || '13063';
+      extraFields.customfield_12981 = { id: tier3Id }; // Current Tier = Tier 3
+    }
+    try {
+      await this.jiraClient.updateFields(created.issueKey, extraFields);
+    } catch (err) {
+      // Non-fatal: the ticket exists; log and still return the key.
+      console.warn('[portal-jira] Failed to set extra fields on', created.issueKey, ':', err instanceof Error ? err.message : err);
+    }
+
+    return created.issueKey;
+  }
+
   async linkIssues(newKey: string, originalKey: string): Promise<void> {
     if (!this.jiraClient) return;
     const linkTypeName = this.settings.get('jira_link_type_name') || 'Relates';

@@ -121,6 +121,23 @@ export const PortalTicketCreateSchema = z.object({
 
 export type PortalTicketCreateInput = z.infer<typeof PortalTicketCreateSchema>;
 
+// ── Network Request (Guild / Fine & Country intake → NT) ──
+
+export const PortalNetworkRequestSchema = z.object({
+  network: z.enum(['Guild', 'Fine & Country']),
+  summary: z.string().min(1).max(500),
+  agentNameBranch: z.string().min(1).max(300),
+  agentOfficeId: z.string().max(100).optional(),
+  detail: z.string().min(1),
+  priority: z.enum(['Low', 'Medium', 'High']).default('Medium'),
+  requestType: z.enum(['broken', 'change']),
+  hubspotLink: z.string().max(1000).optional(),
+  notes: z.string().max(5000).optional(),
+  supportTeam: z.enum(['development', 'support']),
+});
+
+export type PortalNetworkRequestInput = z.infer<typeof PortalNetworkRequestSchema>;
+
 // ── KB Articles ──
 
 export interface PortalKbArticle {
@@ -398,6 +415,9 @@ export interface PortalOrgFeatures {
   kb: boolean;
   support: boolean;
   onboarding: boolean;
+  /** Guild / Fine & Country "Raise a ticket" intake. Gated per-org via the
+   *  `portal_raise_ticket_org_ids` setting (allowlist of org ids). */
+  raiseTicket?: boolean;
 }
 
 // ── Customer Dashboards (Onboarding + Support) ──

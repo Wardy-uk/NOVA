@@ -1,6 +1,6 @@
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
-import type { PortalTicketCreateInput } from '../../shared/portal-types.js';
+import type { PortalTicketCreateInput, PortalNetworkRequestInput } from '../../shared/portal-types.js';
 import { execute, queryOne } from './database.js';
 import { trackEvent } from './portal-analytics.js';
 import { EscalationLogService } from './escalation-log-service.js';
@@ -328,6 +328,45 @@ export class PortalIntakeService {
         },
       });
     }
+
+    return { ticketKey };
+  }
+
+  async submitNetworkRequest(
+    input: PortalNetworkRequestInput,
+    portalUserId: number,
+    orgId: number,
+    userEmail: string,
+  ): Promise<{ ticketKey: string }> {
+    await trackEvent('form_completed', portalUserId, orgId, { category: 'network_request' });
+
+    let ticketKey: string;
+    try {
+      ticketKey = await this.portalJira.createNetworkRequest({
+        network: input.network,
+        summary: input.summary,
+        agentNameBranch: input.agentNameBranch,
+        agentOfficeId: input.agentOfficeId,
+        detail: input.detail,
+        priority: input.priority,
+        requestType: input.requestType,
+        hubspotLink: input.hubspotLink,
+        notes: input.notes,
+        triagedForDevelopment: input.supportTeam === 'development',
+        reporterEmail: userEmail,
+      });
+    } catch (err) {
+      console.error('[portal-intake] Network request creation failed:', err);
+      throw new Error('We couldn\'t raise your ticket right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
+
+    await execute(
+      `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+       VALUES (?, ?, ?, ?)`,
+      [portalUserId, ticketKey, JSON.stringify(input), 'network_request'],
+    );
+
+    await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: ticketKey, category: 'network_request' });
 
     return { ticketKey };
   }
