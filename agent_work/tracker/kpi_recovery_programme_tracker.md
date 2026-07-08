@@ -20,8 +20,8 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | --- | --- | --- |
 | Programme initialisation | Active | Top-level `agent_work` governance lane established for this programme on 2026-05-29. |
 | Active phase | Replacement Parity Closure | Follow-on closure work to reach replacement-grade parity after clean-sheet convergence. |
-| Active work package | `KPX-WP10` | KPI Data parity surface delivery. |
-| Current convergence state | Checkpoint Ready | KPI Data passed evaluation; the remaining parameter-consistency note is bounded and non-blocking. |
+| Active work package | `KPX-WP11` | Data freshness and historical backfill closure. |
+| Current convergence state | Build Ready | Human direction is to focus next on real data depth, fresh-flow verification, and honest backfill rather than another surface. |
 | Scope protection | Active | No production code changes by Manager; no implementation prescription in briefs. |
 | Hidden evaluator logic | Protected | Holdouts stored outside Build-readable planning artefacts. |
 | Promotion gate | Replacement Parity Active | Replacement parity closure continues with the next targeted surface slice. |
@@ -56,6 +56,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `KPX-WP8A` | Prove the populated Agent Breaches path with disposable fixture support | Pass — Checkpoint Ready | Breach / at-risk / clear outcomes and teardown cleanliness are independently verified. |
 | `KPX-WP9` | Deliver Daily History parity surface on the clean-sheet path | Qualified Pass — Checkpoint Ready | Honest frozen-grid behaviour is proven; remaining richer multi-row proof is environmental only. |
 | `KPX-WP10` | Deliver KPI Data parity surface on the clean-sheet path | Qualified Pass — Checkpoint Ready | Honest raw/grid dataset behaviour is proven; remaining param-consistency note is bounded and non-blocking. |
+| `KPX-WP11` | Verify fresh-data flow and close highest-value historical backfill gaps | Build Ready | Improve real data population across the clean-sheet platform before opening more parity surfaces. |
 
 ## Phase Gate Rules
 
@@ -113,6 +114,7 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | `BKX-8` | Closed | Agent Breaches populated-path classification is now verified via disposable fixture seed, classification proof, and teardown. |
 | `BKX-9` | Open bounded environmental gap | Daily History multi-row presentation remains lightly proven because only one frozen day exists in the environment. |
 | `BKX-10` | Open bounded consistency gap | KPI Data uses `spaceKey` as the working filter param while sibling clean-sheet surfaces often use `space`; worth aligning later but not a blocker. |
+| `BKX-11` | Open core data gap | The clean-sheet platform remains materially under-populated; fresh-flow and historical backfill now need a dedicated governed closure slice. |
 
 ## Change Log
 
@@ -167,3 +169,4 @@ Status: Authoritative orchestration state for the clean-sheet KPI Recovery & Evi
 | 2026-06-01 | Daily History parity closure checkpoint created at commit `b2ac3d3` and pushed to both remotes. Human direction remains to keep closing named legacy surfaces. Manager decision: open `KPX-WP10` for KPI Data parity surface delivery as the next clearly named remaining legacy surface. |
 | 2026-06-01 | `KPX-WP10` build completion reviewed from `agent_work/build_status/kpi_data_parity_screen_2026-06-01.md`. Clean-sheet KPI Data surface now exists with raw/grid access to supported clean-sheet datasets, explicit unsupported handling, and legacy isolation. Open independent evaluation before any checkpoint decision. |
 | 2026-06-01 | `KPX-WP10` evaluation returned QUALIFIED PASS from `agent_work/eval_output/kpi_data_parity_eval_2026-06-01.md`. KPI Data is present, clean-sheet-backed, and honest about supported datasets, sparse states, truncation, and unsupported legacy-only families. The remaining `space` vs `spaceKey` filter inconsistency is bounded and non-blocking. Manager decision: checkpoint the slice now. |
+| 2026-06-01 | KPI Data parity closure checkpoint created at commit `3ee266b` and pushed to both remotes. Human direction then shifted from opening another surface to tackling the underlying data-depth problem directly. Manager decision: open `KPX-WP11` for data freshness verification and historical backfill closure. |

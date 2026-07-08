@@ -65,6 +65,60 @@ function shuffleArr<T>(arr: T[]): T[] {
   return a;
 }
 
+/** Self-contained canvas confetti burst — no dependency. Auto-removes after ~3s. */
+function fireConfetti(): void {
+  if (typeof document === 'undefined') return;
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { canvas.remove(); return; }
+
+  const colors = ['#5ec1ca', '#fbbf24', '#34d399', '#f472b6', '#a78bfa', '#f87171'];
+  const cx = canvas.width / 2;
+  const particles = Array.from({ length: 160 }, () => {
+    const angle = Math.random() * Math.PI - Math.PI / 2; // fan upward/outward
+    const speed = 6 + Math.random() * 9;
+    return {
+      x: cx + (Math.random() - 0.5) * 200,
+      y: canvas.height * 0.35,
+      vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? -1 : 1),
+      vy: Math.sin(angle) * speed - (4 + Math.random() * 4),
+      w: 6 + Math.random() * 6,
+      h: 8 + Math.random() * 8,
+      rot: Math.random() * Math.PI,
+      vrot: (Math.random() - 0.5) * 0.4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+    };
+  });
+
+  const start = performance.now();
+  const tick = (now: number) => {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const fade = elapsed > 2200 ? Math.max(0, 1 - (elapsed - 2200) / 800) : 1;
+    for (const p of particles) {
+      p.vy += 0.25; // gravity
+      p.vx *= 0.99;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rot += p.vrot;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    if (elapsed < 3000) requestAnimationFrame(tick);
+    else canvas.remove();
+  };
+  requestAnimationFrame(tick);
+}
+
 export function StandupView({ token }: { token: string }) {
   const dateFromHash = (() => {
     const q = window.location.hash.split('?')[1];
@@ -80,6 +134,7 @@ export function StandupView({ token }: { token: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [displayOrder, setDisplayOrder] = useState<string[] | null>(null);
   const [shuffling, setShuffling] = useState(false);
+  const [firstUp, setFirstUp] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | BriefCategory | 'over5'>('all');
   const [search, setSearch] = useState('');
@@ -138,17 +193,32 @@ export function StandupView({ token }: { token: string }) {
   async function startStandup() {
     const names = detail?.roster ?? [];
     if (names.length > 1) {
+      setFirstUp(null);
       setShuffling(true);
-      await new Promise<void>((resolve) => {
-        let ticks = 0;
-        const maxTicks = 12;
-        const iv = setInterval(() => {
-          ticks += 1;
-          setDisplayOrder(shuffleArr(names));
-          if (ticks >= maxTicks) { clearInterval(iv); resolve(); }
-        }, 110);
+      // Raffle wheel: spin fast, then decelerate to a stop so it lands with suspense.
+      const finalOrder = await new Promise<string[]>((resolve) => {
+        let delay = 55;
+        let order = names;
+        const spin = () => {
+          order = shuffleArr(order);
+          setDisplayOrder(order);
+          delay *= 1.18; // ease-out — each tick a little slower than the last
+          if (delay < 420) {
+            setTimeout(spin, delay);
+          } else {
+            resolve(order);
+          }
+        };
+        spin();
       });
       setShuffling(false);
+      // Crown whoever the wheel landed on.
+      const winner = finalOrder[0];
+      setFirstUp(winner ?? null);
+      if (winner) fireConfetti();
+      const cheers = ['🎉 You\'re up first', '🥇 First to spill the beans', '🎲 The dice have spoken', '🏆 Lucky winner goes first', '🎤 You\'ve got the mic'];
+      const pick = cheers[Math.floor(Math.random() * cheers.length)];
+      if (winner) setToast(`${pick}: ${winner}!`);
     }
     await setStatus('active');
   }
@@ -246,7 +316,7 @@ export function StandupView({ token }: { token: string }) {
       {/* Action bar */}
       <div className="flex flex-wrap gap-2">
         <button onClick={sendPrompts} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#2f353d] text-neutral-200 hover:bg-[#363d47] disabled:opacity-50">{busy === 'prompts' ? 'Sending…' : 'Send prompts'}</button>
-        {detail?.session?.status === 'pending' && <button onClick={startStandup} disabled={!!busy || shuffling} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">{shuffling ? '🎲 Shuffling…' : 'Start standup'}</button>}
+        {detail?.session?.status === 'pending' && <button onClick={startStandup} disabled={!!busy || shuffling} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">{shuffling ? '🎲 Spinning the wheel…' : 'Start standup'}</button>}
         {detail?.session?.status === 'active' && <button onClick={() => setStatus('complete')} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] disabled:opacity-50">Complete</button>}
         {detail?.session?.status === 'complete' && <button onClick={() => setStatus('pending')} disabled={!!busy} className="px-3 py-1.5 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] disabled:opacity-50">Reopen</button>}
       </div>
@@ -289,13 +359,17 @@ export function StandupView({ token }: { token: string }) {
           const commits = commitmentsByAgent.get(name) ?? [];
           const carried = carriedByAgent.get(name) ?? [];
           const open = expandedAgent === name;
+          const isFirstUp = !shuffling && firstUp === name;
           return (
-            <div key={name} className={`rounded-lg border overflow-hidden transition-all duration-200 ease-out ${shuffling ? 'animate-pulse scale-[0.98] ring-1 ring-[#5ec1ca]/40' : ''} ${submitted ? 'border-[#3a424d] bg-[#2f353d]' : 'border-[#3a424d]/50 bg-[#2f353d]/40'}`}>
+            <div key={name} className={`rounded-lg border overflow-hidden transition-all duration-200 ease-out ${shuffling ? 'animate-pulse scale-[0.98] ring-1 ring-[#5ec1ca]/40' : ''} ${isFirstUp ? 'ring-2 ring-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.35)] animate-[pulse_1s_ease-in-out_2]' : ''} ${submitted ? 'border-[#3a424d] bg-[#2f353d]' : 'border-[#3a424d]/50 bg-[#2f353d]/40'}`}>
               {/* Header — retains submission summary detail; toggles the card */}
               <button onClick={() => setExpandedAgent(open ? null : name)} className={`w-full flex items-center gap-2.5 px-4 py-3 text-left hover:bg-[#363d47] ${open ? 'border-b border-[#3a424d]' : ''}`}>
                 <span className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold ${submitted ? 'bg-[#5ec1ca]/20 text-[#5ec1ca]' : 'bg-neutral-700/40 text-neutral-500'}`}>{agentInitials(name)}</span>
                 <span className="flex-1 min-w-0">
-                  <span className="block text-sm text-neutral-100 truncate">{name}</span>
+                  <span className="flex items-center gap-1.5 text-sm text-neutral-100 truncate">
+                    {name}
+                    {isFirstUp && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">🥇 First up</span>}
+                  </span>
                   {submitted
                     ? <span className="block text-[11px] text-neutral-400">{sub!.ticket_count ?? '–'} tickets · {sub!.over_5_count ?? '–'} over 5 · {commitmentCount} commit.</span>
                     : <span className="block text-[11px] text-neutral-500">Not submitted</span>}
@@ -344,6 +418,8 @@ export function StandupView({ token }: { token: string }) {
                           {t.over5 && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
                           <a href={`https://nurtur.atlassian.net/browse/${t.key}`} target="_blank" rel="noreferrer" className="text-[#5ec1ca] hover:underline shrink-0">{t.key}</a>
                           <span className="text-neutral-300 flex-1 truncate">{t.summary}</span>
+                          {t.tier && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-400 shrink-0" title="Current Tier">{t.tier}</span>}
+                          {t.status && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-400 shrink-0" title="Status">{t.status}</span>}
                           <span className="text-neutral-500 shrink-0">{t.ageDays != null ? `${t.ageDays}d` : ''}</span>
                         </div>
                       ))}

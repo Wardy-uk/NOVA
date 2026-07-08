@@ -4,13 +4,13 @@
 
 | Field | Value |
 | --- | --- |
-| Current date | 2026-05-31 |
+| Current date | 2026-06-01 |
 | Active programme | KPI Recovery & Evidence Integrity |
 | Active phase | Replacement Parity Closure |
-| Active work package | `KPX-WP10` |
-| Lifecycle state | Checkpoint Ready |
-| Next required action | Route the KPI Data parity checkpoint scope to the Build Agent for a tight git commit. |
-| Following action after findings | Review the checkpoint result, update tracker, then decide whether to continue parity closure or pause for review. |
+| Active work package | `KPX-WP11` |
+| Lifecycle state | Build Ready |
+| Next required action | Route the data freshness and historical backfill brief to the Build Agent. |
+| Following action after findings | Review the freshness/backfill report, update tracker, then decide whether to open evaluation or a narrower recovery loop. |
 
 ## Isolation Rules Applied
 
