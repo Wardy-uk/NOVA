@@ -86,6 +86,7 @@ interface NormalisedIssue {
   priority: string;
   issuetype: string;
   project: string;
+  projectType: string;
   labels: string;
   requestType: string;
   tier: string | null;
@@ -172,6 +173,7 @@ export class PortalDashboardService {
         priority: f.priority?.name || 'Medium',
         issuetype: f.issuetype?.name || '',
         project: f.project?.key || '',
+        projectType: f.project?.projectTypeKey || '',
         labels: Array.isArray(f.labels) ? f.labels.join(' ') : '',
         requestType: cfValue(f[CF_REQUEST_TYPE]) || '',
         tier: cfValue(f[CF_TIER]),
@@ -180,8 +182,14 @@ export class PortalDashboardService {
       };
     });
 
-    this.cache.set(orgId, { at: Date.now(), issues });
-    return issues;
+    // JSM only — exclude Jira Software / Business work items (Epics, Stories, dev
+    // tasks). Service-desk projects are projectTypeKey = 'service_desk'.
+    const allowedTypes = parseList(this.setting('portal_dashboard_project_types'), ['service_desk'])
+      .map(t => t.toLowerCase());
+    const jsm = issues.filter(i => allowedTypes.includes(i.projectType.toLowerCase()));
+
+    this.cache.set(orgId, { at: Date.now(), issues: jsm });
+    return jsm;
   }
 
   private isOnboarding(iss: NormalisedIssue, tokens: string[]): boolean {

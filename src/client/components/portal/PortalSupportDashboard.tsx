@@ -36,6 +36,7 @@ export default function PortalSupportDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,7 +105,7 @@ export default function PortalSupportDashboard() {
           return (
             <button
               key={k.key}
-              onClick={() => setFilter(k.key)}
+              onClick={() => { setFilter(k.key); setExpanded(true); }}
               aria-pressed={active}
               className={`group relative text-left bg-white rounded-2xl border border-gray-200 p-4 transition-all hover:shadow-md hover:-translate-y-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? `ring-2 ${k.ring} shadow-sm` : ''}`}
             >
@@ -140,8 +141,21 @@ export default function PortalSupportDashboard() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Collapsible ticket list */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-live="polite">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          aria-expanded={expanded}
+          className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <span className="text-sm font-semibold text-gray-700">
+            Ticket list <span className="text-gray-400 font-normal">({rows.length}{filter !== 'all' ? ` ${KPIS.find(k => k.key === filter)?.label.toLowerCase()}` : ''})</span>
+          </span>
+          <svg className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {expanded && (<div className="border-t border-gray-100">
         {filter !== 'all' && (
           <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between text-sm">
             <span className="text-gray-600">Filtered: <span className="font-medium">{KPIS.find(k => k.key === filter)?.label}</span> ({rows.length})</span>
@@ -200,6 +214,7 @@ export default function PortalSupportDashboard() {
             </table>
           </div>
         )}
+        </div>)}
       </div>
     </div>
   );

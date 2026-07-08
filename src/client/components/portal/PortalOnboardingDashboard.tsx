@@ -21,6 +21,7 @@ export default function PortalOnboardingDashboard() {
   const [data, setData] = useState<OnboardingDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,8 +115,21 @@ export default function PortalOnboardingDashboard() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Collapsible request list */}
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-live="polite">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          aria-expanded={expanded}
+          className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <span className="text-sm font-semibold text-gray-700">
+            Request list <span className="text-gray-400 font-normal">({data?.rows.length ?? 0})</span>
+          </span>
+          <svg className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {expanded && (<div className="border-t border-gray-100">
         {loading ? (
           <div className="divide-y divide-gray-100">
             {[...Array(5)].map((_, i) => (
@@ -160,6 +174,7 @@ export default function PortalOnboardingDashboard() {
             </table>
           </div>
         )}
+        </div>)}
       </div>
     </div>
   );
