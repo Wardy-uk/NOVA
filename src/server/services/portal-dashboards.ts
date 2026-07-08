@@ -45,6 +45,26 @@ function wholeDaysSince(iso: string | null): number {
   return Math.max(0, Math.floor((Date.now() - then) / MS_PER_DAY));
 }
 
+// Parse the per-org reporter list (newline/comma separated). Entries may be
+// emails, display names, or account ids (incl. JSM "qm:orgid:accountid" form —
+// we also index the trailing accountId segment).
+function parseReporters(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const out = new Set<string>();
+  for (const part of raw.split(/[\n,]/)) {
+    const token = part.trim().replace(/^["']|["']$/g, '').toLowerCase();
+    if (!token) continue;
+    out.add(token);
+    if (token.includes(':')) out.add(token.slice(token.lastIndexOf(':') + 1));
+  }
+  return [...out];
+}
+
+interface OrgScope {
+  bcAccount: string | null;
+  reporters: string[];
+}
+
 export class PortalDashboardService {
   constructor(private settings?: FileSettingsQueries) {}
 
@@ -52,26 +72,50 @@ export class PortalDashboardService {
     return this.settings?.get(key) as string | undefined;
   }
 
-  async getOrgBcAccountNumber(orgId: number): Promise<string | null> {
-    const row = await queryOne<{ bc_account_number: string | null }>(
-      `SELECT bc_account_number FROM portal_organisations WHERE id = ?`,
+  async getOrgScope(orgId: number): Promise<OrgScope> {
+    const row = await queryOne<{ bc_account_number: string | null; scope_reporters: string | null }>(
+      `SELECT bc_account_number, scope_reporters FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
     const bc = row?.bc_account_number?.trim();
-    return bc ? bc : null;
+    return {
+      bcAccount: bc ? bc : null,
+      reporters: parseReporters(row?.scope_reporters),
+    };
   }
 
-  private async getOpenIssues(bcAccount: string): Promise<OpenIssueRow[]> {
+  // Open tickets for the customer: BC Account match OR any configured reporter
+  // (email / display name / account id). Mirrors the source JQL's reporter-set
+  // OR BC-Account-Number logic, restricted to unresolved.
+  private async getOpenIssues(scope: OrgScope): Promise<OpenIssueRow[]> {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (scope.bcAccount) {
+      clauses.push(`bc_account_number = ?`);
+      params.push(scope.bcAccount);
+    }
+    if (scope.reporters.length) {
+      const placeholders = scope.reporters.map(() => '?').join(', ');
+      clauses.push(`LOWER(reporter_email) IN (${placeholders})`);
+      params.push(...scope.reporters);
+      clauses.push(`LOWER(reporter_display) IN (${placeholders})`);
+      params.push(...scope.reporters);
+      clauses.push(`LOWER(reporter_account_id) IN (${placeholders})`);
+      params.push(...scope.reporters);
+    }
+    if (!clauses.length) return [];
+
     return query<OpenIssueRow>(
       `SELECT issue_key, summary, status_name, status_category, priority_name,
               issuetype_name, current_tier, request_type, project_key, labels,
               assignee_display, jira_created, jira_updated,
               sla_breach_time, sla_breached
        FROM jira_issue_cache
-       WHERE bc_account_number = ?
+       WHERE (${clauses.join(' OR ')})
          AND (status_category IS NULL OR status_category <> 'done')
        ORDER BY jira_created ASC`,
-      [bcAccount],
+      params,
     );
   }
 
@@ -86,13 +130,15 @@ export class PortalDashboardService {
   }
 
   async getOnboardingDashboard(orgId: number): Promise<OnboardingDashboardResponse> {
-    const bcAccount = await this.getOrgBcAccountNumber(orgId);
-    if (!bcAccount) return { summary: emptyOnboardingSummary(), rows: [], bcAccountNumber: null };
+    const scope = await this.getOrgScope(orgId);
+    if (!scope.bcAccount && !scope.reporters.length) {
+      return { summary: emptyOnboardingSummary(), rows: [], bcAccountNumber: null };
+    }
 
-    const tokens = parseList(this.setting('portal_onboarding_request_types'), ['onboard']);
+    const tokens = parseList(this.setting('portal_onboarding_request_types'), ['onboard', 'delivery']);
     const projectKeys = parseList(this.setting('portal_onboarding_project_keys'), []);
 
-    const issues = await this.getOpenIssues(bcAccount);
+    const issues = await this.getOpenIssues(scope);
     const rows: OnboardingDashboardRow[] = issues
       .filter(r => this.isOnboarding(r, tokens, projectKeys))
       .map(r => {
@@ -116,7 +162,7 @@ export class PortalDashboardService {
       breach: rows.filter(r => r.ageDays > 30).length,
     };
 
-    return { summary, rows, bcAccountNumber: bcAccount };
+    return { summary, rows, bcAccountNumber: scope.bcAccount };
   }
 
   // ── Support ──
@@ -147,10 +193,12 @@ export class PortalDashboardService {
   }
 
   async getSupportDashboard(orgId: number): Promise<SupportDashboardResponse> {
-    const bcAccount = await this.getOrgBcAccountNumber(orgId);
-    if (!bcAccount) return { summary: emptySupportSummary(), rows: [], bcAccountNumber: null };
+    const scope = await this.getOrgScope(orgId);
+    if (!scope.bcAccount && !scope.reporters.length) {
+      return { summary: emptySupportSummary(), rows: [], bcAccountNumber: null };
+    }
 
-    const onboardingTokens = parseList(this.setting('portal_onboarding_request_types'), ['onboard']);
+    const onboardingTokens = parseList(this.setting('portal_onboarding_request_types'), ['onboard', 'delivery']);
     const onboardingProjects = parseList(this.setting('portal_onboarding_project_keys'), []);
     const tpjProjects = parseList(this.setting('portal_tpj_project_keys'), ['tpj', 'ntpj']);
     const awaitingSprint = parseList(this.setting('portal_awaiting_sprint_statuses'), ['awaiting sprint']);
@@ -159,7 +207,7 @@ export class PortalDashboardService {
       ['in development', 'awaiting testing', 'scheduled for release', 'in progress'],
     );
 
-    const issues = await this.getOpenIssues(bcAccount);
+    const issues = await this.getOpenIssues(scope);
     const rows: SupportDashboardRow[] = issues
       .filter(r => !this.isOnboarding(r, onboardingTokens, onboardingProjects))
       .map(r => {
@@ -191,7 +239,7 @@ export class PortalDashboardService {
       allocatedSprint: rows.filter(r => r.sprintState === 'allocated').length,
     };
 
-    return { summary, rows, bcAccountNumber: bcAccount };
+    return { summary, rows, bcAccountNumber: scope.bcAccount };
   }
 }
 

@@ -1976,6 +1976,12 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'bc_account_number') IS NULL
      ALTER TABLE portal_organisations ADD bc_account_number NVARCHAR(100) NULL;`,
 
+    // Reporter identities that also belong to this customer (mirrors the
+    // "reporter IN (...)" branch of the source JQL). Newline/comma-separated list
+    // of emails, display names, or account ids — matched against reporter_* cols.
+    `IF COL_LENGTH('portal_organisations', 'scope_reporters') IS NULL
+     ALTER TABLE portal_organisations ADD scope_reporters NVARCHAR(MAX) NULL;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
        id INT IDENTITY(1,1) PRIMARY KEY,

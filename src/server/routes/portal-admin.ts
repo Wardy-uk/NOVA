@@ -209,10 +209,11 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         domain: string | null;
         external_id: string;
         bc_account_number: string | null;
+        scope_reporters: string | null;
         user_count: number;
         ticket_count: number;
       }>(
-        `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number,
+        `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -246,7 +247,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -263,11 +264,18 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
           [orgId, jira_organisation_id || null, jira_email_domain || null],
         );
       }
-      // BC Account Number is the customer key for the Onboarding/Support dashboards.
+      // BC Account Number + reporter list are the customer key for the
+      // Onboarding/Support dashboards (BC Account OR any listed reporter).
       if (bc_account_number !== undefined) {
         await execute(
           `UPDATE portal_organisations SET bc_account_number = ?, updated_at = GETUTCDATE() WHERE id = ?`,
           [bc_account_number ? String(bc_account_number).trim() : null, orgId],
+        );
+      }
+      if (scope_reporters !== undefined) {
+        await execute(
+          `UPDATE portal_organisations SET scope_reporters = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [scope_reporters ? String(scope_reporters).trim() : null, orgId],
         );
       }
       res.json({ ok: true });
