@@ -1,6 +1,6 @@
 import { queryOne } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import type { JiraRestClient } from './jira-client.js';
+import { JiraRestClient } from './jira-client.js';
 import type {
   OnboardingDashboardResponse,
   OnboardingDashboardRow,
@@ -283,7 +283,18 @@ export class PortalDashboardService {
     const origSummary = (orig?.fields as any)?.summary || originalKey;
     const raiseOnBehalfOf = await this.resolveAccountId(byEmail);
 
-    const created = await this.jira.createServiceDeskRequest({
+    // The JSM Service Desk API must be called on the DIRECT site URL with Basic
+    // auth — the api.atlassian.com/ex/jira/{cloudId} gateway rejects
+    // /rest/servicedeskapi/* for API tokens ("scope does not match"). Build a
+    // direct-site client from the service-desk credentials for the create.
+    const siteUrl = (this.setting('jira_url') || '').replace(/\/+$/, '');
+    const sdEmail = this.setting('jira_username');
+    const sdToken = this.setting('jira_token');
+    const sdClient = (siteUrl && sdEmail && sdToken)
+      ? new JiraRestClient({ baseUrl: siteUrl, email: sdEmail, apiToken: sdToken })
+      : this.jira;
+
+    const created = await sdClient.createServiceDeskRequest({
       serviceDeskId,
       requestTypeId,
       requestFieldValues: {
