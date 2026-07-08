@@ -10,6 +10,7 @@ interface Props {
   onLogout: () => void;
   children: React.ReactNode;
   features?: PortalOrgFeatures;
+  logoUrl?: string | null;
 }
 
 // Nav items gated by a per-org feature flag carry a `feature` key.
@@ -22,7 +23,7 @@ const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?
   { view: 'kb', label: 'Knowledge Base', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', feature: 'kb' },
 ];
 
-export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features }: Props) {
+export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl }: Props) {
   const navItems = NAV_ITEMS.filter(item => !item.feature || !features || features[item.feature]);
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -31,7 +32,9 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <span className="text-xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>
+              {logoUrl
+                ? <img src={logoUrl} alt={user.orgName || 'Logo'} className="h-8 max-w-[160px] object-contain" />
+                : <span className="text-xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>}
               <span className="text-sm font-medium text-gray-600" aria-hidden="true">|</span>
               <span className="text-sm font-medium text-gray-600">Support Portal</span>
             </div>

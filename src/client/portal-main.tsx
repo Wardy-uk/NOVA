@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/globals.css';
-import type { PortalAuthPayload, PortalOrgFeatures } from '../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgBranding } from '../shared/portal-types.js';
 import PortalLayout from './components/portal/PortalLayout.js';
 import PortalLogin from './components/portal/PortalLogin.js';
 import PortalToastContainer, { showPortalToast } from './components/portal/PortalToast.js';
@@ -120,6 +120,39 @@ async function portalFetch(path: string, opts: RequestInit = {}): Promise<Respon
 // Export for use in portal components
 (window as any).__portalFetch = portalFetch;
 
+function shadeHex(hex: string, amt: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const r = clamp(((n >> 16) & 0xff) * (1 + amt));
+  const g = clamp(((n >> 8) & 0xff) * (1 + amt));
+  const b = clamp((n & 0xff) * (1 + amt));
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+// Apply per-org branding by overriding the Tailwind theme CSS variables at runtime.
+function applyBranding(b: PortalOrgBranding | null): void {
+  const root = document.documentElement;
+  if (!b) return;
+  if (b.primary) {
+    root.style.setProperty('--color-brand', b.primary);
+    root.style.setProperty('--color-brand-dark', shadeHex(b.primary, -0.18));
+  }
+  if (b.secondary) root.style.setProperty('--color-brand-secondary', b.secondary);
+  if (b.font) {
+    root.style.setProperty('--font-sans', `'${b.font}', ui-sans-serif, sans-serif`);
+    root.style.setProperty('--font-heading', `'${b.font}', ui-sans-serif, sans-serif`);
+    if (!document.getElementById('org-brand-font')) {
+      const link = document.createElement('link');
+      link.id = 'org-brand-font';
+      link.rel = 'stylesheet';
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(b.font).replace(/%20/g, '+')}:wght@400;500;600;700&display=swap`;
+      document.head.appendChild(link);
+    }
+  }
+}
+
 function parseJwt(token: string): PortalAuthPayload | null {
   try {
     const parts = token.split('.');
@@ -164,6 +197,7 @@ function clearStoredCodexTestUser(): void {
 function PortalApp() {
   const [user, setUser] = useState<PortalAuthPayload | null>(null);
   const [features, setFeatures] = useState<PortalOrgFeatures | null>(null);
+  const [branding, setBranding] = useState<PortalOrgBranding | null>(null);
   const [view, setView] = useState<PortalView>('home');
   const [selectedTicketKey, setSelectedTicketKey] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
@@ -288,6 +322,17 @@ function PortalApp() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // Fetch + apply per-org branding once authenticated
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    portalFetch('/api/portal/branding')
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.ok) { setBranding(d.data); applyBranding(d.data); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user]);
+
   // Until features load, keep Get Help + KB visible (existing default) but treat
   // the customer dashboards as opt-in so they don't flash for orgs without them.
   const resolvedFeatures: PortalOrgFeatures = features ?? { getHelp: true, kb: true, support: false, onboarding: false };
@@ -387,7 +432,7 @@ function PortalApp() {
   );
 
   return (
-    <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout} features={resolvedFeatures}>
+    <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout} features={resolvedFeatures} logoUrl={branding?.logoUrl || null}>
       <Suspense fallback={fallback}>
         {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} features={resolvedFeatures} />}
         {view === 'tickets' && <PortalTicketList onViewTicket={handleViewTicket} />}

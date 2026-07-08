@@ -542,6 +542,8 @@ function OrgsPanel() {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
+    brand_website_url: string | null; brand_logo_url: string | null;
+    brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
@@ -555,6 +557,7 @@ function OrgsPanel() {
             <th className="text-left px-4 py-2 text-gray-400">Domain</th>
             <th className="text-left px-4 py-2 text-gray-400">Customer scope (BC Account # + reporters)</th>
             <th className="text-left px-4 py-2 text-gray-400">Portal features</th>
+            <th className="text-left px-4 py-2 text-gray-400">Branding</th>
             <th className="text-left px-4 py-2 text-gray-400">Users</th>
           </tr>
         </thead>
@@ -588,6 +591,8 @@ function OrgRow({ org, onSaved }: {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
+    brand_website_url: string | null; brand_logo_url: string | null;
+    brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
   onSaved: () => void;
 }) {
@@ -596,13 +601,46 @@ function OrgRow({ org, onSaved }: {
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
   });
+  const [brand, setBrand] = useState({
+    websiteUrl: org.brand_website_url || '', logoUrl: org.brand_logo_url || '',
+    primary: org.brand_primary || '', secondary: org.brand_secondary || '', font: org.brand_font || '',
+  });
+  const [fetchingBrand, setFetchingBrand] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const origFeatures = { getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket };
+  const origBrand = { websiteUrl: org.brand_website_url || '', logoUrl: org.brand_logo_url || '', primary: org.brand_primary || '', secondary: org.brand_secondary || '', font: org.brand_font || '' };
   const dirty =
     (bc.trim() || null) !== (org.bc_account_number || null) ||
     (reporters.trim() || null) !== (org.scope_reporters || null) ||
-    FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]);
+    FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]) ||
+    (Object.keys(brand) as Array<keyof typeof brand>).some(k => brand[k] !== origBrand[k]);
+
+  const fetchBranding = async () => {
+    if (!brand.websiteUrl.trim()) return;
+    setFetchingBrand(true);
+    try {
+      const res = await fetch(`${API}/branding/fetch`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ url: brand.websiteUrl.trim() }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setBrand(prev => ({
+          websiteUrl: d.data.websiteUrl || prev.websiteUrl,
+          logoUrl: d.data.logoUrl || prev.logoUrl,
+          primary: d.data.primary || prev.primary,
+          secondary: d.data.secondary || prev.secondary,
+          font: d.data.font || prev.font,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch branding:', err);
+    } finally {
+      setFetchingBrand(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -614,6 +652,13 @@ function OrgRow({ org, onSaved }: {
           bc_account_number: bc.trim() || null,
           scope_reporters: reporters.trim() || null,
           features,
+          branding: {
+            websiteUrl: brand.websiteUrl.trim() || null,
+            logoUrl: brand.logoUrl.trim() || null,
+            primary: brand.primary.trim() || null,
+            secondary: brand.secondary.trim() || null,
+            font: brand.font.trim() || null,
+          },
         }),
       });
       const d = await res.json();
@@ -668,6 +713,53 @@ function OrgRow({ org, onSaved }: {
               {saving ? '…' : 'Save'}
             </button>
           )}
+        </div>
+      </td>
+      <td className="px-4 py-2">
+        <div className="space-y-1.5 w-56">
+          <div className="flex gap-1">
+            <input
+              value={brand.websiteUrl}
+              onChange={e => setBrand(p => ({ ...p, websiteUrl: e.target.value }))}
+              placeholder="Website URL"
+              className="flex-1 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            />
+            <button
+              onClick={fetchBranding}
+              disabled={fetchingBrand || !brand.websiteUrl.trim()}
+              title="Fetch branding from website"
+              className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50 whitespace-nowrap"
+            >
+              {fetchingBrand ? '…' : 'Fetch'}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            {brand.logoUrl
+              ? <img src={brand.logoUrl} alt="logo" className="h-6 max-w-[64px] object-contain bg-white rounded px-1" />
+              : <span className="text-xs text-gray-500">no logo</span>}
+            <input
+              value={brand.logoUrl.startsWith('data:') ? '' : brand.logoUrl}
+              onChange={e => setBrand(p => ({ ...p, logoUrl: e.target.value }))}
+              placeholder={brand.logoUrl.startsWith('data:') ? '(embedded image)' : 'Logo URL'}
+              className="flex-1 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-gray-400">
+              <input type="color" value={brand.primary || '#5ec1ca'} onChange={e => setBrand(p => ({ ...p, primary: e.target.value }))} className="w-6 h-6 bg-transparent border border-gray-600 rounded" />
+              Primary
+            </label>
+            <label className="flex items-center gap-1 text-xs text-gray-400">
+              <input type="color" value={brand.secondary || '#4ba8b0'} onChange={e => setBrand(p => ({ ...p, secondary: e.target.value }))} className="w-6 h-6 bg-transparent border border-gray-600 rounded" />
+              Secondary
+            </label>
+          </div>
+          <input
+            value={brand.font}
+            onChange={e => setBrand(p => ({ ...p, font: e.target.value }))}
+            placeholder="Font (e.g. Inter)"
+            className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          />
         </div>
       </td>
       <td className="px-4 py-2">{org.user_count}</td>

@@ -7,6 +7,7 @@ import type {
   SupportDashboardResponse,
   SupportDashboardRow,
   PortalOrgFeatures,
+  PortalOrgBranding,
 } from '../../shared/portal-types.js';
 
 // Customer-facing Onboarding + Support dashboards.
@@ -125,6 +126,24 @@ export class PortalDashboardService {
       support: !!row.feat_support,
       onboarding: !!row.feat_onboarding,
       raiseTicket: !!row.feat_raise_ticket,
+    };
+  }
+
+  async getOrgBranding(orgId: number): Promise<PortalOrgBranding> {
+    const row = await queryOne<{
+      brand_website_url: string | null; brand_logo_url: string | null;
+      brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
+    }>(
+      `SELECT brand_website_url, brand_logo_url, brand_primary, brand_secondary, brand_font
+       FROM portal_organisations WHERE id = ?`,
+      [orgId],
+    );
+    return {
+      websiteUrl: row?.brand_website_url || null,
+      logoUrl: row?.brand_logo_url || null,
+      primary: row?.brand_primary || null,
+      secondary: row?.brand_secondary || null,
+      font: row?.brand_font || null,
     };
   }
 

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
+import { fetchOrgBranding } from '../services/portal-branding.js';
 
 const VALID_PORTAL_ROLES = ['requester', 'leader', 'manager', 'org_admin', 'admin'];
 function normalisePortalRole(role: unknown): string {
@@ -273,11 +274,17 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         feat_support: number;
         feat_onboarding: number;
         feat_raise_ticket: number;
+        brand_website_url: string | null;
+        brand_logo_url: string | null;
+        brand_primary: string | null;
+        brand_secondary: string | null;
+        brand_font: string | null;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket,
+                po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -309,9 +316,21 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
     }
   });
 
+  // Auto-suggest branding from an org's website (admin reviews/edits before save).
+  router.post('/branding/fetch', async (req: Request, res: Response) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!url) { res.status(400).json({ ok: false, error: 'A website URL is required' }); return; }
+    try {
+      const branding = await fetchOrgBranding(url);
+      res.json({ ok: true, data: branding });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch branding' });
+    }
+  });
+
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -350,6 +369,16 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
            SET feat_get_help = ?, feat_kb = ?, feat_support = ?, feat_onboarding = ?, feat_raise_ticket = ?, updated_at = GETUTCDATE()
            WHERE id = ?`,
           [bit(features.getHelp), bit(features.kb), bit(features.support), bit(features.onboarding), bit(features.raiseTicket), orgId],
+        );
+      }
+      // Per-org branding
+      if (branding && typeof branding === 'object') {
+        const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+        await execute(
+          `UPDATE portal_organisations
+           SET brand_website_url = ?, brand_logo_url = ?, brand_primary = ?, brand_secondary = ?, brand_font = ?, updated_at = GETUTCDATE()
+           WHERE id = ?`,
+          [s(branding.websiteUrl), s(branding.logoUrl), s(branding.primary), s(branding.secondary), s(branding.font), orgId],
         );
       }
       res.json({ ok: true });

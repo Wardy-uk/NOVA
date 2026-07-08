@@ -1996,6 +1996,19 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'feat_raise_ticket') IS NULL
      ALTER TABLE portal_organisations ADD feat_raise_ticket BIT NOT NULL CONSTRAINT DF_portal_org_raise_ticket DEFAULT 0;`,
 
+    // Per-org branding — auto-suggested from the org's website, admin-editable,
+    // applied to the portal shell (logo, primary/secondary colours, font).
+    `IF COL_LENGTH('portal_organisations', 'brand_website_url') IS NULL
+     ALTER TABLE portal_organisations ADD brand_website_url NVARCHAR(500) NULL;`,
+    `IF COL_LENGTH('portal_organisations', 'brand_logo_url') IS NULL
+     ALTER TABLE portal_organisations ADD brand_logo_url NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('portal_organisations', 'brand_primary') IS NULL
+     ALTER TABLE portal_organisations ADD brand_primary NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('portal_organisations', 'brand_secondary') IS NULL
+     ALTER TABLE portal_organisations ADD brand_secondary NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('portal_organisations', 'brand_font') IS NULL
+     ALTER TABLE portal_organisations ADD brand_font NVARCHAR(100) NULL;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
        id INT IDENTITY(1,1) PRIMARY KEY,

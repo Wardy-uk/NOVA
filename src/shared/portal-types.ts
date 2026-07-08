@@ -454,6 +454,16 @@ export interface PortalMetrics {
   repeatDeflection: number;
 }
 
+// ── Per-org branding ──
+
+export interface PortalOrgBranding {
+  websiteUrl: string | null;
+  logoUrl: string | null;   // http(s) or data: URI
+  primary: string | null;   // hex
+  secondary: string | null; // hex
+  font: string | null;      // font family name (loadable web font)
+}
+
 // ── Per-org portal feature toggles ──
 
 export interface PortalOrgFeatures {
