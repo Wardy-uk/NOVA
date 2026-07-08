@@ -151,7 +151,9 @@ export const PortalNetworkRequestSchema = z.object({
   agentNameBranch: z.string().min(1).max(300),
   agentOfficeId: z.string().max(100).optional(),
   detail: z.string().min(1),
-  priority: z.enum(['Low', 'Medium', 'High']).default('Medium'),
+  priority: z.enum(['Low', 'Medium', 'High', 'Business Critical']).default('Medium'),
+  // Optional context when priority = Business Critical (maps to Jira Blocker).
+  businessCriticalReason: z.string().max(2000).optional(),
   requestType: z.enum(['broken', 'change']),
   hubspotLink: z.string().max(1000).optional(),
   notes: z.string().max(5000).optional(),

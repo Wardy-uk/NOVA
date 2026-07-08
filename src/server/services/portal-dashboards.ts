@@ -90,6 +90,7 @@ interface NormalisedIssue {
   created: string;
   updated: string;
   priority: string;
+  priorityId: string;
   issuetype: string;
   project: string;
   projectType: string;
@@ -179,6 +180,7 @@ export class PortalDashboardService {
         created: f.created || '',
         updated: f.updated || f.created || '',
         priority: f.priority?.name || 'Medium',
+        priorityId: f.priority?.id || '',
         issuetype: f.issuetype?.name || '',
         project: f.project?.key || '',
         projectType: f.project?.projectTypeKey || '',
@@ -411,6 +413,9 @@ export class PortalDashboardService {
       .map(t => t.toLowerCase());
     // Escalations = JSM Request Type contains "Escalation" (configurable).
     const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
+    // Business Critical = Jira Blocker (priority id 1 in this instance; name is
+    // localised so we match by id).
+    const blockerPriorityId = this.setting('portal_business_critical_priority_id') || '1';
     const tierSupport = parseList(this.setting('portal_tier_support'), DEFAULT_TIER_SUPPORT).map(t => t.toLowerCase());
     const tierT3 = parseList(this.setting('portal_tier_t3'), DEFAULT_TIER_T3).map(t => t.toLowerCase());
     const tierDev = parseList(this.setting('portal_tier_development'), DEFAULT_TIER_DEVELOPMENT).map(t => t.toLowerCase());
@@ -431,7 +436,7 @@ export class PortalDashboardService {
           daysSinceUpdate,
           stale: daysSinceUpdate >= 3,
           overSla: i.slaBreached,
-          businessCritical: i.priority.toLowerCase() === 'blocker',
+          businessCritical: i.priorityId === blockerPriorityId || i.priority.toLowerCase() === 'blocker',
           priority: i.priority,
           sprintState: this.sprintState(i, devStatuses),
           tierGroup: this.tierGroup(i, tierSupport, tierT3, tierDev),

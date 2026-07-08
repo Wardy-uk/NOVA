@@ -356,6 +356,7 @@ export class PortalIntakeService {
         agentOfficeId: input.agentOfficeId,
         detail: input.detail,
         priority: input.priority,
+        businessCriticalReason: input.businessCriticalReason,
         requestType: input.requestType,
         hubspotLink: input.hubspotLink,
         notes: input.notes,

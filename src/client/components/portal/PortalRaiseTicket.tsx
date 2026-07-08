@@ -7,7 +7,7 @@ interface Props {
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
 type Network = 'Guild' | 'Fine & Country';
-type Priority = 'Low' | 'Medium' | 'High';
+type Priority = 'Low' | 'Medium' | 'High' | 'Business Critical';
 type RequestType = 'broken' | 'change';
 type SupportTeam = 'development' | 'support';
 
@@ -18,6 +18,7 @@ export default function PortalRaiseTicket({ onCreated }: Props) {
   const [agentOfficeId, setAgentOfficeId] = useState('');
   const [detail, setDetail] = useState('');
   const [priority, setPriority] = useState<Priority>('Medium');
+  const [businessCriticalReason, setBusinessCriticalReason] = useState('');
   const [requestType, setRequestType] = useState<RequestType>('broken');
   const [supportTeam, setSupportTeam] = useState<SupportTeam>('support');
   const [hubspotLink, setHubspotLink] = useState('');
@@ -45,6 +46,7 @@ export default function PortalRaiseTicket({ onCreated }: Props) {
           agentOfficeId: agentOfficeId || undefined,
           detail,
           priority,
+          businessCriticalReason: priority === 'Business Critical' ? (businessCriticalReason || undefined) : undefined,
           requestType,
           hubspotLink: hubspotLink || undefined,
           notes: notes || undefined,
@@ -178,9 +180,26 @@ export default function PortalRaiseTicket({ onCreated }: Props) {
               <option value="Low">Low</option>
               <option value="Medium">Medium</option>
               <option value="High">High</option>
+              <option value="Business Critical">Business Critical</option>
             </select>
           </div>
         </div>
+
+        {priority === 'Business Critical' && (
+          <div>
+            <label htmlFor="rt-bc-reason" className="block text-sm font-medium text-gray-700 mb-1">
+              Why is this business critical? <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="rt-bc-reason"
+              value={businessCriticalReason}
+              onChange={e => setBusinessCriticalReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. blocking all agents from listing properties"
+              className={inputCls}
+            />
+          </div>
+        )}
 
         {/* Support Team */}
         <div>

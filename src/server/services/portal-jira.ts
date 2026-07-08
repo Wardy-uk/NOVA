@@ -648,7 +648,8 @@ export class PortalJiraService {
     agentNameBranch: string;
     agentOfficeId?: string;
     detail: string;
-    priority: 'Low' | 'Medium' | 'High';
+    priority: 'Low' | 'Medium' | 'High' | 'Business Critical';
+    businessCriticalReason?: string;
     requestType: 'broken' | 'change';
     hubspotLink?: string;
     notes?: string;
@@ -686,6 +687,9 @@ export class PortalJiraService {
       `Request type: ${requestTypeLabel}`,
       `Link to originating ${params.network} Support Hubspot ticket (For Dev team's reference): ${params.hubspotLink || '—'}`,
     ];
+    if (params.priority === 'Business Critical') {
+      descLines.push('', `⚠ BUSINESS CRITICAL${params.businessCriticalReason ? `: ${params.businessCriticalReason}` : ''}`);
+    }
     if (params.notes) { descLines.push('', `Notes: ${params.notes}`); }
     const description = descLines.join('\n');
 
@@ -712,7 +716,11 @@ export class PortalJiraService {
 
     // 2) Set fields the request form doesn't cover: priority, network label,
     //    and (for dev triage) Current Tier = Tier 3.
-    const priorityId = params.priority === 'Low' ? '4' : params.priority === 'High' ? '3' : '10100'; // Minor / Major / Normal
+    // Business Critical → Blocker (this instance has no 'Blocker' by name; the
+    // highest priority is id 1, shown as 紧急 under the service account locale).
+    const blockerId = this.settings.get('portal_business_critical_priority_id') || '1';
+    const priorityId = params.priority === 'Business Critical' ? blockerId
+      : params.priority === 'Low' ? '4' : params.priority === 'High' ? '3' : '10100'; // Blocker / Minor / Major / Normal
     const networkLabel = params.network === 'Guild' ? 'guild' : 'fine-and-country';
     const extraFields: Record<string, unknown> = {
       priority: { id: priorityId },
