@@ -264,10 +264,15 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         external_id: string;
         bc_account_number: string | null;
         scope_reporters: string | null;
+        feat_get_help: number;
+        feat_kb: number;
+        feat_support: number;
+        feat_onboarding: number;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
+                po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -301,7 +306,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -330,6 +335,16 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
         await execute(
           `UPDATE portal_organisations SET scope_reporters = ?, updated_at = GETUTCDATE() WHERE id = ?`,
           [scope_reporters ? String(scope_reporters).trim() : null, orgId],
+        );
+      }
+      // Per-org feature toggles
+      if (features && typeof features === 'object') {
+        const bit = (v: unknown) => (v ? 1 : 0);
+        await execute(
+          `UPDATE portal_organisations
+           SET feat_get_help = ?, feat_kb = ?, feat_support = ?, feat_onboarding = ?, updated_at = GETUTCDATE()
+           WHERE id = ?`,
+          [bit(features.getHelp), bit(features.kb), bit(features.support), bit(features.onboarding), orgId],
         );
       }
       res.json({ ok: true });

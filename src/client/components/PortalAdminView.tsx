@@ -537,6 +537,7 @@ function OrgsPanel() {
   const { data: orgs, loading } = useFetch<Array<{
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
+    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number;
   }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
@@ -549,6 +550,7 @@ function OrgsPanel() {
             <th className="text-left px-4 py-2 text-gray-400">Organisation</th>
             <th className="text-left px-4 py-2 text-gray-400">Domain</th>
             <th className="text-left px-4 py-2 text-gray-400">Customer scope (BC Account # + reporters)</th>
+            <th className="text-left px-4 py-2 text-gray-400">Portal features</th>
             <th className="text-left px-4 py-2 text-gray-400">Users</th>
           </tr>
         </thead>
@@ -569,19 +571,33 @@ function OrgsPanel() {
   );
 }
 
+const FEATURE_DEFS: Array<{ key: 'getHelp' | 'kb' | 'support' | 'onboarding'; label: string }> = [
+  { key: 'getHelp', label: 'Get Help' },
+  { key: 'kb', label: 'Knowledge Base' },
+  { key: 'support', label: 'Support' },
+  { key: 'onboarding', label: 'Onboarding' },
+];
+
 function OrgRow({ org, onSaved }: {
   org: {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
+    feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number;
   };
   onSaved: () => void;
 }) {
   const [bc, setBc] = useState(org.bc_account_number || '');
   const [reporters, setReporters] = useState(org.scope_reporters || '');
+  const [features, setFeatures] = useState({
+    getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding,
+  });
   const [saving, setSaving] = useState(false);
+
+  const origFeatures = { getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding };
   const dirty =
     (bc.trim() || null) !== (org.bc_account_number || null) ||
-    (reporters.trim() || null) !== (org.scope_reporters || null);
+    (reporters.trim() || null) !== (org.scope_reporters || null) ||
+    FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]);
 
   const save = async () => {
     setSaving(true);
@@ -592,6 +608,7 @@ function OrgRow({ org, onSaved }: {
         body: JSON.stringify({
           bc_account_number: bc.trim() || null,
           scope_reporters: reporters.trim() || null,
+          features,
         }),
       });
       const d = await res.json();
@@ -622,16 +639,29 @@ function OrgRow({ org, onSaved }: {
             rows={3}
             className="w-64 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
+        </div>
+      </td>
+      <td className="px-4 py-2">
+        <div className="space-y-1">
+          {FEATURE_DEFS.map(f => (
+            <label key={f.key} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={features[f.key]}
+                onChange={e => setFeatures(prev => ({ ...prev, [f.key]: e.target.checked }))}
+                className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500"
+              />
+              {f.label}
+            </label>
+          ))}
           {dirty && (
-            <div>
-              <button
-                onClick={save}
-                disabled={saving}
-                className="px-2 py-1 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
-              >
-                {saving ? '…' : 'Save scope'}
-              </button>
-            </div>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="mt-1 px-2 py-1 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
+            >
+              {saving ? '…' : 'Save'}
+            </button>
           )}
         </div>
       </td>

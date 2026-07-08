@@ -10,6 +10,16 @@ export function createPortalDashboardRoutes(settings: FileSettingsQueries | unde
   const router = Router();
   const service = new PortalDashboardService(settings, jira);
 
+  router.get('/features', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    try {
+      const data = await service.getOrgFeatures(req.portalUser.orgId);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load features' });
+    }
+  });
+
   router.get('/dashboards/onboarding', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
     try {

@@ -6,6 +6,7 @@ import type {
   OnboardingDashboardRow,
   SupportDashboardResponse,
   SupportDashboardRow,
+  PortalOrgFeatures,
 } from '../../shared/portal-types.js';
 
 // Customer-facing Onboarding + Support dashboards.
@@ -99,6 +100,22 @@ export class PortalDashboardService {
 
   private setting(key: string): string | undefined {
     return this.settings?.get(key) as string | undefined;
+  }
+
+  // Per-org feature toggles. If the org has no row (e.g. internal admin, orgId 0)
+  // everything is visible so we never hide features from staff.
+  async getOrgFeatures(orgId: number): Promise<PortalOrgFeatures> {
+    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number }>(
+      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding FROM portal_organisations WHERE id = ?`,
+      [orgId],
+    );
+    if (!row) return { getHelp: true, kb: true, support: true, onboarding: true };
+    return {
+      getHelp: !!row.feat_get_help,
+      kb: !!row.feat_kb,
+      support: !!row.feat_support,
+      onboarding: !!row.feat_onboarding,
+    };
   }
 
   async getOrgScope(orgId: number): Promise<OrgScope> {

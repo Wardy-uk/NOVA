@@ -391,6 +391,15 @@ export interface PortalMetrics {
   repeatDeflection: number;
 }
 
+// ── Per-org portal feature toggles ──
+
+export interface PortalOrgFeatures {
+  getHelp: boolean;
+  kb: boolean;
+  support: boolean;
+  onboarding: boolean;
+}
+
 // ── Customer Dashboards (Onboarding + Support) ──
 // Scoped per-customer by BC Account Number. Built from jira_issue_cache.
 

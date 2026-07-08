@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { PortalAuthPayload } from '../../../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures } from '../../../shared/portal-types.js';
 
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'kb' | 'chat';
 
@@ -7,6 +7,7 @@ interface Props {
   onNavigate: (view: PortalView) => void;
   onViewTicket: (key: string) => void;
   portalUser?: PortalAuthPayload | null;
+  features?: PortalOrgFeatures;
 }
 
 interface TicketSummary {
@@ -25,7 +26,9 @@ interface KbArticle {
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
-export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Props) {
+export default function PortalHome({ onNavigate, onViewTicket, portalUser, features }: Props) {
+  const showGetHelp = features?.getHelp ?? true;
+  const showKb = features?.kb ?? true;
   const [recentTickets, setRecentTickets] = useState<TicketSummary[]>([]);
   const [popularArticles, setPopularArticles] = useState<KbArticle[]>([]);
   const [ticketCount, setTicketCount] = useState(0);
@@ -114,6 +117,7 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
       </div>
 
       {/* Primary CTA */}
+      {showGetHelp && (
       <div className="text-center py-2">
         <button
           onClick={() => onNavigate('chat')}
@@ -130,6 +134,7 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
           </div>
         </button>
       </div>
+      )}
 
       {/* Recent Tickets */}
       <div role="region" aria-label="Recent tickets" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -172,7 +177,7 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser }: Pro
       </div>
 
       {/* Popular KB Articles */}
-      {popularArticles.length > 0 && (
+      {showKb && popularArticles.length > 0 && (
         <div role="region" aria-label="Popular articles" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Popular Articles</h2>

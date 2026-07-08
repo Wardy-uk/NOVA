@@ -1982,6 +1982,17 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'scope_reporters') IS NULL
      ALTER TABLE portal_organisations ADD scope_reporters NVARCHAR(MAX) NULL;`,
 
+    // Per-org portal feature toggles. Get Help + KB default on (existing behaviour);
+    // the customer Support/Onboarding dashboards default off (opt-in per customer).
+    `IF COL_LENGTH('portal_organisations', 'feat_get_help') IS NULL
+     ALTER TABLE portal_organisations ADD feat_get_help BIT NOT NULL CONSTRAINT DF_portal_org_get_help DEFAULT 1;`,
+    `IF COL_LENGTH('portal_organisations', 'feat_kb') IS NULL
+     ALTER TABLE portal_organisations ADD feat_kb BIT NOT NULL CONSTRAINT DF_portal_org_kb DEFAULT 1;`,
+    `IF COL_LENGTH('portal_organisations', 'feat_support') IS NULL
+     ALTER TABLE portal_organisations ADD feat_support BIT NOT NULL CONSTRAINT DF_portal_org_support DEFAULT 0;`,
+    `IF COL_LENGTH('portal_organisations', 'feat_onboarding') IS NULL
+     ALTER TABLE portal_organisations ADD feat_onboarding BIT NOT NULL CONSTRAINT DF_portal_org_onboarding DEFAULT 0;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
        id INT IDENTITY(1,1) PRIMARY KEY,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/globals.css';
-import type { PortalAuthPayload } from '../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures } from '../shared/portal-types.js';
 import PortalLayout from './components/portal/PortalLayout.js';
 import PortalLogin from './components/portal/PortalLogin.js';
 import PortalToastContainer, { showPortalToast } from './components/portal/PortalToast.js';
@@ -162,6 +162,7 @@ function clearStoredCodexTestUser(): void {
 
 function PortalApp() {
   const [user, setUser] = useState<PortalAuthPayload | null>(null);
+  const [features, setFeatures] = useState<PortalOrgFeatures | null>(null);
   const [view, setView] = useState<PortalView>('home');
   const [selectedTicketKey, setSelectedTicketKey] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
@@ -275,6 +276,32 @@ function PortalApp() {
     setView('ticket-detail');
   }, []);
 
+  // Fetch per-org feature toggles once authenticated
+  useEffect(() => {
+    if (!user) { setFeatures(null); return; }
+    let cancelled = false;
+    portalFetch('/api/portal/features')
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.ok) setFeatures(d.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Until features load, keep Get Help + KB visible (existing default) but treat
+  // the customer dashboards as opt-in so they don't flash for orgs without them.
+  const resolvedFeatures: PortalOrgFeatures = features ?? { getHelp: true, kb: true, support: false, onboarding: false };
+
+  // Redirect away from a view the org isn't allowed to see
+  useEffect(() => {
+    if (!features) return;
+    if ((view === 'support-dashboard' && !features.support) ||
+        (view === 'onboarding-dashboard' && !features.onboarding) ||
+        (view === 'kb' && !features.kb) ||
+        (view === 'chat' && !features.getHelp)) {
+      setView('home');
+    }
+  }, [features, view]);
+
   // SSE connection for real-time portal events
   const sseRef = useRef<EventSource | null>(null);
   const sseRetryRef = useRef(1000);
@@ -358,18 +385,18 @@ function PortalApp() {
   );
 
   return (
-    <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout}>
+    <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout} features={resolvedFeatures}>
       <Suspense fallback={fallback}>
-        {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} />}
+        {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} features={resolvedFeatures} />}
         {view === 'tickets' && <PortalTicketList onViewTicket={handleViewTicket} />}
         {view === 'ticket-detail' && selectedTicketKey && (
           <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} onRefreshRef={ticketRefreshRef} />
         )}
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
-        {view === 'kb' && <PortalKnowledgeBase onNavigate={setView} />}
-        {view === 'chat' && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
-        {view === 'support-dashboard' && <PortalSupportDashboard />}
-        {view === 'onboarding-dashboard' && <PortalOnboardingDashboard />}
+        {view === 'kb' && resolvedFeatures.kb && <PortalKnowledgeBase onNavigate={setView} />}
+        {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
+        {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}
+        {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>
