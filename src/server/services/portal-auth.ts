@@ -154,13 +154,22 @@ export async function handleCallback(
     );
   }
 
+  // Resolve the user's ACTUAL org + role (may differ from the token claims if the
+  // account was linked by email to an admin-created portal user).
+  const finalUser = await queryOne<{ org_id: number; role: PortalUserRole; org_name: string }>(
+    `SELECT u.org_id, u.role, o.name AS org_name
+     FROM portal_users u JOIN portal_organisations o ON o.id = u.org_id
+     WHERE u.id = ?`,
+    [userId],
+  );
+
   // Issue portal JWT
   const payload: PortalAuthPayload = {
     userId,
     email: claims.email,
-    orgId,
-    orgName,
-    role: 'requester',
+    orgId: finalUser?.org_id ?? orgId,
+    orgName: finalUser?.org_name ?? orgName,
+    role: finalUser?.role ?? 'requester',
     authType: 'oidc',
   };
 
@@ -213,17 +222,31 @@ async function upsertUser(
   role: PortalUserRole = 'requester',
   authType: PortalUserAuthType = 'oidc',
 ): Promise<number> {
-  const existing = await queryOne<{ id: number }>(
+  // 1. Already linked to this Ecosystem identity (external_id = OIDC subject).
+  let existing = await queryOne<{ id: number }>(
     `SELECT id FROM portal_users WHERE external_id = ?`,
     [externalId],
   );
 
+  // 2. Otherwise adopt an admin-created (or any) portal user with the same email.
+  //    This is how a locally-created user gets linked to Ecosystem SSO on first
+  //    sign-in. We deliberately do NOT overwrite org_id or role here so the
+  //    admin-assigned organisation and role are preserved.
+  if (!existing) {
+    existing = await queryOne<{ id: number }>(
+      `SELECT TOP 1 id FROM portal_users
+       WHERE LOWER(email) = LOWER(?) AND access_state <> 'removed'
+       ORDER BY id`,
+      [email],
+    );
+  }
+
   if (existing) {
     await execute(
       `UPDATE portal_users
-       SET org_id = ?, email = ?, display_name = ?, role = ?, auth_type = ?, last_login = GETUTCDATE()
+       SET external_id = ?, email = ?, display_name = ?, auth_type = ?, last_login = GETUTCDATE()
        WHERE id = ?`,
-      [orgId, email, displayName, role, authType, existing.id],
+      [externalId, email, displayName, authType, existing.id],
     );
     return existing.id;
   }
