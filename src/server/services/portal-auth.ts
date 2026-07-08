@@ -135,6 +135,28 @@ export async function handleCallback(
   // since we just exchanged an auth code over TLS)
   const claims = decodeIdToken(tokens.id_token);
 
+  // IdentityServer-style IdPs (this Ecosystem) often return only `sub` in the
+  // id_token and expose email/name/profile at the userinfo endpoint. Without this
+  // the email is blank and email-based account linking can't work.
+  if ((!claims.email || !claims.name) && tokens.access_token) {
+    try {
+      const uiRes = await fetch(`${config.issuer}/connect/userinfo`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: 'application/json' },
+      });
+      if (uiRes.ok) {
+        const ui: Record<string, any> = await uiRes.json();
+        claims.email = claims.email || ui.email || ui.preferred_username || ui.upn || ui.unique_name || ui.name || '';
+        claims.name = claims.name || ui.name || ui.given_name || claims.email;
+        claims.organisation_id = claims.organisation_id || ui.organisation_id || ui.org_id;
+        claims.organisation_name = claims.organisation_name || ui.organisation_name || ui.org_name;
+      } else {
+        console.warn(`[portal-oidc] userinfo ${uiRes.status} — email/name may be blank`);
+      }
+    } catch (err) {
+      console.warn('[portal-oidc] userinfo fetch failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   // Upsert organisation
   const orgExternalId = claims.organisation_id || claims.org_id || 'unknown';
   const orgName = claims.organisation_name || claims.org_name || 'Unknown Organisation';
