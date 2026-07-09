@@ -549,28 +549,14 @@ function OrgsPanel() {
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
   return (
-    <div className="bg-gray-800 rounded-lg overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700">
-            <th className="text-left px-4 py-2 text-gray-400">Organisation</th>
-            <th className="text-left px-4 py-2 text-gray-400">Domain</th>
-            <th className="text-left px-4 py-2 text-gray-400">Customer scope (BC Account # + reporters)</th>
-            <th className="text-left px-4 py-2 text-gray-400">Portal features</th>
-            <th className="text-left px-4 py-2 text-gray-400">Branding</th>
-            <th className="text-left px-4 py-2 text-gray-400">Users</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-700">
-          {(orgs || []).map(o => (
-            <OrgRow key={o.id} org={o} onSaved={() => setReloadKey(k => k + 1)} />
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {(orgs || []).map(o => (
+        <OrgRow key={o.id} org={o} onSaved={() => setReloadKey(k => k + 1)} />
+      ))}
       {(!orgs || orgs.length === 0) && (
-        <div className="px-4 py-8 text-center text-gray-500">No organisations yet</div>
+        <div className="px-4 py-8 text-center text-gray-500 bg-gray-800 rounded-lg">No organisations yet</div>
       )}
-      <p className="px-4 py-2 text-xs text-gray-500 border-t border-gray-700">
+      <p className="px-1 text-xs text-gray-500">
         A ticket belongs to the customer if its <span className="font-mono">BC Account #</span> matches
         <em> or</em> its reporter is in the reporter list. Both scope the customer Onboarding &amp; Support dashboards.
       </p>
@@ -689,66 +675,53 @@ function OrgRow({ org, onSaved }: {
     }
   };
 
+  const inputCls = 'px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500';
+
   return (
-    <tr className="text-gray-300 align-top">
-      <td className="px-4 py-2">{org.name}</td>
-      <td className="px-4 py-2 font-mono text-xs">{org.domain || '-'}</td>
-      <td className="px-4 py-2">
-        <div className="space-y-1.5">
-          <input
-            value={bc}
-            onChange={e => setBc(e.target.value)}
-            placeholder="BC Account # e.g. CU0002362"
-            className="w-44 px-2 py-1 text-xs font-mono bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-          />
-          <textarea
-            value={reporters}
-            onChange={e => setReporters(e.target.value)}
-            placeholder={'Reporters (one per line): email, display name, or account id'}
-            rows={3}
-            className="w-64 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-          />
+    <div className="bg-gray-800 rounded-lg p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-white">{org.name}</h3>
+          <span className="text-xs font-mono text-gray-500">{org.domain || 'no domain'}</span>
+          <span className="text-xs text-gray-500">{org.user_count} user{org.user_count === 1 ? '' : 's'}</span>
         </div>
-      </td>
-      <td className="px-4 py-2">
-        <div className="space-y-1">
+        {dirty && (
+          <button
+            onClick={save}
+            disabled={saving}
+            className="px-3 py-1.5 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 font-medium"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Customer scope */}
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">Customer scope</div>
+          <input value={bc} onChange={e => setBc(e.target.value)} placeholder="BC Account # e.g. CU0002362" className={`w-full font-mono ${inputCls}`} />
+          <textarea value={reporters} onChange={e => setReporters(e.target.value)} rows={3} placeholder="Reporters (one per line): email, display name, or account id" className={`w-full ${inputCls}`} />
+        </div>
+
+        {/* Features */}
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">Portal features</div>
           {FEATURE_DEFS.map(f => (
             <label key={f.key} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={features[f.key]}
-                onChange={e => setFeatures(prev => ({ ...prev, [f.key]: e.target.checked }))}
-                className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500"
-              />
+              <input type="checkbox" checked={features[f.key]} onChange={e => setFeatures(prev => ({ ...prev, [f.key]: e.target.checked }))} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
               {f.label}
             </label>
           ))}
-          {dirty && (
-            <button
-              onClick={save}
-              disabled={saving}
-              className="mt-1 px-2 py-1 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
-            >
-              {saving ? '…' : 'Save'}
-            </button>
-          )}
         </div>
-      </td>
-      <td className="px-4 py-2">
-        <div className="space-y-1.5 w-56">
+
+        {/* Branding */}
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">Branding</div>
           <div className="flex gap-1">
-            <input
-              value={brand.websiteUrl}
-              onChange={e => setBrand(p => ({ ...p, websiteUrl: e.target.value }))}
-              placeholder="Website URL"
-              className="flex-1 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-            />
-            <button
-              onClick={fetchBranding}
-              disabled={fetchingBrand || !brand.websiteUrl.trim()}
-              title="Fetch branding from website"
-              className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50 whitespace-nowrap"
-            >
+            <input value={brand.websiteUrl} onChange={e => setBrand(p => ({ ...p, websiteUrl: e.target.value }))} placeholder="Website URL" className={`flex-1 ${inputCls}`} />
+            <button onClick={fetchBranding} disabled={fetchingBrand || !brand.websiteUrl.trim()} title="Fetch branding from website" className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50 whitespace-nowrap">
               {fetchingBrand ? '…' : 'Fetch'}
             </button>
           </div>
@@ -756,14 +729,9 @@ function OrgRow({ org, onSaved }: {
             {brand.logoUrl
               ? <img src={brand.logoUrl} alt="logo" className="h-6 max-w-[64px] object-contain bg-white rounded px-1" />
               : <span className="text-xs text-gray-500">no logo</span>}
-            <input
-              value={brand.logoUrl.startsWith('data:') ? '' : brand.logoUrl}
-              onChange={e => setBrand(p => ({ ...p, logoUrl: e.target.value }))}
-              placeholder={brand.logoUrl.startsWith('data:') ? '(embedded image)' : 'Logo URL'}
-              className="flex-1 px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-            />
+            <input value={brand.logoUrl.startsWith('data:') ? '' : brand.logoUrl} onChange={e => setBrand(p => ({ ...p, logoUrl: e.target.value }))} placeholder={brand.logoUrl.startsWith('data:') ? '(embedded image)' : 'Logo URL'} className={`flex-1 ${inputCls}`} />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <label className="flex items-center gap-1 text-xs text-gray-400">
               <input type="color" value={brand.primary || '#5ec1ca'} onChange={e => setBrand(p => ({ ...p, primary: e.target.value }))} className="w-6 h-6 bg-transparent border border-gray-600 rounded" />
               Primary
@@ -773,25 +741,15 @@ function OrgRow({ org, onSaved }: {
               Secondary
             </label>
           </div>
-          <input
-            value={brand.font}
-            onChange={e => setBrand(p => ({ ...p, font: e.target.value }))}
-            placeholder="Font (e.g. Inter)"
-            className="w-full px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
-          />
+          <input value={brand.font} onChange={e => setBrand(p => ({ ...p, font: e.target.value }))} placeholder="Font (e.g. Inter)" className={`w-full ${inputCls}`} />
           {hasBranding && (
-            <button
-              onClick={removeBranding}
-              disabled={saving}
-              className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-50"
-            >
+            <button onClick={removeBranding} disabled={saving} className="px-2 py-1 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-50">
               Remove branding
             </button>
           )}
         </div>
-      </td>
-      <td className="px-4 py-2">{org.user_count}</td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
