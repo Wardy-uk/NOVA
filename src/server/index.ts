@@ -212,6 +212,7 @@ import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
+import { getAgentPeriod } from './services/kpi-agent/period.js';
 import { sendAllKpiEmails } from './services/kpi-email-digest.js';
 import cookieParser from 'cookie-parser';
 
@@ -4000,6 +4001,41 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         commitDetailHtml = commitSummaryHtml;
       }
 
+      // ── LEFT (toggle): per-agent performance league — weekly window, ranked by
+      // composite score. Same data + RAG bands as the authenticated Leaderboard
+      // (getAgentPeriod). Leadership-only board; lock-down is a later phase.
+      let agentViewHtml = '';
+      try {
+        const anchor = now.toLocaleDateString('en-CA'); // YYYY-MM-DD, local
+        const { agents } = await getAgentPeriod(settingsQueries, 'week', anchor);
+        const ranked = [...agents].sort((a, b) => b.compositeScore - a.compositeScore || b.solved - a.solved);
+        const sc = (v: number | null | undefined) => v == null ? '#e2e8f0' : v >= 75 ? '#10b981' : v >= 50 ? '#eab308' : '#ef4444';
+        const ragCol = (r: string | null | undefined) => r ? (r === 'green' ? '#10b981' : r === 'amber' ? '#eab308' : '#ef4444') : '#e2e8f0';
+        const n1 = (v: number | null | undefined, dp = 0) => v == null ? '—' : v.toFixed(dp);
+        if (!ranked.length) {
+          agentViewHtml = `<div class="empty">No agent KPI data for this week yet</div>`;
+        } else {
+          const rowsHtml = ranked.map((a, i) => `<tr class="arow">
+            <td class="a-rank">${i + 1}</td>
+            <td class="a-name">${esc(a.agentName)}<span class="a-sub">${esc(a.tierCode || '')}${a.team ? ' · ' + esc(a.team) : ''}</span></td>
+            <td class="a-c" style="color:${sc(a.compositeScore)};font-weight:700">${Math.round(a.compositeScore)}</td>
+            <td class="a-c">${n1(a.solved)}</td>
+            <td class="a-c" style="color:${sc(a.productivityScore)}">${n1(a.ticketsPerHour, 1)}</td>
+            <td class="a-c" style="color:${sc(a.slaScore)}">${a.slaCompliancePct == null ? '—' : Math.round(a.slaCompliancePct) + '%'}</td>
+            <td class="a-c" style="color:${sc(a.qualityScore)}">${n1(a.qaOverall, 1)}</td>
+            <td class="a-c" style="color:${ragCol(a.rag && a.rag.csat)}">${n1(a.csatAvg, 1)}</td>
+            <td class="a-c" style="color:${ragCol(a.rag && a.rag.over2h)}">${n1(a.overSla)}</td>
+          </tr>`).join('');
+          agentViewHtml = `<div class="kblock-h">Agent performance &middot; this week &middot; ranked by composite score</div>
+            <div class="atbl-wrap"><table class="atbl">
+              <thead><tr><th>#</th><th class="a-name">Agent</th><th>Score</th><th>Solved</th><th>Tkts/hr</th><th>SLA%</th><th>QA</th><th>CSAT</th><th>Over&nbsp;SLA</th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table></div>`;
+        }
+      } catch {
+        agentViewHtml = `<div class="empty">Agent performance unavailable</div>`;
+      }
+
       const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -4135,6 +4171,15 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .right .rrow .rmeta{font-size:1.4vh}
 .rrank{display:inline-flex;align-items:center;justify-content:center;min-width:1.9vh;height:1.9vh;margin-right:.5vw;padding:0 .4vh;border-radius:.5vh;background:rgba(148,163,184,.16);color:#94a3b8;font-size:1.3vh;font-weight:700;vertical-align:middle}
 .rmore{padding:.9vh .8vw;color:#94a3b8;font-size:1.35vh;font-style:italic;text-align:center}
+.atbl-wrap{overflow-y:auto;max-height:78vh}
+.atbl{width:100%;border-collapse:collapse;font-size:1.5vh}
+.atbl thead th{position:sticky;top:0;background:#212832;color:#94a3b8;font-weight:600;font-size:1.35vh;text-align:center;padding:1vh .4vw;border-bottom:1px solid rgba(255,255,255,.1)}
+.atbl thead th.a-name{text-align:left}
+.atbl td{padding:1.05vh .4vw;text-align:center;border-top:1px solid rgba(255,255,255,.05)}
+.atbl .a-rank{color:#64748b;font-size:1.35vh}
+.atbl .a-name{text-align:left;font-size:1.6vh}
+.atbl .a-name .a-sub{display:block;color:#64748b;font-size:1.15vh;margin-top:.15vh}
+.atbl .arow:nth-child(even){background:rgba(255,255,255,.02)}
 </style>
 </head><body><div class="page">
 <div class="head">
@@ -4143,27 +4188,31 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 </div>
 <div class="cols">
   <div class="panel left exp" data-expand="src-kpi" data-title="Strategic KPIs — full granular breakdown" tabindex="0" role="button">
-    <div class="panel-h"><span>Strategic KPIs</span>
+    <div class="panel-h"><span id="left-title">Strategic KPIs</span>
       <span style="display:flex;align-items:center;gap:1vw">
+        <button class="wk-toggle" id="view-toggle" type="button" onclick="event.stopPropagation();window.__toggleView&&window.__toggleView(this)">Show agents</button>
         <button class="wk-toggle" id="wk-toggle" type="button" onclick="event.stopPropagation();window.__toggleWk&&window.__toggleWk(this)">Show daily view</button>
         <span class="exp-hint">Expand ⤢</span>
       </span>
     </div>
     <div class="panel-body">
-      <div class="kblock" id="day-block" style="display:none">
-        <div class="kblock-h">This week &middot; day by day</div>
-        <div class="kgrid">
-          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
-          ${dailyHtml}
+      <div id="team-view">
+        <div class="kblock" id="day-block" style="display:none">
+          <div class="kblock-h">This week &middot; day by day</div>
+          <div class="kgrid">
+            <div class="mrow mhead"><div class="mlabel"></div><div class="mcells">${dayHeadHtml}</div><div></div></div>
+            ${dailyHtml}
+          </div>
+        </div>
+        <div class="kblock" id="wk-block" style="display:flex">
+          <div class="kblock-h">Red days per week &middot; last 4 weeks</div>
+          <div class="kgrid">
+            <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
+            ${weeklyHtml}
+          </div>
         </div>
       </div>
-      <div class="kblock" id="wk-block" style="display:flex">
-        <div class="kblock-h">Red days per week &middot; last 4 weeks</div>
-        <div class="kgrid">
-          <div class="mrow mhead"><div class="mlabel"></div><div class="mcells mcellsw">${weekHeadHtml}</div><div></div></div>
-          ${weeklyHtml}
-        </div>
-      </div>
+      <div id="agent-view" style="display:none">${agentViewHtml}</div>
     </div>
   </div>
   <div class="right">
@@ -4204,6 +4253,17 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     wk.style.display=showWeekly?'flex':'none';
     day.style.display=showWeekly?'none':'flex';
     btn.textContent=showWeekly?'Show daily view':'Show 4-week view';
+  };
+  // Toggle the left panel between team KPIs and the per-agent league.
+  window.__toggleView=function(btn){
+    var team=byId('team-view'),agent=byId('agent-view'),wkBtn=byId('wk-toggle'),title=byId('left-title');
+    if(!team||!agent)return;
+    var showAgent=agent.style.display==='none';
+    agent.style.display=showAgent?'block':'none';
+    team.style.display=showAgent?'none':'block';
+    if(wkBtn)wkBtn.style.display=showAgent?'none':'';
+    if(title)title.textContent=showAgent?'Agent Performance':'Strategic KPIs';
+    btn.textContent=showAgent?'Show team':'Show agents';
   };
   var ov=byId('ov'),card=byId('ovcard'),body=byId('ovbody'),title=byId('ovt'),min=byId('ovmin'),last=null,busy=false;
   function expand(src){
