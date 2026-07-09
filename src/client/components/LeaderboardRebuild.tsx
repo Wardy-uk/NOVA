@@ -114,7 +114,7 @@ export function LeaderboardRebuild() {
                   <td className="px-3 py-2 text-center text-sm" style={{ color: scoreColor(a.productivityScore) }}>{num(a.ticketsPerHour, 1)}</td>
                   <td className="px-3 py-2 text-center text-sm" style={{ color: scoreColor(a.slaScore) }}>{a.slaCompliancePct == null ? '—' : `${Math.round(a.slaCompliancePct)}%`}</td>
                   <td className="px-3 py-2 text-center text-sm" style={{ color: scoreColor(a.qualityScore) }}>{num(a.qaOverall, 1)}</td>
-                  <td className="px-3 py-2 text-center text-sm">{num(a.csatAvg, 1)}</td>
+                  <td className="px-3 py-2 text-center text-sm" style={{ color: a.rag.csat ? scoreColor(a.rag.csat === 'green' ? 100 : a.rag.csat === 'amber' ? 60 : 0) : undefined }}>{num(a.csatAvg, 1)}</td>
                   <td className="px-3 py-2 text-center text-sm" style={{ color: a.rag.over2h ? scoreColor(a.rag.over2h === 'green' ? 100 : a.rag.over2h === 'amber' ? 60 : 0) : undefined }}>{num(a.overSla)}</td>
                   <td className="px-3 py-2 text-center text-sm text-slate-400">{a.points}</td>
                 </tr>
