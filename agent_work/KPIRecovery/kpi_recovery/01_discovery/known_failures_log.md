@@ -29,11 +29,11 @@ Every entry should distinguish between:
 |----|---------|-----------------|-------|------------|--------|----------|
 | KF-006 | 14 ghost KPIs emitting for "Customer Care" and "Unclassified" tiers | Calculation defect | Per-tier KPI emission | High | **FIX APPLIED (Loop 02)** — awaiting deploy | `ccBucket()` defaults null to CC (Incidents); emission guard tightened to `if (!ALL_TIERS.includes(tier)) continue;` |
 | KF-007 | Development ticket count: four-way divergence (275/292/230/213) across dashboard, wallboard, JSM, n8n | Source-of-truth ambiguity | Development backlog | High | OPEN — hypothesis formed | NOVA all-issue-types, wallboard broader status, JSM/n8n unknown filters |
-| KF-008 | FRT Compliance % (Open Queue) stuck at 100% for 3+ days; n8n shows 62% | **Data defect — FIX APPLIED (Loop 03)** | FRT compliance metrics | High | **FIX APPLIED** — awaiting deploy + re-sync | `customfield_14046` added to `ALL_FIELDS`. Parser verified compatible (20/20 NT tickets). Simulated FRT Compliance = 72.3%. |
-| KF-009 | All per-tier FRT breached counts stuck at 0; n8n shows 11, 11, 46 etc. | **Data defect — FIX APPLIED (Loop 03)** | Per-tier FRT breach counts | High | **FIX APPLIED** — shares fix with KF-008 | Same field addition. Simulated per-tier breaches: Development actionable=7, not_actionable=6 (50-ticket sample). |
-| KF-010 | CSAT % emitting 0% | **Data defect — ROOT CAUSE CONFIRMED (WS2-B)** | CSAT metric (team, derived, agent-level) | **High** | **ROOT CAUSE CONFIRMED** — awaiting fix | `customfield_12802` is NOT in `ALL_FIELDS` in `jira-sync-service.ts` line 19. Field never fetched from Jira API → `fields_json` never contains it → `parseCsat()` always returns null → CSAT % always 0. Fix: add `'customfield_12802'` to `ALL_FIELDS`, verify field exists in NT project, full re-sync after deploy. |
+| KF-008 | FRT Compliance % (Open Queue) stuck at 100% for 3+ days; n8n shows 62% | **Data defect** | FRT compliance metrics | High | **RESOLVED — VERIFIED IN PROD (2026-07-09)** | `customfield_14046` present in `ALL_FIELDS` (jira-sync-service.ts:52). Live strategic board shows real FRT: 86/78/91/95/90% — no longer stuck at 100%. |
+| KF-009 | All per-tier FRT breached counts stuck at 0; n8n shows 11, 11, 46 etc. | **Data defect** | Per-tier FRT breach counts | High | **RESOLVED — VERIFIED IN PROD (2026-07-09)** | Shares fix with KF-008; field present in prod, breach counts non-zero. |
+| KF-010 | CSAT % emitting 0% | **Data defect** | CSAT metric (team, derived, agent-level) | **High** | **RESOLVED — VERIFIED IN PROD (2026-07-09)** | `customfield_12802` present in `ALL_FIELDS` (jira-sync-service.ts:59). Live strategic board shows real CSAT: 3/2.3/2.3/2/2.5 — no longer 0%. |
 | KF-011 | Escalation and rejection counts stuck at 0 | **Data pipeline gap — FIX DEPLOYED** | Escalation metrics | **High** | **RUNTIME VERIFIED — SOURCE PATH RECOVERED** | Sync-path tier-change detection is live, historical backfill now reads Current Tier (`customfield_12981`) correctly, and bidirectional recording is working. Runtime evidence: 1,254 total records, 1,083 upward escalations, 115 downward rejections, and non-zero current-day KPI outputs. |
-| KF-012 | Per-tier FRT breached (not actionable) always 0 | **Data defect — FIX APPLIED (Loop 03)** | Per-tier FRT | High | **FIX APPLIED** — shares fix with KF-008 | Same field addition resolves this. |
+| KF-012 | Per-tier FRT breached (not actionable) always 0 | **Data defect** | Per-tier FRT | High | **RESOLVED — VERIFIED IN PROD (2026-07-09)** | Shares fix with KF-008; field present in prod. |
 | KF-013 | SLA field identity ambiguity: `customfield_10010` (sync) vs `customfield_14046`/`customfield_14048` (KPI pipeline) | **RESOLVED** | SLA field governance | High | RESOLVED | Service Desk API confirms: SLA ID 76 = FRT = `customfield_14046`, SLA ID 78 = Resolution = `customfield_14048`. `customfield_10010` = dead. |
 | KF-014 | Resolved-today uses `jira_updated` date, not actual resolution timestamp | Calculation defect | Resolved-today metrics | Medium | OPEN | Commit `bcde0b9` reverted `resolved_at` back to `jira_updated` — column not yet backfilled |
 
@@ -53,9 +53,9 @@ Every entry should distinguish between:
 ## Failure Dependency Graph
 
 ```
-KF-008 (FRT Compliance 100%) — FIX APPLIED
-  └── KF-009 (per-tier FRT counts = 0) — same root — FIX APPLIED
-  └── KF-012 (per-tier FRT not-actionable = 0) — same root — FIX APPLIED
+KF-008 (FRT Compliance 100%) — RESOLVED / VERIFIED IN PROD 2026-07-09
+  └── KF-009 (per-tier FRT counts = 0) — same root — RESOLVED / VERIFIED IN PROD
+  └── KF-012 (per-tier FRT not-actionable = 0) — same root — RESOLVED / VERIFIED IN PROD
   └── KF-013 (SLA field ambiguity) — RESOLVED
 
 KF-006 (ghost KPIs) — FIX APPLIED
@@ -68,8 +68,8 @@ KF-011 (escalation/rejection = 0) — FIX DEPLOYED / RUNTIME VERIFIED
   └── Automatic population now live via jira_sync
   └── Historical backfill now reads Current Tier changelog + records downward changes
 
-KF-010 (CSAT % = 0) — ROOT CAUSE CONFIRMED (WS2-B)
-  └── Fix: add customfield_12802 to ALL_FIELDS in jira-sync-service.ts
+KF-010 (CSAT % = 0) — RESOLVED / VERIFIED IN PROD 2026-07-09
+  └── customfield_12802 present in ALL_FIELDS (jira-sync-service.ts:59); live board shows real CSAT
   └── KAM/CSM Satisfaction: NOT broken — survey system works, no surveys created yet
 
 KF-015 (Breach Board SLA = 0) — independent, wallboard logic
