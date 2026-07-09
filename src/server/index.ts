@@ -212,7 +212,6 @@ import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
-import { getAgentPeriod } from './services/kpi-agent/period.js';
 import { sendAllKpiEmails } from './services/kpi-email-digest.js';
 import cookieParser from 'cookie-parser';
 
@@ -4001,32 +4000,66 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         commitDetailHtml = commitSummaryHtml;
       }
 
-      // ── LEFT (toggle): per-agent performance league — weekly window, ranked by
-      // composite score. Same data + RAG bands as the authenticated Leaderboard
-      // (getAgentPeriod). Leadership-only board; lock-down is a later phase.
+      // ── LEFT (toggle): per-agent performance league. Sourced from the SAME table
+      // the board already uses for org QA/CSAT — dbo.jira_agent_kpi_daily (n8n) — so
+      // it needs no rebuild pipeline. Last 5 business days: Solved summed, rates
+      // averaged, over-SLA = latest stock. Ranked by composite score. RAG bands match
+      // the board's conventions (QA 0–10, CSAT 0–5). Leadership-only; lock-down later.
       let agentViewHtml = '';
       try {
-        const anchor = now.toLocaleDateString('en-CA'); // YYYY-MM-DD, local
-        const { agents } = await getAgentPeriod(settingsQueries, 'week', anchor);
-        const ranked = [...agents].sort((a, b) => b.compositeScore - a.compositeScore || b.solved - a.solved);
-        const sc = (v: number | null | undefined) => v == null ? '#e2e8f0' : v >= 75 ? '#10b981' : v >= 50 ? '#eab308' : '#ef4444';
-        const ragCol = (r: string | null | undefined) => r ? (r === 'green' ? '#10b981' : r === 'amber' ? '#eab308' : '#ef4444') : '#e2e8f0';
-        const n1 = (v: number | null | undefined, dp = 0) => v == null ? '—' : v.toFixed(dp);
+        const agRows = (await pool.request().query(`
+          SELECT CONVERT(varchar(10), d.ReportDate, 23) AS d, a.AccountId AS accountId,
+                 d.AgentName AS name, d.TierCode AS tier, d.Team AS team,
+                 d.OpenTickets_Over2Hours AS overSla, d.SolvedTickets_Today AS solved,
+                 d.SLACompliancePct AS sla, d.TicketsPerHour AS tph, d.CSATAverage AS csat, d.QAOverallAvg AS qa
+          FROM dbo.jira_agent_kpi_daily d
+          LEFT JOIN dbo.Agent a ON a.AgentId = d.AgentId
+          WHERE d.ReportDate >= DATEADD(day, -7, CAST(GETDATE() AS DATE))
+            AND d.ReportDate < CAST(GETDATE() AS DATE) AND a.AccountId IS NOT NULL
+          ORDER BY d.ReportDate
+        `)).recordset as Array<{ d: string; accountId: string; name: string; tier: string | null; team: string | null; overSla: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; qa: number | null }>;
+        const byAgent = new Map<string, typeof agRows>();
+        for (const r of agRows) { if (!byAgent.has(r.accountId)) byAgent.set(r.accountId, [] as typeof agRows); byAgent.get(r.accountId)!.push(r); }
+        const av = (xs: Array<number | null>): number | null => { const v = xs.filter((x): x is number => x != null).map(Number); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+        type Ag = { name: string; tier: string; team: string; solved: number; tph: number | null; sla: number | null; qa: number | null; csat: number | null; overSla: number; composite: number };
+        const agents: Ag[] = [];
+        for (const [, days] of byAgent) {
+          const last = days[days.length - 1];
+          const solved = days.reduce((s, x) => s + (Number(x.solved) || 0), 0);
+          const tph = av(days.map(x => x.tph)), sla = av(days.map(x => x.sla));
+          const qa = av(days.map(x => x.qa)), csat = av(days.map(x => x.csat)); // qa 0–10, csat 0–5
+          const overSla = Number(last.overSla) || 0;
+          const norm: number[] = [];
+          if (tph != null) norm.push(Math.min(tph * 20, 100));
+          if (sla != null) norm.push(sla);
+          if (qa != null) norm.push(qa * 10);
+          if (csat != null) norm.push(csat * 20);
+          const composite = norm.length ? norm.reduce((s, x) => s + x, 0) / norm.length : 0;
+          agents.push({ name: last.name, tier: last.tier || '', team: last.team || '', solved, tph, sla, qa, csat, overSla, composite });
+        }
+        const ranked = agents.sort((a, b) => b.composite - a.composite || b.solved - a.solved);
+        const sc = (v: number | null) => v == null ? '#e2e8f0' : v >= 75 ? '#10b981' : v >= 50 ? '#eab308' : '#ef4444';
+        const ragQa = (v: number | null) => v == null ? '#e2e8f0' : v >= 8 ? '#10b981' : v >= 6 ? '#eab308' : '#ef4444';
+        const ragCsat = (v: number | null) => v == null ? '#e2e8f0' : v >= 4 ? '#10b981' : v >= 3 ? '#eab308' : '#ef4444';
+        const ragSla = (v: number | null) => v == null ? '#e2e8f0' : v >= 95 ? '#10b981' : v >= 90 ? '#eab308' : '#ef4444';
+        const ragTph = (v: number | null) => v == null ? '#e2e8f0' : v >= 1.5 ? '#10b981' : v >= 1.0 ? '#eab308' : '#ef4444';
+        const ragOver = (v: number) => v === 0 ? '#10b981' : v <= 2 ? '#eab308' : '#ef4444';
+        const n1 = (v: number | null, dp = 0) => v == null ? '—' : Number(v).toFixed(dp);
         if (!ranked.length) {
           agentViewHtml = `<div class="empty">No agent KPI data for this week yet</div>`;
         } else {
           const rowsHtml = ranked.map((a, i) => `<tr class="arow">
             <td class="a-rank">${i + 1}</td>
-            <td class="a-name">${esc(a.agentName)}<span class="a-sub">${esc(a.tierCode || '')}${a.team ? ' · ' + esc(a.team) : ''}</span></td>
-            <td class="a-c" style="color:${sc(a.compositeScore)};font-weight:700">${Math.round(a.compositeScore)}</td>
+            <td class="a-name">${esc(a.name)}<span class="a-sub">${esc(a.tier)}${a.team ? ' · ' + esc(a.team) : ''}</span></td>
+            <td class="a-c" style="color:${sc(a.composite)};font-weight:700">${Math.round(a.composite)}</td>
             <td class="a-c">${n1(a.solved)}</td>
-            <td class="a-c" style="color:${sc(a.productivityScore)}">${n1(a.ticketsPerHour, 1)}</td>
-            <td class="a-c" style="color:${sc(a.slaScore)}">${a.slaCompliancePct == null ? '—' : Math.round(a.slaCompliancePct) + '%'}</td>
-            <td class="a-c" style="color:${sc(a.qualityScore)}">${n1(a.qaOverall, 1)}</td>
-            <td class="a-c" style="color:${ragCol(a.rag && a.rag.csat)}">${n1(a.csatAvg, 1)}</td>
-            <td class="a-c" style="color:${ragCol(a.rag && a.rag.over2h)}">${n1(a.overSla)}</td>
+            <td class="a-c" style="color:${ragTph(a.tph)}">${n1(a.tph, 1)}</td>
+            <td class="a-c" style="color:${ragSla(a.sla)}">${a.sla == null ? '—' : Math.round(a.sla) + '%'}</td>
+            <td class="a-c" style="color:${ragQa(a.qa)}">${n1(a.qa, 1)}</td>
+            <td class="a-c" style="color:${ragCsat(a.csat)}">${n1(a.csat, 1)}</td>
+            <td class="a-c" style="color:${ragOver(a.overSla)}">${n1(a.overSla)}</td>
           </tr>`).join('');
-          agentViewHtml = `<div class="kblock-h">Agent performance &middot; this week &middot; ranked by composite score</div>
+          agentViewHtml = `<div class="kblock-h">Agent performance &middot; last 5 business days &middot; ranked by composite score</div>
             <div class="atbl-wrap"><table class="atbl">
               <thead><tr><th>#</th><th class="a-name">Agent</th><th>Score</th><th>Solved</th><th>Tkts/hr</th><th>SLA%</th><th>QA</th><th>CSAT</th><th>Over&nbsp;SLA</th></tr></thead>
               <tbody>${rowsHtml}</tbody>
