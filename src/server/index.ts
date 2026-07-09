@@ -3919,10 +3919,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         // otherwise created + the goal-rule hours (no live cycle → no active pauses to miss).
         if (agentJiraClient && projs) {
           const jql = `project = NT AND due is not EMPTY AND due >= now() AND statusCategory != Done ORDER BY due ASC`;
-          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'customfield_12981', 'customfield_12800', 'customfield_14048'], 100);
+          const r = await agentJiraClient.searchJql(jql, ['summary', 'duedate', 'created', 'issuetype', 'priority', 'assignee', 'customfield_12981', 'customfield_12800', 'customfield_14048'], 100);
           const dayMs = 86400000;
           const dateOnly = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-          type Commit = { key: string; trunc: string; tier: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
+          type Commit = { key: string; trunc: string; tier: string; assignee: string; dueStr: string; daysRem: number; pastSla: number; over60: boolean };
           const items: Commit[] = [];
           for (const iss of (r.issues || [])) {
             const f = iss.fields as Record<string, any>;
@@ -3944,6 +3944,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               key: iss.key,
               trunc: summary.length > 60 ? summary.slice(0, 59) + '…' : summary,
               tier: tierName || (f.issuetype && f.issuetype.name) || '—',
+              assignee: (f.assignee && f.assignee.displayName) || 'Unassigned',
               dueStr: due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
               daysRem: Math.ceil((due.getTime() - now.getTime()) / dayMs),
               pastSla: businessDaysBetween(slaTarget, due),
@@ -3966,16 +3967,17 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               { label: '31–60d', cls: 'b-cyan', test: d => d > 30 && d <= 60 },
               { label: '60d+', cls: 'b-amber', test: d => d > 60 },
             ];
-            commitSummaryHtml = `<div class="bk-grid">${buckets.map(b => {
-              const n = mainItems.filter(i => b.test(i.daysRem)).length;
+            const bucketRow = (label: string, its: Commit[]) => `<div class="bk-row-label">${label} &middot; ${its.length}</div><div class="bk-grid">${buckets.map(b => {
+              const n = its.filter(i => b.test(i.daysRem)).length;
               return `<div class="bk ${b.cls}${n === 0 ? ' bk-0' : ''}"><div class="bk-n">${n}</div><div class="bk-l">${b.label}</div></div>`;
-            }).join('')}</div><div class="bk-total">${mainItems.length} commitment${mainItems.length === 1 ? '' : 's'} beyond SLA${devItems.length ? ` &middot; +${devItems.length} Dev/T3` : ''}</div>`;
+            }).join('')}</div>`;
+            commitSummaryHtml = bucketRow('Customer Care &middot; Tier 2 &middot; Prod', mainItems) + bucketRow('Tier 3 &middot; Development', devItems);
             const renderRow = (i: Commit) => {
               const rowCls = i.daysRem < 0 ? ' c-red' : i.daysRem <= 7 ? ' c-amber' : '';
               const remLbl = i.daysRem < 0 ? `${-i.daysRem}d overdue` : `${i.daysRem}d`;
               return `<a class="crow${rowCls}" href="${jiraBase}/browse/${esc(i.key)}" target="_blank">
                 <div class="ckey">${esc(i.key)}</div>
-                <div class="csum">${esc(i.trunc)}</div>
+                <div class="csum">${esc(i.trunc)}<span class="ctier">${esc(i.tier)}</span><span class="casg">${esc(i.assignee)}</span></div>
                 <div class="cdue"><span class="cbadge" style="${i.over60 ? 'background:rgba(245,158,11,.14);color:#f59e0b;border:1px solid #f59e0b55' : 'background:rgba(94,193,202,.12);color:#5ec1ca;border:1px solid #5ec1ca44'}">${i.over60 ? '&gt;60d' : 'cycle'}</span><span class="cdate">${i.dueStr}</span><span class="cpast">${i.pastSla}d past SLA</span><span class="crem">${remLbl}</span></div>
               </a>`;
             };
@@ -3987,10 +3989,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
               return [...byTier.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
                 .map(t => `<div class="grp"><div class="grp-h">${esc(t)} &middot; ${byTier.get(t)!.length}</div>${byTier.get(t)!.map(renderRow).join('')}</div>`).join('');
             };
-            const devBlock = devItems.length
-              ? `<button class="wk-toggle" type="button" style="margin:1vh 0" onclick="var d=document.getElementById('commit-dev');var on=d.style.display==='none';d.style.display=on?'block':'none';this.textContent=(on?'Hide':'Show')+' Dev / Tier 3 (${devItems.length})'">Show Dev / Tier 3 (${devItems.length})</button><div id="commit-dev" style="display:none">${groupByTier(devItems)}</div>`
-              : '';
-            commitDetailHtml = (groupByTier(mainItems) || '<div class="empty">No non-Dev commitments beyond SLA</div>') + devBlock;
+            const section = (label: string, its: Commit[]) => `<div class="grp2-h">${label} &middot; ${its.length}</div>${its.length ? groupByTier(its) : '<div class="empty">None beyond SLA</div>'}`;
+            commitDetailHtml = section('Customer Care &middot; Tier 2 &middot; Prod', mainItems) + section('Tier 3 &middot; Development', devItems);
           }
         } else {
           commitSummaryHtml = `<div class="empty">Jira not configured</div>`;
@@ -4055,6 +4055,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .ckey{font-size:1.35vh;font-weight:700;color:#5ec1ca;font-variant-numeric:tabular-nums}
 .csum{font-size:1.5vh;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ctier{display:inline-block;margin-left:.5vw;font-size:1.15vh;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.casg{display:inline-block;margin-left:.5vw;font-size:1.15vh;color:#5ec1ca;opacity:.8}
 .cdue{display:flex;align-items:center;gap:.5vw;white-space:nowrap}
 .cbadge{font-size:1.1vh;font-weight:700;padding:.3vh .5vw;border-radius:5px}
 .cdate{font-size:1.4vh;color:#cbd5e1;font-weight:600}
@@ -4077,6 +4078,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .bk.b-red .bk-n{color:#ef4444}.bk.b-amber .bk-n{color:#f59e0b}.bk.b-cyan .bk-n{color:#5ec1ca}
 .bk.bk-0 .bk-n{color:#475569}.bk.bk-0{opacity:.6}
 .bk-total{text-align:center;font-size:1.3vh;color:#64748b;margin-top:.7vh;font-weight:600}
+.bk-row-label{font-size:1.15vh;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#5ec1ca;opacity:.85;padding:.7vh .3vw .1vh}
+.grp2-h{font-size:1.4vh;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#5ec1ca;padding:1vh .3vw .4vh;border-bottom:1px solid rgba(94,193,202,.25);margin:.9vh 0 .5vh}
 .cpast{font-size:1.1vh;color:#94a3b8;min-width:5.5vw;text-align:right}
 /* risk "why" detail */
 .why{border:1px solid #2f353d;border-radius:12px;background:rgba(255,255,255,.02);padding:1.4vh 1.4vw;margin-bottom:1.2vh}
