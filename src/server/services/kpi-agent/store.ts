@@ -9,6 +9,16 @@ let ensured = false;
 
 export async function ensureAgentTable(): Promise<void> {
   if (ensured) return;
+  // Migration: a legacy EAV metrics table (KPI-platform leftover, columns
+  // space_key/metric_key/value, data frozen June 2026) squatted on this name and
+  // broke every rebuild query ("Invalid column name 'kpi_date'"). Move it aside —
+  // idempotent + reversible (rename, not drop) — so the rebuild owns the table.
+  await execute(
+    `IF EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kpi_agent_daily') AND type = 'U')
+       AND NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'kpi_agent_daily') AND name = 'kpi_date')
+       AND NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kpi_agent_daily_legacy_eav') AND type = 'U')
+     EXEC sp_rename 'kpi_agent_daily', 'kpi_agent_daily_legacy_eav';`,
+  );
   await execute(
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kpi_agent_daily') AND type = 'U')
      CREATE TABLE kpi_agent_daily (
