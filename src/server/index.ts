@@ -3827,13 +3827,14 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         missing_feature: 'Missing feature', docs_gap: 'Docs gap', uncertain: 'Uncertain',
       };
       try {
-        const atRisk = (await getAtRiskCustomersFromIssues()).filter(c => c.tier >= 2).slice(0, 5);
-        if (!atRisk.length) {
+        const atRiskAll = (await getAtRiskCustomersFromIssues()).filter(c => c.tier >= 2).slice(0, 10);
+        const atRisk = atRiskAll.slice(0, 5); // compact in-panel summary; expand shows full top-10
+        if (!atRiskAll.length) {
           riskSummaryHtml = `<div class="empty">No accounts currently flagged &mdash; waiting on AgentBrain issue feed</div>`;
           riskDetailHtml = riskSummaryHtml;
         } else {
-          // Pull the issues affecting these customers for the WHY panel.
-          const names = atRisk.map(c => c.customer).filter(Boolean);
+          // Pull the issues affecting these customers for the WHY panel (top-10).
+          const names = atRiskAll.map(c => c.customer).filter(Boolean);
           const issuesByCust = new Map<string, Array<{ title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>>();
           if (names.length) {
             const ph = names.map(() => '?').join(',');
@@ -3848,15 +3849,15 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           }
           const meta = (c: typeof atRisk[number]) =>
             `${c.issue_count} issue${c.issue_count === 1 ? '' : 's'} &middot; ${c.ticket_total} ticket${c.ticket_total === 1 ? '' : 's'}${c.growing ? ` &middot; ${c.growing} growing` : ''}`;
-          riskSummaryHtml = atRisk.map(c => {
+          riskSummaryHtml = atRisk.map((c, i) => {
             const high = c.tier >= 3;
             return `<div class="rrow">
-              <div class="rname">${esc(c.customer || 'Unknown account')}</div>
+              <div class="rname"><span class="rrank">${i + 1}</span>${esc(c.customer || 'Unknown account')}</div>
               <div class="rmeta">${meta(c)}</div>
               <div class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</div>
             </div>`;
-          }).join('');
-          riskDetailHtml = atRisk.map(c => {
+          }).join('') + (atRiskAll.length > atRisk.length ? `<div class="rmore">+${atRiskAll.length - atRisk.length} more &middot; expand for full top-10 league table</div>` : '');
+          riskDetailHtml = atRiskAll.map((c, i) => {
             const high = c.tier >= 3;
             const issues = issuesByCust.get(c.customer) || [];
             const issHtml = issues.length ? issues.map(i => {
@@ -3870,7 +3871,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             const name = c.customer || 'Unknown account';
             const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
             return `<div class="why">
-              <div class="why-h"><span class="why-name">${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(c)} &middot; score ${c.score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
+              <div class="why-h"><span class="why-name"><span class="rrank">${i + 1}</span>${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(c)} &middot; score ${c.score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
               <div class="why-sigs">${issHtml}</div>
             </div>`;
           }).join('');
@@ -4132,6 +4133,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .right .rrow{padding:1.3vh .8vw;margin-bottom:.6vh}
 .right .rrow .rname{font-size:1.95vh}
 .right .rrow .rmeta{font-size:1.4vh}
+.rrank{display:inline-flex;align-items:center;justify-content:center;min-width:1.9vh;height:1.9vh;margin-right:.5vw;padding:0 .4vh;border-radius:.5vh;background:rgba(148,163,184,.16);color:#94a3b8;font-size:1.3vh;font-weight:700;vertical-align:middle}
+.rmore{padding:.9vh .8vw;color:#94a3b8;font-size:1.35vh;font-style:italic;text-align:center}
 </style>
 </head><body><div class="page">
 <div class="head">
@@ -4164,8 +4167,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     </div>
   </div>
   <div class="right">
-    <div class="panel exp" data-expand="src-risk" data-title="Key Account Risks — why each is flagged" tabindex="0" role="button">
-      <div class="panel-h"><span>Key Account Risks</span><span class="exp-hint">Expand ⤢</span></div>
+    <div class="panel exp" data-expand="src-risk" data-title="Top 10 accounts with issues — why each is flagged" tabindex="0" role="button">
+      <div class="panel-h"><span>Top Accounts with Issues</span><span class="exp-hint">Expand ⤢</span></div>
       <div class="panel-body">${riskSummaryHtml}</div>
     </div>
     <div class="panel exp" data-expand="src-commit" data-title="Key Commitments — tickets due beyond SLA" tabindex="0" role="button">
@@ -4174,7 +4177,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     </div>
   </div>
 </div>
-<div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min &middot; click any panel to expand</div>
+<div class="foot">nurtur.tech &middot; NOVA Strategic Dashboard &middot; auto-refresh 5 min &middot; click any panel to expand &middot; SLA figures are end-of-day snapshots, not retroactively recomputed</div>
 
 <!-- hidden detail bodies, injected into the overlay on expand -->
 <div class="detail-src" id="src-kpi">
