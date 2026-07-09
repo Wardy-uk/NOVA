@@ -33,6 +33,7 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser, featu
   const [popularArticles, setPopularArticles] = useState<KbArticle[]>([]);
   const [ticketCount, setTicketCount] = useState(0);
   const [orgOpenCount, setOrgOpenCount] = useState(0);
+  const [ticketScope, setTicketScope] = useState<'mine' | 'org'>('mine');
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const [announcementDismissed, setAnnouncementDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,17 +44,20 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser, featu
 
   useEffect(() => {
     Promise.all([
-      pf('/api/portal/tickets?status=open&pageSize=3').then(r => r.json()),
+      // Live, role-scoped: Leaders/Managers see org activity, requesters their own.
+      pf('/api/portal/my-tickets?scope=org&status=open').then(r => r.json()),
       pf('/api/portal/kb/popular').then(r => r.json()),
       pf('/api/portal/home-summary').then(r => r.json()),
     ]).then(([ticketsRes, kbRes, summaryRes]) => {
       if (ticketsRes.ok) {
-        setRecentTickets(ticketsRes.data.tickets || []);
-        setTicketCount(ticketsRes.data.total || 0);
+        const list = ticketsRes.data.tickets || [];
+        setRecentTickets(list.slice(0, 5));
+        setTicketCount(list.length);
+        setOrgOpenCount(list.length);
+        setTicketScope(ticketsRes.data.scope || 'mine');
       }
       if (kbRes.ok) setPopularArticles(kbRes.data || []);
       if (summaryRes.ok) {
-        setOrgOpenCount(summaryRes.data.orgOpenCount || 0);
         setAnnouncement(summaryRes.data.announcement || null);
       }
     }).catch(console.error).finally(() => setLoading(false));
@@ -111,7 +115,7 @@ export default function PortalHome({ onNavigate, onViewTicket, portalUser, featu
         <h1 className="text-2xl font-bold text-gray-900">Welcome back, {displayName}</h1>
         {orgOpenCount > 0 && (
           <p className="text-sm text-gray-500 mt-1">
-            Your organisation has {orgOpenCount} open ticket{orgOpenCount !== 1 ? 's' : ''}
+            {ticketScope === 'org' ? 'Your organisation has' : 'You have'} {orgOpenCount} open ticket{orgOpenCount !== 1 ? 's' : ''}
           </p>
         )}
       </div>

@@ -4270,7 +4270,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   portalKb.startSync();
 
   // Portal admin (requires internal NOVA auth + admin role — no portalGate so admins can configure before enabling)
-  app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries));
+  app.use('/api/portal/admin', requireRole('admin', 'super_admin'), createPortalAdminRoutes(settingsQueries, typeof llmService !== 'undefined' ? llmService : null));
 
   // Auth routes (no portal auth middleware — these handle login/callback)
   app.use('/api/portal/auth', portalGate, createPortalAuthRoutes(settingsQueries));

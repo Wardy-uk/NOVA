@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import type { PortalOrgBranding } from '../../shared/portal-types.js';
+import type { LlmService } from './llm-service.js';
 
 // Best-effort branding extraction from an organisation's website. Everything here
 // is a *suggestion* — the admin reviews/edits before saving. We only parse text
@@ -58,7 +60,19 @@ function extractThemeColour(html: string): string | null {
   return normaliseHex(meta);
 }
 
-// Scan CSS text for custom properties that look like brand/primary/secondary.
+// A colour is "neutral" (not a brand colour) if it's near-black/white or a low
+// saturation grey — we skip those when guessing the brand palette.
+function isNeutral(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 0xff, g = (n >> 8) & 0xff, b = n & 0xff;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const light = (max + min) / 2;
+  const sat = max === min ? 0 : (max - min) / (255 - Math.abs(max + min - 255));
+  return sat < 0.25 || light < 24 || light > 235;
+}
+
+// Scan CSS text for custom properties that look like brand/primary/secondary,
+// then fall back to the most frequent saturated colour in the stylesheet.
 function extractCssColours(css: string): { primary: string | null; secondary: string | null } {
   const grab = (names: string[]) => {
     for (const n of names) {
@@ -68,10 +82,23 @@ function extractCssColours(css: string): { primary: string | null; secondary: st
     }
     return null;
   };
-  return {
-    primary: grab(['primary', 'brand', 'color-primary', 'colour-primary', 'brand-primary', 'accent', 'main']),
-    secondary: grab(['secondary', 'color-secondary', 'colour-secondary', 'brand-secondary', 'accent-2', 'accent2']),
-  };
+  let primary = grab(['primary', 'brand', 'color-primary', 'colour-primary', 'brand-primary', 'accent', 'main']);
+  let secondary = grab(['secondary', 'color-secondary', 'colour-secondary', 'brand-secondary', 'accent-2', 'accent2']);
+
+  if (!primary || !secondary) {
+    const freq = new Map<string, number>();
+    const re = /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(css))) {
+      const hex = normaliseHex('#' + m[1]);
+      if (!hex || isNeutral(hex)) continue;
+      freq.set(hex, (freq.get(hex) || 0) + 1);
+    }
+    const ranked = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+    primary = primary || ranked[0] || null;
+    secondary = secondary || ranked.find(h => h !== primary) || null;
+  }
+  return { primary, secondary };
 }
 
 function extractFont(html: string, css: string): string | null {
@@ -130,7 +157,46 @@ async function fetchLogoDataUri(candidates: string[]): Promise<string | null> {
   return null;
 }
 
-export async function fetchOrgBranding(inputUrl: string): Promise<PortalOrgBranding> {
+const brandingSchema = z.object({
+  primary: z.string().nullable().describe('Primary brand colour as a hex code, e.g. #1a2b49'),
+  secondary: z.string().nullable().describe('Secondary/accent brand colour as a hex code'),
+  font: z.string().nullable().describe('Primary font family name — a real loadable web/Google font, e.g. Montserrat'),
+});
+
+// Ask the LLM (with vision on the logo) to infer the brand palette + font. This is
+// far better than scraping for sites that don't declare theme-color/CSS vars.
+async function inferBrandingWithAI(
+  llm: LlmService,
+  args: { url: string; css: string; logoDataUri: string | null },
+): Promise<{ primary: string | null; secondary: string | null; font: string | null }> {
+  const images: Array<{ base64: string; mimeType: string }> = [];
+  if (args.logoDataUri && args.logoDataUri.startsWith('data:')) {
+    const m = /^data:([^;]+);base64,(.+)$/.exec(args.logoDataUri);
+    if (m) images.push({ mimeType: m[1], base64: m[2] });
+  }
+  const system = [
+    'You are a brand designer identifying a company\'s visual identity for a customer support portal theme.',
+    'Given the company logo image (if provided) and CSS snippets from their website, infer:',
+    '- primary: the dominant brand colour (prefer a strong colour visible in the logo), as a hex code',
+    '- secondary: a complementary accent colour, as a hex code',
+    '- font: the brand\'s primary font family — MUST be a real, loadable Google Font family name',
+    'Return hex colours like #1a2b49. Use null only if you genuinely cannot tell.',
+  ].join('\n');
+  const user = `Website: ${args.url}\n\nCSS / style hints (truncated):\n${args.css.slice(0, 6000)}`;
+  const res = await llm.call(system, user, brandingSchema, {
+    callType: 'portal_branding',
+    images: images.length ? images : undefined,
+    maxTokens: 300,
+    temperature: 0,
+  });
+  return {
+    primary: normaliseHex(res.data.primary),
+    secondary: normaliseHex(res.data.secondary),
+    font: res.data.font?.trim() || null,
+  };
+}
+
+export async function fetchOrgBranding(inputUrl: string, llm?: LlmService | null): Promise<PortalOrgBranding> {
   const websiteUrl = normaliseUrl(inputUrl);
   const empty: PortalOrgBranding = { websiteUrl, logoUrl: null, primary: null, secondary: null, font: null };
 
@@ -155,14 +221,26 @@ export async function fetchOrgBranding(inputUrl: string): Promise<PortalOrgBrand
     if (sheet) css += '\n' + sheet.body;
   }
 
-  const cssColours = extractCssColours(css);
-  const [logoUrl] = await Promise.all([fetchLogoDataUri(extractLogoCandidates(html, base))]);
+  const logoUrl = await fetchLogoDataUri(extractLogoCandidates(html, base));
 
-  return {
-    websiteUrl,
-    logoUrl,
-    primary: extractThemeColour(html) || cssColours.primary,
-    secondary: cssColours.secondary,
-    font: extractFont(html, css),
-  };
+  // Heuristic baseline (theme-color / CSS vars / Google-font link).
+  const cssColours = extractCssColours(css);
+  let primary = extractThemeColour(html) || cssColours.primary;
+  let secondary = cssColours.secondary;
+  let font = extractFont(html, css);
+
+  // Prefer AI inference (vision on the logo) — much better for sites that don't
+  // declare their brand in machine-readable form. Fall back to heuristics on error.
+  if (llm) {
+    try {
+      const ai = await inferBrandingWithAI(llm, { url: websiteUrl, css, logoDataUri: logoUrl });
+      primary = ai.primary || primary;
+      secondary = ai.secondary || secondary;
+      font = ai.font || font;
+    } catch (err) {
+      console.warn('[portal-branding] AI inference failed, using heuristics:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  return { websiteUrl, logoUrl, primary, secondary, font };
 }

@@ -5,13 +5,14 @@ import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
 import { fetchOrgBranding } from '../services/portal-branding.js';
+import type { LlmService } from '../services/llm-service.js';
 
 const VALID_PORTAL_ROLES = ['requester', 'leader', 'manager', 'org_admin', 'admin'];
 function normalisePortalRole(role: unknown): string {
   return typeof role === 'string' && VALID_PORTAL_ROLES.includes(role) ? role : 'requester';
 }
 
-export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
+export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: LlmService | null): Router {
   const router = Router();
 
   async function ensureOrganisation(orgId: number | null, name: string | null, domain: string | null): Promise<number> {
@@ -321,7 +322,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries): Router {
     const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
     if (!url) { res.status(400).json({ ok: false, error: 'A website URL is required' }); return; }
     try {
-      const branding = await fetchOrgBranding(url);
+      const branding = await fetchOrgBranding(url, llm);
       res.json({ ok: true, data: branding });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to fetch branding' });
