@@ -2009,6 +2009,21 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'brand_font') IS NULL
      ALTER TABLE portal_organisations ADD brand_font NVARCHAR(100) NULL;`,
 
+    // Portal escalations — links an original ticket to the Escalation request a
+    // manager raised from it, so the portal can show/open the escalation.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_escalations') AND type = 'U')
+     CREATE TABLE portal_escalations (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       original_key NVARCHAR(30) NOT NULL,
+       escalation_key NVARCHAR(30) NOT NULL,
+       org_id INT NULL,
+       created_by_email NVARCHAR(255) NULL,
+       reason NVARCHAR(MAX) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_escalations_original')
+     CREATE INDEX IX_portal_escalations_original ON portal_escalations (original_key);`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_org_jira_mapping') AND type = 'U')
      CREATE TABLE portal_org_jira_mapping (
        id INT IDENTITY(1,1) PRIMARY KEY,

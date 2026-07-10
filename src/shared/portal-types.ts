@@ -235,6 +235,7 @@ export interface PortalOrgTicket {
   created: string;
   updated: string;
   isEscalation: boolean;
+  escalationKey: string | null; // if this ticket has been escalated, the Escalation ticket's key
 }
 
 export interface PortalMyTicketsResponse {

@@ -119,7 +119,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                   <th scope="col" className="text-left px-4 py-3 font-medium">Priority</th>
                   {scope === 'org' && <th scope="col" className="text-left px-4 py-3 font-medium">Reporter</th>}
                   <th scope="col" className="text-left px-4 py-3 font-medium">Updated</th>
-                  {canEscalate && <th scope="col" className="text-right px-5 py-3 font-medium">Action</th>}
+                  <th scope="col" className="text-right px-5 py-3 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -136,18 +136,24 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                     <td className="px-4 py-3 text-gray-600">{t.priority}</td>
                     {scope === 'org' && <td className="px-4 py-3 text-gray-600">{t.reporter || '-'}</td>}
                     <td className="px-4 py-3 text-gray-500">{t.updated ? new Date(t.updated).toLocaleDateString() : '-'}</td>
-                    {canEscalate && (
-                      <td className="px-5 py-3 text-right">
-                        {!t.isEscalation && (
-                          <button
-                            onClick={() => setEscalating(t)}
-                            className="px-2.5 py-1 text-xs rounded-lg border border-pink-300 text-pink-700 hover:bg-pink-50 font-medium"
-                          >
-                            Escalate
-                          </button>
-                        )}
-                      </td>
-                    )}
+                    <td className="px-5 py-3 text-right">
+                      {t.escalationKey ? (
+                        <button
+                          onClick={() => onViewTicket(t.escalationKey!)}
+                          title="Open the escalation ticket"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-pink-100 text-pink-700 hover:bg-pink-200 font-medium"
+                        >
+                          Escalated → <span className="font-mono">{t.escalationKey}</span>
+                        </button>
+                      ) : (canEscalate && !t.isEscalation) ? (
+                        <button
+                          onClick={() => setEscalating(t)}
+                          className="px-2.5 py-1 text-xs rounded-lg border border-pink-300 text-pink-700 hover:bg-pink-50 font-medium"
+                        >
+                          Escalate
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

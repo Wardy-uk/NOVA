@@ -362,7 +362,7 @@ export class PortalJiraService {
     if (!this.jiraClient) return null;
 
     const [issue, comments, changelog] = await Promise.all([
-      this.jiraClient.getIssue(ticketKey, ['summary', 'status', 'priority', 'created', 'updated', 'assignee', 'reporter', 'description', 'attachment']),
+      this.jiraClient.getIssue(ticketKey, ['summary', 'status', 'priority', 'created', 'updated', 'assignee', 'reporter', 'description', 'attachment', 'customfield_14626']),
       this.jiraClient.getComments(ticketKey, 20),
       this.jiraClient.getChangelog(ticketKey),
     ]);
@@ -403,7 +403,7 @@ export class PortalJiraService {
       reporter: fields.reporter?.emailAddress || fields.reporter?.displayName || null,
       latestComment: publicComments.length > 0 ? publicComments[0].body.slice(0, 200) : null,
       description: extractJiraText(fields.description),
-      bcAccountNumber: typeof fields.bc_account_number === 'string' ? fields.bc_account_number : null,
+      bcAccountNumber: typeof fields.customfield_14626 === 'string' ? fields.customfield_14626 : null,
       comments: publicComments,
       attachments,
       statusHistory,
@@ -411,108 +411,46 @@ export class PortalJiraService {
     };
   }
 
-  async getTicketDetail(ticketKey: string, orgId: number): Promise<PortalTicketDetail | null> {
-    const domain = await this.getOrgEmailDomain(orgId);
-    const hasPortalAssociation = await this.hasPortalAssociation(ticketKey, orgId);
-    if (!domain && !hasPortalAssociation) return null;
-
-    const ticket = await queryOne<{
-      issue_key: string;
-      summary: string;
-      status: string;
-      priority: string;
-      created_at: string;
-      updated_at: string;
-      assignee: string | null;
-      reporter_email: string | null;
-      description: string | null;
-      bc_account_number: string | null;
-      sla_breach_time: string | null;
-    }>(
-      `SELECT issue_key, summary, status, ISNULL(priority, 'Medium') AS priority,
-              created_at, updated_at, assignee_display AS assignee, reporter_email, description,
-              bc_account_number, sla_breach_time
-       FROM jira_issue_cache
-       WHERE issue_key = ?
-         AND (? = 1 OR (? <> '' AND reporter_email LIKE ?))`,
-      [ticketKey, hasPortalAssociation ? 1 : 0, domain || '', domain ? `%@${domain}` : ''],
+  // Per-org scope for detail authorisation (BC Account + reporter identities).
+  private async getOrgScopeForDetail(orgId: number): Promise<{ bc: string | null; reporters: string[]; domain: string | null }> {
+    const row = await queryOne<{ bc_account_number: string | null; scope_reporters: string | null; domain: string | null }>(
+      `SELECT bc_account_number, scope_reporters, domain FROM portal_organisations WHERE id = ?`,
+      [orgId],
     );
+    const reporters = (row?.scope_reporters || '')
+      .split(/[\n,]/).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase()).filter(Boolean);
+    return { bc: row?.bc_account_number?.trim() || null, reporters, domain: row?.domain || null };
+  }
 
-    if (!ticket) {
-      if (!hasPortalAssociation) return null;
-      return this.getLiveTicketDetail(ticketKey);
+  // A portal user may open a ticket that is their own, was created via the portal,
+  // or — for leaders/managers — belongs to their organisation's scope. Fetches
+  // live from Jira so it works across every project (not just the NT cache).
+  async getTicketDetail(
+    ticketKey: string,
+    portalUser: { orgId: number; email: string; role: string },
+  ): Promise<PortalTicketDetail | null> {
+    const detail = await this.getLiveTicketDetail(ticketKey);
+    if (!detail) return null;
+
+    const email = (portalUser.email || '').toLowerCase();
+    const reporter = (detail.reporter || '').toLowerCase();
+
+    // 1) Own ticket, or created through the portal.
+    if (reporter && reporter === email) return detail;
+    if (await this.hasPortalAssociation(ticketKey, portalUser.orgId)) return detail;
+
+    // 2) Leaders/Managers/admins may view any ticket in their org's scope.
+    const canViewOrg = ['leader', 'manager', 'org_admin', 'admin'].includes(portalUser.role);
+    if (canViewOrg) {
+      const scope = await this.getOrgScopeForDetail(portalUser.orgId);
+      const inScope =
+        (scope.reporters.length && scope.reporters.includes(reporter)) ||
+        (!!scope.bc && !!detail.bcAccountNumber && detail.bcAccountNumber.trim() === scope.bc) ||
+        (!!scope.domain && reporter.endsWith(`@${scope.domain.toLowerCase()}`));
+      if (inScope) return detail;
     }
 
-    // Get public comments from comment cache
-    const comments = await query<{
-      jira_comment_id: string;
-      author_display: string;
-      body_text: string;
-      jira_created: string;
-      is_public: number;
-    }>(
-      `SELECT jira_comment_id, author_display, body_text, jira_created, is_public
-       FROM jira_comment_cache
-       WHERE issue_key = ? AND is_public = 1
-       ORDER BY jira_created DESC`,
-      [ticketKey],
-    );
-
-    const publicComments: PortalTicketComment[] = comments.map(c => ({
-      id: c.jira_comment_id,
-      author: c.author_display || 'Unknown',
-      body: c.body_text || '',
-      created: c.jira_created,
-      isInternal: false,
-    }));
-
-    const slaStatus = this.buildSlaStatus(ticket.sla_breach_time);
-
-    let attachments: PortalTicketAttachment[] = [];
-    let statusHistory: PortalStatusChange[] = [];
-
-    if (this.jiraClient) {
-      const [attachResult, changelogResult] = await Promise.allSettled([
-        this.jiraClient.getIssue(ticketKey, ['attachment']),
-        this.jiraClient.getChangelog(ticketKey),
-      ]);
-
-      if (attachResult.status === 'fulfilled' && attachResult.value) {
-        const fields = attachResult.value.fields as Record<string, unknown> | undefined;
-        const rawAttachments = (fields?.attachment ?? []) as Array<{
-          id: string; filename: string; mimeType: string; size: number; content: string;
-        }>;
-        attachments = rawAttachments.map(a => ({
-          id: a.id,
-          filename: a.filename,
-          mimeType: a.mimeType,
-          size: a.size,
-          url: `/api/portal/tickets/${ticketKey}/attachments/${a.id}`,
-        }));
-      }
-
-      if (changelogResult.status === 'fulfilled') {
-        statusHistory = buildCustomerVisibleStatusHistory(changelogResult.value ?? [], this.settings);
-      }
-    }
-
-    return {
-      key: ticket.issue_key,
-      summary: ticket.summary || '',
-      status: mapJiraStatusToPortal(ticket.status || 'Unknown', this.settings),
-      priority: ticket.priority,
-      created: ticket.created_at,
-      updated: ticket.updated_at,
-      assignee: ticket.assignee,
-      reporter: ticket.reporter_email,
-      latestComment: publicComments.length > 0 ? publicComments[0].body.slice(0, 200) : null,
-      description: ticket.description,
-      bcAccountNumber: ticket.bc_account_number,
-      comments: publicComments,
-      attachments,
-      statusHistory,
-      slaStatus,
-    };
+    return null;
   }
 
   async addComment(ticketKey: string, orgId: number, body: string, authorName: string): Promise<void> {

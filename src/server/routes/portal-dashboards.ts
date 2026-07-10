@@ -83,7 +83,7 @@ export function createPortalDashboardRoutes(settings: FileSettingsQueries | unde
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
     if (!reason) { res.status(400).json({ ok: false, error: 'An escalation reason is required' }); return; }
     try {
-      const result = await service.escalateTicket(req.params.key as string, reason, req.portalUser.email);
+      const result = await service.escalateTicket(req.params.key as string, reason, req.portalUser.email, req.portalUser.orgId);
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to escalate ticket' });

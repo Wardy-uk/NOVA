@@ -52,7 +52,11 @@ export function createPortalTicketRoutes(
   router.get('/tickets/:key', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
     try {
-      const detail = await portalJira.getTicketDetail(req.params.key as string, req.portalUser.orgId);
+      const detail = await portalJira.getTicketDetail(req.params.key as string, {
+        orgId: req.portalUser.orgId,
+        email: req.portalUser.email,
+        role: req.portalUser.role,
+      });
       if (!detail) { res.status(404).json({ ok: false, error: 'Ticket not found' }); return; }
       res.json({ ok: true, data: detail });
     } catch (err) {

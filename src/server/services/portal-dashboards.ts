@@ -1,4 +1,4 @@
-import { queryOne } from './database.js';
+import { query, queryOne, execute } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { JiraRestClient } from './jira-client.js';
 import type {
@@ -281,7 +281,7 @@ export class PortalDashboardService {
     const allowedTypes = parseList(this.setting('portal_dashboard_project_types'), ['service_desk']).map(t => t.toLowerCase());
     const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
 
-    return (result.issues || [])
+    const rows = (result.issues || [])
       .map((iss: any) => {
         const f = iss.fields ?? {};
         const requestType = [f[CF_JSM_REQUEST_TYPE]?.requestType?.name, cfValue(f[CF_SLA_REQUEST_TYPE])].filter(Boolean).join(' ');
@@ -296,17 +296,36 @@ export class PortalDashboardService {
           created: f.created || '',
           updated: f.updated || f.created || '',
           isEscalation: escalationTokens.some(t => requestType.toLowerCase().includes(t)),
+          escalationKey: null as string | null,
           _projectType: (f.project?.projectTypeKey || '').toLowerCase(),
         };
       })
       .filter((t: any) => allowedTypes.includes(t._projectType))
       .map(({ _projectType, ...t }: any) => t);
+
+    // Attach the escalation ticket key for any of these originals that have been escalated.
+    const escMap = await this.getEscalationMap(rows.map((r: any) => r.key));
+    for (const r of rows) r.escalationKey = escMap.get(r.key) ?? null;
+    return rows;
+  }
+
+  private async getEscalationMap(keys: string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (!keys.length) return map;
+    const placeholders = keys.map(() => '?').join(', ');
+    const rows = await query<{ original_key: string; escalation_key: string }>(
+      `SELECT original_key, escalation_key FROM portal_escalations
+       WHERE original_key IN (${placeholders}) ORDER BY id ASC`,
+      keys,
+    );
+    for (const r of rows) map.set(r.original_key, r.escalation_key); // latest wins
+    return map;
   }
 
   // ── Escalate a ticket ──
   // Creates a new Escalation request (JSM Request Type = Escalation) linked back
   // to the original ticket. Manager-only (enforced at the route).
-  async escalateTicket(originalKey: string, reason: string, byEmail: string): Promise<{ key: string }> {
+  async escalateTicket(originalKey: string, reason: string, byEmail: string, orgId?: number): Promise<{ key: string }> {
     if (!this.jira) throw new Error('Jira is not configured');
     const serviceDeskId = this.setting('portal_escalation_service_desk_id') || '50';
     const requestTypeId = this.setting('portal_escalation_request_type_id') || '1237';
@@ -350,6 +369,30 @@ export class PortalDashboardService {
       });
     } catch (err) {
       console.warn(`[portal-escalate] created ${created.issueKey} but link to ${originalKey} failed:`, err instanceof Error ? err.message : err);
+    }
+
+    // Escalations always route to a fixed owner (mirrors the existing NOVA
+    // email-escalation process). Configure the owner's email/accountId.
+    const ownerEmail = this.setting('portal_escalation_assignee_email');
+    const ownerAccountId = this.setting('portal_escalation_assignee_account_id')
+      || (ownerEmail ? await this.resolveAccountId(ownerEmail) : null);
+    if (ownerAccountId) {
+      try {
+        await this.jira.updateFields(created.issueKey, { assignee: { accountId: ownerAccountId } });
+      } catch (err) {
+        console.warn(`[portal-escalate] could not assign ${created.issueKey} to owner:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // Record the link so the portal can show/open the escalation on the original.
+    try {
+      await execute(
+        `INSERT INTO portal_escalations (original_key, escalation_key, org_id, created_by_email, reason)
+         VALUES (?, ?, ?, ?, ?)`,
+        [originalKey, created.issueKey, orgId ?? null, byEmail, reason],
+      );
+    } catch (err) {
+      console.warn('[portal-escalate] could not record escalation:', err instanceof Error ? err.message : err);
     }
 
     return { key: created.issueKey };
