@@ -3606,7 +3606,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           // Neutral/grey — no agreed target yet; the point is to expose how thin it is
           // (a 2.3 built on 0.4% coverage is an impression, not a measurement).
           if (solved > 0) {
-            const cov = Math.round((n / solved) * 100);
+            const cov = Math.round((n / solved) * 1000) / 10;   // 1dp — "0.4%" not "0%"
             byDay.get(dayKey)!.set('__csat_cov__', { count: cov, rag: null });
           }
         }
