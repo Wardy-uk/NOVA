@@ -1,168 +1,228 @@
 import React, { useEffect, useState } from 'react';
 
 interface Props {
-  token: string;
+  token: string; // either a legacy hex token or a Jira issue key (NT-1234)
 }
+
+const TEAL = '#0d9488';
+const RATING_LABELS = ['', 'Poor', 'Below par', 'OK', 'Good', 'Excellent'];
 
 export default function PortalCSAT({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ticketKey, setTicketKey] = useState('');
   const [summary, setSummary] = useState('');
-  const [csatScore, setCsatScore] = useState(0);
-  const [easeScore, setEaseScore] = useState(0);
-  const [effortScore, setEffortScore] = useState(0);
+
+  const [rating, setRating] = useState(0); // banked rating
+  const [hover, setHover] = useState(0);
+  const [banking, setBanking] = useState(false);
+  const [banked, setBanked] = useState(false);
+
   const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentDone, setCommentDone] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/portal/csat/${token}`)
+    fetch(`/api/portal/csat/${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(data => {
         if (data.ok) {
           setTicketKey(data.data.ticketKey);
           setSummary(data.data.summary);
         } else {
-          setError(data.error === 'already_responded' ? 'This survey has already been completed.' :
-                   data.error === 'expired' ? 'This survey has expired.' :
-                   'Survey not found.');
+          setError(
+            data.error === 'already_responded' ? 'Thanks — you have already rated this ticket.' :
+            data.error === 'expired' ? 'This feedback link has expired.' :
+            data.error === 'rate_limited' ? 'Too many requests — please try again in a minute.' :
+            'We could not find this feedback request.',
+          );
         }
       })
-      .catch(() => setError('Failed to load survey.'))
+      .catch(() => setError('Something went wrong loading this page.'))
       .finally(() => setLoading(false));
   }, [token]);
 
-  const handleSubmit = async () => {
-    if (csatScore === 0) return;
-    setSubmitting(true);
+  // Rating is banked the instant it is chosen — no separate submit step.
+  const pickRating = async (n: number) => {
+    if (banked || banking) return;
+    setRating(n);
+    setBanking(true);
     try {
-      const res = await fetch(`/api/portal/csat/${token}`, {
+      const res = await fetch(`/api/portal/csat/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          csatScore,
-          easeScore: easeScore || undefined,
-          effortScore: effortScore || undefined,
-          comment: comment.trim() || undefined,
-        }),
+        body: JSON.stringify({ csatScore: n }),
       });
       const data = await res.json();
       if (data.ok) {
-        setSubmitted(true);
+        setBanked(true);
+      } else if (data.error === 'already_responded') {
+        setBanked(true); // already recorded elsewhere — still show the thank-you
       } else {
-        setError(data.error === 'already_responded' ? 'This survey has already been completed.' : 'Failed to submit.');
+        setError('We could not record your rating. Please try again.');
+        setRating(0);
       }
     } catch {
-      setError('Failed to submit survey.');
+      setError('We could not record your rating. Please try again.');
+      setRating(0);
     }
-    setSubmitting(false);
+    setBanking(false);
   };
 
-  const StarRow = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
-    <div style={{ marginBottom: '24px' }}>
-      <div style={{ fontSize: '14px', fontWeight: 600, color: '#374151', marginBottom: '8px' }}>{label}</div>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        {[1, 2, 3, 4, 5].map(n => (
-          <button
-            key={n}
-            onClick={() => onChange(n)}
-            style={{
-              width: '44px', height: '44px', borderRadius: '8px', border: '2px solid',
-              borderColor: n <= value ? '#0d9488' : '#d1d5db',
-              background: n <= value ? '#0d9488' : 'white',
-              color: n <= value ? 'white' : '#6b7280',
-              fontSize: '18px', cursor: 'pointer', fontWeight: 600,
-              transition: 'all 0.15s',
-            }}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#9ca3af', marginTop: '4px', paddingLeft: '4px', paddingRight: '4px' }}>
-        <span>Poor</span><span>Excellent</span>
+  const sendComment = async () => {
+    const text = comment.trim();
+    if (!text) return;
+    setCommentSaving(true);
+    try {
+      await fetch(`/api/portal/csat/${encodeURIComponent(token)}/comment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: text }),
+      });
+      setCommentDone(true);
+    } catch {
+      setCommentDone(true); // rating is already safe; don't nag about the comment
+    }
+    setCommentSaving(false);
+  };
+
+  const shell = (children: React.ReactNode) => (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#f4f6f8', padding: '20px', boxSizing: 'border-box',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      <div style={{ width: '100%', maxWidth: '440px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '14px', letterSpacing: '0.14em', fontSize: '12px', fontWeight: 700, color: TEAL }}>
+          NURTUR&nbsp;SUPPORT
+        </div>
+        <div style={{ background: 'white', borderRadius: '18px', boxShadow: '0 6px 24px rgba(15,23,42,0.08)', padding: '28px 24px' }}>
+          {children}
+        </div>
+        <div style={{ textAlign: 'center', marginTop: '14px', fontSize: '12px', color: '#94a3b8' }}>
+          Nurtur · Customer Support
+        </div>
       </div>
     </div>
   );
 
   if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9fafb', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-        <div style={{ color: '#9ca3af' }}>Loading...</div>
-      </div>
-    );
+    return shell(<div style={{ textAlign: 'center', color: '#94a3b8', padding: '24px 0' }}>Loading…</div>);
   }
 
   if (error) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9fafb', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-        <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px 24px' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
-          <div style={{ fontSize: '18px', fontWeight: 600, color: '#374151', marginBottom: '8px' }}>
-            {error}
-          </div>
-          <div style={{ fontSize: '14px', color: '#6b7280' }}>
-            If you believe this is an error, please contact support.
-          </div>
-        </div>
-      </div>
+    return shell(
+      <div style={{ textAlign: 'center', padding: '12px 0' }}>
+        <div style={{ fontSize: '40px', marginBottom: '12px' }}>💬</div>
+        <div style={{ fontSize: '17px', fontWeight: 600, color: '#1e293b' }}>{error}</div>
+      </div>,
     );
   }
 
-  if (submitted) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9fafb', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-        <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px 24px' }}>
-          <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '28px' }}>✓</div>
-          <div style={{ fontSize: '22px', fontWeight: 700, color: '#111827', marginBottom: '8px' }}>Thank you!</div>
-          <div style={{ fontSize: '14px', color: '#6b7280' }}>
-            Your feedback helps us improve our service. You can close this page.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9fafb', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '24px' }}>
-      <div style={{ maxWidth: '480px', width: '100%', background: 'white', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '32px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{ fontSize: '13px', color: '#0d9488', fontWeight: 600, marginBottom: '4px' }}>CUSTOMER SATISFACTION SURVEY</div>
-          <div style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '8px' }}>How did we do?</div>
-          <div style={{ fontSize: '14px', color: '#6b7280' }}>
-            Regarding ticket <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0d9488' }}>{ticketKey}</span>
-          </div>
-          <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{summary}</div>
-        </div>
-
-        <StarRow label="How satisfied are you with the resolution? *" value={csatScore} onChange={setCsatScore} />
-        <StarRow label="How easy was it to get help?" value={easeScore} onChange={setEaseScore} />
-        <StarRow label="How much effort did you have to put in?" value={effortScore} onChange={setEffortScore} />
-
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#374151', marginBottom: '8px' }}>Any additional comments?</div>
-          <textarea
-            value={comment}
-            onChange={e => setComment(e.target.value)}
-            placeholder="Tell us more about your experience..."
-            rows={3}
-            style={{ width: '100%', padding: '10px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', resize: 'none', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
-          />
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={csatScore === 0 || submitting}
-          style={{
-            width: '100%', padding: '12px', background: csatScore === 0 ? '#d1d5db' : '#0d9488',
-            color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600,
-            cursor: csatScore === 0 ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
-          }}
-        >
-          {submitting ? 'Submitting...' : 'Submit Feedback'}
-        </button>
-      </div>
+  // Star row — the whole interaction. Tapping a star banks the rating.
+  const Stars = ({ interactive }: { interactive: boolean }) => (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
+      {[1, 2, 3, 4, 5].map(n => {
+        const active = n <= (hover || rating);
+        return (
+          <button
+            key={n}
+            onClick={() => interactive && pickRating(n)}
+            onMouseEnter={() => interactive && setHover(n)}
+            onMouseLeave={() => interactive && setHover(0)}
+            disabled={!interactive || banking}
+            aria-label={`${n} star${n > 1 ? 's' : ''}`}
+            style={{
+              background: 'none', border: 'none', padding: '2px',
+              cursor: interactive && !banking ? 'pointer' : 'default',
+              fontSize: '44px', lineHeight: 1,
+              color: active ? '#f59e0b' : '#d1d5db',
+              transition: 'color 0.12s, transform 0.12s',
+              transform: interactive && hover === n ? 'scale(1.12)' : 'scale(1)',
+            }}
+          >
+            ★
+          </button>
+        );
+      })}
     </div>
+  );
+
+  // ── Banked: thank-you + optional comment ──
+  if (banked) {
+    return shell(
+      <div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '56px', height: '56px', borderRadius: '50%', background: '#d1fae5',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '26px',
+          }}>✓</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginBottom: '4px' }}>Thank you!</div>
+          <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '18px' }}>
+            You rated your experience <strong style={{ color: '#0f172a' }}>{rating}/5</strong>{RATING_LABELS[rating] ? ` — ${RATING_LABELS[rating]}` : ''}.
+          </div>
+          <div style={{ pointerEvents: 'none' }}><Stars interactive={false} /></div>
+        </div>
+
+        {commentDone ? (
+          <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#64748b' }}>
+            Your comment has been shared with the team. You can close this page.
+          </div>
+        ) : (
+          <div style={{ marginTop: '22px', borderTop: '1px solid #eef2f6', paddingTop: '18px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
+              Anything you'd like to add? <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span>
+            </div>
+            <textarea
+              value={comment}
+              onChange={e => setComment(e.target.value)}
+              placeholder="Tell us more about your experience…"
+              rows={3}
+              style={{
+                width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '10px',
+                fontSize: '14px', resize: 'none', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+              }}
+            />
+            <button
+              onClick={sendComment}
+              disabled={!comment.trim() || commentSaving}
+              style={{
+                width: '100%', marginTop: '10px', padding: '11px', borderRadius: '10px', border: 'none',
+                background: !comment.trim() ? '#cbd5e1' : TEAL, color: 'white', fontSize: '14px', fontWeight: 600,
+                cursor: !comment.trim() ? 'default' : 'pointer',
+              }}
+            >
+              {commentSaving ? 'Sending…' : 'Send comment'}
+            </button>
+          </div>
+        )}
+      </div>,
+    );
+  }
+
+  // ── Initial: single rating, above the fold, captured on tap ──
+  return shell(
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '19px', fontWeight: 700, color: '#0f172a', marginBottom: '6px' }}>
+        How did we do?
+      </div>
+      <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px' }}>
+        Tap a star to rate the help you received on
+      </div>
+      <div style={{ fontSize: '13px', color: TEAL, fontWeight: 600, fontFamily: 'monospace', marginBottom: '2px' }}>
+        {ticketKey}
+      </div>
+      {summary && summary !== ticketKey && (
+        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {summary}
+        </div>
+      )}
+      <div style={{ marginTop: '18px', marginBottom: '8px' }}>
+        <Stars interactive={true} />
+      </div>
+      <div style={{ height: '18px', fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>
+        {RATING_LABELS[hover || rating] || ''}
+      </div>
+    </div>,
   );
 }

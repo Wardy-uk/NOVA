@@ -461,8 +461,11 @@ function parseNovaJwt(token: string): { id: number; username: string; role: stri
   }
 }
 
+// Accept both the legacy hex token and a plain Jira issue key (e.g. NT-1234).
+const CSAT_PATH_RE = /^\/portal\/csat\/([a-fA-F0-9]+|[A-Z][A-Z0-9]+-\d+)$/;
+
 function CsatRoute() {
-  const match = window.location.pathname.match(/^\/portal\/csat\/([a-f0-9]+)$/);
+  const match = window.location.pathname.match(CSAT_PATH_RE);
   if (!match) return null;
   return (
     <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>}>
@@ -473,6 +476,6 @@ function CsatRoute() {
 
 const root = document.getElementById('portal-root');
 if (root) {
-  const csatMatch = window.location.pathname.match(/^\/portal\/csat\/[a-f0-9]+$/);
+  const csatMatch = CSAT_PATH_RE.test(window.location.pathname);
   createRoot(root).render(csatMatch ? <CsatRoute /> : <PortalApp />);
 }

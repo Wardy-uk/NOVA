@@ -53,6 +53,7 @@ const StandupView = lazy(() => import('./components/StandupView.js').then(m => (
 import { WallboardDrillPanel } from './components/WallboardDrillPanel.js';
 const TrendsView = lazy(() => import('./components/TrendsView.js').then(m => ({ default: m.TrendsView })));
 const EscalationReportView = lazy(() => import('./components/EscalationReportView.js').then(m => ({ default: m.EscalationReportView })));
+const CsatAdoptionView = lazy(() => import('./components/CsatAdoptionView.js').then(m => ({ default: m.CsatAdoptionView })));
 const RiskIntelligenceView = lazy(() => import('./components/RiskIntelligenceView.js').then(m => ({ default: m.RiskIntelligenceView })));
 const TrainingMatrixView = lazy(() => import('./components/TrainingMatrixView.js').then(m => ({ default: m.TrainingMatrixView })));
 const TrainingSummaryView = lazy(() => import('./components/TrainingSummaryView.js').then(m => ({ default: m.TrainingSummaryView })));
@@ -115,7 +116,7 @@ type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
-  | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'tpj-maintenance'
+  | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'csat-adoption' | 'tpj-maintenance'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile' | 'people-121-setup' | 'people-121-overview'
   | 'training-matrix' | 'training-summary'
@@ -229,6 +230,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-rebuild-trends', label: 'Trends' },
       { view: 'kpi-rebuild-operational', label: 'Operational Indicators' },
       { view: 'kpi-rebuild-legacy', label: 'Legacy KPIs' },
+      { view: 'csat-adoption', label: 'CSAT Adoption' },
       { view: 'tpj-maintenance', label: 'TPJ Maintenance' },
     ],
   },
@@ -1166,6 +1168,9 @@ export function App() {
           )}
           {view === 'kpi-rebuild-legacy' && (
             <KpiRebuildLegacy />
+          )}
+          {view === 'csat-adoption' && (
+            <CsatAdoptionView />
           )}
           {view === 'tpj-maintenance' && (
             <TpjMaintenanceView />

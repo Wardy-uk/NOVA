@@ -115,6 +115,7 @@ import { createPortalKbRoutes } from './routes/portal-kb.js';
 import { createPortalAdminRoutes } from './routes/portal-admin.js';
 import { createPortalEventsRoutes } from './routes/portal-events.js';
 import { createPortalCsatRoutes } from './routes/portal-csat.js';
+import { createCsatMetricsRoutes } from './routes/csat-metrics.js';
 import { createPortalDashboardRoutes } from './routes/portal-dashboards.js';
 import { portalAuthMiddleware } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
@@ -1277,6 +1278,9 @@ async function main() {
   // ── Agent KPIs (Layer 3 rebuild) — per-agent scorecard + SLA Breach Board ──
   app.use('/api/kpi-agent', requireAreaAccess(['kpis', 'qa'], 'view'),
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
+
+  // ── CSAT adoption + response instrumentation (agent-macro experiment) ──
+  app.use('/api/csat-metrics', requireAreaAccess(['kpis', 'qa'], 'view'), createCsatMetricsRoutes());
 
   // ── TPJ Maintenance (NTPJ) dashboard — Lucy's team, scoped to the NTPJ project ──
   // Access: super_admin, OR the KPI role AND membership of the TPJ team.
@@ -4458,7 +4462,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));
 
   // CSAT survey routes (public, token-based, no auth)
-  app.use('/api/portal/csat', portalGate, createPortalCsatRoutes());
+  app.use('/api/portal/csat', portalGate, createPortalCsatRoutes({
+    settings: settingsQueries,
+    getJiraClient: buildServiceDeskJiraClient,
+  }));
 
   console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);
 
