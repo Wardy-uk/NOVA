@@ -48,6 +48,10 @@ const DEFAULT_DEV_STATUSES = [
 
 const CACHE_TTL_MS = 30_000;
 
+// Default owner for portal-raised escalations — Nick Ward (nickw@nurtur.tech).
+// Override per-deployment via the portal_escalation_assignee_account_id setting.
+const DEFAULT_ESCALATION_ASSIGNEE_ACCOUNT_ID = '712020:f108bd7f-b362-41d7-83ca-f8c0c0bbac65';
+
 function parseList(raw: string | undefined | null, fallback: string[]): string[] {
   if (!raw) return fallback;
   const items = raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
@@ -372,13 +376,14 @@ export class PortalDashboardService {
     }
 
     // Escalations always route to a fixed owner (mirrors the existing NOVA
-    // email-escalation process). Configure the owner's email/accountId.
+    // email-escalation process). Defaults to Nick Ward; a setting can override.
     const ownerEmail = this.setting('portal_escalation_assignee_email');
     const ownerAccountId = this.setting('portal_escalation_assignee_account_id')
-      || (ownerEmail ? await this.resolveAccountId(ownerEmail) : null);
+      || (ownerEmail ? await this.resolveAccountId(ownerEmail) : null)
+      || DEFAULT_ESCALATION_ASSIGNEE_ACCOUNT_ID;
     if (ownerAccountId) {
       try {
-        await this.jira.updateFields(created.issueKey, { assignee: { accountId: ownerAccountId } });
+        await sdClient.updateFields(created.issueKey, { assignee: { accountId: ownerAccountId } });
       } catch (err) {
         console.warn(`[portal-escalate] could not assign ${created.issueKey} to owner:`, err instanceof Error ? err.message : err);
       }
