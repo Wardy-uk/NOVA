@@ -215,6 +215,9 @@ export class JiraRestClient {
         'Authorization': this.authHeader,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        // Force English field values (status/priority/issuetype names). The service
+        // account's Jira locale is Chinese; Jira Cloud honours Accept-Language.
+        'Accept-Language': 'en-GB, en;q=0.9',
       },
     };
     if (body !== undefined) {
@@ -497,7 +500,7 @@ export class JiraRestClient {
     const url = `${this.baseUrl}/rest/servicedeskapi/servicedesk/${serviceDeskId}/requesttype?limit=100`;
     try {
       const res = await fetch(url, {
-        headers: { 'Authorization': this.authHeader, 'Accept': 'application/json' },
+        headers: { 'Authorization': this.authHeader, 'Accept': 'application/json', 'Accept-Language': 'en-GB, en;q=0.9' },
       });
       if (!res.ok) {
         console.warn(`[JiraClient] getRequestTypes(${serviceDeskId}) → ${res.status} ${res.statusText}`);
