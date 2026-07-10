@@ -141,7 +141,7 @@ import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
-import { upsertIssueCard, getAtRiskCustomersFromIssues } from './services/issue-router-store.js';
+import { upsertIssueCard, getAtRiskCustomersFromIssues, canonicalCustomer } from './services/issue-router-store.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -3834,17 +3834,28 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           riskDetailHtml = riskSummaryHtml;
         } else {
           // Pull the issues affecting these customers for the WHY panel (top-10).
-          const names = atRiskAll.map(c => c.customer).filter(Boolean);
+          // Query by raw member names, then re-bucket by canonical KEY so merged
+          // accounts (e.g. GPEA = Fine & Country + The Guild) show one combined list.
+          const keyToDisplay = new Map(atRiskAll.map(c => [c.key, c.customer]));
+          const memberNames = [...new Set(atRiskAll.flatMap(c => c.members).filter(Boolean))];
           const issuesByCust = new Map<string, Array<{ title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>>();
-          if (names.length) {
-            const ph = names.map(() => '?').join(',');
-            const rows = await query<{ customer: string; title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>(
-              `SELECT ic.customer, c.title, c.route, c.trend, c.customer_count, ic.ticket_count
+          if (memberNames.length) {
+            const ph = memberNames.map(() => '?').join(',');
+            const rows = await query<{ customer: string; signature: string; title: string | null; route: string | null; trend: string | null; customer_count: number | null; ticket_count: number }>(
+              `SELECT ic.customer, ic.signature, c.title, c.route, c.trend, c.customer_count, ic.ticket_count
                FROM agent_issue_customers ic JOIN agent_issue_cards c ON c.signature = ic.signature
-               WHERE ic.customer IN (${ph}) ORDER BY c.customer_count DESC`, names);
+               WHERE ic.customer IN (${ph}) ORDER BY c.customer_count DESC`, memberNames);
+            const seenSig = new Map<string, Set<string>>(); // display → signatures already listed
             for (const r of rows) {
-              if (!issuesByCust.has(r.customer)) issuesByCust.set(r.customer, []);
-              issuesByCust.get(r.customer)!.push(r);
+              const canon = canonicalCustomer(r.customer);
+              const display = canon && keyToDisplay.get(canon.key);
+              if (!display) continue;
+              let seen = seenSig.get(display);
+              if (!seen) { seen = new Set(); seenSig.set(display, seen); }
+              if (seen.has(r.signature)) continue; // dedupe issue across merged variants
+              seen.add(r.signature);
+              if (!issuesByCust.has(display)) issuesByCust.set(display, []);
+              issuesByCust.get(display)!.push(r);
             }
           }
           const meta = (c: typeof atRisk[number]) =>
