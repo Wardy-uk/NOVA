@@ -4009,13 +4009,15 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       try {
         const agRows = (await pool.request().query(`
           SELECT CONVERT(varchar(10), d.ReportDate, 23) AS d, a.AccountId AS accountId,
-                 d.AgentName AS name, d.TierCode AS tier, d.Team AS team,
+                 d.AgentName AS name, d.TierCode AS tier, a.Team AS team,
                  d.OpenTickets_Over2Hours AS overSla, d.SolvedTickets_Today AS solved,
                  d.SLACompliancePct AS sla, d.TicketsPerHour AS tph, d.CSATAverage AS csat, d.QAOverallAvg AS qa
           FROM dbo.jira_agent_kpi_daily d
-          LEFT JOIN dbo.Agent a ON a.AgentId = d.AgentId
+          JOIN dbo.Agent a ON a.AgentId = d.AgentId
           WHERE d.ReportDate >= DATEADD(day, -7, CAST(GETDATE() AS DATE))
-            AND d.ReportDate < CAST(GETDATE() AS DATE) AND a.AccountId IS NOT NULL
+            AND d.ReportDate < CAST(GETDATE() AS DATE)
+            AND a.IsActive = 1
+            AND a.Team IN ('CustomerCare', 'DigitalDesign', 'Support')
             AND d.AgentName NOT IN ('Nick Ward', 'NOVA AI')
           ORDER BY d.ReportDate
         `)).recordset as Array<{ d: string; accountId: string; name: string; tier: string | null; team: string | null; overSla: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; qa: number | null }>;
