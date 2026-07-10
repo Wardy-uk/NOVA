@@ -141,7 +141,7 @@ import { JiraSyncService } from './services/jira-sync-service.js';
 import { JiraCacheQueries } from './services/jira-cache-queries.js';
 import { LlmService } from './services/llm-service.js';
 import { AssignmentEngine } from './services/assignment-engine.js';
-import { upsertIssueCard, getAtRiskCustomersFromIssues, canonicalCustomer } from './services/issue-router-store.js';
+import { upsertIssueCard, getAtRiskCustomersFromIssues, canonicalCustomer, accountRiskSummary } from './services/issue-router-store.js';
 import { AgentAvailabilityService } from './services/agent-availability.js';
 import { syncPeopleHR } from './services/people-hr-sync.js';
 import { TicketClassifier } from './services/ticket-classifier.js';
@@ -3822,10 +3822,6 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // = the WHY (the specific cross-customer issues each account is caught up in).
       let riskSummaryHtml = '', riskDetailHtml = '';
       const badgeStyle = (high: boolean) => `background:${high ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'};color:${high ? '#ef4444' : '#f59e0b'};border:1px solid ${high ? '#ef444455' : '#f59e0b55'}`;
-      const ROUTE_LABELS: Record<string, string> = {
-        bug_external: 'External bug', bug_internal: 'Internal bug', ux_friction: 'UX friction',
-        missing_feature: 'Missing feature', docs_gap: 'Docs gap', uncertain: 'Uncertain',
-      };
       try {
         const atRiskAll = (await getAtRiskCustomersFromIssues()).filter(c => c.tier >= 2).slice(0, 10);
         const atRisk = atRiskAll.slice(0, 5); // compact in-panel summary; expand shows full top-10
@@ -3871,19 +3867,18 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           riskDetailHtml = atRiskAll.map((c, i) => {
             const high = c.tier >= 3;
             const issues = issuesByCust.get(c.customer) || [];
-            const issHtml = issues.length ? issues.map(i => {
-              const jql = encodeURIComponent(`text ~ "${(i.title || '').replace(/"/g, '')}" ORDER BY updated DESC`);
-              return `<a class="sig" href="${jiraBase}/issues/?jql=${jql}" target="_blank">
-                <span class="sig-t">${esc(i.title || 'Untitled issue')}</span>
-                <span class="sig-k">${esc(ROUTE_LABELS[i.route || ''] || i.route || 'Uncertain')}${i.trend && i.trend !== 'stable' ? ` &middot; ${esc(i.trend)}` : ''}</span>
-                <span class="sig-e">${i.customer_count ?? 0} customers affected${i.ticket_count ? ` &middot; ${i.ticket_count} from this account` : ''}</span>
-              </a>`;
-            }).join('') : `<div class="muted">No issue detail recorded for this account.</div>`;
             const name = c.customer || 'Unknown account';
+            // One plain-English paragraph (why ranked + what to do) + a theme
+            // breakdown, instead of the raw firehose of fragmented AgentBrain cards.
+            const { paragraph, themes } = accountRiskSummary(c, issues, i + 1);
+            const themeHtml = themes.length
+              ? `<div class="why-th">${themes.map(t => `<span class="tchip">${esc(t.name)} &middot; <b>${t.tickets}</b> tix &middot; ${t.cards} pattern${t.cards === 1 ? '' : 's'}</span>`).join('')}</div>`
+              : '';
             const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
             return `<div class="why">
               <div class="why-h"><span class="why-name"><span class="rrank">${i + 1}</span>${esc(name)}</span><span class="rbadge" style="${badgeStyle(high)}">${high ? 'HIGH' : 'MEDIUM'}</span><span class="why-meta">${meta(c)} &middot; score ${c.score}</span><a class="why-jira" href="${jiraBase}/issues/?jql=${jql}" target="_blank">Open in Jira ↗</a></div>
-              <div class="why-sigs">${issHtml}</div>
+              <div class="why-sum">${esc(paragraph)}</div>
+              ${themeHtml}
             </div>`;
           }).join('');
         }
@@ -4011,18 +4006,22 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         commitDetailHtml = commitSummaryHtml;
       }
 
-      // ── LEFT (toggle): per-agent performance league. Sourced from the SAME table
-      // the board already uses for org QA/CSAT — dbo.jira_agent_kpi_daily (n8n) — so
-      // it needs no rebuild pipeline. Last 5 business days: Solved summed, rates
-      // averaged, over-SLA = latest stock. Ranked by composite score. RAG bands match
-      // the board's conventions (QA 0–10, CSAT 0–5). Leadership-only; lock-down later.
+      // ── LEFT (toggle): per-agent performance league — Model A (2026-07).
+      // Ranked ONLY on census-based, cross-comparable dimensions: SLA compliance,
+      // throughput (Solved) and tickets/hr, weighted 50/30/20 (redistributed over
+      // present dims). QA and CSAT are shown as GREY CONTEXT with honest sample sizes
+      // but NOT scored: QA sampling is not comparable across agents (coverage varies
+      // widely, Support/Design reviewed far more than CC; cause being established) and
+      // its raw count is ~66% inflated by re-scoring — so QA n here is DISTINCT tickets
+      // from jira_qa_results, not QATicketsScored. CSAT coverage is ~0.4% of solved.
+      // Fixing QA sampling/attribution = backlog item C. Agents with no activity drop
+      // to an "insufficient data" bucket, shown but unranked. Leadership-only board.
       let agentViewHtml = '';
       try {
         const agRows = (await pool.request().query(`
-          SELECT CONVERT(varchar(10), d.ReportDate, 23) AS d, a.AccountId AS accountId,
-                 d.AgentName AS name, d.TierCode AS tier, a.Team AS team,
-                 d.OpenTickets_Over2Hours AS overSla, d.SolvedTickets_Today AS solved,
-                 d.SLACompliancePct AS sla, d.TicketsPerHour AS tph, d.CSATAverage AS csat, d.QAOverallAvg AS qa
+          SELECT a.AccountId AS accountId, d.AgentName AS name, d.TierCode AS tier, a.Team AS team,
+                 d.OpenTickets_Total AS openT, d.SolvedTickets_Today AS solved,
+                 d.SLACompliancePct AS sla, d.TicketsPerHour AS tph, d.CSATAverage AS csat, d.CSATCount AS csatN
           FROM dbo.jira_agent_kpi_daily d
           JOIN dbo.Agent a ON a.AgentId = d.AgentId
           WHERE d.ReportDate >= DATEADD(day, -7, CAST(GETDATE() AS DATE))
@@ -4031,35 +4030,53 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             AND a.Team IN ('CustomerCare', 'DigitalDesign', 'Support')
             AND d.AgentName NOT IN ('Nick Ward', 'NOVA AI')
           ORDER BY d.ReportDate
-        `)).recordset as Array<{ d: string; accountId: string; name: string; tier: string | null; team: string | null; overSla: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; qa: number | null }>;
+        `)).recordset as Array<{ accountId: string; name: string; tier: string | null; team: string | null; openT: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; csatN: number | null }>;
+        // Honest QA context: DISTINCT tickets per assignee (dedupes the ~66% re-score
+        // inflation in QATicketsScored) + avg score, from the raw QA table, same window.
+        const qaByName = new Map<string, { n: number; avg: number | null }>();
+        try {
+          const qaRows = (await pool.request().query(`
+            SELECT assigneeName AS name, COUNT(DISTINCT issueKey) AS n, AVG(CAST(overallScore AS float)) AS avg
+            FROM dbo.jira_qa_results
+            WHERE CreatedAt >= DATEADD(day, -7, CAST(GETDATE() AS DATE)) AND CreatedAt < CAST(GETDATE() AS DATE)
+              AND ISNULL(qaType, '') <> 'excluded'
+            GROUP BY assigneeName
+          `)).recordset as Array<{ name: string; n: number; avg: number | null }>;
+          for (const r of qaRows) qaByName.set(String(r.name || '').toLowerCase().trim(), { n: Number(r.n) || 0, avg: r.avg == null ? null : Number(r.avg) });
+        } catch { /* QA context optional */ }
+
         const byAgent = new Map<string, typeof agRows>();
         for (const r of agRows) { if (!byAgent.has(r.accountId)) byAgent.set(r.accountId, [] as typeof agRows); byAgent.get(r.accountId)!.push(r); }
         const av = (xs: Array<number | null>): number | null => { const v = xs.filter((x): x is number => x != null).map(Number); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
-        type Ag = { name: string; tier: string; team: string; solved: number; tph: number | null; sla: number | null; qa: number | null; csat: number | null; overSla: number; composite: number };
-        const agents: Ag[] = [];
+        type Ag = { name: string; tier: string; team: string; solved: number; tph: number | null; sla: number | null; qaAvg: number | null; qaN: number; csat: number | null; csatN: number; activity: number; composite: number };
+        const raw: Ag[] = [];
         for (const [, days] of byAgent) {
           const last = days[days.length - 1];
           const solved = days.reduce((s, x) => s + (Number(x.solved) || 0), 0);
-          const tph = av(days.map(x => x.tph)), sla = av(days.map(x => x.sla));
-          const qa = av(days.map(x => x.qa)), csat = av(days.map(x => x.csat)); // qa 0–10, csat 0–5
-          const overSla = Number(last.overSla) || 0;
-          const norm: number[] = [];
-          if (tph != null) norm.push(Math.min(tph * 20, 100));
-          if (sla != null) norm.push(sla);
-          if (qa != null) norm.push(qa * 10);
-          if (csat != null) norm.push(csat * 20);
-          const composite = norm.length ? norm.reduce((s, x) => s + x, 0) / norm.length : 0;
-          agents.push({ name: last.name, tier: last.tier || '', team: last.team || '', solved, tph, sla, qa, csat, overSla, composite });
+          const tph = av(days.map(x => x.tph)), sla = av(days.map(x => x.sla)), csat = av(days.map(x => x.csat));
+          const csatN = days.reduce((s, x) => s + (Number(x.csatN) || 0), 0);
+          const latestOpen = Number(last.openT) || 0;
+          const qc = qaByName.get(last.name.toLowerCase().trim());
+          raw.push({ name: last.name, tier: last.tier || '', team: last.team || '', solved, tph, sla,
+            qaAvg: qc ? qc.avg : null, qaN: qc ? qc.n : 0, csat, csatN, activity: solved + latestOpen, composite: 0 });
         }
-        const ranked = agents.sort((a, b) => b.composite - a.composite || b.solved - a.solved);
+        const maxSolved = Math.max(1, ...raw.map(a => a.solved));
+        // Model A composite — SLA 50 / Solved 30 / tph 20, redistributed over present dims.
+        for (const a of raw) {
+          const parts: Array<[number, number]> = [];
+          if (a.sla != null) parts.push([50, a.sla]);
+          parts.push([30, a.solved / maxSolved * 100]);
+          if (a.tph != null) parts.push([20, Math.min(a.tph * 20, 100)]);
+          let sv = 0, sw = 0; for (const [w, v] of parts) { sv += w * v; sw += w; }
+          a.composite = sw > 0 ? sv / sw : 0;
+        }
+        const insufficient = raw.filter(a => a.activity === 0);
+        const ranked = raw.filter(a => a.activity > 0).sort((a, b) => b.composite - a.composite || b.solved - a.solved);
         const sc = (v: number | null) => v == null ? '#e2e8f0' : v >= 75 ? '#10b981' : v >= 50 ? '#eab308' : '#ef4444';
-        const ragQa = (v: number | null) => v == null ? '#e2e8f0' : v >= 8 ? '#10b981' : v >= 6 ? '#eab308' : '#ef4444';
-        const ragCsat = (v: number | null) => v == null ? '#e2e8f0' : v >= 4 ? '#10b981' : v >= 3 ? '#eab308' : '#ef4444';
         const ragSla = (v: number | null) => v == null ? '#e2e8f0' : v >= 95 ? '#10b981' : v >= 90 ? '#eab308' : '#ef4444';
         const ragTph = (v: number | null) => v == null ? '#e2e8f0' : v >= 1.5 ? '#10b981' : v >= 1.0 ? '#eab308' : '#ef4444';
-        const ragOver = (v: number) => v === 0 ? '#10b981' : v <= 2 ? '#eab308' : '#ef4444';
         const n1 = (v: number | null, dp = 0) => v == null ? '—' : Number(v).toFixed(dp);
-        if (!ranked.length) {
+        if (!ranked.length && !insufficient.length) {
           agentViewHtml = `<div class="empty">No agent KPI data for this week yet</div>`;
         } else {
           const rowsHtml = ranked.map((a, i) => `<tr class="arow">
@@ -4069,15 +4086,20 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             <td class="a-c">${n1(a.solved)}</td>
             <td class="a-c" style="color:${ragTph(a.tph)}">${n1(a.tph, 1)}</td>
             <td class="a-c" style="color:${ragSla(a.sla)}">${a.sla == null ? '—' : Math.round(a.sla) + '%'}</td>
-            <td class="a-c" style="color:${ragQa(a.qa)}">${n1(a.qa, 1)}</td>
-            <td class="a-c" style="color:${ragCsat(a.csat)}">${n1(a.csat, 1)}</td>
-            <td class="a-c" style="color:${ragOver(a.overSla)}">${n1(a.overSla)}</td>
+            <td class="a-ctx">${a.qaAvg == null ? '—' : n1(a.qaAvg, 1)}<span class="a-n">n=${a.qaN}</span></td>
+            <td class="a-ctx">${a.csat == null ? '—' : n1(a.csat, 1)}<span class="a-n">n=${a.csatN}</span></td>
           </tr>`).join('');
-          agentViewHtml = `<div class="kblock-h">Agent performance &middot; last 5 business days &middot; ranked by composite score</div>
+          const insufHtml = insufficient.length
+            ? `<div class="a-insuf-h">Insufficient data &middot; not ranked</div>` +
+              insufficient.map(a => `<div class="a-insuf">${esc(a.name)}<span class="a-sub">${esc(a.team)}</span></div>`).join('')
+            : '';
+          agentViewHtml = `<div class="kblock-h">Agent performance &middot; last 5 business days &middot; ranked SLA 50 / Solved 30 / Tkts-hr 20</div>
             <div class="atbl-wrap"><table class="atbl">
-              <thead><tr><th>#</th><th class="a-name">Agent</th><th>Score</th><th>Solved</th><th>Tkts/hr</th><th>SLA%</th><th>QA</th><th>CSAT</th><th>Over&nbsp;SLA</th></tr></thead>
+              <thead><tr><th>#</th><th class="a-name">Agent</th><th>Score</th><th>Solved</th><th>Tkts/hr</th><th>SLA%</th><th class="a-ctx-h">QA</th><th class="a-ctx-h">CSAT</th></tr></thead>
               <tbody>${rowsHtml}</tbody>
-            </table></div>`;
+            </table>
+            <div class="a-note">QA &amp; CSAT are context only — not part of the rank. QA sampling is not comparable across agents (coverage varies widely; cause being established); CSAT coverage is ~0.4% of solved this week. n = tickets sampled.</div>
+            ${insufHtml}</div>`;
         }
       } catch {
         agentViewHtml = `<div class="empty">Agent performance unavailable</div>`;
@@ -4179,6 +4201,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .sig-k{font-size:1.3vh;font-weight:700;color:#5ec1ca;font-variant-numeric:tabular-nums}
 .sig-e{font-size:1.4vh;color:#cbd5e1;font-style:italic}
 .muted{font-size:1.4vh;color:#64748b;padding:.4vh 0}
+.why-sum{margin-top:.9vh;font-size:1.6vh;line-height:1.55;color:#e2e8f0}
+.why-th{margin-top:.9vh;display:flex;gap:.5vw;flex-wrap:wrap}
+.tchip{font-size:1.3vh;font-weight:600;color:#cbd5e1;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:.45vh .9vw;font-variant-numeric:tabular-nums}
+.tchip b{color:#fde68a;font-weight:800}
 /* fullscreen overlay */
 .kpi-detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 3vw}
 .ov{position:fixed;inset:0;z-index:1000;display:none}
@@ -4227,6 +4253,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 .atbl .a-name{text-align:left;font-size:1.6vh}
 .atbl .a-name .a-sub{display:block;color:#64748b;font-size:1.15vh;margin-top:.15vh}
 .atbl .arow:nth-child(even){background:rgba(255,255,255,.02)}
+.atbl th.a-ctx-h{color:#64748b;border-left:1px solid rgba(255,255,255,.07)}
+.atbl .a-ctx{padding:1.05vh .4vw;text-align:center;color:#64748b;font-size:1.35vh;border-left:1px solid rgba(255,255,255,.05)}
+.atbl .a-ctx .a-n{display:block;color:#475569;font-size:1.05vh;margin-top:.1vh}
+.a-note{padding:1vh .6vw;color:#64748b;font-size:1.2vh;font-style:italic;line-height:1.45}
+.a-insuf-h{padding:1vh .6vw .3vh;color:#94a3b8;font-size:1.3vh;font-weight:600;border-top:1px solid rgba(255,255,255,.06);margin-top:.4vh}
+.a-insuf{padding:.5vh .6vw;color:#64748b;font-size:1.45vh}
+.a-insuf .a-sub{color:#475569;font-size:1.15vh;margin-left:.5vw}
 </style>
 </head><body><div class="page">
 <div class="head">
