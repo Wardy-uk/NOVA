@@ -440,9 +440,27 @@ export class PortalJiraService {
     if (await this.hasPortalAssociation(ticketKey, portalUser.orgId)) return detail;
 
     // 2) Leaders/Managers/admins may view any ticket in their org's scope.
+    //    Authorise via a scoped JQL membership check (Jira resolves reporters/BC
+    //    server-side) rather than string-matching the detail response — the
+    //    gateway can return a display name and omit the BC field.
     const canViewOrg = ['leader', 'manager', 'org_admin', 'admin'].includes(portalUser.role);
     if (canViewOrg) {
       const scope = await this.getOrgScopeForDetail(portalUser.orgId);
+      const branches: string[] = [];
+      if (scope.reporters.length) {
+        branches.push(`reporter in (${scope.reporters.map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r)).join(', ')})`);
+      }
+      if (scope.bc) branches.push(`cf[14626] ~ ${JSON.stringify(scope.bc)}`);
+
+      if (branches.length && this.jiraClient) {
+        try {
+          const res = await this.jiraClient.searchJql(`key = ${ticketKey} AND (${branches.join(' OR ')})`, ['key'], 1);
+          if (res?.issues?.length) return detail;
+        } catch (err) {
+          console.warn(`[portal-detail] membership JQL failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      // Fallback: field-based match (works when the reporter email/BC are exposed).
       const inScope =
         (scope.reporters.length && scope.reporters.includes(reporter)) ||
         (!!scope.bc && !!detail.bcAccountNumber && detail.bcAccountNumber.trim() === scope.bc) ||
