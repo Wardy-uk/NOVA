@@ -247,6 +247,71 @@ export async function getAtRiskCustomersFromIssues(): Promise<AtRiskCustomer[]> 
   return out;
 }
 
+// ── Account issue summary ────────────────────────────────────────────────────
+// AgentBrain heavily fragments its issue cards — one real problem is emitted as
+// dozens of near-identical (sometimes literally identical) "Investigate …" cards.
+// For the exec board we don't list the raw cards; we bucket them into themes and
+// write one plain-English paragraph: why the account ranks + what to do about it.
+
+export interface IssueLite { title: string | null; route: string | null; trend: string | null; ticket_count: number; }
+export interface AccountTheme { name: string; cards: number; tickets: number; }
+
+interface ThemeDef { name: string; test: RegExp; action: string; }
+// First matching rule wins — order matters (suppression before generic email, etc.).
+const THEME_DEFS: ThemeDef[] = [
+  { name: 'Self-service unsubscribe & suppression', test: /unsubscribe|suppress|removal|mailing list|blacklist|opt.?out|gdpr|data removal/i,
+    action: 'raise self-service unsubscribe/suppression with Product — it is a recurring gap and a compliance risk' },
+  { name: 'Self-service branch & account details', test: /branch (contact|details)|business details|account details|self-service.*(branch|business|account)/i,
+    action: 'give agents self-service editing of branch/business details (recurring admin gap)' },
+  { name: 'Property feed & website listings', test: /feed|listing|not updating|reflected|\bsync\b|website|portal|publish|\brex\b|\balto\b|leadpro|enquiry form/i,
+    action: 'treat as a single owned feed-sync problem and drive it with the CRM/feed providers (Rex, Alto, LeadPro) rather than as many separate faults' },
+  { name: 'Email deliverability & bounces', test: /bounce|invalid email|delivery report|email.*(format|render)|nurtur direct|campaign data|blacklisted/i,
+    action: 'scope Nurtur Direct delivery and bounce reporting as one fix' },
+  { name: 'APS reporting accuracy', test: /\baps\b|reporting inacc|conversion data|property status trigger/i,
+    action: 'correct APS reporting accuracy centrally' },
+  { name: 'Members Hub & Marketing Packs', test: /members hub|marketing pack|e-?zine|window card|admin hub|qr code/i,
+    action: 'batch the Members Hub / Marketing Packs defects to one developer' },
+  { name: 'Billing & invoicing', test: /invoic|billing|payment|refund/i,
+    action: 'route the invoicing/billing errors to finance and dev' },
+];
+const themeOf = (title: string | null): string => {
+  const s = title || '';
+  for (const d of THEME_DEFS) if (d.test.test(s)) return d.name;
+  return 'Other';
+};
+
+/** One-paragraph "why ranked + what to do" for an at-risk account, plus its theme
+ *  breakdown. Deterministic (no LLM) so it renders instantly on the wallboard. */
+export function accountRiskSummary(
+  a: { customer: string; issue_count: number; ticket_total: number; growing: number },
+  issues: IssueLite[],
+  rank: number,
+): { paragraph: string; themes: AccountTheme[] } {
+  const map = new Map<string, AccountTheme>();
+  for (const it of issues) {
+    const name = themeOf(it.title);
+    let t = map.get(name);
+    if (!t) { t = { name, cards: 0, tickets: 0 }; map.set(name, t); }
+    t.cards++; t.tickets += it.ticket_count ?? 0;
+  }
+  const themes = [...map.values()].sort((x, y) => y.tickets - x.tickets);
+  const n = a.issue_count, tix = a.ticket_total;
+  const parts: string[] = [];
+  parts.push(`${a.customer} ranks #${rank} on volume — ${tix} ticket${tix === 1 ? '' : 's'} clustered into ${n} recurring issue pattern${n === 1 ? '' : 's'}${a.growing ? `, ${a.growing} of them growing` : ''}.`);
+  const top = themes.find(t => t.name !== 'Other') || themes[0];
+  if (top) {
+    const pct = tix ? Math.round((top.tickets / tix) * 100) : 0;
+    const rest = themes.filter(t => t !== top && t.name !== 'Other').slice(0, 2);
+    let drivers = `The dominant driver is ${top.name} (${top.tickets} tickets across ${top.cards} pattern${top.cards === 1 ? '' : 's'}${pct ? `, ~${pct}% of the account` : ''})`;
+    if (rest.length) drivers += `, then ${rest.map(t => `${t.name} (${t.tickets})`).join(' and ')}`;
+    parts.push(drivers + '.');
+    const actions = [top, ...rest].map(t => THEME_DEFS.find(d => d.name === t.name)?.action).filter(Boolean) as string[];
+    if (actions.length) parts.push(`Action: ${actions.join('; ')}.`);
+  }
+  if (n >= 15) parts.push(`Note: these ${n} patterns are AI-generated and heavily fragmented (many restate the same problem), so read by theme, not card count.`);
+  return { paragraph: parts.join(' '), themes };
+}
+
 export async function getIssueCards(limit = 200): Promise<Record<string, unknown>[]> {
   return query<Record<string, unknown>>(
     `SELECT TOP (${Math.max(1, Math.floor(limit))}) signature, route, confidence, severity, title,

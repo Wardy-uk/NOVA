@@ -3574,20 +3574,40 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             AND CSATAverage IS NOT NULL AND CSATCount > 0
           GROUP BY CAST(ReportDate AS DATE)
         `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
+        // Denominator for coverage = resolved tickets across all agents per day
+        // (independent of whether a survey came back). Coverage = responses ÷ solved.
+        const csatSolvedRows = (await pool.request().query(`
+          SELECT CAST(ReportDate AS DATE) AS d, SUM(SolvedTickets_Today) AS solved
+          FROM dbo.jira_agent_kpi_daily
+          WHERE ReportDate >= DATEADD(day, -42, CAST(GETDATE() AS DATE))
+            AND ReportDate < CAST(GETDATE() AS DATE)
+          GROUP BY CAST(ReportDate AS DATE)
+        `)).recordset as Array<{ d: Date | string; solved: number }>;
         const csatDaily = new Map<string, { s: number; n: number }>();
         for (const r of csatRows) csatDaily.set(toDayKey(r.d), { s: Number(r.s) || 0, n: Number(r.n) || 0 });
+        const csatSolvedDaily = new Map<string, number>();
+        for (const r of csatSolvedRows) csatSolvedDaily.set(toDayKey(r.d), Number(r.solved) || 0);
         for (const dayKey of byDay.keys()) {
           const end = new Date(dayKey + 'T00:00:00Z');
-          let s = 0, n = 0;
+          let s = 0, n = 0, solved = 0;
           for (let i = 0; i < CSAT_ROLL_DAYS; i++) {
             const dk = new Date(end); dk.setUTCDate(dk.getUTCDate() - i);
-            const v = csatDaily.get(dk.toISOString().slice(0, 10));
+            const key = dk.toISOString().slice(0, 10);
+            const v = csatDaily.get(key);
             if (v) { s += v.s; n += v.n; }
+            solved += csatSolvedDaily.get(key) || 0;
           }
           if (n > 0) {
             const avg = Math.round((s / n) * 10) / 10;            // 1–5 average, 1dp
             const rag = avg >= 4 ? 1 : avg >= 3 ? 2 : 3;          // 4/5 = green
             byDay.get(dayKey)!.set('__csat_roll__', { count: avg, rag });
+          }
+          // Coverage: % of resolved tickets that returned a CSAT rating (7-day rolling).
+          // Neutral/grey — no agreed target yet; the point is to expose how thin it is
+          // (a 2.3 built on 0.4% coverage is an impression, not a measurement).
+          if (solved > 0) {
+            const cov = Math.round((n / solved) * 100);
+            byDay.get(dayKey)!.set('__csat_cov__', { count: cov, rag: null });
           }
         }
       } catch { /* CSAT rolling optional */ }
@@ -3657,6 +3677,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // week → not injected → grey dash, excluded from trend/weekly.
       const csatCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null =>
         getNamed(dm, n => n === '__csat_roll__');
+      // CSAT coverage: % of resolved tickets that returned a rating (rolling 7-day).
+      // Neutral grey — exposes how thin the CSAT sample is behind the score.
+      const csatCovCell = (dm: Map<string, { count: number; rag: number | null }>): { num: number; rag: number | null } | null =>
+        getNamed(dm, n => n === '__csat_cov__');
 
       // Muted RAG palette — calm "attention" tones, not alarm, for the SLT board.
       const ragColor = (rag: number | null) => rag === 1 ? '#4ca88a' : rag === 2 ? '#c99a3f' : rag === 3 ? '#c2554f' : '#475569';
@@ -3717,6 +3741,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
         { header: 'Intake', metrics: [{ label: 'New ticket volume', get: newvolCell, kind: 'newvol', opts: { neutral: true } }] },
         { header: 'Quality &middot; CSAT + QA', metrics: [
           { label: 'CSAT', get: csatCell, kind: 'csat', opts: { sub: true, higher: true } },
+          { label: 'CSAT % scored', get: csatCovCell, kind: 'pct', opts: { sub: true, neutral: true } },
           { label: 'QA score (/10)', get: dm => getNamed(dm, n => n === '__org_qa__'), kind: 'qa', opts: { sub: true, higher: true } },
         ] },
         { header: 'Performance', metrics: [
@@ -3872,7 +3897,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
             // breakdown, instead of the raw firehose of fragmented AgentBrain cards.
             const { paragraph, themes } = accountRiskSummary(c, issues, i + 1);
             const themeHtml = themes.length
-              ? `<div class="why-th">${themes.map(t => `<span class="tchip">${esc(t.name)} &middot; <b>${t.tickets}</b> tix &middot; ${t.cards} pattern${t.cards === 1 ? '' : 's'}</span>`).join('')}</div>`
+              ? `<div class="why-th">${themes.slice(0, 5).map(t => `<span class="tchip">${esc(t.name)} &middot; <b>${t.tickets}</b> tix &middot; ${t.cards} pattern${t.cards === 1 ? '' : 's'}</span>`).join('')}</div>`
               : '';
             const jql = encodeURIComponent(`text ~ "${name.replace(/"/g, '')}" ORDER BY updated DESC`);
             return `<div class="why">
