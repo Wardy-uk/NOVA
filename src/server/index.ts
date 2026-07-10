@@ -4451,6 +4451,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // KB routes (public — no auth required for read)
   app.use('/api/portal/kb', portalGate, createPortalKbRoutes(portalKb));
 
+  // CSAT survey routes (public, no auth). MUST be mounted before the authenticated
+  // `/api/portal` mounts below — otherwise portalAuth intercepts `/api/portal/csat/*`
+  // and 401s ("Missing portal authentication token") before this route is reached.
+  app.use('/api/portal/csat', portalGate, createPortalCsatRoutes({
+    settings: settingsQueries,
+    getJiraClient: buildServiceDeskJiraClient,
+  }));
+
   // Authenticated portal routes
   const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
   app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
@@ -4460,12 +4468,6 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 
   // Widget routes (public, CORS-gated, own auth via email identification)
   app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));
-
-  // CSAT survey routes (public, token-based, no auth)
-  app.use('/api/portal/csat', portalGate, createPortalCsatRoutes({
-    settings: settingsQueries,
-    getJiraClient: buildServiceDeskJiraClient,
-  }));
 
   console.log(`[N.O.V.A] Portal routes wired (currently ${settingsQueries.get('portal_enabled') === 'true' ? 'enabled' : 'disabled'} — toggle via Admin > Feature Flags)`);
 
