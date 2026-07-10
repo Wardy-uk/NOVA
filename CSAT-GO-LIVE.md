@@ -30,7 +30,6 @@ Then in **NOVA → Admin → Settings**, set:
 |---|---|
 | `csat_jira_mirror_field` | `customfield_XXXXX` (the NOVA CSAT number field) |
 | `csat_jira_mirror_comment_field` | `customfield_YYYYY` (optional, the comment field) |
-| `csat_accept_window_days` | `14` (how long after resolution a rating is accepted) |
 | `csat_comment_mode` | **`off`** (stops NOVA's old auto-poster — the agent macro replaces it) |
 
 > Mirror-write is **best-effort**: NOVA is the source of truth. If the Jira write fails, the rating is still safe in NOVA and the failure is logged.
@@ -54,7 +53,8 @@ Suggested body:
 
 Notes:
 - Use the **issue key** variable (`{{issue.key}}` / "Work item Key"), not a hash. NOVA now accepts the plain key.
-- HMAC signing was considered and **dropped** — canned responses can only substitute `{{issue.key}}`, they can't compute a signature. The endpoint is instead guarded by: ticket-must-exist-and-be-resolved, resolved-within-14-days, first-write-wins, and IP rate-limiting.
+- HMAC signing was considered and **dropped** — canned responses can only substitute `{{issue.key}}`, they can't compute a signature. The endpoint is instead guarded by: **ticket-must-exist** (in NOVA's cache), **first-write-wins** per ticket, and **IP rate-limiting** (20/min).
+- **Ratings are accepted at any lifecycle point** — we no longer require the ticket to be resolved. Instead NOVA snapshots the ticket's **state and age** at rating time (`ticket_status`, `ticket_status_category`, `ticket_resolved`, `ticket_created`, `ticket_resolved_at`, `ticket_age_hours`), so a rating on an unresolved ticket is *signal* about the lifecycle, not contamination. Tradeoff: with the resolved gate gone, any existing ticket key can be rated once — mitigated by first-write-wins + rate-limit.
 - The macro must be run as a **public** reply for it to count toward adoption (instrumentation only counts public comments).
 
 ---
@@ -97,7 +97,8 @@ Corporate link scanners (Mimecast, Safe Links, Rocketseed) **prefetch URLs in in
 ## What NOVA now does (code, shipped this branch)
 
 - **Route** `/portal/csat/{{issue.key}}` — accepts a plain issue key (legacy hex token still works). `src/server/routes/portal-csat.ts`, client route `src/client/portal-main.tsx`.
-- **Guards** — ticket must exist + be resolved + within `csat_accept_window_days`; **first-write-wins** per ticket (duplicates logged, not overwritten); **IP rate-limit** (20/min).
+- **Guards** — ticket must exist in cache; **first-write-wins** per ticket (duplicates logged, not overwritten); **IP rate-limit** (20/min). Rating accepted at any state; lifecycle context (state + age) snapshotted on submit.
+- **Optional comment** — captured after the rating is banked, stored in NOVA, and **posted onto the Jira ticket as an internal note** (`Customer CSAT feedback — rated N/5: …`).
 - **Page redesign** — `src/client/components/portal/PortalCSAT.tsx`: no login/cookie/consent gate, mobile-first, single star rating **banked on tap** (no submit button), optional comment **after** banking, thank-you confirms what was rated.
 - **Mirror write** — on submit, writes the rating (and optional comment) to the configured NOVA CSAT field; best-effort.
 - **Instrumentation** — `src/server/routes/csat-metrics.ts` + `src/client/components/CsatAdoptionView.tsx`.

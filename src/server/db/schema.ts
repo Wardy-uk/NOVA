@@ -2164,6 +2164,21 @@ async function runMigrations(): Promise<void> {
        created_at DATETIME2 DEFAULT GETUTCDATE()
      );`,
 
+    // CSAT lifecycle context — captured at the moment the rating is submitted, so
+    // ratings taken at any ticket state/age become signal (trends across lifecycle).
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_status') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_status NVARCHAR(100) NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_status_category') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_status_category NVARCHAR(50) NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_resolved') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_resolved BIT NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_created') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_created DATETIME2 NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_resolved_at') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_resolved_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'ticket_age_hours') IS NULL
+     ALTER TABLE portal_csat_surveys ADD ticket_age_hours INT NULL;`,
+
     // ── Assignment retry queue — unassigned tickets queued for automatic retry ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'assignment_retry_queue') AND type = 'U')
      CREATE TABLE assignment_retry_queue (

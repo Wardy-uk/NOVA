@@ -32,59 +32,69 @@ function rateLimited(ip: string): boolean {
 
 interface CachedTicket {
   summary: string | null;
+  status_name: string | null;
   status_category: string | null;
   resolution_name: string | null;
-  jira_updated: string | null;
+  jira_created: string | null;
   reporter_email: string | null;
   fields_json: string | null;
 }
 
-interface EligibleResult {
-  ok: boolean;
-  reason?: 'not_found' | 'not_resolved' | 'expired';
+interface TicketContext {
+  found: boolean;
   ticket?: CachedTicket;
+  status: string | null;
+  statusCategory: string | null;
+  resolved: boolean;
+  created: Date | null;
+  resolvedAt: Date | null;
+  ageHours: number | null;
 }
 
-/** Look up a cached ticket and decide whether it is eligible for a CSAT rating:
- *  it must exist, be resolved, and have resolved within the accept window. */
-async function loadEligibleTicket(
-  issueKey: string,
-  windowDays: number,
-): Promise<EligibleResult> {
+/** Look up a cached ticket and snapshot its lifecycle context (state + age) at
+ *  rating time. CSAT is accepted at ANY lifecycle point — the only gate is that
+ *  the ticket must actually exist (so guessed keys can't bank junk ratings). The
+ *  captured state/age turns "rated an unresolved ticket" into signal, not noise. */
+async function loadTicketContext(issueKey: string): Promise<TicketContext> {
   const ticket = await queryOne<CachedTicket>(
-    `SELECT summary, status_category, resolution_name, jira_updated, reporter_email, fields_json
+    `SELECT summary, status_name, status_category, resolution_name, jira_created, reporter_email, fields_json
      FROM jira_issue_cache WHERE issue_key = ?`,
     [issueKey],
   );
-  if (!ticket) return { ok: false, reason: 'not_found' };
+  if (!ticket) {
+    return { found: false, status: null, statusCategory: null, resolved: false, created: null, resolvedAt: null, ageHours: null };
+  }
 
   const resolved = ticket.status_category === 'Done' || !!ticket.resolution_name;
-  if (!resolved) return { ok: false, reason: 'not_resolved' };
 
-  // Resolved-within-N-days: prefer Jira's resolutiondate, fall back to jira_updated.
-  let resolvedAt: number | null = null;
+  let resolvedAt: Date | null = null;
   if (ticket.fields_json) {
     try {
       const rd = JSON.parse(ticket.fields_json)?.resolutiondate;
-      if (rd) resolvedAt = new Date(rd).getTime();
+      if (rd) resolvedAt = new Date(rd);
     } catch { /* ignore malformed cache */ }
   }
-  if (resolvedAt == null && ticket.jira_updated) resolvedAt = new Date(ticket.jira_updated).getTime();
-  if (resolvedAt == null || Number.isNaN(resolvedAt)) return { ok: false, reason: 'expired' };
 
-  const ageDays = (Date.now() - resolvedAt) / 86_400_000;
-  if (ageDays > windowDays) return { ok: false, reason: 'expired' };
+  const created = ticket.jira_created ? new Date(ticket.jira_created) : null;
+  const ageHours = created && !Number.isNaN(created.getTime())
+    ? Math.round((Date.now() - created.getTime()) / 3_600_000)
+    : null;
 
-  return { ok: true, ticket };
+  return {
+    found: true,
+    ticket,
+    status: ticket.status_name,
+    statusCategory: ticket.status_category,
+    resolved,
+    created: created && !Number.isNaN(created.getTime()) ? created : null,
+    resolvedAt: resolvedAt && !Number.isNaN(resolvedAt.getTime()) ? resolvedAt : null,
+    ageHours,
+  };
 }
 
 export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
   const router = Router();
 
-  const acceptWindowDays = () => {
-    const n = Number(deps.settings.get('csat_accept_window_days'));
-    return Number.isFinite(n) && n > 0 ? n : 14;
-  };
   const clientIp = (req: Request) =>
     (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() || req.ip || 'unknown';
 
@@ -110,16 +120,16 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
           return;
         }
 
-        const eligible = await loadEligibleTicket(issueKey, acceptWindowDays());
-        if (!eligible.ok) {
-          const code = eligible.reason === 'not_found' ? 404 : 200;
-          res.status(code).json({ ok: false, error: eligible.reason === 'expired' ? 'expired' : 'not_found' });
+        // Only gate: the ticket must exist in cache. Rating is accepted at any state.
+        const ctx = await loadTicketContext(issueKey);
+        if (!ctx.found) {
+          res.status(404).json({ ok: false, error: 'not_found' });
           return;
         }
 
         res.json({
           ok: true,
-          data: { ticketKey: issueKey, summary: eligible.ticket?.summary || issueKey },
+          data: { ticketKey: issueKey, summary: ctx.ticket?.summary || issueKey },
         });
         return;
       }
@@ -195,11 +205,11 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
       if (isIssueKey(param)) {
         issueKey = param.toUpperCase();
 
-        // Guard: ticket must exist, be resolved, and be within the accept window.
-        const eligible = await loadEligibleTicket(issueKey, acceptWindowDays());
-        if (!eligible.ok) {
-          const code = eligible.reason === 'not_found' ? 404 : 200;
-          res.status(code).json({ ok: false, error: eligible.reason === 'expired' ? 'expired' : 'not_found' });
+        // Only gate: the ticket must exist. Rating accepted at any lifecycle point;
+        // we snapshot its state + age so ratings become lifecycle signal.
+        const ctx = await loadTicketContext(issueKey);
+        if (!ctx.found) {
+          res.status(404).json({ ok: false, error: 'not_found' });
           return;
         }
 
@@ -218,15 +228,17 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
           surveyId = existing.id;
           await execute(
             `UPDATE portal_csat_surveys
-             SET csat_score = ?, ease_score = ?, effort_score = ?, comment = ?, responded_at = GETUTCDATE()
+             SET csat_score = ?, ease_score = ?, effort_score = ?, comment = ?, responded_at = GETUTCDATE(),
+                 ticket_status = ?, ticket_status_category = ?, ticket_resolved = ?, ticket_created = ?, ticket_resolved_at = ?, ticket_age_hours = ?
              WHERE id = ?`,
-            [csatScore, easeScore || null, effortScore || null, comment || null, surveyId],
+            [csatScore, easeScore || null, effortScore || null, comment || null,
+             ctx.status, ctx.statusCategory, ctx.resolved ? 1 : 0, ctx.created, ctx.resolvedAt, ctx.ageHours, surveyId],
           );
         } else {
           // Lazy row: agent-macro links have no pre-generated survey.
           const token = crypto.randomBytes(32).toString('hex');
-          const expiresAt = new Date(Date.now() + acceptWindowDays() * 86_400_000);
-          const reporterEmail = eligible.ticket?.reporter_email ?? null;
+          const expiresAt = new Date(Date.now() + 365 * 86_400_000);
+          const reporterEmail = ctx.ticket?.reporter_email ?? null;
           const user = reporterEmail
             ? await queryOne<{ id: number; org_id: number }>(
                 `SELECT id, org_id FROM portal_users WHERE email = ?`,
@@ -235,11 +247,13 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
             : null;
           const inserted = await queryOne<{ id: number }>(
             `INSERT INTO portal_csat_surveys
-               (token, jira_issue_key, portal_user_id, org_id, csat_score, ease_score, effort_score, comment, expires_at, responded_at)
+               (token, jira_issue_key, portal_user_id, org_id, csat_score, ease_score, effort_score, comment, expires_at, responded_at,
+                ticket_status, ticket_status_category, ticket_resolved, ticket_created, ticket_resolved_at, ticket_age_hours)
              OUTPUT INSERTED.id
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETUTCDATE())`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, GETUTCDATE(), ?, ?, ?, ?, ?, ?)`,
             [token, issueKey, user?.id ?? null, user?.org_id ?? null,
-             csatScore, easeScore || null, effortScore || null, comment || null, expiresAt],
+             csatScore, easeScore || null, effortScore || null, comment || null, expiresAt,
+             ctx.status, ctx.statusCategory, ctx.resolved ? 1 : 0, ctx.created, ctx.resolvedAt, ctx.ageHours],
           );
           surveyId = inserted!.id;
         }
@@ -304,8 +318,8 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
     try {
       const col = isIssueKey(param) ? 'jira_issue_key' : 'token';
       const value = isIssueKey(param) ? param.toUpperCase() : param;
-      const row = await queryOne<{ id: number; jira_issue_key: string; responded_at: string | null; comment: string | null }>(
-        `SELECT id, jira_issue_key, responded_at, comment FROM portal_csat_surveys WHERE ${col} = ?`,
+      const row = await queryOne<{ id: number; jira_issue_key: string; csat_score: number | null; responded_at: string | null; comment: string | null }>(
+        `SELECT id, jira_issue_key, csat_score, responded_at, comment FROM portal_csat_surveys WHERE ${col} = ?`,
         [value],
       );
       if (!row || !row.responded_at) {
@@ -320,17 +334,18 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
         res.json({ ok: false, error: 'expired' });
         return;
       }
+      // Store in NOVA (source of truth).
       await execute(`UPDATE portal_csat_surveys SET comment = ? WHERE id = ?`, [comment, row.id]);
 
-      // Mirror the comment into the Jira comment field if one is configured.
-      const commentFieldId = deps.settings.get('csat_jira_mirror_comment_field');
-      if (commentFieldId) {
-        const client = deps.getJiraClient();
-        if (client) {
-          await client.updateFields(row.jira_issue_key, { [commentFieldId]: comment }).catch(err =>
-            console.warn(`[csat] Jira comment mirror failed for ${row.jira_issue_key}:`, err instanceof Error ? err.message : err),
-          );
-        }
+      // Paste it onto the Jira ticket as an internal note so agents see the feedback
+      // (internal — doesn't re-notify the customer). Best-effort; never fails the save.
+      const client = deps.getJiraClient();
+      if (client) {
+        const rated = row.csat_score ? ` — rated ${row.csat_score}/5` : '';
+        const noteText = `Customer CSAT feedback${rated}:\n${comment}`;
+        await client.addComment(row.jira_issue_key, noteText, { internal: true }).catch(err =>
+          console.warn(`[csat] Jira comment post failed for ${row.jira_issue_key}:`, err instanceof Error ? err.message : err),
+        );
       }
       res.json({ ok: true });
     } catch (err) {
