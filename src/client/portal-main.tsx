@@ -461,21 +461,26 @@ function parseNovaJwt(token: string): { id: number; username: string; role: stri
   }
 }
 
-// Accept both the legacy hex token and a plain Jira issue key (e.g. NT-1234).
-const CSAT_PATH_RE = /^\/portal\/csat\/([a-fA-F0-9]+|[A-Z][A-Z0-9]+-\d+)$/;
+// Any /portal/csat/<segment> is a feedback link. Route ALL of them to the CSAT
+// page (which shows a clear error for unknown/malformed tokens) rather than
+// falling through to the portal app — e.g. an unsubstituted ${issue.key}.
+const CSAT_PREFIX_RE = /^\/portal\/csat\/(.+)$/;
 
 function CsatRoute() {
-  const match = window.location.pathname.match(CSAT_PATH_RE);
+  const match = window.location.pathname.match(CSAT_PREFIX_RE);
   if (!match) return null;
+  // Decode the raw segment; the CSAT page validates it against the API.
+  let token = match[1];
+  try { token = decodeURIComponent(token); } catch { /* keep raw */ }
   return (
     <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>}>
-      <PortalCSAT token={match[1]} />
+      <PortalCSAT token={token} />
     </Suspense>
   );
 }
 
 const root = document.getElementById('portal-root');
 if (root) {
-  const csatMatch = CSAT_PATH_RE.test(window.location.pathname);
+  const csatMatch = CSAT_PREFIX_RE.test(window.location.pathname);
   createRoot(root).render(csatMatch ? <CsatRoute /> : <PortalApp />);
 }
