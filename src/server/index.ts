@@ -4016,6 +4016,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
           LEFT JOIN dbo.Agent a ON a.AgentId = d.AgentId
           WHERE d.ReportDate >= DATEADD(day, -7, CAST(GETDATE() AS DATE))
             AND d.ReportDate < CAST(GETDATE() AS DATE) AND a.AccountId IS NOT NULL
+            AND d.AgentName NOT IN ('Nick Ward', 'NOVA AI')
           ORDER BY d.ReportDate
         `)).recordset as Array<{ d: string; accountId: string; name: string; tier: string | null; team: string | null; overSla: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; qa: number | null }>;
         const byAgent = new Map<string, typeof agRows>();
