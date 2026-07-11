@@ -640,31 +640,33 @@ export class JiraSyncService {
     const bodyText = extractText(comment.body);
     const bodyAdf = comment.body ? JSON.stringify(comment.body) : null;
     const isPublic = comment.jsdPublic !== false;
+    // Flag CSAT-link comments at write time so adoption metrics never LIKE-scan bodies.
+    const hasCsatLink = bodyText && bodyText.includes('/portal/csat/') ? 1 : 0;
 
     await execute(`
       MERGE jira_comment_cache AS target
       USING (SELECT ? AS jira_comment_id) AS source ON target.jira_comment_id = source.jira_comment_id
       WHEN MATCHED THEN UPDATE SET
         issue_key = ?, author_account_id = ?, author_display = ?, author_email = ?,
-        body_text = ?, body_adf = ?, is_public = ?,
+        body_text = ?, body_adf = ?, is_public = ?, has_csat_link = ?,
         jira_created = ?, jira_updated = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         jira_comment_id, issue_key, author_account_id, author_display, author_email,
-        body_text, body_adf, is_public, jira_created, jira_updated
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        body_text, body_adf, is_public, has_csat_link, jira_created, jira_updated
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         comment.id,
         // UPDATE
         issueKey,
         comment.author?.accountId ?? null, comment.author?.displayName ?? null,
         comment.author?.emailAddress ?? null,
-        bodyText || null, bodyAdf, isPublic,
+        bodyText || null, bodyAdf, isPublic, hasCsatLink,
         new Date(comment.created), new Date(comment.updated),
         // INSERT
         comment.id, issueKey,
         comment.author?.accountId ?? null, comment.author?.displayName ?? null,
         comment.author?.emailAddress ?? null,
-        bodyText || null, bodyAdf, isPublic,
+        bodyText || null, bodyAdf, isPublic, hasCsatLink,
         new Date(comment.created), new Date(comment.updated),
       ],
     );

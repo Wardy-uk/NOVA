@@ -714,6 +714,14 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_issue')
      CREATE INDEX IX_jira_comment_issue ON jira_comment_cache (issue_key, jira_created DESC);`,
 
+    // CSAT adoption flag — set at sync time so we never LIKE-scan comment bodies at
+    // query time (100k+ rows with large ADF bodies make that a >90s full scan).
+    // NOT NULL DEFAULT 0 is a metadata-only add; no historical comment has a CSAT link.
+    `IF COL_LENGTH('jira_comment_cache', 'has_csat_link') IS NULL
+     ALTER TABLE jira_comment_cache ADD has_csat_link BIT NOT NULL DEFAULT 0;`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_csat')
+     CREATE INDEX IX_jira_comment_csat ON jira_comment_cache (issue_key, is_public) WHERE has_csat_link = 1;`,
+
     // ── Jira Sync State ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_sync_state') AND type = 'U')
      CREATE TABLE jira_sync_state (

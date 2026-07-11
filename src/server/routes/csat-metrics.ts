@@ -33,35 +33,31 @@ export function createCsatMetricsRoutes(): Router {
         ratings_received: number;
         avg_rating: number | null;
       }>(
+        // Uses the has_csat_link flag (set at sync time, filtered-indexed) so we never
+        // LIKE-scan comment bodies — that was a >90s full scan over 100k rows.
         `WITH resolved AS (
-           SELECT c.issue_key, COALESCE(c.assignee_display, 'Unassigned') AS agent
+           SELECT c.issue_key, COALESCE(c.assignee_display, 'Unassigned') AS agent,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM jira_comment_cache cc
+                    WHERE cc.issue_key = c.issue_key
+                      AND cc.is_public = 1
+                      AND cc.has_csat_link = 1
+                  ) THEN 1 ELSE 0 END AS has_link
            FROM jira_issue_cache c
            WHERE c.status_category = 'Done'
              AND c.jira_updated >= ? AND c.jira_updated < ?
-         ),
-         links AS (
-           SELECT DISTINCT cc.issue_key
-           FROM jira_comment_cache cc
-           JOIN resolved r ON r.issue_key = cc.issue_key
-           WHERE cc.is_public = 1 AND cc.body_text LIKE '%/portal/csat/%'
-         ),
-         ratings AS (
-           SELECT s.jira_issue_key, s.csat_score
-           FROM portal_csat_surveys s
-           WHERE s.responded_at IS NOT NULL
-             AND s.responded_at >= ? AND s.responded_at < ?
          )
          SELECT r.agent,
-                COUNT(DISTINCT r.issue_key)          AS resolved,
-                COUNT(DISTINCT l.issue_key)          AS links_sent,
-                COUNT(DISTINCT rt.jira_issue_key)    AS ratings_received,
-                AVG(CAST(rt.csat_score AS FLOAT))    AS avg_rating
+                COUNT(*) AS resolved,
+                SUM(r.has_link) AS links_sent,
+                SUM(CASE WHEN s.jira_issue_key IS NOT NULL THEN 1 ELSE 0 END) AS ratings_received,
+                AVG(CASE WHEN s.jira_issue_key IS NOT NULL THEN CAST(s.csat_score AS FLOAT) END) AS avg_rating
          FROM resolved r
-         LEFT JOIN links l   ON l.issue_key = r.issue_key
-         LEFT JOIN ratings rt ON rt.jira_issue_key = r.issue_key
+         LEFT JOIN portal_csat_surveys s
+                ON s.jira_issue_key = r.issue_key AND s.responded_at IS NOT NULL
          GROUP BY r.agent
          ORDER BY resolved DESC`,
-        [from, toExclusive, from, toExclusive],
+        [from, toExclusive],
       );
 
       const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
