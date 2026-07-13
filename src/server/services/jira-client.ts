@@ -450,7 +450,13 @@ export class JiraRestClient {
         comment: [{ add: commentAdd }],
       };
     }
-    // Retry loop: strip fields Jira rejects as "not on the appropriate screen"
+    // Retry loop: strip fields Jira rejects as "not on the appropriate screen",
+    // and satisfy the NT "BC Account number is mandatory" resolve validator for
+    // tickets that have no BC account (e.g. plugin/WP Engine notifications with
+    // no Dynamics contact). Because this only fires when the validator actually
+    // rejects, tickets that already carry a real BC account never reach here and
+    // their value is never overwritten.
+    let bcAccountInjected = false;
     for (let attempt = 0; attempt < 6; attempt++) {
       try {
         await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
@@ -465,6 +471,19 @@ export class JiraRestClient {
           console.warn(`[JiraClient] Retrying transition on ${issueKey} without rejected field '${badField}'`);
           payload.fields = Object.keys(fields).length > 0 ? fields : undefined;
           continue;
+        }
+        if (!bcAccountInjected && /BC Account number is mandatory/i.test(msg)) {
+          bcAccountInjected = true;
+          // The field isn't on the resolve screen, so it can't be set in the
+          // transition payload — set it via a normal field edit first, then retry.
+          try {
+            await this.updateFields(issueKey, { customfield_14626: 'N/A' }); // BC Account Number — sentinel for tickets with no Dynamics/BC contact
+            console.warn(`[JiraClient] Set sentinel BC Account number on ${issueKey} to satisfy resolve validator (ticket had none), retrying transition`);
+            continue;
+          } catch (setErr) {
+            console.error(`[JiraClient] Failed to set sentinel BC Account number on ${issueKey}:`, setErr instanceof Error ? setErr.message : setErr);
+            throw err;
+          }
         }
         throw err;
       }
