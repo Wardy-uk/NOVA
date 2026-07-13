@@ -29,7 +29,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
       <header role="banner" className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
               {logoUrl
@@ -56,7 +56,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
         </div>
 
         {/* Navigation */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
           <nav role="navigation" aria-label="Main navigation" className="flex gap-1 -mb-px overflow-x-auto">
             {navItems.map(item => {
               const isActive = currentView === item.view || (item.view === 'tickets' && currentView === 'ticket-detail');
@@ -83,13 +83,13 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
       </header>
 
       {/* Main content */}
-      <main role="main" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main role="main" className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}
       </main>
 
       {/* Footer */}
       <footer role="contentinfo" className="bg-white border-t border-gray-200 py-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-gray-600">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-gray-600">
           <span>Powered by Nurtur</span>
           <a href="mailto:support@nurtur.tech" className="hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none rounded">Need help? Contact us</a>
         </div>
