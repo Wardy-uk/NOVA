@@ -68,6 +68,23 @@ export function canEscalateTicket(role: PortalUserRole | undefined): boolean {
   return !!role && PORTAL_ROLE_RANK[role] >= PORTAL_ROLE_RANK.manager;
 }
 
+// ── Priority ordering (for filter dropdowns) ──
+// Highest urgency first; unknown priorities sort as Medium.
+const PORTAL_PRIORITY_RANK: Record<string, number> = {
+  blocker: 0, 'business critical': 0, highest: 1, high: 2, medium: 3, low: 4, lowest: 5,
+};
+
+export function portalPriorityRank(priority: string | null | undefined): number {
+  return PORTAL_PRIORITY_RANK[(priority || '').toLowerCase()] ?? 3;
+}
+
+/** Unique priority values present in a set of tickets, ordered by urgency. */
+export function portalPriorityOptions(priorities: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  for (const p of priorities) { if (p) seen.add(p); }
+  return [...seen].sort((a, b) => portalPriorityRank(a) - portalPriorityRank(b));
+}
+
 export interface PortalUser {
   id: number;
   external_id: string;
@@ -229,6 +246,7 @@ export interface PortalOrgTicket {
   summary: string;
   status: string;        // raw Jira status
   priority: string;
+  tier: string | null;   // current handling tier (Customer Care / Tier 2 / Tier 3 / Development)
   requestType: string;
   reporter: string | null;
   assignee: string | null;
@@ -488,6 +506,7 @@ export interface OnboardingDashboardRow {
   created: string;            // logged date
   ageDays: number;            // whole days since logged
   ageBucket: 'ok' | 'over7' | 'over14' | 'over21' | 'breach'; // >30 = SLA breach
+  priority: string;           // Jira priority name
 }
 
 export interface OnboardingDashboardSummary {

@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { PortalOrgTicket, PortalMyTicketsResponse } from '../../../shared/portal-types.js';
+import { portalPriorityOptions } from '../../../shared/portal-types.js';
 import { showPortalToast } from './PortalToast.js';
 
 interface Props {
@@ -16,6 +17,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
   const [canViewOrg, setCanViewOrg] = useState(false);
   const [canEscalate, setCanEscalate] = useState(false);
   const [search, setSearch] = useState('');
+  const [priority, setPriority] = useState('all');
   const [escalating, setEscalating] = useState<PortalOrgTicket | null>(null);
 
   const load = useCallback(async () => {
@@ -40,6 +42,13 @@ export default function PortalTicketList({ onViewTicket }: Props) {
   }, [scope, status, search]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Priority filter is applied client-side over the loaded rows.
+  const priorityOptions = useMemo(() => portalPriorityOptions(tickets.map(t => t.priority)), [tickets]);
+  const visibleTickets = useMemo(
+    () => priority === 'all' ? tickets : tickets.filter(t => t.priority === priority),
+    [tickets, priority],
+  );
 
   const statusColor = (s: string) => {
     const l = s.toLowerCase();
@@ -82,6 +91,16 @@ export default function PortalTicketList({ onViewTicket }: Props) {
           ))}
         </div>
 
+        <select
+          value={priority}
+          onChange={e => setPriority(e.target.value)}
+          aria-label="Filter by priority"
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+        >
+          <option value="all">All priorities</option>
+          {priorityOptions.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+
         <div className="flex-1" />
 
         <input
@@ -104,7 +123,7 @@ export default function PortalTicketList({ onViewTicket }: Props) {
               </div>
             ))}
           </div>
-        ) : tickets.length === 0 ? (
+        ) : visibleTickets.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-600">
             <p className="text-lg mb-2">No tickets found</p>
             <p className="text-sm">{scope === 'mine' ? 'You have no tickets matching these filters.' : 'No org tickets match these filters.'}</p>
@@ -117,13 +136,14 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                   <th scope="col" className="text-left px-5 py-3 font-medium">Ticket</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Status</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Priority</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Tier</th>
                   {scope === 'org' && <th scope="col" className="text-left px-4 py-3 font-medium">Reporter</th>}
                   <th scope="col" className="text-left px-4 py-3 font-medium">Updated</th>
                   <th scope="col" className="text-right px-5 py-3 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {tickets.map(t => (
+                {visibleTickets.map(t => (
                   <tr key={t.key} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-3 cursor-pointer" onClick={() => onViewTicket(t.key)}>
                       <div className="flex items-center gap-2">
@@ -134,6 +154,11 @@ export default function PortalTicketList({ onViewTicket }: Props) {
                     </td>
                     <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(t.status)}`}>{t.status}</span></td>
                     <td className="px-4 py-3 text-gray-600">{t.priority}</td>
+                    <td className="px-4 py-3">
+                      {t.tier
+                        ? <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">{t.tier}</span>
+                        : <span className="text-gray-400">—</span>}
+                    </td>
                     {scope === 'org' && <td className="px-4 py-3 text-gray-600">{t.reporter || '-'}</td>}
                     <td className="px-4 py-3 text-gray-500">{t.updated ? new Date(t.updated).toLocaleDateString() : '-'}</td>
                     <td className="px-5 py-3 text-right">

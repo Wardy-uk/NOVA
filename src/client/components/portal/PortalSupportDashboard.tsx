@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { SupportDashboardResponse, SupportDashboardRow } from '../../../shared/portal-types.js';
+import { portalPriorityOptions } from '../../../shared/portal-types.js';
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -62,6 +63,7 @@ export default function PortalSupportDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [priority, setPriority] = useState('all');
   const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -83,8 +85,11 @@ export default function PortalSupportDashboard() {
 
   const s = data?.summary;
 
+  const priorityOptions = useMemo(() => portalPriorityOptions((data?.rows ?? []).map(r => r.priority)), [data]);
+
   const rows = useMemo(() => {
-    const all = data?.rows ?? [];
+    let all = data?.rows ?? [];
+    if (priority !== 'all') all = all.filter(r => r.priority === priority);
     switch (filter) {
       case 'stale': return all.filter(r => r.stale);
       case 'sla': return all.filter(r => r.overSla);
@@ -96,7 +101,7 @@ export default function PortalSupportDashboard() {
       case 'development': return all.filter(r => r.tierGroup === 'development');
       default: return all;
     }
-  }, [data, filter]);
+  }, [data, filter, priority]);
 
   const typeBreakdown = useMemo(() => {
     const m = new Map<string, number>();
@@ -123,9 +128,20 @@ export default function PortalSupportDashboard() {
             Open tickets across all projects
           </p>
         </div>
-        <button onClick={load} className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand outline-none">
-          ↻ Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={priority}
+            onChange={e => { setPriority(e.target.value); if (e.target.value !== 'all') setExpanded(true); }}
+            aria-label="Filter by priority"
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white text-gray-600 focus-visible:ring-2 focus-visible:ring-brand outline-none"
+          >
+            <option value="all">All priorities</option>
+            {priorityOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <button onClick={load} className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand outline-none">
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
       {/* KPI cards — row 1: health (5), row 2: tier breakdown (4) */}
@@ -210,7 +226,7 @@ export default function PortalSupportDashboard() {
         ) : rows.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-500">
             <p className="text-lg mb-1">No tickets</p>
-            <p className="text-sm">{filter === 'all' ? 'No open tickets for your account.' : 'Nothing matches this filter.'}</p>
+            <p className="text-sm">{filter === 'all' && priority === 'all' ? 'No open tickets for your account.' : 'Nothing matches this filter.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -218,7 +234,8 @@ export default function PortalSupportDashboard() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
                   <th scope="col" className="text-left px-5 py-3 font-medium">Ticket</th>
-                  <th scope="col" className="text-left px-4 py-3 font-medium">Type</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Tier</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Priority</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Owner</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Status</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Sprint</th>
@@ -238,6 +255,7 @@ export default function PortalSupportDashboard() {
                       <div className="text-gray-900 max-w-sm truncate">{r.summary}</div>
                     </td>
                     <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">{r.type}</span></td>
+                    <td className="px-4 py-3 text-gray-600">{r.priority}</td>
                     <td className="px-4 py-3 text-gray-600">{r.owner || <span className="text-gray-400">Unassigned</span>}</td>
                     <td className="px-4 py-3 text-gray-700">{r.status}</td>
                     <td className="px-4 py-3">{sprintBadge(r.sprintState)}</td>

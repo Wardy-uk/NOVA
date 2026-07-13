@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { OnboardingDashboardResponse, OnboardingDashboardRow } from '../../../shared/portal-types.js';
+import { portalPriorityOptions } from '../../../shared/portal-types.js';
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -22,6 +23,7 @@ export default function PortalOnboardingDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [priority, setPriority] = useState('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,6 +44,12 @@ export default function PortalOnboardingDashboard() {
 
   const s = data?.summary;
   const total = s?.total || 0;
+
+  const priorityOptions = useMemo(() => portalPriorityOptions((data?.rows ?? []).map(r => r.priority)), [data]);
+  const filteredRows = useMemo(
+    () => priority === 'all' ? (data?.rows ?? []) : (data?.rows ?? []).filter(r => r.priority === priority),
+    [data, priority],
+  );
 
   const cards = [
     { label: 'Open requests', value: s?.total ?? 0, accent: 'text-slate-700', bg: 'bg-gray-50',
@@ -78,7 +86,18 @@ export default function PortalOnboardingDashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Onboarding</h1>
           <p className="text-sm text-gray-500 mt-0.5">Open onboarding requests &amp; their current stage</p>
         </div>
-        <button onClick={load} className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand outline-none">↻ Refresh</button>
+        <div className="flex items-center gap-2">
+          <select
+            value={priority}
+            onChange={e => { setPriority(e.target.value); if (e.target.value !== 'all') setExpanded(true); }}
+            aria-label="Filter by priority"
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white text-gray-600 focus-visible:ring-2 focus-visible:ring-brand outline-none"
+          >
+            <option value="all">All priorities</option>
+            {priorityOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <button onClick={load} className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-brand outline-none">↻ Refresh</button>
+        </div>
       </div>
 
       {/* KPI cards */}
@@ -123,7 +142,7 @@ export default function PortalOnboardingDashboard() {
           className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <span className="text-sm font-semibold text-gray-700">
-            Request list <span className="text-gray-400 font-normal">({data?.rows.length ?? 0})</span>
+            Request list <span className="text-gray-400 font-normal">({filteredRows.length})</span>
           </span>
           <svg className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -140,10 +159,10 @@ export default function PortalOnboardingDashboard() {
           </div>
         ) : error ? (
           <div className="px-6 py-16 text-center text-rose-600">{error}</div>
-        ) : !data || data.rows.length === 0 ? (
+        ) : !data || filteredRows.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-500">
             <p className="text-lg mb-1">No open onboarding requests</p>
-            <p className="text-sm">Nothing in progress for your account right now.</p>
+            <p className="text-sm">{priority === 'all' ? 'Nothing in progress for your account right now.' : 'Nothing matches this priority.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -152,18 +171,20 @@ export default function PortalOnboardingDashboard() {
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
                   <th scope="col" className="text-left px-5 py-3 font-medium">Request</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Stage</th>
+                  <th scope="col" className="text-left px-4 py-3 font-medium">Priority</th>
                   <th scope="col" className="text-left px-4 py-3 font-medium">Owner</th>
                   <th scope="col" className="text-right px-5 py-3 font-medium">Days open</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {data.rows.map(r => (
+                {filteredRows.map(r => (
                   <tr key={r.key} className="hover:bg-gray-50/70 transition-colors">
                     <td className="px-5 py-3">
                       <div className="font-mono text-gray-500 text-xs">{r.key}</div>
                       <div className="text-gray-900 max-w-md truncate">{r.summary}</div>
                     </td>
                     <td className="px-4 py-3 text-gray-700">{r.stage}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.priority}</td>
                     <td className="px-4 py-3 text-gray-600">{r.owner || <span className="text-gray-400">Unassigned</span>}</td>
                     <td className="px-5 py-3 text-right">
                       <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium tabular-nums ${BUCKET_STYLE[r.ageBucket]}`}>{r.ageDays}d</span>

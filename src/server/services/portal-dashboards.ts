@@ -294,6 +294,7 @@ export class PortalDashboardService {
           summary: f.summary || '',
           status: f.status?.name || 'Unknown',
           priority: f.priority?.name || 'Medium',
+          tier: cfValue(f[CF_TIER]),
           requestType,
           reporter: f.reporter?.emailAddress || f.reporter?.displayName || null,
           assignee: f.assignee?.displayName || null,
@@ -432,6 +433,7 @@ export class PortalDashboardService {
           created: i.created,
           ageDays,
           ageBucket: onboardingBucket(ageDays),
+          priority: i.priority,
         };
       });
 
