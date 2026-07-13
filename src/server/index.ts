@@ -61,7 +61,9 @@ import { createOnboardingRoutes } from './routes/onboarding.js';
 import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
 import { SalesQueries } from './db/sales-queries.js';
 import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
-import { JiraRestClient } from './services/jira-client.js';
+import { JiraRestClient, type BcAccountResolver } from './services/jira-client.js';
+import { buildBcClient } from './services/bc-client.js';
+import { resolveBcAccountNumber } from './services/bc-account-resolver.js';
 import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware, createAreaAccessGuard, requireRole, requireRoleAndTeam } from './middleware/auth.js';
 import type { CustomRole } from './middleware/auth.js';
@@ -552,6 +554,15 @@ async function main() {
   );
 
   // 3. Aggregator
+  // Resolves the real BC Account Number for tickets blocked by the NT "Quick
+  // Resolve" validator. Injected into every JiraRestClient so all close paths
+  // resolve a real account (or hold for a human) instead of writing 'N/A'.
+  const bcAccountResolver: BcAccountResolver = async (ticket, opts) => {
+    const bc = buildBcClient(settingsQueries.getAll());
+    if (!bc) return undefined; // BC not configured → caller falls back to legacy sentinel
+    return resolveBcAccountNumber(bc, ticket, { infraFallback: opts.infraFallback });
+  };
+
   // Onboarding/Admin Jira client — uses Admin > Jira (Global) credentials only.
   // For ticket creation, service desk shared views, problem scanner.
   function buildOnboardingJiraClient(): JiraRestClient | null {
@@ -563,12 +574,12 @@ async function main() {
     // Prefer Cloud ID (api.atlassian.com gateway) — jira_ob_url is for browse links only
     if (s.jira_ob_cloud_id) {
       console.log(`[OnboardingClient] Using Cloud ID: ${s.jira_ob_cloud_id.slice(0, 8)}...`);
-      return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+      return new JiraRestClient({ cloudId: s.jira_ob_cloud_id, email: s.jira_ob_email, apiToken: s.jira_ob_token }, { bcResolver: bcAccountResolver });
     }
     // Fallback to direct URL if no Cloud ID configured
     if (s.jira_ob_url) {
       console.log(`[OnboardingClient] Using direct URL: ${s.jira_ob_url}`);
-      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token });
+      return new JiraRestClient({ baseUrl: s.jira_ob_url, email: s.jira_ob_email, apiToken: s.jira_ob_token }, { bcResolver: bcAccountResolver });
     }
     console.log(`[OnboardingClient] No Cloud ID or URL configured`);
     return null;
@@ -580,7 +591,7 @@ async function main() {
     const s = settingsQueries.getAll();
     // Use seeded personal creds (jira_url/jira_username/jira_token in global settings)
     if (s.jira_enabled === 'true' && s.jira_url && s.jira_username && s.jira_token) {
-      return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token });
+      return new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token }, { bcResolver: bcAccountResolver });
     }
     // Fallback to onboarding creds for service desk
     return buildOnboardingJiraClient();
@@ -4565,7 +4576,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     const s = settingsQueries.getAll();
     if (s.jira_enabled === 'true' && s.jira_url && s.jira_username && s.jira_token) {
       return {
-        jiraClient: new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token }),
+        jiraClient: new JiraRestClient({ baseUrl: s.jira_url, email: s.jira_username, apiToken: s.jira_token }, { bcResolver: bcAccountResolver }),
         jiraBaseUrl: s.jira_url,
       };
     }

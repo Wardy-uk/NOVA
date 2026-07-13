@@ -5,6 +5,28 @@
  */
 
 import { normalizeStatusFields } from '../utils/jira-locale.js';
+import { extractText } from './shared/adf-utils.js';
+
+/**
+ * Resolves the real BC Account Number for a ticket that the NT "Quick Resolve"
+ * validator has just blocked for a missing BC account. Injected at construction
+ * so this low-level REST client stays decoupled from BC/settings.
+ * Returns:
+ *   - a string  → the BC account number to set, then retry the transition;
+ *   - null      → resolved but no confident match → HOLD (don't close);
+ *   - undefined → resolver unavailable → fall back to the legacy 'N/A' sentinel.
+ */
+export type BcAccountResolver = (
+  ticket: {
+    key: string;
+    summary?: string | null;
+    description?: string | null;
+    organisationName?: string | null;
+    reporterEmail?: string | null;
+    bcAccountNumber?: string | null;
+  },
+  opts: { infraFallback: boolean },
+) => Promise<string | null | undefined>;
 
 export interface JiraClientConfig {
   baseUrl: string;   // e.g. https://yourorg.atlassian.net
@@ -168,8 +190,13 @@ export function buildAdfDescription(sections: AdfSection[]): object {
 export class JiraRestClient {
   private authHeader: string;
   private baseUrl: string;
+  private bcResolver?: BcAccountResolver;
 
-  constructor(config: JiraClientConfig | JiraOAuthClientConfig | JiraCloudBasicConfig) {
+  constructor(
+    config: JiraClientConfig | JiraOAuthClientConfig | JiraCloudBasicConfig,
+    deps?: { bcResolver?: BcAccountResolver },
+  ) {
+    this.bcResolver = deps?.bcResolver;
     if ('cloudId' in config && 'accessToken' in config) {
       // OAuth 3LO — use Atlassian API gateway with Bearer token
       this.baseUrl = `https://api.atlassian.com/ex/jira/${config.cloudId}`;
@@ -432,6 +459,9 @@ export class JiraRestClient {
         visibility?: { type: string; value: string };
         internal?: boolean;
       };
+      /** For Nurtur-internal infra notifications (PMTA/BYM): if no customer BC
+       *  account resolves, close against Nurtur's own BC account instead of holding. */
+      bcInfraFallback?: boolean;
     }
   ): Promise<void> {
     const payload: Record<string, unknown> = {
@@ -451,12 +481,12 @@ export class JiraRestClient {
       };
     }
     // Retry loop: strip fields Jira rejects as "not on the appropriate screen",
-    // and satisfy the NT "BC Account number is mandatory" resolve validator for
-    // tickets that have no BC account (e.g. plugin/WP Engine notifications with
-    // no Dynamics contact). Because this only fires when the validator actually
-    // rejects, tickets that already carry a real BC account never reach here and
-    // their value is never overwritten.
-    let bcAccountInjected = false;
+    // and satisfy the NT "BC Account number is mandatory" resolve validator by
+    // resolving the ticket's *real* Business Central account (via the injected
+    // bcResolver) before retrying. This only fires when the validator actually
+    // rejects, so tickets that already carry a real BC account never reach here
+    // and their value is never overwritten.
+    let bcAccountHandled = false;
     for (let attempt = 0; attempt < 6; attempt++) {
       try {
         await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
@@ -472,21 +502,68 @@ export class JiraRestClient {
           payload.fields = Object.keys(fields).length > 0 ? fields : undefined;
           continue;
         }
-        if (!bcAccountInjected && /BC Account number is mandatory/i.test(msg)) {
-          bcAccountInjected = true;
-          // The field isn't on the resolve screen, so it can't be set in the
-          // transition payload — set it via a normal field edit first, then retry.
-          try {
-            await this.updateFields(issueKey, { customfield_14626: 'N/A' }); // BC Account Number — sentinel for tickets with no Dynamics/BC contact
-            console.warn(`[JiraClient] Set sentinel BC Account number on ${issueKey} to satisfy resolve validator (ticket had none), retrying transition`);
-            continue;
-          } catch (setErr) {
-            console.error(`[JiraClient] Failed to set sentinel BC Account number on ${issueKey}:`, setErr instanceof Error ? setErr.message : setErr);
-            throw err;
+        if (!bcAccountHandled && /BC Account number is mandatory/i.test(msg)) {
+          bcAccountHandled = true;
+          const bcNumber = await this.resolveBcAccount(issueKey, options?.bcInfraFallback ?? false);
+          if (bcNumber) {
+            // Field isn't on the resolve screen — set via a normal edit, then retry.
+            try {
+              await this.updateFields(issueKey, { customfield_14626: bcNumber });
+              console.warn(`[JiraClient] Set BC Account number '${bcNumber}' on ${issueKey} to satisfy resolve validator, retrying transition`);
+              continue;
+            } catch (setErr) {
+              console.error(`[JiraClient] Failed to set BC Account number on ${issueKey}:`, setErr instanceof Error ? setErr.message : setErr);
+              throw err;
+            }
           }
+          // Resolver ran but found no confident match → hold for a human.
+          // Never invent a value: rethrow so the caller leaves the ticket open.
+          console.warn(`[JiraClient] No BC account could be confidently resolved for ${issueKey} — holding for human, not closing.`);
+          throw err;
         }
         throw err;
       }
+    }
+  }
+
+  /**
+   * Resolve the real BC account number for a ticket blocked by the "BC Account
+   * number is mandatory" validator. Gathers signals from the issue and defers to
+   * the injected resolver. Returns:
+   *   - a string  → set it and retry the close;
+   *   - null      → resolved but no confident match → hold for a human;
+   *   - 'N/A'     → resolver unavailable (not configured) → legacy sentinel so
+   *                 closes still work when BC integration is off.
+   */
+  private async resolveBcAccount(issueKey: string, infraFallback: boolean): Promise<string | null> {
+    if (!this.bcResolver) return 'N/A'; // no resolver wired → preserve legacy behaviour
+    let signals: {
+      summary?: string | null; description?: string | null;
+      organisationName?: string | null; reporterEmail?: string | null; bcAccountNumber?: string | null;
+    } = {};
+    try {
+      const issue = await this.getIssue(issueKey, [
+        'summary', 'description', 'reporter', 'customfield_10002', 'customfield_14626',
+      ]);
+      const f = (issue?.fields ?? {}) as Record<string, any>;
+      const orgs = f.customfield_10002;
+      signals = {
+        summary: f.summary ?? null,
+        description: extractText(f.description) || null,
+        organisationName: Array.isArray(orgs) ? (orgs[0]?.name ?? null) : (orgs?.name ?? null),
+        reporterEmail: f.reporter?.emailAddress ?? null,
+        bcAccountNumber: (f.customfield_14626 as string) ?? null,
+      };
+    } catch (err) {
+      console.warn(`[JiraClient] Could not gather BC signals for ${issueKey}:`, err instanceof Error ? err.message : err);
+    }
+    try {
+      const resolved = await this.bcResolver({ key: issueKey, ...signals }, { infraFallback });
+      // undefined → resolver unavailable → legacy 'N/A' sentinel; null → hold.
+      return resolved === undefined ? 'N/A' : resolved;
+    } catch (err) {
+      console.error(`[JiraClient] BC resolver threw for ${issueKey}:`, err instanceof Error ? err.message : err);
+      return 'N/A'; // resolver error → don't strand the close; fall back to sentinel
     }
   }
 

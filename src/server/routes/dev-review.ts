@@ -34,6 +34,7 @@ const CF_ISSUE_ENVIRONMENT = 'customfield_13213';
 const CF_NURTUR_PRODUCT = 'customfield_13183';
 const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
 const CF_STORY_TYPE = 'customfield_15014';
+const CF_BC_ACCOUNT = 'customfield_14626';
 
 // Story Type — mandatory on the dev Bug create screen (EP, APPS). The
 // reviewer picks one in the Accept modal; option id → allowed set.
@@ -468,7 +469,7 @@ export function createDevReviewRoutes(
           'created', 'updated', 'duedate', 'issuetype',
           CF_CURRENT_TIER, CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
           CF_ESCALATION_REASON, CF_EXPECTED_OUTCOME, CF_ISSUE_ENVIRONMENT, CF_NURTUR_PRODUCT,
-          CF_DEVELOPMENT_DETAILS,
+          CF_DEVELOPMENT_DETAILS, CF_BC_ACCOUNT,
         ]);
         if (!issue) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
         issueFields = issue.fields;
@@ -710,6 +711,7 @@ export function createDevReviewRoutes(
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
     const workItemComment = String(req.body?.workItemComment || '').trim();
     const storyType = String(req.body?.storyType || '').trim();
+    const bcAccount = String(req.body?.bcAccount || '').trim();
     const display = await userDisplay(req);
 
     if (!tldr) {
@@ -792,6 +794,19 @@ export function createDevReviewRoutes(
       await devQueries.markThreadSyncFailed(threadId, msg);
       res.status(409).json({ ok: false, error: msg });
       return;
+    }
+
+    // The Escalate to Development screen now mandates a BC Account number.
+    // Set the reviewer-supplied value via a normal edit BEFORE the transition
+    // so the validator is satisfied regardless of whether the field survives
+    // on the transition screen. Non-fatal on failure — if it's still missing
+    // the transition below returns the raw Jira validator error.
+    if (bcAccount) {
+      try {
+        await client.updateFields(key, { [CF_BC_ACCOUNT]: bcAccount });
+      } catch (bcErr) {
+        console.warn(`[DevReview/accept] Failed to set BC Account number on ${key}: ${bcErr instanceof Error ? bcErr.message : bcErr}`);
+      }
     }
 
     // Step 1 — transition with screen fields + comment. The transition
@@ -1013,6 +1028,7 @@ export function createDevReviewRoutes(
     const tldr = String(req.body?.tldr || '').trim();
     const developmentDetails = String(req.body?.developmentDetails || '').trim();
     const workItemComment = String(req.body?.workItemComment || '').trim();
+    const bcAccount = String(req.body?.bcAccount || '').trim();
     const display = await userDisplay(req);
 
     if (!workItemKey || !/^[A-Z]+-\d+$/.test(workItemKey)) {
@@ -1092,6 +1108,16 @@ export function createDevReviewRoutes(
       await devQueries.markThreadSyncFailed(threadId, msg);
       res.status(409).json({ ok: false, error: msg });
       return;
+    }
+
+    // The Escalate to Development screen mandates a BC Account number. Set the
+    // reviewer-supplied value before the transition so the validator passes.
+    if (bcAccount) {
+      try {
+        await client.updateFields(key, { [CF_BC_ACCOUNT]: bcAccount });
+      } catch (bcErr) {
+        console.warn(`[DevReview/link-existing] Failed to set BC Account number on ${key}: ${bcErr instanceof Error ? bcErr.message : bcErr}`);
+      }
     }
 
     // Step 1 — transition with screen fields + comment

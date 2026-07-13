@@ -398,6 +398,7 @@ export function DevReviewQueueView() {
   const [acceptDevDetails, setAcceptDevDetails] = useState('');
   const [acceptWorkItemComment, setAcceptWorkItemComment] = useState('');
   const [acceptStoryType, setAcceptStoryType] = useState('');
+  const [acceptBcAccount, setAcceptBcAccount] = useState('');
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [acceptedWorkItem, setAcceptedWorkItem] = useState<{ key: string; sourceKey: string; linked?: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -521,18 +522,19 @@ export function DevReviewQueueView() {
     setAcceptNote('');
     setAcceptWorkItemComment('');
     setAcceptStoryType('');
+    setAcceptBcAccount(String(detail.fields.customfield_14626 || ''));
     setAcceptError(null);
     setShowAcceptModal(true);
   };
 
   const onAccept = async () => {
-    if (!acceptTldr.trim() || !acceptStoryType || !selectedKey) return;
+    if (!acceptTldr.trim() || !acceptStoryType || !acceptBcAccount.trim() || !selectedKey) return;
     setBusy(true);
     setAcceptError(null);
     try {
       const json = await apiFull(`/ticket/${selectedKey}/accept`, {
         method: 'POST',
-        body: JSON.stringify({ note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment, storyType: acceptStoryType }),
+        body: JSON.stringify({ note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment, storyType: acceptStoryType, bcAccount: acceptBcAccount.trim() }),
       });
       if (json.ok) {
         setItems(prev => prev.map(i => i.key === selectedKey
@@ -542,7 +544,7 @@ export function DevReviewQueueView() {
         if (json.workItemKey) setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey });
         // Clear the form only after a successful accept — never on failure,
         // or the user loses the TL;DR they typed.
-        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setAcceptWorkItemComment(''); setAcceptStoryType('');
+        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setAcceptWorkItemComment(''); setAcceptStoryType(''); setAcceptBcAccount('');
       } else {
         setAcceptError(json.error || 'Accept failed — please try again.');
       }
@@ -560,19 +562,20 @@ export function DevReviewQueueView() {
     setAcceptNote('');
     setAcceptWorkItemComment('');
     setLinkExistingKey('');
+    setAcceptBcAccount(String(detail.fields.customfield_14626 || ''));
     setAcceptError(null);
     setShowLinkExistingModal(true);
   };
 
   const onLinkExisting = async () => {
     if (!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim())) return;
-    if (!acceptTldr.trim() || !selectedKey) return;
+    if (!acceptTldr.trim() || !acceptBcAccount.trim() || !selectedKey) return;
     setBusy(true);
     setAcceptError(null);
     try {
       const json = await apiFull(`/ticket/${selectedKey}/link-existing`, {
         method: 'POST',
-        body: JSON.stringify({ workItemKey: linkExistingKey.trim(), note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment }),
+        body: JSON.stringify({ workItemKey: linkExistingKey.trim(), note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment, bcAccount: acceptBcAccount.trim() }),
       });
       if (json.ok) {
         setItems(prev => prev.map(i => i.key === selectedKey
@@ -581,7 +584,7 @@ export function DevReviewQueueView() {
         setShowLinkExistingModal(false);
         if (json.workItemKey) setAcceptedWorkItem({ key: json.workItemKey, sourceKey: selectedKey, linked: true });
         // Clear the form only after a successful link — never on failure.
-        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setLinkExistingKey(''); setAcceptWorkItemComment('');
+        setAcceptNote(''); setAcceptTldr(''); setAcceptDevDetails(''); setLinkExistingKey(''); setAcceptWorkItemComment(''); setAcceptBcAccount('');
       } else {
         setAcceptError(json.error || 'Link failed — please try again.');
       }
@@ -774,6 +777,11 @@ export function DevReviewQueueView() {
             </select>
           </div>
           <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2"><span>BC Account Number</span><span className="text-red-400">*</span></label>
+            <input type="text" value={acceptBcAccount} onChange={e => setAcceptBcAccount(e.target.value)} placeholder="e.g. CU00012345" className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600 font-mono" style={{ ...drTheme.input, borderColor: acceptBcAccount.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)' }} />
+            <p className="text-[10px] text-neutral-500 mt-1">Mandatory on the Escalate to Development screen. Pre-filled from the ticket if set.</p>
+          </div>
+          <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Development Details</label>
             <textarea value={acceptDevDetails} onChange={e => setAcceptDevDetails(e.target.value)} placeholder="Technical context, suspected cause, queries…" rows={6} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono" style={drTheme.input} />
           </div>
@@ -786,10 +794,10 @@ export function DevReviewQueueView() {
             <textarea value={acceptNote} onChange={e => setAcceptNote(e.target.value)} placeholder="Optional context for the dev team…" rows={2} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600" style={drTheme.input} />
           </div>
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5">
-            <div className="text-[10px] text-neutral-500">{acceptError ? <span className="text-red-400">{acceptError}</span> : !acceptTldr.trim() ? <span className="text-red-400">TL;DR required</span> : !acceptStoryType ? <span className="text-red-400">Story Type required</span> : <span className="text-emerald-400">✓ Ready to accept</span>}</div>
+            <div className="text-[10px] text-neutral-500">{acceptError ? <span className="text-red-400">{acceptError}</span> : !acceptTldr.trim() ? <span className="text-red-400">TL;DR required</span> : !acceptStoryType ? <span className="text-red-400">Story Type required</span> : !acceptBcAccount.trim() ? <span className="text-red-400">BC Account number required</span> : <span className="text-emerald-400">✓ Ready to accept</span>}</div>
             <div className="flex items-center gap-2">
               <button onClick={() => setShowAcceptModal(false)} className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5">Cancel</button>
-              <button onClick={onAccept} disabled={busy || !acceptTldr.trim() || !acceptStoryType} className="px-5 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>{busy ? 'Accepting…' : '✓ Move to Development'}</button>
+              <button onClick={onAccept} disabled={busy || !acceptTldr.trim() || !acceptStoryType || !acceptBcAccount.trim()} className="px-5 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #10b981, #5ec1ca)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>{busy ? 'Accepting…' : '✓ Move to Development'}</button>
             </div>
           </div>
         </Modal>
@@ -812,6 +820,11 @@ export function DevReviewQueueView() {
             <textarea value={acceptTldr} onChange={e => setAcceptTldr(e.target.value)} placeholder="e.g. Email sends are queueing more than once…" rows={2} className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600" style={{ background: 'rgba(255,255,255,0.06)', borderColor: acceptTldr.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)' }} />
           </div>
           <div className="mb-4">
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2"><span>BC Account Number</span><span className="text-red-400">*</span></label>
+            <input type="text" value={acceptBcAccount} onChange={e => setAcceptBcAccount(e.target.value)} placeholder="e.g. CU00012345" className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600 font-mono" style={{ background: 'rgba(255,255,255,0.06)', borderColor: acceptBcAccount.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)' }} />
+            <p className="text-[10px] text-neutral-500 mt-1">Mandatory on the Escalate to Development screen. Pre-filled from the ticket if set.</p>
+          </div>
+          <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Development Details</label>
             <textarea value={acceptDevDetails} onChange={e => setAcceptDevDetails(e.target.value)} placeholder="Technical context, suspected cause, queries…" rows={6} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600 font-mono" style={{ background: 'rgba(255,255,255,0.06)' }} />
           </div>
@@ -824,10 +837,10 @@ export function DevReviewQueueView() {
             <textarea value={acceptWorkItemComment} onChange={e => setAcceptWorkItemComment(e.target.value)} placeholder="Anything to add to the linked work item?" rows={3} className="w-full px-3 py-2 text-[13px] rounded-lg border border-white/10 text-neutral-50 placeholder-neutral-600" style={{ background: 'rgba(255,255,255,0.06)' }} />
           </div>
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5">
-            <div className="text-[10px] text-neutral-500">{acceptError ? <span className="text-red-400">{acceptError}</span> : linkExistingKey.trim() && /^[A-Z]+-\d+$/.test(linkExistingKey.trim()) && acceptTldr.trim() ? <span className="text-blue-400">✓ Ready to link</span> : <span className="text-red-400">{!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim()) ? 'Valid work item key required' : 'TL;DR required'}</span>}</div>
+            <div className="text-[10px] text-neutral-500">{acceptError ? <span className="text-red-400">{acceptError}</span> : linkExistingKey.trim() && /^[A-Z]+-\d+$/.test(linkExistingKey.trim()) && acceptTldr.trim() && acceptBcAccount.trim() ? <span className="text-blue-400">✓ Ready to link</span> : <span className="text-red-400">{!linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim()) ? 'Valid work item key required' : !acceptTldr.trim() ? 'TL;DR required' : 'BC Account number required'}</span>}</div>
             <div className="flex items-center gap-2">
               <button onClick={() => setShowLinkExistingModal(false)} className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5">Cancel</button>
-              <button onClick={onLinkExisting} disabled={busy || !acceptTldr.trim() || !linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim())} className="px-5 py-2 text-xs rounded-lg font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', boxShadow: '0 4px 16px rgba(59,130,246,0.35)' }}>{busy ? 'Linking…' : '🔗 Link & Accept'}</button>
+              <button onClick={onLinkExisting} disabled={busy || !acceptTldr.trim() || !acceptBcAccount.trim() || !linkExistingKey.trim() || !/^[A-Z]+-\d+$/.test(linkExistingKey.trim())} className="px-5 py-2 text-xs rounded-lg font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', boxShadow: '0 4px 16px rgba(59,130,246,0.35)' }}>{busy ? 'Linking…' : '🔗 Link & Accept'}</button>
             </div>
           </div>
         </Modal>

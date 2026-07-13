@@ -571,13 +571,19 @@ export class AutoRulesEngine {
       console.warn(`[auto-rules] Could not verify transitions for ${ticketKey}, proceeding:`, err instanceof Error ? err.message : err);
     }
 
-    // Transition to resolved with all required fields in one call
+    // Transition to resolved with all required fields in one call.
+    // Auto-close rules target automated, non-customer notifications (integration
+    // checks, monitoring, vendor/noreply email, PMTA infra). If the BC-account
+    // validator blocks the close and no customer resolves, fall back to Nurtur's
+    // own BC account rather than stranding the ticket (bcInfraFallback). A real
+    // customer (e.g. a same-reporter duplicate) still resolves to its own account
+    // first — the fallback only fires when nothing resolves.
     const { fields, comment } = buildResolveFields({
       tldr: action.note,
       resolution: action.resolution,
       comment: `Auto-actioned by NOVA rule '${rule.id}'. ${action.note}`,
     });
-    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment, bcInfraFallback: true });
   }
 
   private async handleSetTier(
