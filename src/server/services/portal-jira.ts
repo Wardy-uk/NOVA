@@ -11,6 +11,7 @@ import type {
   PortalSlaStatus,
 } from '../../shared/portal-types.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
+import { getOrgScope, CF_BC_ACCOUNT } from './portal-org-scope.js';
 
 interface TicketQueryOptions {
   orgId: number;
@@ -411,17 +412,6 @@ export class PortalJiraService {
     };
   }
 
-  // Per-org scope for detail authorisation (BC Account + reporter identities).
-  private async getOrgScopeForDetail(orgId: number): Promise<{ bc: string | null; reporters: string[]; domain: string | null }> {
-    const row = await queryOne<{ bc_account_number: string | null; scope_reporters: string | null; domain: string | null }>(
-      `SELECT bc_account_number, scope_reporters, domain FROM portal_organisations WHERE id = ?`,
-      [orgId],
-    );
-    const reporters = (row?.scope_reporters || '')
-      .split(/[\n,]/).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase()).filter(Boolean);
-    return { bc: row?.bc_account_number?.trim() || null, reporters, domain: row?.domain || null };
-  }
-
   // A portal user may open a ticket that is their own, was created via the portal,
   // or — for leaders/managers — belongs to their organisation's scope. Fetches
   // live from Jira so it works across every project (not just the NT cache).
@@ -440,32 +430,42 @@ export class PortalJiraService {
     if (await this.hasPortalAssociation(ticketKey, portalUser.orgId)) return detail;
 
     // 2) Leaders/Managers/admins may view any ticket in their org's scope.
-    //    Authorise via a scoped JQL membership check (Jira resolves reporters/BC
-    //    server-side) rather than string-matching the detail response — the
-    //    gateway can return a display name and omit the BC field.
     const canViewOrg = ['leader', 'manager', 'org_admin', 'admin'].includes(portalUser.role);
     if (canViewOrg) {
-      const scope = await this.getOrgScopeForDetail(portalUser.orgId);
-      const branches: string[] = [];
-      if (scope.reporters.length) {
-        branches.push(`reporter in (${scope.reporters.map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r)).join(', ')})`);
-      }
-      if (scope.bc) branches.push(`cf[14626] ~ ${JSON.stringify(scope.bc)}`);
+      const scope = await getOrgScope(portalUser.orgId);
 
-      if (branches.length && this.jiraClient) {
+      // Reporter identities: `reporter in (...)` is an exact, server-side match, so
+      // let Jira resolve emails / display names / accountIds for us.
+      if (scope.reporters.length && this.jiraClient) {
+        const list = scope.reporters.map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r)).join(', ');
         try {
-          const res = await this.jiraClient.searchJql(`key = ${ticketKey} AND (${branches.join(' OR ')})`, ['key'], 1);
+          const res = await this.jiraClient.searchJql(`key = ${ticketKey} AND reporter in (${list})`, ['key'], 1);
           if (res?.issues?.length) return detail;
         } catch (err) {
-          console.warn(`[portal-detail] membership JQL failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+          console.warn(`[portal-detail] reporter membership JQL failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
         }
       }
-      // Fallback: field-based match (works when the reporter email/BC are exposed).
-      const inScope =
-        (scope.reporters.length && scope.reporters.includes(reporter)) ||
-        (!!scope.bc && !!detail.bcAccountNumber && detail.bcAccountNumber.trim() === scope.bc) ||
-        (!!scope.domain && reporter.endsWith(`@${scope.domain.toLowerCase()}`));
-      if (inScope) return detail;
+
+      // BC Account: JQL can only match cf[14626] fuzzily (`~`), which would let an
+      // org with BC "123" open a ticket belonging to BC "1234". Read the field and
+      // compare it exactly. The gateway sometimes omits it from getIssue, so fall
+      // back to a keyed search that explicitly requests the field.
+      if (scope.bcAccount) {
+        let bc = detail.bcAccountNumber;
+        if (!bc && this.jiraClient) {
+          try {
+            const res = await this.jiraClient.searchJql(`key = ${ticketKey}`, [CF_BC_ACCOUNT], 1);
+            const raw = res?.issues?.[0]?.fields?.[CF_BC_ACCOUNT];
+            bc = typeof raw === 'string' ? raw : null;
+          } catch (err) {
+            console.warn(`[portal-detail] BC lookup failed for ${ticketKey}:`, err instanceof Error ? err.message : err);
+          }
+        }
+        if (bc && bc.trim().toLowerCase() === scope.bcAccount.toLowerCase()) return detail;
+      }
+
+      // Email domain: exact suffix match on the reporter's address.
+      if (scope.domain && reporter.endsWith(`@${scope.domain}`)) return detail;
     }
 
     return null;

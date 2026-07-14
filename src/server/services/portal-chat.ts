@@ -11,6 +11,14 @@ import { trackEvent } from './portal-analytics.js';
 import type { PortalPlaybookService } from './portal-playbooks.js';
 import { expandSearchTerms, cleanSearchTerms, rankAndFilter } from './kb-search-utils.js';
 
+/** The caller does not own the chat session they referenced. Routes map this to a 404. */
+export class PortalChatAccessError extends Error {
+  constructor(message = 'Chat session not found') {
+    super(message);
+    this.name = 'PortalChatAccessError';
+  }
+}
+
 // ── LLM Response Schemas ──
 
 // Optional enum that tolerates the model emitting "" (or any non-matching value) for a
@@ -1300,11 +1308,24 @@ export class PortalChatService {
     return session!;
   }
 
+  // Ownership gate. The session id arrives from the URL / request body, so it must
+  // be proven to belong to the caller before any read or write — otherwise any
+  // portal user can post into, submit, or close another tenant's chat session.
+  private async assertSessionOwner(sessionId: number, portalUserId: number): Promise<void> {
+    const row = await queryOne<{ id: number }>(
+      `SELECT id FROM portal_chat_sessions WHERE id = ? AND portal_user_id = ?`,
+      [sessionId, portalUserId],
+    );
+    if (!row) throw new PortalChatAccessError('Chat session not found');
+  }
+
   async sendMessage(
     sessionId: number,
     content: string,
     context: ChatContext,
   ): Promise<PortalChatMessage> {
+    await this.assertSessionOwner(sessionId, context.portalUserId);
+
     // Store user message
     await execute(
       `INSERT INTO portal_chat_messages (session_id, role, content)
@@ -4094,6 +4115,8 @@ ${contextParts.join('\n')}`,
     context: ChatContext,
     options?: { skipMessage?: boolean },
   ): Promise<{ ticketKey: string }> {
+    await this.assertSessionOwner(sessionId, context.portalUserId);
+
     const session = await queryOne<{ metadata: string | null }>(
       `SELECT metadata FROM portal_chat_sessions WHERE id = ?`,
       [sessionId],
@@ -4861,7 +4884,8 @@ Rules:
     }
   }
 
-  async endSession(sessionId: number): Promise<void> {
+  async endSession(sessionId: number, portalUserId: number): Promise<void> {
+    await this.assertSessionOwner(sessionId, portalUserId);
     await execute(
       `UPDATE portal_chat_sessions SET status = 'resolved', ended_at = GETUTCDATE() WHERE id = ? AND status = 'active'`,
       [sessionId],

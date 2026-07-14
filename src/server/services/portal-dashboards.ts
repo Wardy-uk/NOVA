@@ -1,6 +1,7 @@
 import { query, queryOne, execute } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { JiraRestClient } from './jira-client.js';
+import { getOrgScope, buildScopeJqlBranches, matchesOrgScope, type OrgScope } from './portal-org-scope.js';
 import type {
   OnboardingDashboardResponse,
   OnboardingDashboardRow,
@@ -58,16 +59,6 @@ function parseList(raw: string | undefined | null, fallback: string[]): string[]
   return items.length ? items : fallback;
 }
 
-function parseReporters(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  const out: string[] = [];
-  for (const part of raw.split(/[\n,]/)) {
-    const token = part.trim().replace(/^["']|["']$/g, '');
-    if (token) out.push(token);
-  }
-  return out;
-}
-
 function wholeDaysSince(iso: string | null | undefined): number {
   if (!iso) return 0;
   const then = new Date(iso).getTime();
@@ -80,11 +71,6 @@ function cfValue(v: any): string | null {
   if (typeof v === 'string') return v;
   if (Array.isArray(v)) return v.map(cfValue).filter(Boolean).join(', ') || null;
   return v.value ?? v.name ?? null;
-}
-
-interface OrgScope {
-  bcAccount: string | null;
-  reporters: string[];
 }
 
 interface NormalisedIssue {
@@ -115,15 +101,18 @@ export class PortalDashboardService {
     return this.settings?.get(key) as string | undefined;
   }
 
-  // Per-org feature toggles. If the org has no row (e.g. internal admin, orgId 0)
-  // everything is visible so we never hide features from staff.
+  // Per-org feature toggles. Fails CLOSED: an org with no row is a misconfigured
+  // tenant, not a privileged one. (Internal staff always have a real org row —
+  // the portal auth middleware creates 'nurtur-internal' on first request.)
   async getOrgFeatures(orgId: number): Promise<PortalOrgFeatures> {
     const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number }>(
       `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
-    // No org row (internal staff, orgId 0) → everything visible so we can test it.
-    if (!row) return { getHelp: true, kb: true, support: true, onboarding: true, raiseTicket: true };
+    if (!row) {
+      console.warn(`[portal] No organisation row for orgId=${orgId} — hiding all features`);
+      return { getHelp: false, kb: false, support: false, onboarding: false, raiseTicket: false };
+    }
     return {
       getHelp: !!row.feat_get_help,
       kb: !!row.feat_kb,
@@ -152,27 +141,11 @@ export class PortalDashboardService {
   }
 
   async getOrgScope(orgId: number): Promise<OrgScope> {
-    const row = await queryOne<{ bc_account_number: string | null; scope_reporters: string | null }>(
-      `SELECT bc_account_number, scope_reporters FROM portal_organisations WHERE id = ?`,
-      [orgId],
-    );
-    const bc = row?.bc_account_number?.trim();
-    return { bcAccount: bc || null, reporters: parseReporters(row?.scope_reporters) };
+    return getOrgScope(orgId);
   }
 
   private buildJql(scope: OrgScope): string | null {
-    const branches: string[] = [];
-    if (scope.reporters.length) {
-      // Account ids / qm: ids are safe unquoted (Jira accepts ':' and '-').
-      // Anything with a reserved char (e.g. '@' in an email) must be quoted.
-      const list = scope.reporters
-        .map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r))
-        .join(', ');
-      branches.push(`reporter in (${list})`);
-    }
-    if (scope.bcAccount) {
-      branches.push(`cf[14626] ~ ${JSON.stringify(scope.bcAccount)}`);
-    }
+    const branches = buildScopeJqlBranches(scope);
     if (!branches.length) return null;
 
     const exclude = parseList(this.setting('portal_open_exclude_statuses'), DEFAULT_EXCLUDE_STATUSES);
@@ -189,7 +162,14 @@ export class PortalDashboardService {
     if (!jql || !this.jira) return [];
 
     const result = await this.jira.searchJqlAll(jql, JIRA_FIELDS, 500);
-    const issues: NormalisedIssue[] = (result.issues || []).map((iss: any) => {
+    // The JQL is only a prefilter — cf[14626] can only be matched fuzzily (`~`),
+    // so BC account "123" also pulls back "1234". Re-check every issue exactly.
+    const scoped = (result.issues || []).filter((iss: any) => matchesOrgScope(scope, iss));
+    const dropped = (result.issues || []).length - scoped.length;
+    if (dropped > 0) {
+      console.warn(`[portal] org ${orgId}: dropped ${dropped} issue(s) that matched the JQL prefilter but not the exact org scope`);
+    }
+    const issues: NormalisedIssue[] = scoped.map((iss: any) => {
       const f = iss.fields ?? {};
       const sla = f[CF_RESOLUTION_SLA];
       const slaBreached = !!(sla?.ongoingCycle?.breached
@@ -261,17 +241,17 @@ export class PortalDashboardService {
     if (!this.jira) return [];
 
     let scopeClause: string;
+    // Set for the 'org' scope only: the JQL BC branch is fuzzy, so results must be
+    // re-checked exactly. 'mine' is an exact reporter match and needs no re-check
+    // (and must not be re-checked — a user's own ticket may carry no BC account).
+    let exactScope: OrgScope | null = null;
     if (opts.scope === 'mine') {
       const accountId = await this.resolveAccountId(opts.userEmail);
       if (!accountId) return [];
       scopeClause = `reporter = "${accountId}"`;
     } else {
-      const scope = await this.getOrgScope(opts.orgId);
-      const branches: string[] = [];
-      if (scope.reporters.length) {
-        branches.push(`reporter in (${scope.reporters.map(r => (/[@\s(),]/.test(r) ? JSON.stringify(r) : r)).join(', ')})`);
-      }
-      if (scope.bcAccount) branches.push(`cf[14626] ~ ${JSON.stringify(scope.bcAccount)}`);
+      exactScope = await this.getOrgScope(opts.orgId);
+      const branches = buildScopeJqlBranches(exactScope);
       if (!branches.length) return [];
       scopeClause = `(${branches.join(' OR ')})`;
     }
@@ -286,6 +266,7 @@ export class PortalDashboardService {
     const escalationTokens = parseList(this.setting('portal_escalation_request_types'), ['escalation']).map(t => t.toLowerCase());
 
     const rows = (result.issues || [])
+      .filter((iss: any) => !exactScope || matchesOrgScope(exactScope, iss))
       .map((iss: any) => {
         const f = iss.fields ?? {};
         const requestType = [f[CF_JSM_REQUEST_TYPE]?.requestType?.name, cfValue(f[CF_SLA_REQUEST_TYPE])].filter(Boolean).join(' ');

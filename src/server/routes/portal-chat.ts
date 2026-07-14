@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import jwt from 'jsonwebtoken';
-import type { PortalChatService } from '../services/portal-chat.js';
+import { PortalChatAccessError, type PortalChatService } from '../services/portal-chat.js';
 import type { PortalJiraService } from '../services/portal-jira.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { trackEvent } from '../services/portal-analytics.js';
@@ -47,6 +47,7 @@ export function createPortalChatRoutes(chatService: PortalChatService, portalJir
       );
       res.json({ ok: true, data: message });
     } catch (err) {
+      if (err instanceof PortalChatAccessError) { res.status(404).json({ ok: false, error: err.message }); return; }
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to send message' });
     }
   });
@@ -93,6 +94,7 @@ export function createPortalChatRoutes(chatService: PortalChatService, portalJir
 
       res.json({ ok: true, data: { ticketKey: result.ticketKey } });
     } catch (err) {
+      if (err instanceof PortalChatAccessError) { res.status(404).json({ ok: false, error: err.message }); return; }
       console.error('[portal-chat] Confirm failed:', err);
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create ticket' });
     }
@@ -122,10 +124,11 @@ export function createPortalChatRoutes(chatService: PortalChatService, portalJir
   router.post('/chat/sessions/:id/end', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
     try {
-      await chatService.endSession(parseInt(req.params.id as string, 10));
+      await chatService.endSession(parseInt(req.params.id as string, 10), req.portalUser.userId);
       await trackEvent('chat_resolved', req.portalUser.userId, req.portalUser.orgId);
       res.json({ ok: true });
     } catch (err) {
+      if (err instanceof PortalChatAccessError) { res.status(404).json({ ok: false, error: err.message }); return; }
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to end session' });
     }
   });
@@ -242,6 +245,7 @@ export function createWidgetChatRoutes(chatService: PortalChatService, settings:
         res.status(401).json({ ok: false, error: 'Invalid or expired token' });
         return;
       }
+      if (err instanceof PortalChatAccessError) { res.status(404).json({ ok: false, error: err.message }); return; }
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Chat failed' });
     }
   });
