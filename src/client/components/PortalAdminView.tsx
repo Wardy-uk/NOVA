@@ -144,6 +144,7 @@ function UsersPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [orgsForUserId, setOrgsForUserId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ display_name: '', role: 'requester', org_id: '', password: '' });
   const [form, setForm] = useState({
     email: '',
@@ -435,6 +436,12 @@ function UsersPanel() {
                       >
                         Edit
                       </button>
+                      <button
+                        onClick={() => setOrgsForUserId(id => id === u.id ? null : u.id)}
+                        className="px-2 py-1 rounded bg-gray-700 text-xs text-gray-100 hover:bg-gray-600"
+                      >
+                        Orgs
+                      </button>
                       {u.auth_type === 'local' && (
                         <>
                           <button
@@ -524,6 +531,13 @@ function UsersPanel() {
                   </td>
                 </tr>
               )}
+              {orgsForUserId === u.id && (
+                <tr className="bg-gray-900/60">
+                  <td colSpan={8} className="px-4 py-3">
+                    <UserOrgMemberships user={u} orgs={orgs || []} />
+                  </td>
+                </tr>
+              )}
             </React.Fragment>
             ))}
           </tbody>
@@ -532,6 +546,115 @@ function UsersPanel() {
           <div className="px-4 py-8 text-center text-gray-500">No portal users yet</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Extra organisations a user may switch into, on top of their home org. Home org is
+// implicit and changed via Edit, not here. Internal staff need no rows — they get
+// read-only view-as on every org automatically.
+function UserOrgMemberships({ user, orgs }: {
+  user: { id: number; org_name: string; auth_type: 'oidc' | 'local' | 'internal' };
+  orgs: Array<{ id: number; name: string }>;
+}) {
+  const [reloadKey, setReloadKey] = useState(0);
+  const [addOrgId, setAddOrgId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { data: memberships, loading } = useFetch<Array<{ org_id: number; org_name: string; role: string | null }>>(
+    `${API}/users/${user.id}/orgs`,
+    [user.id, reloadKey],
+  );
+
+  if (user.auth_type === 'internal') {
+    return (
+      <p className="text-xs text-gray-400">
+        Internal staff can already view every organisation (read-only) and don't need memberships.
+        Their home organisation is <span className="text-gray-200">{user.org_name}</span>.
+      </p>
+    );
+  }
+
+  const mutate = async (fn: () => Promise<Response>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await (await fn()).json();
+      if (!data.ok) throw new Error(data.error || 'Failed');
+      setAddOrgId('');
+      setReloadKey(k => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = () => mutate(() => fetch(`${API}/users/${user.id}/orgs`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ org_id: Number(addOrgId) }),
+  }));
+
+  const remove = (orgId: number) => mutate(() => fetch(`${API}/users/${user.id}/orgs/${orgId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  }));
+
+  const granted = new Set((memberships || []).map(m => m.org_id));
+  const available = orgs.filter(o => o.name !== user.org_name && !granted.has(o.id));
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-400">
+        Home organisation: <span className="text-gray-200">{user.org_name}</span> (change via Edit).
+        Additional organisations below can be switched into with full access.
+      </p>
+
+      {loading ? (
+        <div className="h-6 bg-gray-800 rounded animate-pulse" />
+      ) : (memberships || []).length === 0 ? (
+        <p className="text-xs text-gray-500">No additional organisations.</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {(memberships || []).map(m => (
+            <li key={m.org_id} className="flex items-center gap-2 px-2 py-1 rounded bg-gray-800 border border-gray-700 text-xs text-gray-200">
+              {m.org_name}
+              <button
+                onClick={() => remove(m.org_id)}
+                disabled={busy}
+                aria-label={`Remove ${m.org_name}`}
+                className="text-red-300 hover:text-red-200 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-gray-400">
+          Add organisation
+          <select
+            value={addOrgId}
+            onChange={e => setAddOrgId(e.target.value)}
+            className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100 min-w-[220px]"
+          >
+            <option value="">Select…</option>
+            {available.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <button
+          onClick={add}
+          disabled={!addOrgId || busy}
+          className="px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Add'}
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }

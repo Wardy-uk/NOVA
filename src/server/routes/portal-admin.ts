@@ -260,6 +260,70 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     res.json({ ok: true });
   });
 
+  // ── Extra org memberships ──
+  // A user's home org (portal_users.org_id) is implicit and cannot be granted or
+  // revoked here — change it via PUT /users/:id. These rows are ADDITIONAL orgs the
+  // user may switch into, with full write access. Internal staff don't need them:
+  // they get read-only view-as on every org automatically.
+
+  router.get('/users/:id/orgs', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (!id) { res.status(400).json({ ok: false, error: 'Valid user ID is required' }); return; }
+    try {
+      const rows = await query<{ org_id: number; org_name: string; role: string | null; created_at: string }>(
+        `SELECT puo.org_id, po.name AS org_name, puo.role, puo.created_at
+         FROM portal_user_orgs puo
+         JOIN portal_organisations po ON po.id = puo.org_id
+         WHERE puo.portal_user_id = ?
+         ORDER BY po.name`,
+        [id],
+      );
+      res.json({ ok: true, data: rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list memberships' });
+    }
+  });
+
+  router.post('/users/:id/orgs', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    const orgId = parseInt(req.body?.org_id, 10);
+    if (!id || !orgId) { res.status(400).json({ ok: false, error: 'User ID and org_id are required' }); return; }
+
+    const user = await queryOne<{ id: number; org_id: number }>(`SELECT id, org_id FROM portal_users WHERE id = ?`, [id]);
+    if (!user) { res.status(404).json({ ok: false, error: 'Portal user not found' }); return; }
+    if (user.org_id === orgId) {
+      res.status(400).json({ ok: false, error: 'That is already the user\'s home organisation' });
+      return;
+    }
+    const org = await queryOne<{ id: number }>(`SELECT id FROM portal_organisations WHERE id = ?`, [orgId]);
+    if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
+
+    try {
+      // Role is optional — NULL means "same role as in their home org".
+      const role = typeof req.body?.role === 'string' && req.body.role ? normalisePortalRole(req.body.role) : null;
+      await execute(
+        `IF NOT EXISTS (SELECT 1 FROM portal_user_orgs WHERE portal_user_id = ? AND org_id = ?)
+         INSERT INTO portal_user_orgs (portal_user_id, org_id, role) VALUES (?, ?, ?)`,
+        [id, orgId, id, orgId, role],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to add membership' });
+    }
+  });
+
+  router.delete('/users/:id/orgs/:orgId', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    const orgId = parseInt(req.params.orgId as string, 10);
+    if (!id || !orgId) { res.status(400).json({ ok: false, error: 'Valid user ID and org ID are required' }); return; }
+    try {
+      await execute(`DELETE FROM portal_user_orgs WHERE portal_user_id = ? AND org_id = ?`, [id, orgId]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to remove membership' });
+    }
+  });
+
   // Portal organisations list
   router.get('/organisations', async (_req: Request, res: Response) => {
     try {
