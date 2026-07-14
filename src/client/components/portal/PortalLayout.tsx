@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PortalAuthPayload, PortalOrgFeatures } from '../../../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgMembershipSummary } from '../../../shared/portal-types.js';
 
 type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
 
@@ -11,6 +11,9 @@ interface Props {
   children: React.ReactNode;
   features?: PortalOrgFeatures;
   logoUrl?: string | null;
+  orgs?: PortalOrgMembershipSummary[];
+  activeOrgId?: number | null;
+  onSwitchOrg?: (orgId: number) => void;
 }
 
 // Nav items gated by a per-org feature flag carry a `feature` key.
@@ -23,8 +26,14 @@ const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?
   { view: 'kb', label: 'Knowledge Base', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', feature: 'kb' },
 ];
 
-export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl }: Props) {
+export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl, orgs, activeOrgId, onSwitchOrg }: Props) {
   const navItems = NAV_ITEMS.filter(item => !item.feature || !features || features[item.feature]);
+
+  // Only show the switcher when there is somewhere to switch to.
+  const canSwitch = !!onSwitchOrg && !!orgs && orgs.length > 1;
+  const active = orgs?.find(o => o.orgId === activeOrgId) ?? null;
+  const viewingReadOnly = active?.canWrite === false;
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Header */}
@@ -40,6 +49,22 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
             </div>
 
             <div className="flex items-center gap-4">
+              {canSwitch && (
+                <label className="flex items-center gap-2">
+                  <span className="sr-only">Organisation</span>
+                  <select
+                    value={activeOrgId ?? ''}
+                    onChange={e => onSwitchOrg!(Number(e.target.value))}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white text-gray-900 max-w-[220px] focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 outline-none"
+                  >
+                    {orgs!.map(o => (
+                      <option key={o.orgId} value={o.orgId}>
+                        {o.orgName}{o.kind === 'view-as' ? ' (view only)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-medium text-gray-900">{user.email}</div>
                 <div className="text-xs text-gray-600">{user.orgName}</div>
@@ -54,6 +79,20 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
             </div>
           </div>
         </div>
+
+        {viewingReadOnly && (
+          <div role="status" className="bg-amber-50 border-t border-amber-200">
+            <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-2 text-sm text-amber-900">
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span>
+                Viewing <strong>{active?.orgName}</strong> as they see it. Read-only — switch back to your own organisation to make changes.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Navigation */}
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">

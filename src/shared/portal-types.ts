@@ -102,10 +102,28 @@ export interface PortalUser {
 export interface PortalAuthPayload {
   userId: number;
   email: string;
+  /** The org this request runs against — the active org, which may not be the home org. */
   orgId: number;
   orgName: string;
   role: PortalUserRole;
   authType?: PortalUserAuthType;
+  /** The user's own org (portal_users.org_id). Only differs from orgId when switched. */
+  homeOrgId?: number;
+  /** True when the user has switched into an org they only have read access to. */
+  viewAs?: boolean;
+}
+
+/** An org the current user may switch into. */
+export interface PortalOrgMembershipSummary {
+  orgId: number;
+  orgName: string;
+  kind: 'home' | 'member' | 'view-as';
+  canWrite: boolean;
+}
+
+export interface PortalMyOrgsResponse {
+  orgs: PortalOrgMembershipSummary[];
+  activeOrgId: number;
 }
 
 // ── Chat ──

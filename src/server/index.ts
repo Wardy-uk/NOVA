@@ -119,7 +119,7 @@ import { createPortalEventsRoutes } from './routes/portal-events.js';
 import { createPortalCsatRoutes } from './routes/portal-csat.js';
 import { createCsatMetricsRoutes } from './routes/csat-metrics.js';
 import { createPortalDashboardRoutes } from './routes/portal-dashboards.js';
-import { portalAuthMiddleware } from './middleware/portal-auth-middleware.js';
+import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
 import { PortalChatService } from './services/portal-chat.js';
@@ -4470,12 +4470,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     getJiraClient: buildServiceDeskJiraClient,
   }));
 
-  // Authenticated portal routes
+  // Authenticated portal routes. portalReadOnly must sit after portalAuth (it reads
+  // req.portalUser.viewAs) and before every route that can mutate.
   const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
-  app.use('/api/portal', portalGate, portalAuth, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
-  app.use('/api/portal', portalGate, portalAuth, createPortalChatRoutes(portalChat, portalJira));
-  app.use('/api/portal', portalGate, portalAuth, createPortalEventsRoutes());
-  app.use('/api/portal', portalGate, portalAuth, createPortalDashboardRoutes(settingsQueries, portalJiraClient));
+  const portalReadOnly = portalViewAsReadOnly();
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalChatRoutes(portalChat, portalJira));
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEventsRoutes());
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalDashboardRoutes(settingsQueries, portalJiraClient));
 
   // Widget routes (public, CORS-gated, own auth via email identification)
   app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));

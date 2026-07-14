@@ -3,6 +3,7 @@ import { PortalDashboardService } from '../services/portal-dashboards.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import { canViewAllOrgTickets, canEscalateTicket } from '../../shared/portal-types.js';
+import { listMemberships } from '../services/portal-org-membership.js';
 
 // Customer-facing Onboarding + Support dashboards, scoped to the portal user's
 // organisation (→ BC Account Number OR reporter set). Queries Jira live so it
@@ -10,6 +11,29 @@ import { canViewAllOrgTickets, canEscalateTicket } from '../../shared/portal-typ
 export function createPortalDashboardRoutes(settings: FileSettingsQueries | undefined, jira: JiraRestClient | null): Router {
   const router = Router();
   const service = new PortalDashboardService(settings, jira);
+
+  // Orgs this user may switch into, plus the one they're currently in. Drives the
+  // org switcher; a single-org customer gets one entry and no switcher is shown.
+  router.get('/my-orgs', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    try {
+      const memberships = await listMemberships({
+        userId: req.portalUser.userId,
+        homeOrgId: req.portalUser.homeOrgId ?? req.portalUser.orgId,
+        role: req.portalUser.role,
+        authType: req.portalUser.authType,
+      });
+      res.json({
+        ok: true,
+        data: {
+          orgs: memberships.map(m => ({ orgId: m.orgId, orgName: m.orgName, kind: m.kind, canWrite: m.canWrite })),
+          activeOrgId: req.portalUser.orgId,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load organisations' });
+    }
+  });
 
   router.get('/features', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }

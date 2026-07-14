@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/globals.css';
-import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgBranding } from '../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgBranding, PortalOrgMembershipSummary } from '../shared/portal-types.js';
 import PortalLayout from './components/portal/PortalLayout.js';
 import PortalLogin from './components/portal/PortalLogin.js';
 import PortalToastContainer, { showPortalToast } from './components/portal/PortalToast.js';
@@ -21,6 +21,9 @@ type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
+// The org the user has switched into. The server treats this as a request, not a
+// fact — it validates membership and falls back to the home org if not entitled.
+const ACTIVE_ORG_KEY = 'portal_active_org';
 const CODEX_TEST_USER_KEY = 'portal_codex_test_user';
 const CODEX_TEST_USER: PortalAuthPayload = {
   userId: -1,
@@ -95,6 +98,10 @@ async function ensureFreshToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+function getActiveOrgId(): string | null {
+  return localStorage.getItem(ACTIVE_ORG_KEY);
+}
+
 async function portalFetch(path: string, opts: RequestInit = {}): Promise<Response> {
   const token = await ensureFreshToken();
   if (!token && !path.includes('/auth/')) {
@@ -102,11 +109,13 @@ async function portalFetch(path: string, opts: RequestInit = {}): Promise<Respon
     window.location.href = '/portal';
     return new Response(JSON.stringify({ ok: false, error: 'Session expired' }), { status: 401 });
   }
+  const activeOrg = getActiveOrgId();
   const res = await fetch(path, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(activeOrg ? { 'X-Portal-Org': activeOrg } : {}),
       ...opts.headers,
     },
   });
@@ -202,6 +211,8 @@ function PortalApp() {
   const [selectedTicketKey, setSelectedTicketKey] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'oidc' | 'internal' | null>(null);
   const [checking, setChecking] = useState(true);
+  const [orgs, setOrgs] = useState<PortalOrgMembershipSummary[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -301,15 +312,44 @@ function PortalApp() {
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem(PORTAL_TOKEN_KEY);
+    localStorage.removeItem(ACTIVE_ORG_KEY);
     clearStoredCodexTestUser();
     setUser(null);
     setView('home');
+  }, []);
+
+  // Switching org changes branding, feature flags and every piece of data on screen.
+  // Reload rather than try to invalidate it all — it is a rare, deliberate action.
+  const handleSwitchOrg = useCallback((orgId: number) => {
+    localStorage.setItem(ACTIVE_ORG_KEY, String(orgId));
+    window.location.reload();
   }, []);
 
   const handleViewTicket = useCallback((key: string) => {
     setSelectedTicketKey(key);
     setView('ticket-detail');
   }, []);
+
+  // Which orgs can this user switch into? Most customers get exactly one.
+  useEffect(() => {
+    if (!user) { setOrgs([]); setActiveOrgId(null); return; }
+    let cancelled = false;
+    portalFetch('/api/portal/my-orgs')
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled || !d.ok) return;
+        setOrgs(d.data.orgs);
+        setActiveOrgId(d.data.activeOrgId);
+        // The server has the final say. If it refused our requested org (revoked
+        // membership, stale localStorage) it falls back to the home org — mirror
+        // that locally so we stop sending a header it will keep rejecting.
+        if (String(d.data.activeOrgId) !== getActiveOrgId()) {
+          localStorage.setItem(ACTIVE_ORG_KEY, String(d.data.activeOrgId));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Fetch per-org feature toggles once authenticated
   useEffect(() => {
@@ -432,7 +472,17 @@ function PortalApp() {
   );
 
   return (
-    <PortalLayout user={user} currentView={view} onNavigate={setView} onLogout={handleLogout} features={resolvedFeatures} logoUrl={branding?.logoUrl || null}>
+    <PortalLayout
+      user={user}
+      currentView={view}
+      onNavigate={setView}
+      onLogout={handleLogout}
+      features={resolvedFeatures}
+      logoUrl={branding?.logoUrl || null}
+      orgs={orgs}
+      activeOrgId={activeOrgId}
+      onSwitchOrg={handleSwitchOrg}
+    >
       <Suspense fallback={fallback}>
         {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} features={resolvedFeatures} />}
         {view === 'tickets' && <PortalTicketList onViewTicket={handleViewTicket} />}

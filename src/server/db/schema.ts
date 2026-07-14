@@ -2187,6 +2187,22 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_csat_surveys', 'ticket_age_hours') IS NULL
      ALTER TABLE portal_csat_surveys ADD ticket_age_hours INT NULL;`,
 
+    // ── Multi-org membership ──
+    // portal_users.org_id remains the user's HOME org (the one they land in, and the
+    // one they can write to). This table adds any *additional* orgs they may switch
+    // into. Internal staff don't need rows here — they get read-only view-as access
+    // to every org (see portal-org-membership.ts). Rows are for genuine membership,
+    // e.g. a customer group whose person legitimately oversees several brands.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_user_orgs') AND type = 'U')
+     CREATE TABLE portal_user_orgs (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       portal_user_id INT NOT NULL REFERENCES portal_users(id),
+       org_id INT NOT NULL REFERENCES portal_organisations(id),
+       role NVARCHAR(50) NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_portal_user_orgs UNIQUE (portal_user_id, org_id)
+     );`,
+
     // ── Assignment retry queue — unassigned tickets queued for automatic retry ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'assignment_retry_queue') AND type = 'U')
      CREATE TABLE assignment_retry_queue (

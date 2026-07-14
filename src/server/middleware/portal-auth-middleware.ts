@@ -10,6 +10,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { CustomRole } from './auth.js';
 import { parseRoles, isAdmin } from '../utils/role-helpers.js';
 import { queryOne, execute } from '../services/database.js';
+import { resolveActiveOrg } from '../services/portal-org-membership.js';
 
 declare global {
   namespace Express {
@@ -95,6 +96,69 @@ function isInternalMode(settings: FileSettingsQueries): boolean {
   return (settings.get('portal_auth_mode') || 'internal') === 'internal';
 }
 
+/** The org the client asked to act as. Untrusted — validated against membership. */
+function requestedOrgId(req: Request): number | null {
+  const raw = req.headers['x-portal-org'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Build req.portalUser for a user whose identity is already established, resolving
+ * which org the request runs against. A user's home org always wins unless they
+ * asked for another org they are genuinely a member of.
+ */
+async function attachActiveOrg(
+  req: Request,
+  identity: {
+    userId: number;
+    email: string;
+    homeOrgId: number;
+    homeOrgName: string;
+    role: PortalUserRole;
+    authType: PortalUserAuthType;
+  },
+): Promise<boolean> {
+  const active = await resolveActiveOrg(
+    { userId: identity.userId, homeOrgId: identity.homeOrgId, role: identity.role, authType: identity.authType },
+    requestedOrgId(req),
+  );
+  if (!active) return false;
+
+  req.portalUser = {
+    userId: identity.userId,
+    email: identity.email,
+    orgId: active.orgId,
+    orgName: active.orgName,
+    role: active.role,
+    authType: identity.authType,
+    homeOrgId: identity.homeOrgId,
+    viewAs: !active.canWrite,
+  };
+  return true;
+}
+
+/**
+ * Read-only enforcement for view-as. Staff looking at a customer's portal see
+ * exactly what that customer sees — they must not be able to act inside it, or a
+ * comment/escalation would appear to come from the customer with no trace of who
+ * really made it. Mount AFTER portalAuthMiddleware.
+ */
+export function portalViewAsReadOnly() {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.portalUser?.viewAs || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+      next();
+      return;
+    }
+    res.status(403).json({
+      ok: false,
+      error: `You are viewing ${req.portalUser.orgName} read-only. Switch back to your own organisation to make changes.`,
+      code: 'PORTAL_VIEW_AS_READ_ONLY',
+    });
+  };
+}
+
 export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRoles?: () => CustomRole[]) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (isInternalMode(settingsQueries)) {
@@ -125,14 +189,18 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRo
 
         const portalUserId = await upsertInternalPortalUser(req.user.id, actualEmail, displayName, orgId, portalRole);
 
-        req.portalUser = {
+        const attached = await attachActiveOrg(req, {
           userId: portalUserId,
           email: actualEmail,
-          orgId,
-          orgName: INTERNAL_ORG_NAME,
+          homeOrgId: orgId,
+          homeOrgName: INTERNAL_ORG_NAME,
           role: portalRole,
           authType: 'internal',
-        };
+        });
+        if (!attached) {
+          res.status(403).json({ ok: false, error: 'No organisation is available for this account' });
+          return;
+        }
         next();
       } catch (err) {
         console.error('[portal-auth] Internal auth bridge failed:', err);
@@ -178,17 +246,24 @@ export function portalAuthMiddleware(settingsQueries: FileSettingsQueries, getRo
         });
         return;
       }
+      // Home org and role come from the DB, never the token — a tampered JWT must
+      // not be able to move the user into another org.
       const org = userRow.org_id === payload.orgId
         ? { name: payload.orgName }
         : await queryOne<{ name: string }>(`SELECT name FROM portal_organisations WHERE id = ?`, [userRow.org_id]);
-      req.portalUser = {
+
+      const attached = await attachActiveOrg(req, {
         userId: payload.userId,
         email: userRow.email || payload.email,
-        orgId: userRow.org_id,
-        orgName: org?.name || payload.orgName,
+        homeOrgId: userRow.org_id,
+        homeOrgName: org?.name || payload.orgName,
         role: (userRow.role as PortalUserRole) || payload.role,
         authType: userRow.auth_type,
-      };
+      });
+      if (!attached) {
+        res.status(403).json({ ok: false, error: 'No organisation is available for this account' });
+        return;
+      }
       next();
     } catch {
       res.status(401).json({ ok: false, error: 'Invalid or expired portal token' });
