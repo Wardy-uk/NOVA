@@ -161,7 +161,6 @@ const AREAS: Record<Area, AreaDef> = {
     label: 'Service Desk',
     defaultView: 'sd-dashboard',
     tabs: [
-      { view: 'look-at-this', label: '🔴 Look at this' },
       { view: 'sd-dashboard', label: 'Dashboard' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
@@ -311,6 +310,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'tickets', label: 'My Tickets' },
       { view: 'agent-nova-queue', label: 'NOVA Queue' },
+      { view: 'look-at-this', label: '🔴 Look at this' },
       { view: 'ai-approvals', label: 'AI Approvals' },
       { view: 'agent-workspace', label: 'Workspace' },
       { view: 'agent-dashboard', label: 'Dashboard' },
@@ -1105,7 +1105,7 @@ export function App() {
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
           )}
-          {view === 'look-at-this' && !sdFilter && (
+          {view === 'look-at-this' && canSeeArea('ai-agent') && (
             <LookAtThisView />
           )}
           {/* ai-approvals moved to NOVA AI Agent area */}
