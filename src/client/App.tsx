@@ -78,6 +78,7 @@ const CalyxTicketsView = lazy(() => import('./components/CalyxTicketsView.js').t
 const CalyxSettingsView = lazy(() => import('./components/CalyxSettingsView.js').then(m => ({ default: m.CalyxSettingsView })));
 const CalyxPortal = lazy(() => import('./components/CalyxPortal.js').then(m => ({ default: m.CalyxPortal })));
 */
+const LookAtThisView = lazy(() => import('./components/LookAtThisView.js').then(m => ({ default: m.LookAtThisView })));
 const AgentDashboardView = lazy(() => import('./components/AgentDashboardView.js').then(m => ({ default: m.AgentDashboardView })));
 const AgentWorkspaceView = lazy(() => import('./components/AgentWorkspaceView.js').then(m => ({ default: m.AgentWorkspaceView })));
 const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js').then(m => ({ default: m.AgentCoachingView })));
@@ -109,7 +110,7 @@ declare const __APP_VERSION__: string;
 // ── Area / View definitions ──
 
 type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
-type View = 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
+type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
@@ -159,6 +160,7 @@ const AREAS: Record<Area, AreaDef> = {
     label: 'Service Desk',
     defaultView: 'sd-dashboard',
     tabs: [
+      { view: 'look-at-this', label: '🔴 Look at this' },
       { view: 'sd-dashboard', label: 'Dashboard' },
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
@@ -1100,6 +1102,9 @@ export function App() {
           )}
           {view === 'sd-dashboard' && !sdFilter && (
             <ServiceDeskDashboard />
+          )}
+          {view === 'look-at-this' && !sdFilter && (
+            <LookAtThisView />
           )}
           {/* ai-approvals moved to NOVA AI Agent area */}
           {/* KPIs */}

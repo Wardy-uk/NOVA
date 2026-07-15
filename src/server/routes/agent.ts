@@ -25,6 +25,7 @@ import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { SuggestionEngine } from '../services/suggestion-engine.js';
 import type { RiskScorer } from '../services/risk-scorer.js';
+import { groupFlaggedByReason } from '../services/risk-scorer.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { DriftDetector } from '../services/drift-detector.js';
 import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries } from '../db/queries.js';
@@ -387,6 +388,19 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get flagged tickets' });
+    }
+  });
+
+  // "Nick — look at this": pending flagged tickets grouped by *why* (calm board)
+  router.get('/flagged/look-at-this', async (req, res) => {
+    if (!deps?.riskScorer) return res.json({ ok: true, data: { total: 0, groups: [], generatedAt: new Date().toISOString() } });
+    try {
+      const settingMin = parseInt(deps.settingsQueries?.get('nick_look_threshold') || '', 10);
+      const min = parseInt(req.query.min as string, 10) || (Number.isFinite(settingMin) ? settingMin : 0);
+      const pending = await deps.riskScorer.getFlagged('pending');
+      res.json({ ok: true, data: groupFlaggedByReason(pending, min) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to build look-at-this' });
     }
   });
 

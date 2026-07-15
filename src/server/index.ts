@@ -972,7 +972,7 @@ async function main() {
   });
 
   // NEURO bridge — uses its own shared-secret auth, must be registered before JWT middleware
-  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager));
+  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager, () => agentLoop?.getRiskScorer() ?? null));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {

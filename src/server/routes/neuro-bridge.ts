@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import type { McpClientManager } from '../services/mcp-client.js';
 import type { Request, Response } from 'express';
+import type { RiskScorer } from '../services/risk-scorer.js';
+import { groupFlaggedByReason } from '../services/risk-scorer.js';
 
 // Hardcoded allowed identity — this bridge is for Nick only
 const ALLOWED_USERNAME = 'nickw';
@@ -27,8 +29,29 @@ function bridgeAuth(req: Request, res: Response): boolean {
   return true;
 }
 
-export function createNeuroBridgeRoutes(mcpManager: McpClientManager): Router {
+export function createNeuroBridgeRoutes(
+  mcpManager: McpClientManager,
+  getRiskScorer?: () => RiskScorer | null,
+): Router {
   const router = Router();
+
+  // GET /api/neuro-bridge/flagged — "Nick, look at this" feed for NUERO Focus.
+  // Same grouped shape NOVA's own calm board uses; NUERO pulls this on a timer.
+  router.get('/flagged', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const riskScorer = getRiskScorer?.();
+    if (!riskScorer) {
+      res.json({ ok: true, data: { total: 0, groups: [], generatedAt: new Date().toISOString() } });
+      return;
+    }
+    try {
+      const min = parseInt(req.query.min as string, 10) || 0;
+      const pending = await riskScorer.getFlagged('pending');
+      res.json({ ok: true, data: groupFlaggedByReason(pending, min) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
 
   // GET /api/neuro-bridge/status — check bridge is up and Graph is connected
   router.get('/status', (req, res) => {

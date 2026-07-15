@@ -35,6 +35,113 @@ export interface FlaggedTicket {
   project_key: string | null;
 }
 
+// ── "Nick — look at this" grouping ──────────────────────────────────────────
+// Buckets a flagged ticket by its single highest-scoring risk factor so the
+// calm board can group by *why* rather than dumping one flat list.
+
+export interface LookAtThisTicket {
+  ticket_key: string;
+  risk_score: number;
+  summary: string | null;
+  assignee: string | null;
+  priority: string | null;
+  ticket_status: string | null;
+  current_tier: string | null;
+  project_key: string | null;
+  flagged_at: string;
+  sla_breached: boolean;
+  sla_breach_at: string | null;
+  category: string;      // 'legal' | 'angry' | 'sla' | 'stuck'
+  why: string;           // headline reason (top factor label)
+  reasons: string[];     // all factor labels, highest first
+}
+
+export interface LookAtThisGroup {
+  key: string;
+  label: string;
+  emoji: string;
+  count: number;
+  tickets: LookAtThisTicket[];
+}
+
+export interface LookAtThisResult {
+  total: number;
+  groups: LookAtThisGroup[];
+  generatedAt: string;
+}
+
+// Which board bucket each risk-factor id belongs to. Factors not listed
+// (priority_severe, repeat_reporter) only contribute score, never define the bucket.
+const FACTOR_CATEGORY: Record<string, string> = {
+  escalation_strong: 'legal',
+  sentiment_angry: 'angry',
+  sentiment_frustrated: 'angry',
+  escalation_moderate: 'angry',
+  sla_breached: 'sla',
+  sla_imminent: 'sla',
+  agent_inactive: 'stuck',
+  bounced: 'stuck',
+  many_hands: 'stuck',
+  stale_jira: 'stuck',
+  parked_too_long: 'stuck',
+  untriaged: 'stuck',
+  unassigned: 'stuck',
+  age_activity: 'stuck',
+};
+
+// Display order + presentation. Legal first (rarest, highest stakes), then the
+// human-judgement buckets, then operational.
+const CATEGORY_META: { key: string; label: string; emoji: string }[] = [
+  { key: 'legal', label: 'Legal / formal', emoji: '⚖️' },
+  { key: 'angry', label: 'Angry / frustrated', emoji: '😤' },
+  { key: 'sla', label: 'SLA risk', emoji: '⏰' },
+  { key: 'stuck', label: 'Stuck / stalled', emoji: '🌀' },
+];
+
+function categoriseTicket(ticket: FlaggedTicket): { category: string; why: string; reasons: string[] } {
+  const factors = [...(ticket.risk_factors ?? [])].sort((a, b) => b.score - a.score);
+  // The bucket is defined by the highest-scoring factor that maps to a category.
+  const defining = factors.find((f) => FACTOR_CATEGORY[f.id]);
+  const category = defining ? FACTOR_CATEGORY[defining.id] : 'stuck';
+  const why = defining?.label ?? factors[0]?.label ?? 'Flagged for review';
+  return { category, why, reasons: factors.map((f) => f.label) };
+}
+
+export function groupFlaggedByReason(tickets: FlaggedTicket[], minScore = 0): LookAtThisResult {
+  const qualifying = tickets.filter((t) => t.risk_score >= minScore);
+  const byKey = new Map<string, LookAtThisTicket[]>();
+  for (const meta of CATEGORY_META) byKey.set(meta.key, []);
+
+  for (const t of qualifying) {
+    const { category, why, reasons } = categoriseTicket(t);
+    byKey.get(category)!.push({
+      ticket_key: t.ticket_key,
+      risk_score: t.risk_score,
+      summary: t.summary,
+      assignee: t.assignee,
+      priority: t.priority,
+      ticket_status: t.ticket_status,
+      current_tier: t.current_tier,
+      project_key: t.project_key,
+      flagged_at: t.flagged_at,
+      sla_breached: t.sla_breached,
+      sla_breach_at: t.sla_breach_at,
+      category,
+      why,
+      reasons,
+    });
+  }
+
+  const groups: LookAtThisGroup[] = CATEGORY_META
+    .map((meta) => {
+      const list = (byKey.get(meta.key) ?? []).sort((a, b) => b.risk_score - a.risk_score);
+      return { key: meta.key, label: meta.label, emoji: meta.emoji, count: list.length, tickets: list };
+    })
+    .filter((g) => g.count > 0);
+
+  return { total: qualifying.length, groups, generatedAt: new Date().toISOString() };
+}
+
 interface TicketRiskInput {
   issueKey: string;
   summary: string | null;
