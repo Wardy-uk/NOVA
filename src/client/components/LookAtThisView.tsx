@@ -174,57 +174,74 @@ export function LookAtThisView() {
                 {group.label}
                 <span className="text-xs text-neutral-500 font-normal">· {group.count}</span>
               </h2>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-3">
                 {group.tickets.map(t => (
                   <article
                     key={t.ticket_key}
-                    className={`rounded-2xl border border-white/5 border-l-4 ${CATEGORY_ACCENT[t.category] || 'border-l-neutral-500/60'} bg-[#1c2026] p-4 flex flex-col gap-3`}
+                    className={`w-full rounded-2xl border border-white/5 border-l-4 ${CATEGORY_ACCENT[t.category] || 'border-l-neutral-500/60'} bg-[#1c2026] p-4 sm:p-5 flex flex-col gap-4`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                    {/* Header: identity + summary title on the left, actions on the right */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${scoreChip(t.risk_score)}`}>{t.risk_score}</span>
-                          <span className="font-mono text-sm text-neutral-200">{t.ticket_key}</span>
+                          <a
+                            href={`${JIRA_BASE}/${t.ticket_key}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-sm text-sky-300 hover:text-sky-200"
+                          >
+                            {t.ticket_key}
+                          </a>
                           {t.severity && SEVERITY_BADGE[t.severity] && (
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${SEVERITY_BADGE[t.severity].className}`}>
                               {SEVERITY_BADGE[t.severity].label}
                             </span>
                           )}
+                          <span className="text-[11px] text-neutral-500">flagged {sinceFlagged(t.flagged_at)}</span>
                         </div>
-                        <p className="text-sm text-neutral-300 mt-2 leading-snug">{t.why}</p>
-                        {t.severityRationale && t.severityRationale !== t.why && (
-                          <p className="text-xs text-neutral-400 mt-1 leading-snug italic">{t.severityRationale}</p>
+                        {t.summary && (
+                          <h3 className="text-base font-medium text-neutral-100 mt-2 leading-snug">{t.summary}</h3>
                         )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={`${JIRA_BASE}/${t.ticket_key}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium px-3 py-2 rounded-lg bg-[#272C33] text-neutral-200 hover:bg-[#2f353d] transition-colors whitespace-nowrap"
+                        >
+                          Open in Jira ↗
+                        </a>
+                        <button
+                          onClick={() => gotIt(t.ticket_key)}
+                          disabled={busy.has(t.ticket_key)}
+                          className="text-xs font-medium px-3 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          I've got it ✓
+                        </button>
                       </div>
                     </div>
 
-                    {t.summary && (
-                      <p className="text-xs text-neutral-500 leading-snug line-clamp-2">{t.summary}</p>
-                    )}
+                    {/* Why it's flagged: full factor breakdown + the LLM's impact rationale */}
+                    <div className="rounded-xl bg-black/20 px-3 py-2.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-500 mb-1.5">Why it's flagged</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {t.reasons.map((r, i) => (
+                          <span key={i} className="text-[11px] px-2 py-0.5 rounded-md bg-white/5 text-neutral-300">{r}</span>
+                        ))}
+                      </div>
+                      {t.severityRationale && (
+                        <p className="text-xs text-neutral-400 mt-2 leading-snug italic">{t.severityRationale}</p>
+                      )}
+                    </div>
 
+                    {/* Meta */}
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500">
                       {t.assignee ? <span className="px-1.5 py-0.5 rounded bg-white/5">{t.assignee}</span> : <span className="px-1.5 py-0.5 rounded bg-white/5 text-amber-400/80">Unassigned</span>}
                       {t.current_tier && <span className="px-1.5 py-0.5 rounded bg-white/5">{t.current_tier}</span>}
                       {t.ticket_status && <span className="px-1.5 py-0.5 rounded bg-white/5">{t.ticket_status}</span>}
-                      <span className="ml-auto">{sinceFlagged(t.flagged_at)}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={`${JIRA_BASE}/${t.ticket_key}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 text-center text-xs font-medium px-3 py-2 rounded-lg bg-[#272C33] text-neutral-200 hover:bg-[#2f353d] transition-colors"
-                      >
-                        Open in Jira ↗
-                      </a>
-                      <button
-                        onClick={() => gotIt(t.ticket_key)}
-                        disabled={busy.has(t.ticket_key)}
-                        className="text-xs font-medium px-3 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
-                      >
-                        I've got it ✓
-                      </button>
+                      {t.priority && <span className="px-1.5 py-0.5 rounded bg-white/5">{t.priority}</span>}
                     </div>
                   </article>
                 ))}
