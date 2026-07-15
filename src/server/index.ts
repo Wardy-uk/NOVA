@@ -2036,6 +2036,16 @@ async function main() {
       }
     }, 30 * 60 * 1000);
 
+    // NUERO push — mirror flagged tickets into Nick's NUERO Focus every 10 min.
+    // No-op unless neuro_push_url + neuro_api_token are configured in settings.
+    jobRegistry.register('neuro-push', 'Push flagged tickets to NUERO Focus (10 min)', async () => {
+      const rs = agentLoop?.getRiskScorer();
+      if (!rs) return;
+      const { pushFlaggedToNeuro } = await import('./services/neuro-push.js');
+      const result = await pushFlaggedToNeuro(rs, settingsQueries);
+      if (result && result.pushed > 0) console.log(`[neuro-push] Pushed ${result.pushed} flagged ticket(s) to NUERO`);
+    }, 10 * 60 * 1000);
+
     // Due Date sweep DISABLED — NOVA no longer stamps SLA-breach dates onto CC/Tier 2
     // tickets. Onboarding still sets its own due dates (onboarding-orchestrator.ts).
     // The sweepDueDates() method is left in place but is no longer scheduled.
