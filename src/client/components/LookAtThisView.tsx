@@ -20,7 +20,15 @@ interface LookTicket {
   category: string;
   why: string;
   reasons: string[];
+  severity: string | null;
+  severityRationale: string | null;
 }
+
+const SEVERITY_BADGE: Record<string, { label: string; className: string }> = {
+  critical: { label: '🔥 Critical impact', className: 'bg-red-500/15 text-red-300 ring-1 ring-red-500/30' },
+  high: { label: 'High impact', className: 'bg-orange-500/15 text-orange-300 ring-1 ring-orange-500/30' },
+  medium: { label: 'Moderate impact', className: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30' },
+};
 
 interface LookGroup {
   key: string;
@@ -174,11 +182,19 @@ export function LookAtThisView() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${scoreChip(t.risk_score)}`}>{t.risk_score}</span>
                           <span className="font-mono text-sm text-neutral-200">{t.ticket_key}</span>
+                          {t.severity && SEVERITY_BADGE[t.severity] && (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${SEVERITY_BADGE[t.severity].className}`}>
+                              {SEVERITY_BADGE[t.severity].label}
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-neutral-300 mt-2 leading-snug">{t.why}</p>
+                        {t.severityRationale && t.severityRationale !== t.why && (
+                          <p className="text-xs text-neutral-400 mt-1 leading-snug italic">{t.severityRationale}</p>
+                        )}
                       </div>
                     </div>
 

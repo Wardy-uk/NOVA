@@ -51,9 +51,11 @@ export interface LookAtThisTicket {
   flagged_at: string;
   sla_breached: boolean;
   sla_breach_at: string | null;
-  category: string;      // 'legal' | 'angry' | 'sla' | 'stuck'
+  category: string;      // 'impact' | 'legal' | 'angry' | 'sla' | 'stuck'
   why: string;           // headline reason (top factor label)
   reasons: string[];     // all factor labels, highest first
+  severity: string | null;          // 'critical' | 'high' | 'medium' when assessed, else null
+  severityRationale: string | null; // the LLM's one-line why (from the severity factor detail)
 }
 
 export interface LookAtThisGroup {
@@ -118,6 +120,7 @@ export function groupFlaggedByReason(tickets: FlaggedTicket[], minScore = 0): Lo
 
   for (const t of qualifying) {
     const { category, why, reasons } = categoriseTicket(t);
+    const sevFactor = (t.risk_factors ?? []).find((f) => f.id.startsWith('severity_'));
     byKey.get(category)!.push({
       ticket_key: t.ticket_key,
       risk_score: t.risk_score,
@@ -133,6 +136,8 @@ export function groupFlaggedByReason(tickets: FlaggedTicket[], minScore = 0): Lo
       category,
       why,
       reasons,
+      severity: sevFactor ? sevFactor.id.replace('severity_', '') : null,
+      severityRationale: sevFactor?.detail ?? null,
     });
   }
 
