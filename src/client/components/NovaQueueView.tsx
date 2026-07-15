@@ -8,6 +8,8 @@ interface QueueTicket {
   priority_name: string | null;
   issuetype_name: string | null;
   nurtur_product: string | null;
+  current_tier: string | null;
+  jira_created: string | null;
   jira_updated: string | null;
 }
 
@@ -29,10 +31,10 @@ const api = async (path: string, method = 'GET', body?: unknown) => {
   return r.json();
 };
 
-const fmtWhen = (iso: string | null) => {
+const fmtDate = (iso: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
 };
 
 const priorityClass = (p: string | null) => {
@@ -131,25 +133,27 @@ export function NovaQueueView() {
               <tr>
                 <th className="px-3 py-2 font-medium">Ticket</th>
                 <th className="px-3 py-2 font-medium">Summary</th>
+                <th className="px-3 py-2 font-medium">Tier</th>
                 <th className="px-3 py-2 font-medium">Priority</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Product</th>
-                <th className="px-3 py-2 font-medium">Updated</th>
-                <th className="px-3 py-2 font-medium text-right">Action</th>
+                <th className="px-3 py-2 font-medium">Created</th>
+                <th className="px-3 py-2 font-medium text-right sticky right-0 bg-gray-800">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-700">
               {tickets.map(t => (
-                <tr key={t.issue_key} className="hover:bg-gray-800/50">
+                <tr key={t.issue_key} className="group hover:bg-gray-800/50">
                   <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-200">{t.issue_key}</td>
-                  <td className="px-3 py-2 text-gray-300 max-w-md truncate" title={t.summary ?? ''}>{t.summary ?? '—'}</td>
+                  <td className="px-3 py-2 text-gray-300 max-w-[240px] truncate" title={t.summary ?? ''}>{t.summary ?? '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-300">{t.current_tier ?? '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <span className={`px-2 py-0.5 rounded-full text-xs ${priorityClass(t.priority_name)}`}>{t.priority_name ?? '—'}</span>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-300">{t.status_name ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{t.nurtur_product ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmtWhen(t.jira_updated)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-400 max-w-[140px] truncate" title={t.nurtur_product ?? ''}>{t.nurtur_product ?? '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmtDate(t.jira_created)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right sticky right-0 bg-gray-900 group-hover:bg-gray-800">
                     <button
                       onClick={() => reassign(t.issue_key)}
                       disabled={busy === t.issue_key || !!busy}
