@@ -3314,7 +3314,29 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const accountId = deps?.settingsQueries?.get('nova_ai_jira_account_id') || NOVA_AI_ACCOUNT_FALLBACK;
       const projects = deps?.assignmentEngine?.getConfiguredProjects() ?? ['NT', 'NTPJ'];
       const tickets = await cache.getByAssignee(accountId, projects, 'account_id');
-      res.json({ ok: true, data: { accountId, projects, tickets } });
+
+      // Join the latest AI decision per ticket so each card can explain WHY NOVA is holding it.
+      const keys = tickets.map(t => t.issue_key);
+      const decisions: Record<string, { action: string; confidence: number | null; reasoning: string | null; approval_status: string | null; decided_at: string }> = {};
+      if (keys.length > 0) {
+        const placeholders = keys.map(() => '?').join(',');
+        const rows = await query<{ ticket_id: string; action: string; confidence: number | null; reasoning: string | null; approval_status: string | null; created_at: string }>(
+          `SELECT d.ticket_id, d.action, d.confidence, d.reasoning, d.approval_status, d.created_at
+           FROM agent_decisions d
+           INNER JOIN (
+             SELECT ticket_id, MAX(id) as max_id
+             FROM agent_decisions
+             WHERE ticket_id IN (${placeholders})
+             GROUP BY ticket_id
+           ) latest ON d.id = latest.max_id`,
+          keys,
+        );
+        for (const r of rows) {
+          decisions[r.ticket_id] = { action: r.action, confidence: r.confidence, reasoning: r.reasoning, approval_status: r.approval_status, decided_at: r.created_at };
+        }
+      }
+      const enriched = tickets.map(t => ({ ...t, ai: decisions[t.issue_key] ?? null }));
+      res.json({ ok: true, data: { accountId, projects, tickets: enriched } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load NOVA queue' });
     }

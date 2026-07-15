@@ -1,5 +1,13 @@
 import { useState, useEffect } from 'react';
 
+interface AiDecision {
+  action: string;
+  confidence: number | null;
+  reasoning: string | null;
+  approval_status: string | null;
+  decided_at: string;
+}
+
 interface QueueTicket {
   issue_key: string;
   project_key: string;
@@ -11,6 +19,7 @@ interface QueueTicket {
   current_tier: string | null;
   jira_created: string | null;
   jira_updated: string | null;
+  ai: AiDecision | null;
 }
 
 interface QueueData {
@@ -34,7 +43,7 @@ const api = async (path: string, method = 'GET', body?: unknown) => {
 const fmtDate = (iso: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 const priorityClass = (p: string | null) => {
@@ -45,6 +54,35 @@ const priorityClass = (p: string | null) => {
     case 'low': return 'bg-blue-500/20 text-blue-300';
     default: return 'bg-gray-500/20 text-gray-300';
   }
+};
+
+const actionLabel = (a: string) => {
+  switch (a) {
+    case 'draft_response': return 'Drafted a reply';
+    case 'respond': return 'Responded';
+    case 'public_reply': return 'Public reply';
+    case 'gather_context': return 'Gathering context';
+    case 'chase': return 'Chasing';
+    case 'escalate': return 'Escalated';
+    case 'assign': return 'Assigning';
+    case 'handoff': return 'Handing off';
+    case 'no_action': return 'No action taken';
+    case 'comment': return 'Commented';
+    case 'transition': return 'Transitioned';
+    case 'update_fields': return 'Updated fields';
+    default: return a.replace(/_/g, ' ');
+  }
+};
+
+// Short human-readable reason for why NOVA is still holding the ticket.
+const whyHeld = (ai: AiDecision | null): string => {
+  if (!ai) return 'Claimed by NOVA — no AI decision recorded yet (likely awaiting first pass).';
+  const label = actionLabel(ai.action);
+  if (ai.approval_status === 'pending') return `${label} — holding for human approval.`;
+  if (ai.action === 'gather_context') return `${label} — waiting on more information before acting.`;
+  if (ai.action === 'chase') return `${label} — waiting on a reply from the customer.`;
+  if (ai.action === 'no_action') return `${label} — nothing actionable yet.`;
+  return label;
 };
 
 export function NovaQueueView() {
@@ -77,7 +115,6 @@ export function NovaQueueView() {
       const r = await api('/nova-queue/reassign', 'POST', { ticketKey });
       if (r.ok) {
         setToast({ ok: true, text: `${ticketKey} → ${r.data?.agent?.display_name ?? 'agent'} (${r.data?.openTicketCount ?? '?'} open)` });
-        // Drop it from the list — it's no longer NOVA's.
         setData(prev => prev ? { ...prev, tickets: prev.tickets.filter(t => t.issue_key !== ticketKey) } : prev);
       } else {
         setToast({ ok: false, text: `${ticketKey}: ${r.error ?? 'Reassignment failed'}` });
@@ -101,13 +138,16 @@ export function NovaQueueView() {
             Use “Round-robin now” to hand a ticket to a human agent immediately.
           </p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50"
-        >
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-3">
+          {data && <span className="text-sm text-gray-400">{tickets.length} open</span>}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50"
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {toast && (
@@ -127,45 +167,47 @@ export function NovaQueueView() {
           NOVA AI has no open tickets right now.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-700">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-800 text-gray-400 text-left">
-              <tr>
-                <th className="px-3 py-2 font-medium">Ticket</th>
-                <th className="px-3 py-2 font-medium">Summary</th>
-                <th className="px-3 py-2 font-medium">Tier</th>
-                <th className="px-3 py-2 font-medium">Priority</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Product</th>
-                <th className="px-3 py-2 font-medium">Created</th>
-                <th className="px-3 py-2 font-medium text-right sticky right-0 bg-gray-800">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-700">
-              {tickets.map(t => (
-                <tr key={t.issue_key} className="group hover:bg-gray-800/50">
-                  <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-200">{t.issue_key}</td>
-                  <td className="px-3 py-2 text-gray-300 max-w-[240px] truncate" title={t.summary ?? ''}>{t.summary ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-300">{t.current_tier ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${priorityClass(t.priority_name)}`}>{t.priority_name ?? '—'}</span>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-300">{t.status_name ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400 max-w-[140px] truncate" title={t.nurtur_product ?? ''}>{t.nurtur_product ?? '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmtDate(t.jira_created)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-right sticky right-0 bg-gray-900 group-hover:bg-gray-800">
-                    <button
-                      onClick={() => reassign(t.issue_key)}
-                      disabled={busy === t.issue_key || !!busy}
-                      className="px-3 py-1 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50"
-                    >
-                      {busy === t.issue_key ? 'Assigning…' : 'Round-robin now'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {tickets.map(t => (
+            <div key={t.issue_key} className="w-full rounded-lg border border-gray-700 bg-gray-800/40 p-4 hover:border-gray-600 transition-colors">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  {/* Ticket key + meta chips */}
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-mono text-sm text-indigo-300">{t.issue_key}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs ${priorityClass(t.priority_name)}`}>{t.priority_name ?? 'Unset'}</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-gray-600/40 text-gray-300">{t.status_name ?? '—'}</span>
+                    {t.current_tier && <span className="px-2 py-0.5 rounded-full text-xs bg-gray-600/40 text-gray-300">{t.current_tier}</span>}
+                    {t.nurtur_product && <span className="px-2 py-0.5 rounded-full text-xs bg-gray-600/40 text-gray-400">{t.nurtur_product}</span>}
+                  </div>
+                  {/* Ticket summary */}
+                  <div className="text-gray-100 font-medium">{t.summary ?? '(no summary)'}</div>
+                  {/* Why NOVA is holding it */}
+                  <div className="mt-2 text-sm">
+                    <span className="text-gray-500">Why flagged: </span>
+                    <span className="text-amber-300">{whyHeld(t.ai)}</span>
+                    {t.ai?.confidence != null && (
+                      <span className="text-gray-500"> · {Math.round(t.ai.confidence * 100)}% confidence</span>
+                    )}
+                  </div>
+                  {t.ai?.reasoning && (
+                    <div className="mt-1 text-sm text-gray-400 whitespace-pre-line">{t.ai.reasoning}</div>
+                  )}
+                  <div className="mt-2 text-xs text-gray-500">Created {fmtDate(t.jira_created)} · Updated {fmtDate(t.jira_updated)}</div>
+                </div>
+                {/* Action */}
+                <div className="shrink-0">
+                  <button
+                    onClick={() => reassign(t.issue_key)}
+                    disabled={busy === t.issue_key || !!busy}
+                    className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {busy === t.issue_key ? 'Assigning…' : 'Round-robin now'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
