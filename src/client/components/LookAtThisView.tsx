@@ -40,6 +40,7 @@ const JIRA_BASE = 'https://nurturtech.atlassian.net/browse';
 
 // Category → calm left-border accent. Colour signals *type of concern*, not alarm.
 const CATEGORY_ACCENT: Record<string, string> = {
+  impact: 'border-l-red-500/70',
   legal: 'border-l-violet-400/70',
   angry: 'border-l-rose-400/70',
   sla: 'border-l-amber-400/70',

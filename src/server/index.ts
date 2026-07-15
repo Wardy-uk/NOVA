@@ -2036,6 +2036,17 @@ async function main() {
       }
     }, 30 * 60 * 1000);
 
+    // Ticket severity classification — LLM-assess business impact / blast radius
+    // of open tickets so the risk scorer can rank a broken feed above a cosmetic
+    // bug. Cached + hash-deduped, so most tickets are skipped each run. Every 30 min.
+    jobRegistry.register('severity-classifier', 'Ticket severity classification (30 min)', async () => {
+      const { SeverityClassifier } = await import('./services/severity-classifier.js');
+      const svc = new SeverityClassifier(settingsQueries, llmService);
+      const projects = (settingsQueries.get('agent_jira_project') || 'NT').split(',').map((p: string) => p.trim());
+      const res = await svc.runSeveritySweep(projects);
+      if (res.classified > 0) console.log(`[severity] Classified ${res.classified} ticket(s)`);
+    }, 30 * 60 * 1000);
+
     // NUERO push — mirror flagged tickets into Nick's NUERO Focus every 10 min.
     // No-op unless neuro_push_url + neuro_api_token are configured in settings.
     jobRegistry.register('neuro-push', 'Push flagged tickets to NUERO Focus (10 min)', async () => {

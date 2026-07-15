@@ -73,6 +73,9 @@ export interface LookAtThisResult {
 // Which board bucket each risk-factor id belongs to. Factors not listed
 // (priority_severe, repeat_reporter) only contribute score, never define the bucket.
 const FACTOR_CATEGORY: Record<string, string> = {
+  severity_critical: 'impact',
+  severity_high: 'impact',
+  severity_medium: 'impact',
   escalation_strong: 'legal',
   sentiment_angry: 'angry',
   sentiment_frustrated: 'angry',
@@ -92,6 +95,7 @@ const FACTOR_CATEGORY: Record<string, string> = {
 // Display order + presentation. Legal first (rarest, highest stakes), then the
 // human-judgement buckets, then operational.
 const CATEGORY_META: { key: string; label: string; emoji: string }[] = [
+  { key: 'impact', label: 'Broken / high impact', emoji: '🔥' },
   { key: 'legal', label: 'Legal / formal', emoji: '⚖️' },
   { key: 'angry', label: 'Angry / frustrated', emoji: '😤' },
   { key: 'sla', label: 'SLA risk', emoji: '⏰' },
@@ -165,6 +169,9 @@ interface TicketRiskInput {
   statusName: string | null;
   jiraUpdated: Date | null;
   descriptionText: string | null;
+  severityLevel: 'critical' | 'high' | 'medium' | 'low' | null;
+  impactScore: number | null;
+  severityRationale: string | null;
 }
 
 const STRONG_ESCALATION = /\b(formal\s+complaint|lawyer|solicitor|legal\s+action|trading\s+standards|ombudsman|ICO|GDPR\s+breach|data\s+protection)\b/i;
@@ -351,7 +358,24 @@ export class RiskScorer {
       }
     }
 
-    const score = Math.min(100, factors.reduce((s, f) => s + f.score, 0));
+    // 13. Business severity / blast radius (LLM-assessed, cached). This is the
+    // impact of the underlying fault, independent of customer tone — a feed
+    // dropping listings must outrank a cosmetic bug even if the customer is calm.
+    if (input.severityLevel) {
+      const detail = input.severityRationale || undefined;
+      if (input.severityLevel === 'critical') {
+        factors.push({ id: 'severity_critical', label: 'Critical business impact', score: 40, detail });
+      } else if (input.severityLevel === 'high') {
+        factors.push({ id: 'severity_high', label: 'High business impact', score: 25, detail });
+      } else if (input.severityLevel === 'medium') {
+        factors.push({ id: 'severity_medium', label: 'Moderate business impact', score: 10, detail });
+      }
+    }
+
+    let score = Math.min(100, factors.reduce((s, f) => s + f.score, 0));
+    // Floor: a critical-impact fault must always cross the flag threshold on its
+    // own, even with no distress signals (calm customer, no SLA breach yet).
+    if (input.severityLevel === 'critical') score = Math.max(score, 65);
     return { score, factors };
   }
 
@@ -454,6 +478,17 @@ export class RiskScorer {
       ),
     ]);
 
+    // Business severity (LLM-assessed, cached in ticket_severity) — separate query
+    // so a missing/empty severity table never breaks the core sweep.
+    let severityRows: { ticket_key: string; severity: string; impact_score: number; rationale: string | null }[] = [];
+    try {
+      severityRows = await query<{ ticket_key: string; severity: string; impact_score: number; rationale: string | null }>(
+        `SELECT ticket_key, severity, impact_score, rationale FROM ticket_severity
+         WHERE ticket_key IN (${keyPlaceholders})`, ticketKeys,
+      );
+    } catch { /* table may not exist yet on first boot */ }
+    const severityMap = new Map(severityRows.map(r => [r.ticket_key, r]));
+
     const stateMap = new Map(stateRows.map(r => [r.ticket_id, r]));
     const sentimentMap = new Map(sentimentRows.map(r => [r.issue_key, r.sentiment_score]));
     const commentMap = new Map(commentStats.map(r => [r.issue_key, r]));
@@ -499,6 +534,9 @@ export class RiskScorer {
         statusName: ticket.status_name,
         jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
         descriptionText: ticket.description_text,
+        severityLevel: (severityMap.get(ticket.issue_key)?.severity as TicketRiskInput['severityLevel']) ?? null,
+        impactScore: severityMap.get(ticket.issue_key)?.impact_score ?? null,
+        severityRationale: severityMap.get(ticket.issue_key)?.rationale ?? null,
       };
 
       const { score, factors } = this.scoreTicket(input);
@@ -709,6 +747,13 @@ export class RiskScorer {
       ),
     ]);
 
+    let severityRow: { severity: string; impact_score: number; rationale: string | null } | null = null;
+    try {
+      severityRow = (await queryOne<{ severity: string; impact_score: number; rationale: string | null }>(
+        `SELECT severity, impact_score, rationale FROM ticket_severity WHERE ticket_key = ?`, [ticketKey],
+      )) ?? null;
+    } catch { /* table may not exist yet */ }
+
     const input: TicketRiskInput = {
       issueKey: ticket.issue_key,
       summary: ticket.summary,
@@ -732,6 +777,9 @@ export class RiskScorer {
       statusName: ticket.status_name,
       jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
       descriptionText: ticket.description_text,
+      severityLevel: (severityRow?.severity as TicketRiskInput['severityLevel']) ?? null,
+      impactScore: severityRow?.impact_score ?? null,
+      severityRationale: severityRow?.rationale ?? null,
     };
 
     const { score, factors } = this.scoreTicket(input);

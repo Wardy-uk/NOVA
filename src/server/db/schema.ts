@@ -299,6 +299,18 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ticket_classifications_category')
      CREATE INDEX IX_ticket_classifications_category ON ticket_classifications (category, created_at DESC);`,
 
+    // Business severity / blast-radius (LLM-assessed, one row per open ticket, cached)
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_severity') AND type = 'U')
+     CREATE TABLE ticket_severity (
+       ticket_key NVARCHAR(20) NOT NULL PRIMARY KEY,
+       severity NVARCHAR(10) NOT NULL DEFAULT 'low',
+       impact_score INT NOT NULL DEFAULT 0,
+       rationale NVARCHAR(500) NULL,
+       content_hash NVARCHAR(16) NULL,
+       model NVARCHAR(60) NULL,
+       computed_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
     // WP-18: Trend analysis snapshots
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'ticket_trend_snapshots') AND type = 'U')
      CREATE TABLE ticket_trend_snapshots (
