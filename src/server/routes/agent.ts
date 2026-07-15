@@ -3299,6 +3299,56 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // ── NOVA AI Queue: tickets currently owned by the AI agent ──
+
+  const NOVA_AI_ACCOUNT_FALLBACK = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
+
+  // List every open ticket currently assigned to NOVA AI itself.
+  router.get('/nova-queue', async (_req, res) => {
+    try {
+      const cache = deps?.jiraCache;
+      if (!cache) {
+        res.json({ ok: true, data: { accountId: null, projects: [], tickets: [] } });
+        return;
+      }
+      const accountId = deps?.settingsQueries?.get('nova_ai_jira_account_id') || NOVA_AI_ACCOUNT_FALLBACK;
+      const projects = deps?.assignmentEngine?.getConfiguredProjects() ?? ['NT', 'NTPJ'];
+      const tickets = await cache.getByAssignee(accountId, projects, 'account_id');
+      res.json({ ok: true, data: { accountId, projects, tickets } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load NOVA queue' });
+    }
+  });
+
+  // Run round-robin on a single NOVA-owned ticket now, handing it to a human agent.
+  router.post('/nova-queue/reassign', async (req, res) => {
+    const { ticketKey, pool, preferredSkills } = req.body;
+    if (!ticketKey) {
+      res.status(400).json({ ok: false, error: 'ticketKey is required' });
+      return;
+    }
+    try {
+      const engine = deps?.assignmentEngine;
+      if (!engine) {
+        res.status(503).json({ ok: false, error: 'Assignment engine not available' });
+        return;
+      }
+      const projectKey = engine.resolveProjectFromTicketKey(ticketKey);
+      // NOVA-owned tickets are freely reassignable, but pass the flag so a ticket
+      // NOVA has already handed to a human is re-routed too when explicitly requested.
+      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills, projectKey, { allowHumanReassign: true });
+      if (!result) {
+        res.status(404).json({ ok: false, error: 'No available agents in pool' });
+        return;
+      }
+      // Leave the same Jira audit trail as an automatic round-robin assignment.
+      try { await engine.postAssignmentComment(ticketKey, result); } catch { /* comment is best-effort */ }
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Reassignment failed' });
+    }
+  });
+
   router.get('/roster/assignment-log', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
     const projectKey = req.query.project as string | undefined;

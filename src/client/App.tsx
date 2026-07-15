@@ -80,6 +80,7 @@ const CalyxPortal = lazy(() => import('./components/CalyxPortal.js').then(m => (
 */
 const LookAtThisView = lazy(() => import('./components/LookAtThisView.js').then(m => ({ default: m.LookAtThisView })));
 const AgentDashboardView = lazy(() => import('./components/AgentDashboardView.js').then(m => ({ default: m.AgentDashboardView })));
+const NovaQueueView = lazy(() => import('./components/NovaQueueView.js').then(m => ({ default: m.NovaQueueView })));
 const AgentWorkspaceView = lazy(() => import('./components/AgentWorkspaceView.js').then(m => ({ default: m.AgentWorkspaceView })));
 const AgentCoachingView = lazy(() => import('./components/AgentCoachingView.js').then(m => ({ default: m.AgentCoachingView })));
 const AgentPipelinesView = lazy(() => import('./components/AgentPipelinesView.js').then(m => ({ default: m.AgentPipelinesView })));
@@ -123,7 +124,7 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-nova-queue' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
   | 'backlog-board'
   | 'standup-board'
@@ -309,6 +310,7 @@ const AREAS: Record<Area, AreaDef> = {
     defaultView: 'agent-workspace',
     tabs: [
       { view: 'tickets', label: 'My Tickets' },
+      { view: 'agent-nova-queue', label: 'NOVA Queue' },
       { view: 'ai-approvals', label: 'AI Approvals' },
       { view: 'agent-workspace', label: 'Workspace' },
       { view: 'agent-dashboard', label: 'Dashboard' },
@@ -1372,6 +1374,11 @@ export function App() {
               if (filter.aiAction) sessionStorage.setItem('agent_workspace_filter', JSON.stringify(filter));
               setView('agent-workspace');
             }} />
+          )}
+          {view === 'agent-nova-queue' && canSeeArea('ai-agent') && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <NovaQueueView />
+            </Suspense>
           )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />
