@@ -60,17 +60,59 @@ function enumerateDates(startDate: string, endDate: string): string[] {
   return dates;
 }
 
+// People HR caps at 50 calls/minute per IP. Hold a little under that, and count
+// calls across every caller in this process so a manual sync firing while the
+// scheduled one is mid-run can't blow the budget between them.
+const RATE_LIMIT_PER_MIN = 45;
+const RATE_WINDOW_MS = 60_000;
+const callTimestamps: number[] = [];
+
+async function throttle(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (callTimestamps.length > 0 && now - callTimestamps[0] >= RATE_WINDOW_MS) callTimestamps.shift();
+    if (callTimestamps.length < RATE_LIMIT_PER_MIN) {
+      callTimestamps.push(now);
+      return;
+    }
+    // Budget spent — wait for the oldest call to age out of the window.
+    await sleep(RATE_WINDOW_MS - (now - callTimestamps[0]) + 100);
+  }
+}
+
+function isRateLimited(message: string): boolean {
+  return /limited to \d+ per minute|rate limit|too many requests/i.test(message);
+}
+
 async function apiCall(config: PeopleHRConfig, endpoint: string, body: Record<string, unknown>): Promise<any> {
   const url = `${config.baseUrl}/${endpoint}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ APIKey: config.apiKey, ...body }),
-  });
-  if (!res.ok) throw new Error(`People HR API ${res.status}: ${res.statusText}`);
-  const json = await res.json();
-  if (json.isError) throw new Error(`People HR error: ${json.Message ?? 'unknown'}`);
-  return json.Result ?? [];
+
+  let lastError = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await throttle();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ APIKey: config.apiKey, ...body }),
+    });
+
+    if (res.status === 429) {
+      lastError = 'People HR API 429: Too Many Requests';
+    } else if (!res.ok) {
+      throw new Error(`People HR API ${res.status}: ${res.statusText}`);
+    } else {
+      const json = await res.json();
+      if (!json.isError) return json.Result ?? [];
+      lastError = `People HR error: ${json.Message ?? 'unknown'}`;
+      // Anything that isn't a rate limit (bad key, bad employee id) won't fix itself.
+      if (!isRateLimited(lastError)) throw new Error(lastError);
+    }
+
+    // Rate limited: drop our window budget and back off before retrying.
+    callTimestamps.length = 0;
+    if (attempt < 2) await sleep(RATE_WINDOW_MS * (attempt + 1));
+  }
+  throw new Error(`${lastError} (retries exhausted)`);
 }
 
 async function fetchHolidays(config: PeopleHRConfig, employeeId: string, startDate: string, endDate: string): Promise<PeopleHRAbsence[]> {
@@ -116,11 +158,30 @@ function mapAbsenceType(absence: PeopleHRAbsence): AvailabilityStatus {
   return 'annual_leave';
 }
 
-export async function syncPeopleHR(
+type SyncResult = { synced: number; skipped: number; errors: string[] };
+
+// A manual sync firing while the scheduled one is still running just doubles the
+// call volume into a 50/min cap and rate-limits both. Share the in-flight run.
+let inFlight: Promise<SyncResult> | null = null;
+
+export function syncPeopleHR(
   settings: SettingsQueries,
   availabilityService: AgentAvailabilityService,
   kpiAgents: KpiAgent[],
-): Promise<{ synced: number; skipped: number; errors: string[] }> {
+): Promise<SyncResult> {
+  if (inFlight) {
+    console.log('[people-hr] Sync already running — returning in-flight result');
+    return inFlight;
+  }
+  inFlight = runSync(settings, availabilityService, kpiAgents).finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function runSync(
+  settings: SettingsQueries,
+  availabilityService: AgentAvailabilityService,
+  kpiAgents: KpiAgent[],
+): Promise<SyncResult> {
   const config = getConfig(settings);
   if (!config) return { synced: 0, skipped: 0, errors: ['People HR not configured or disabled'] };
 
@@ -142,10 +203,7 @@ export async function syncPeopleHR(
   for (const agent of agentsWithHrId) {
     const hrId = agent.PeopleHrId!;
     try {
-      await sleep(2200);
       const holidays = await fetchHolidays(config, hrId, startStr, endStr);
-
-      await sleep(2200);
       const absences = await fetchAbsences(config, hrId, startStr, endStr);
 
       const allLeave = [...holidays, ...absences];
