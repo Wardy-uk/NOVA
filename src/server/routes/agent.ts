@@ -3405,10 +3405,16 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  const MANUAL_STATUSES: AvailabilityStatus[] = ['available', 'annual_leave', 'sick', 'other_leave', 'wfh', 'training', 'meeting', 'offline'];
+
   router.post('/availability', async (req, res) => {
     const { rosterId, date, status, reason } = req.body;
     if (!rosterId || !date || !status) {
       res.status(400).json({ ok: false, error: 'rosterId, date, and status are required' });
+      return;
+    }
+    if (!MANUAL_STATUSES.includes(status)) {
+      res.status(400).json({ ok: false, error: `Invalid status. Expected one of: ${MANUAL_STATUSES.join(', ')}` });
       return;
     }
     try {
@@ -3417,7 +3423,9 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         res.status(503).json({ ok: false, error: 'Availability service not available' });
         return;
       }
-      await svc.setAvailability(rosterId, date, status as AvailabilityStatus, reason);
+      // Set from the UI → 'manual', so the People HR sync won't overwrite it today.
+      const setBy = (req as any).user?.username ?? null;
+      await svc.setAvailability(rosterId, date, status as AvailabilityStatus, reason, 'manual', setBy);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to set availability' });

@@ -2,7 +2,10 @@ import sql from 'mssql';
 import { query, queryOne, execute } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
-export type AvailabilityStatus = 'available' | 'annual_leave' | 'sick' | 'wfh' | 'training' | 'meeting' | 'offline';
+export type AvailabilityStatus = 'available' | 'annual_leave' | 'sick' | 'other_leave' | 'wfh' | 'training' | 'meeting' | 'offline';
+
+/** 'manual' rows are set by a human in the UI and win over the People HR sync for that date. */
+export type AvailabilitySource = 'peoplehr' | 'manual';
 
 export interface AgentAvailability {
   id: number;
@@ -10,6 +13,8 @@ export interface AgentAvailability {
   available_date: string;
   status: AvailabilityStatus;
   reason: string | null;
+  source?: AvailabilitySource;
+  set_by?: string | null;
   display_name?: string;
   pool?: string;
 }
@@ -94,14 +99,32 @@ export class AgentAvailabilityService {
     return recordset ?? [];
   }
 
-  async setAvailability(rosterId: number, date: string, status: AvailabilityStatus, reason?: string): Promise<void> {
+  /**
+   * Upsert one agent-day. A 'manual' write always wins; a 'peoplehr' write will
+   * not overwrite an existing 'manual' row, so a same-day override survives the
+   * sync until the date rolls over and a fresh row is written for the new day.
+   */
+  async setAvailability(
+    rosterId: number,
+    date: string,
+    status: AvailabilityStatus,
+    reason?: string,
+    src: AvailabilitySource = 'peoplehr',
+    setBy?: string,
+  ): Promise<void> {
     await execute(`
       MERGE agent_availability AS target
       USING (SELECT ? AS roster_id, ? AS available_date) AS source
       ON target.roster_id = source.roster_id AND target.available_date = source.available_date
-      WHEN MATCHED THEN UPDATE SET status = ?, reason = ?, updated_at = GETUTCDATE()
-      WHEN NOT MATCHED THEN INSERT (roster_id, available_date, status, reason) VALUES (?, ?, ?, ?);
-    `, [rosterId, date, status, reason ?? null, rosterId, date, status, reason ?? null]);
+      WHEN MATCHED AND (? = 'manual' OR ISNULL(target.source, 'peoplehr') <> 'manual')
+        THEN UPDATE SET status = ?, reason = ?, source = ?, set_by = ?, updated_at = GETUTCDATE()
+      WHEN NOT MATCHED
+        THEN INSERT (roster_id, available_date, status, reason, source, set_by) VALUES (?, ?, ?, ?, ?, ?);
+    `, [
+      rosterId, date,
+      src, status, reason ?? null, src, setBy ?? null,
+      rosterId, date, status, reason ?? null, src, setBy ?? null,
+    ]);
   }
 
   async bulkSetAvailability(entries: { rosterId: number; date: string; status: AvailabilityStatus; reason?: string }[]): Promise<number> {
@@ -138,7 +161,7 @@ export class AgentAvailabilityService {
     let availRows: any[] = [];
     if (agentIds.length > 0) {
       availRows = await query<any>(`
-        SELECT roster_id, status, reason
+        SELECT roster_id, status, reason, source, set_by
         FROM agent_availability
         WHERE available_date = ? AND roster_id IN (${agentIds.map(() => '?').join(',')})
       `, [date, ...agentIds]);
@@ -157,6 +180,8 @@ export class AgentAvailabilityService {
         available_date: date,
         status,
         reason: avail?.reason ?? null,
+        source: (avail?.source as AvailabilitySource) ?? undefined,
+        set_by: avail?.set_by ?? null,
         display_name: agent.display_name,
         pool: agent.pool,
       };

@@ -2348,6 +2348,13 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_adobe_sign_agreements_approval_token')
      CREATE INDEX IX_adobe_sign_agreements_approval_token ON adobe_sign_agreements(approval_token) WHERE approval_token IS NOT NULL;`,
 
+    // Manual availability overrides: 'manual' rows are never overwritten by the
+    // People HR sync, so a same-day correction survives until the date rolls over.
+    `IF COL_LENGTH('agent_availability', 'source') IS NULL
+     ALTER TABLE agent_availability ADD source NVARCHAR(20) NOT NULL DEFAULT 'peoplehr';`,
+    `IF COL_LENGTH('agent_availability', 'set_by') IS NULL
+     ALTER TABLE agent_availability ADD set_by NVARCHAR(100) NULL;`,
+
     // Atomic counters for NOVA-generated sequence numbers (e.g. subscription
     // contract numbers). Use BCQueries.nextCounterValue to increment + read in
     // one MERGE statement so concurrent agreement creates never collide.
