@@ -100,7 +100,7 @@ export class AgentAvailabilityService {
       USING (SELECT ? AS roster_id, ? AS available_date) AS source
       ON target.roster_id = source.roster_id AND target.available_date = source.available_date
       WHEN MATCHED THEN UPDATE SET status = ?, reason = ?, updated_at = GETUTCDATE()
-      WHEN NOT MATCHED THEN INSERT (roster_id, available_date, status, reason) VALUES (?, ?, ?, ?)
+      WHEN NOT MATCHED THEN INSERT (roster_id, available_date, status, reason) VALUES (?, ?, ?, ?);
     `, [rosterId, date, status, reason ?? null, rosterId, date, status, reason ?? null]);
   }
 
