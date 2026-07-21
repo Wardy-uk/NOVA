@@ -11,6 +11,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { TriageResultSchema, type TriageResult } from './triage-schema.js';
 import { RespondResultSchema, type RespondResult } from './respond-schema.js';
 import { loadPrompt } from './prompt-loader.js';
+import { screenImages } from './image-utils.js';
 import { executeAndGetId, query } from './database.js';
 import {
   detectCancellationIntent,
@@ -307,9 +308,25 @@ export class Reasoner {
 
   private extractImageContent(event: TicketEvent): import('./llm-service.js').LlmImageContent[] {
     if (!event.attachments) return [];
-    return event.attachments
+    const candidates = event.attachments
       .filter(a => a.base64Content && a.mimeType.startsWith('image/'))
-      .map(a => ({ base64: a.base64Content!, mimeType: a.mimeType }));
+      .map(a => ({ base64: a.base64Content!, mimeType: a.mimeType, filename: a.filename }));
+
+    // Screen out images the vision API will reject (Anthropic caps many-image
+    // requests at 2000px/side) and cap the count, so an oversized screenshot
+    // degrades gracefully instead of 400-ing the whole triage/respond call.
+    const { kept, skipped } = screenImages(candidates, {
+      maxDimension: 2000,
+      maxCount: 8,
+      maxBytes: 3_500_000,
+    });
+    if (skipped.length > 0) {
+      console.warn(
+        `[reasoner] ${event.ticketKey}: skipping ${skipped.length} image(s) for LLM — `
+        + skipped.map(s => `${s.image.filename} (${s.reason})`).join(', '),
+      );
+    }
+    return kept.map(k => ({ base64: k.base64, mimeType: k.mimeType }));
   }
 
   private async searchConfluence(summary: string): Promise<string> {

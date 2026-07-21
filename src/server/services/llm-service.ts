@@ -103,7 +103,10 @@ const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
     failover: { provider: 'openai' },
   },
   cheap: {
-    primary: { provider: 'openrouter', model: 'deepseek/deepseek-chat-v3-0324' },
+    // Use the vision-capable OpenRouter default (gemini-2.0-flash-lite-001).
+    // deepseek-chat-v3 is text-only and 404s the moment an image is attached,
+    // which took out triage on days when this tier served image tickets.
+    primary: { provider: 'openrouter' },
     failover: { provider: 'openai' },
   },
 };
