@@ -93,8 +93,9 @@ export class OnboardingEscalationService {
       for (const level of policy.levels) {
         if (age < level.day) continue;
 
-        if (level.sendCustomerUpdate && level.customerRecipients.some(r => r.email.trim())) {
-          await this.fireOnce(orgId, row.key, level.day, 'update', level.customerRecipients,
+        // Progress updates go to the onboarding's requestor (not a broadcast list).
+        if (level.sendCustomerUpdate && row.reporterEmail?.trim()) {
+          await this.fireOnce(orgId, row.key, level.day, 'update', [{ name: '', email: row.reporterEmail.trim() }],
             () => this.customerUpdateEmail(orgName, row, level));
         }
         if (level.escalate && level.escalationRecipients.some(r => r.email.trim())) {

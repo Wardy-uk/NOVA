@@ -79,6 +79,7 @@ interface NormalisedIssue {
   summary: string;
   status: string;
   owner: string | null;
+  reporterEmail: string | null;
   created: string;
   updated: string;
   priority: string;
@@ -182,6 +183,7 @@ export class PortalDashboardService {
         summary: f.summary || '',
         status: f.status?.name || 'Unknown',
         owner: f.assignee?.displayName || null,
+        reporterEmail: f.reporter?.emailAddress || null,
         created: f.created || '',
         updated: f.updated || f.created || '',
         priority: f.priority?.name || 'Medium',
@@ -413,6 +415,7 @@ export class PortalDashboardService {
           summary: i.summary,
           stage: i.status,
           owner: i.owner,
+          reporterEmail: i.reporterEmail,
           created: i.created,
           ageDays,
           ageBucket: onboardingBucket(ageDays),

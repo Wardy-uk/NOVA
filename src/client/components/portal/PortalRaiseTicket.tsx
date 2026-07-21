@@ -217,7 +217,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Raise a Ticket</h1>
-      <p className="text-sm text-gray-600 mb-6">Guild &amp; Fine &amp; Country network support requests.</p>
+      <p className="text-sm text-gray-600 mb-6">Raise a support, development or onboarding request.</p>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
         {error && (

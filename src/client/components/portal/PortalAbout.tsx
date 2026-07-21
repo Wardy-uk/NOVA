@@ -75,6 +75,7 @@ export default function PortalAbout({ user, multiOrg }: Props) {
           <li><strong>Raise a Ticket</strong> — submit a new request (see below). Only shown if enabled for your organisation.</li>
           <li><strong>Support</strong> / <strong>Onboarding</strong> — live dashboards of your support and onboarding tickets, where enabled.</li>
           <li><strong>Knowledge Base</strong> — searchable help articles; often the fastest way to an answer.</li>
+          <li><strong>Escalations</strong> — <em>(Organisation Admins)</em> set the schedule for onboarding progress updates and escalations for your organisation.</li>
         </ul>
       </Card>
 

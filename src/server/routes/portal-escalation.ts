@@ -47,15 +47,14 @@ export function createPortalEscalationRoutes(): Router {
       res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') });
       return;
     }
-    // A policy can only be enabled once every "send" recipient it relies on has an
-    // email — otherwise the engine would have nobody to send to.
+    // Progress updates go to the onboarding's requestor automatically, so only
+    // internal escalation levels need a configured recipient before enabling.
     if (parsed.data.enabled) {
       const missing = parsed.data.levels.some(l =>
-        (l.sendCustomerUpdate && l.customerRecipients.every(r => !r.email.trim())) ||
-        (l.escalate && l.escalationRecipients.every(r => !r.email.trim())),
+        l.escalate && l.escalationRecipients.every(r => !r.email.trim()),
       );
       if (missing) {
-        res.status(400).json({ ok: false, error: 'Add at least one recipient email to every enabled update/escalation level before turning the policy on.' });
+        res.status(400).json({ ok: false, error: 'Add at least one recipient email to every enabled escalation level before turning the policy on.' });
         return;
       }
     }

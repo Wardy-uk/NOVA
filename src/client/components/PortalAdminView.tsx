@@ -83,7 +83,7 @@ function AboutPanel() {
     { name: 'Knowledge Base', desc: 'Searchable help articles synced from Confluence.' },
     { name: 'Support', desc: 'The customer Support dashboard — a live view of their open support tickets, scoped to their organisation.' },
     { name: 'Onboarding', desc: 'The customer Onboarding dashboard — progress of their setup / go-live tickets.' },
-    { name: 'Raise a Ticket', desc: 'The Guild / Fine & Country network intake form. Enables the route selector and the Onboarding Request form.' },
+    { name: 'Raise a Ticket', desc: 'The network intake form. Enables the route selector (Support / Development / Onboarding Request).' },
   ];
   const routes: Array<{ name: string; desc: string }> = [
     { name: 'Raise to Support', desc: 'A standard support request → lands in the NT service desk queue.' },
@@ -95,8 +95,8 @@ function AboutPanel() {
     <div className="space-y-4">
       <AboutCard title="What the portal is">
         <p>
-          The customer portal is the self-service front door for Nurtur’s networks (Guild, Fine &amp; Country and other
-          customers). Customers sign in to raise and track tickets, chat with the Get Help assistant, search the
+          The customer portal is the self-service front door for Nurtur’s customers and networks.
+          Customers sign in to raise and track tickets, chat with the Get Help assistant, search the
           knowledge base, watch their support &amp; onboarding progress, and — where enabled — submit network and
           onboarding requests that flow straight into Jira.
         </p>
@@ -107,7 +107,7 @@ function AboutPanel() {
         <p>An <strong>organisation</strong> is a customer tenant. Each portal user has one <strong>home organisation</strong> and can optionally be granted additional ones.</p>
         <ul className="list-disc pl-5 space-y-1">
           <li><strong>Home organisation</strong> — the org a user lands in. Set when the user is created and changed via <em>Users → Edit</em>.</li>
-          <li><strong>Additional organisations</strong> — extra orgs a user can switch into with full access. Managed via the <em>Orgs</em> button on a user row. Internal <span className="font-mono">@nurtur.tech</span> staff automatically get read-only access to every org and don’t need these.</li>
+          <li><strong>Additional organisations</strong> — extra orgs a user can switch into, each with <strong>its own role</strong> (e.g. admin in one, viewer in another). Managed via the <em>Orgs</em> button on a user row. Internal <span className="font-mono">@nurtur.tech</span> staff automatically get read-only access to every org and don’t need these.</li>
           <li><strong>Domain</strong> — an email domain (e.g. <span className="font-mono">acme.co.uk</span>) that maps signed-in users and their tickets to this org.</li>
           <li><strong>BC Account # &amp; Reporters</strong> — the “customer scope”. A ticket belongs to the org if its BC Account matches <em>or</em> its reporter is in the reporter list. This scopes the Support &amp; Onboarding dashboards.</li>
           <li><strong>Branding</strong> — per-org logo, colours and font applied to the portal shell (can be auto-fetched from the org’s website).</li>
@@ -154,6 +154,15 @@ function AboutPanel() {
               <span>{r.desc}</span>
             </li>
           ))}
+        </ul>
+      </AboutCard>
+
+      <AboutCard title="Onboarding escalations">
+        <p>Each org can have a configurable escalation policy (portal → <strong>Escalations</strong>, Org Admin+): a set of day thresholds where NOVA acts if an onboarding isn’t complete.</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>Progress updates</strong> go automatically to the onboarding’s <strong>requestor</strong> — not a broadcast list.</li>
+          <li><strong>Escalations</strong> email the configured internal contacts (with an "also inform" cc list), once per level, deduped and audited.</li>
+          <li>Counts in working days, sends only in working hours, and stays off until an admin adds recipients and enables it.</li>
         </ul>
       </AboutCard>
 

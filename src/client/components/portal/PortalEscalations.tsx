@@ -52,11 +52,8 @@ function LevelCard({ level, onChange, onRemove }: {
 
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={level.sendCustomerUpdate} onChange={e => set({ sendCustomerUpdate: e.target.checked })} className="rounded border-gray-300 text-brand focus:ring-brand" />
-        Send a progress update to the customer
+        Send a progress update to the onboarding's requestor
       </label>
-      {level.sendCustomerUpdate && (
-        <RecipientEditor label="Customer recipients" hint="who receives the progress update" items={level.customerRecipients} onChange={v => set({ customerRecipients: v })} />
-      )}
 
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={level.escalate} onChange={e => set({ escalate: e.target.checked })} className="rounded border-gray-300 text-brand focus:ring-brand" />
@@ -126,7 +123,7 @@ export default function PortalEscalations() {
   const setLevel = (i: number, l: EscalationLevel) => setPolicy({ ...policy, levels: policy.levels.map((x, j) => j === i ? l : x) });
   const addLevel = () => setPolicy({
     ...policy,
-    levels: [...policy.levels, { day: 7, name: 'New level', sendCustomerUpdate: false, customerRecipients: [], escalate: true, escalationRecipients: [], informRecipients: [] }]
+    levels: [...policy.levels, { day: 7, name: 'New level', sendCustomerUpdate: false, escalate: true, escalationRecipients: [], informRecipients: [] }]
       .sort((a, b) => a.day - b.day),
   });
 
@@ -141,7 +138,7 @@ export default function PortalEscalations() {
 
       {isDefault && (
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-          You’re viewing the default template (from the Guild agreement). Add recipient emails and <strong>Save</strong> to store it for your organisation.
+          You’re viewing the default template. Add recipient emails and <strong>Save</strong> to store it for your organisation.
         </div>
       )}
       {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
@@ -153,7 +150,7 @@ export default function PortalEscalations() {
           Policy active — send updates &amp; escalations automatically
         </label>
         <p className="text-xs text-gray-500">
-          While off, nothing is sent. You must add a recipient email to every enabled update/escalation level before turning this on.
+          While off, nothing is sent. Progress updates go to each onboarding's requestor automatically; you must add a recipient email to every enabled escalation level before turning this on.
         </p>
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={policy.workingDays} onChange={e => setPolicy({ ...policy, workingDays: e.target.checked })} className="rounded border-gray-300 text-brand focus:ring-brand" />

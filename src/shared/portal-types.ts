@@ -315,9 +315,8 @@ export type EscalationRecipient = z.infer<typeof EscalationRecipientSchema>;
 export const EscalationLevelSchema = z.object({
   day: z.number().int().min(1).max(365),
   name: z.string().min(1).max(120),
-  /** Send a scheduled progress update to the customer contacts. */
+  /** Send a scheduled progress update to the onboarding's requestor. */
   sendCustomerUpdate: z.boolean().default(false),
-  customerRecipients: z.array(EscalationRecipientSchema).max(30).default([]),
   /** Raise an internal escalation to the escalation recipients. */
   escalate: z.boolean().default(false),
   escalationRecipients: z.array(EscalationRecipientSchema).max(30).default([]),
@@ -326,6 +325,21 @@ export const EscalationLevelSchema = z.object({
   note: z.string().max(2000).optional(),
 });
 export type EscalationLevel = z.infer<typeof EscalationLevelSchema>;
+
+// ── Head Office users (per-org reference list) ──
+// Documentation of an org's head-office contacts — maintained by the org's admin
+// and visible to support, so "who are the HO users?" is answered in one place.
+// NOT an escalation recipient source: progress updates go to the ticket requestor.
+export const HeadOfficeUserSchema = z.object({
+  name: z.string().max(200),
+  email: z.string().max(200),
+  title: z.string().max(150).optional(),
+  /** Portal role to grant this user. Head office defaults to Leader (sees all of
+   *  their org's tickets). */
+  role: z.enum(['requester', 'leader', 'manager', 'org_admin', 'admin']).default('leader'),
+});
+export type HeadOfficeUser = z.infer<typeof HeadOfficeUserSchema>;
+export const HeadOfficeUsersSchema = z.array(HeadOfficeUserSchema).max(100);
 
 export const OnboardingEscalationPolicySchema = z.object({
   /** Master switch — nothing is sent while false. Defaults off for safety. */
@@ -336,9 +350,10 @@ export const OnboardingEscalationPolicySchema = z.object({
 });
 export type OnboardingEscalationPolicy = z.infer<typeof OnboardingEscalationPolicySchema>;
 
-/** Seed matching the Guild agreement. Emails left blank on purpose — an admin
- *  fills the real addresses before enabling, so nothing is ever sent to a guessed
- *  address. */
+/** A neutral three-checkpoint template (progress update + two escalation tiers).
+ *  Recipients are intentionally empty — an admin adds the real contacts per org
+ *  before enabling, so nothing is ever sent to a guessed address, and no specific
+ *  customer or person is baked into the default. */
 export const DEFAULT_ESCALATION_POLICY: OnboardingEscalationPolicy = {
   enabled: false,
   workingDays: true,
@@ -347,45 +362,28 @@ export const DEFAULT_ESCALATION_POLICY: OnboardingEscalationPolicy = {
       day: 7,
       name: 'Day 7 — Progress Update',
       sendCustomerUpdate: true,
-      customerRecipients: [],
       escalate: false,
       escalationRecipients: [],
       informRecipients: [],
-      note: 'Progress update: completed activities, work in progress, dependencies, expected next milestones. Communicate proactively if meaningful progress happens sooner.',
+      note: 'Progress update: completed activities, work in progress, dependencies and expected next milestones. Communicate proactively if meaningful progress happens sooner.',
     },
     {
       day: 14,
       name: 'Day 14 — Progress Update & First Escalation',
       sendCustomerUpdate: true,
-      customerRecipients: [],
       escalate: true,
-      escalationRecipients: [
-        { name: 'Nick Ward', email: '' },
-        { name: 'Abigail Brown', email: '' },
-        { name: 'Emma Maciver', email: '' },
-      ],
-      informRecipients: [{ name: 'Kim Rush', email: '' }],
-      note: 'Raised if the integration is not complete by Day 14. Kim Rush informed. Guild assistance may be requested where delays are member/customer-side.',
+      escalationRecipients: [],
+      informRecipients: [],
+      note: 'Raised if the onboarding is not complete by Day 14. Where delays are customer-side, assistance may be requested; where purely internal, the customer is still informed for visibility.',
     },
     {
       day: 21,
-      name: 'Day 21 — Progress Update & Second (Senior) Escalation',
+      name: 'Day 21 — Progress Update & Senior Escalation',
       sendCustomerUpdate: true,
-      customerRecipients: [],
       escalate: true,
-      escalationRecipients: [
-        { name: 'Nick Ward', email: '' },
-        { name: 'Richard Combellack', email: '' },
-        { name: 'Paul Adams', email: '' },
-        { name: 'Emma Maciver', email: '' },
-        { name: 'Abigail Brown', email: '' },
-      ],
-      informRecipients: [
-        { name: 'Kim Rush', email: '' },
-        { name: 'Phillipa Legg', email: '' },
-        { name: 'Iain McKenzie', email: '' },
-      ],
-      note: 'Senior stakeholder escalation if still incomplete by Day 21. Coordination sits with Abigail Brown; Onboarding Team ensures it is raised in time.',
+      escalationRecipients: [],
+      informRecipients: [],
+      note: 'Senior stakeholder escalation if still incomplete by Day 21, to ensure every available action has been taken to remove blockers and complete the onboarding.',
     },
   ],
 };
@@ -717,6 +715,7 @@ export interface OnboardingDashboardRow {
   summary: string;
   stage: string;              // Jira status = current stage (v1)
   owner: string | null;       // Jira assignee
+  reporterEmail: string | null; // requestor — recipient for scheduled progress updates
   created: string;            // logged date
   ageDays: number;            // whole days since logged
   ageBucket: 'ok' | 'over7' | 'over14' | 'over21' | 'breach'; // >30 = SLA breach
