@@ -197,6 +197,105 @@ export const PortalNetworkRequestSchema = z.object({
 
 export type PortalNetworkRequestInput = z.infer<typeof PortalNetworkRequestSchema>;
 
+// ── Raise-a-Ticket routes (top-of-form selector, configurable per org) ──
+
+export type PortalSupportRoute = 'support' | 'development' | 'onboarding';
+
+export const PORTAL_SUPPORT_ROUTE_LABELS: Record<PortalSupportRoute, string> = {
+  support: 'Raise to Support',
+  development: 'Triaged for Development',
+  onboarding: 'Onboarding Request',
+};
+
+/** Order routes appear in the selector / admin config. */
+export const PORTAL_SUPPORT_ROUTE_ORDER: PortalSupportRoute[] = ['support', 'development', 'onboarding'];
+
+/** Default when an org has no explicit config — preserves prior behaviour. */
+export const DEFAULT_PORTAL_SUPPORT_ROUTES: PortalSupportRoute[] = ['support', 'development'];
+
+/** Parse the stored CSV into a validated, de-duped, ordered route list. */
+export function parseSupportRoutes(raw: string | null | undefined): PortalSupportRoute[] {
+  if (!raw || !raw.trim()) return [...DEFAULT_PORTAL_SUPPORT_ROUTES];
+  const set = new Set(
+    raw.split(',').map(s => s.trim()).filter((s): s is PortalSupportRoute =>
+      (PORTAL_SUPPORT_ROUTE_ORDER as string[]).includes(s)),
+  );
+  const routes = PORTAL_SUPPORT_ROUTE_ORDER.filter(r => set.has(r));
+  return routes.length > 0 ? routes : [...DEFAULT_PORTAL_SUPPORT_ROUTES];
+}
+
+// ── Onboarding Request (generic customer set-up form → setup + QA tickets) ──
+// Superset of the Guild Membership Set-Up Form + the "new agent joining" email
+// (NT-24880), with generic labels so any customer can use it.
+
+const OnboardingUserSchema = z.object({
+  name: z.string().max(200).optional(),
+  email: z.string().max(200).optional(),
+  accessLevel: z.string().max(120).optional(),
+  jobTitle: z.string().max(150).optional(),
+});
+
+export type PortalOnboardingUser = z.infer<typeof OnboardingUserSchema>;
+
+export const PortalOnboardingRequestSchema = z.object({
+  // Business
+  brand: z.string().min(1).max(300),
+  branch: z.string().min(1).max(300),
+  network: z.string().max(120).optional(),           // Guild / Fine & Country / other
+  registeredCompanyName: z.string().max(300).optional(),
+  membershipArea: z.string().max(200).optional(),
+  addressLine: z.string().max(300).optional(),
+  town: z.string().max(150).optional(),
+  county: z.string().max(150).optional(),
+  postcode: z.string().max(30).optional(),
+  // Services offered
+  offersSales: z.boolean().default(false),
+  offersLettings: z.boolean().default(false),
+  salesEmail: z.string().max(200).optional(),
+  lettingsEmail: z.string().max(200).optional(),
+  salesPhone: z.string().max(60).optional(),
+  lettingsPhone: z.string().max(60).optional(),
+  // Marketing
+  portals: z.array(z.string().max(60)).max(10).optional(),
+  portalsOther: z.string().max(200).optional(),
+  websiteProvider: z.string().max(200).optional(),
+  // Users to set up
+  users: z.array(OnboardingUserSchema).max(30).optional(),
+  // Referral / CRM
+  crmAccountName: z.string().max(300).optional(),
+  // Magazine
+  magazineReminderEmails: z.string().max(1000).optional(),
+  magazineRegion: z.string().max(150).optional(),
+  // Digital interactive magazine
+  dimSales: z.boolean().optional(),
+  dimLettings: z.boolean().optional(),
+  dimIncludeSoldLet: z.boolean().optional(),
+  dimOrderBy: z.string().max(60).optional(),          // Most Expensive / Recently Added
+  dimApprovalEmail: z.string().max(200).optional(),
+  // Regional market report
+  marketReportRegion: z.string().max(150).optional(),
+  // Lead generation
+  leadResponderPostcodes: z.string().max(500).optional(),
+  leadContactName: z.string().max(200).optional(),
+  leadContactEmail: z.string().max(200).optional(),
+  leadContactPhone: z.string().max(60).optional(),
+  ivtUrl: z.string().max(500).optional(),
+  ivtPresentOn: z.string().max(60).optional(),        // Main website / Separate mini site
+  valuationNotificationEmails: z.string().max(500).optional(),
+  // New agent joining (NT-24880)
+  newAgentName: z.string().max(200).optional(),
+  newAgentEmail: z.string().max(200).optional(),
+  newAgentPhone: z.string().max(60).optional(),
+  newAgentAddress: z.string().max(400).optional(),
+  micrositeUrl: z.string().max(500).optional(),
+  // For the QA ticket
+  bymUrl: z.string().max(500).optional(),
+  // Free text
+  notes: z.string().max(5000).optional(),
+});
+
+export type PortalOnboardingRequestInput = z.infer<typeof PortalOnboardingRequestSchema>;
+
 // ── KB Articles ──
 
 export interface PortalKbArticle {
@@ -511,6 +610,9 @@ export interface PortalOrgFeatures {
   /** Guild / Fine & Country "Raise a ticket" intake. Gated per-org via the
    *  `portal_raise_ticket_org_ids` setting (allowlist of org ids). */
   raiseTicket?: boolean;
+  /** Which routes the Raise-a-Ticket top selector offers this org. Absent →
+   *  the default pair (support, development). */
+  supportRoutes?: PortalSupportRoute[];
 }
 
 // ── Customer Dashboards (Onboarding + Support) ──

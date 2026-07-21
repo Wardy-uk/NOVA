@@ -702,6 +702,164 @@ export class PortalJiraService {
     return created.issueKey;
   }
 
+  /** Onboarding "setup" ticket — captures the customer set-up form into NT so the
+   *  team can build the systems. Returns the created issue key. */
+  async createOnboardingRequest(params: {
+    fields: import('../../shared/portal-types.js').PortalOnboardingRequestInput;
+    reporterEmail?: string;
+    reporterName?: string;
+    bcAccount?: string;
+  }): Promise<string> {
+    const f = params.fields;
+    const projectKey = this.settings.get('portal_onboarding_project') || 'NT';
+    const issueTypeName = this.settings.get('portal_onboarding_issue_type') || 'Service Request';
+
+    const yn = (v: boolean | undefined) => (v ? 'Yes' : 'No');
+    const line = (label: string, value: string | undefined | null) =>
+      value && String(value).trim() ? `${label}: ${String(value).trim()}` : null;
+
+    const sections: string[] = [];
+    sections.push([
+      'BUSINESS',
+      line('Brand / Agent', f.brand),
+      line('Branch', f.branch),
+      line('Network', f.network),
+      line('Registered company name', f.registeredCompanyName),
+      line('Membership area / location', f.membershipArea),
+      line('Address', [f.addressLine, f.town, f.county, f.postcode].filter(Boolean).join(', ') || null),
+    ].filter(Boolean).join('\n'));
+
+    sections.push([
+      'SERVICES',
+      `Offers: ${[f.offersSales ? 'Sales' : null, f.offersLettings ? 'Lettings' : null].filter(Boolean).join(', ') || '—'}`,
+      line('Sales email', f.salesEmail),
+      line('Sales phone', f.salesPhone),
+      line('Lettings email', f.lettingsEmail),
+      line('Lettings phone', f.lettingsPhone),
+    ].filter(Boolean).join('\n'));
+
+    sections.push([
+      'MARKETING',
+      line('Portals', [...(f.portals || []), f.portalsOther].filter(Boolean).join(', ') || null),
+      line('Current website provider', f.websiteProvider),
+    ].filter(Boolean).join('\n'));
+
+    if (f.users && f.users.length > 0) {
+      const rows = f.users
+        .filter(u => u.name || u.email)
+        .map(u => `  • ${[u.name, u.email, u.accessLevel, u.jobTitle].filter(Boolean).join(' | ')}`);
+      if (rows.length) sections.push(['USERS TO SET UP', ...rows].join('\n'));
+    }
+
+    sections.push([
+      'PRODUCTS & SET-UP',
+      line('CRM / referral account name', f.crmAccountName),
+      line('Magazine reminder emails', f.magazineReminderEmails),
+      line('Magazine region', f.magazineRegion),
+      line('Digital magazine — properties', [f.dimSales ? 'Sales' : null, f.dimLettings ? 'Lettings' : null].filter(Boolean).join(', ') || null),
+      f.dimIncludeSoldLet !== undefined ? `Digital magazine — include sold/let: ${yn(f.dimIncludeSoldLet)}` : null,
+      line('Digital magazine — order by', f.dimOrderBy),
+      line('Digital magazine — approval email', f.dimApprovalEmail),
+      line('Regional market report region', f.marketReportRegion),
+    ].filter(Boolean).join('\n'));
+
+    sections.push([
+      'LEAD GENERATION',
+      line('Lead responder postcode coverage', f.leadResponderPostcodes),
+      line('Lead responder contact', [f.leadContactName, f.leadContactEmail, f.leadContactPhone].filter(Boolean).join(' | ') || null),
+      line('Instant valuation tool URL', f.ivtUrl),
+      line('Instant valuation presented on', f.ivtPresentOn),
+      line('Valuation notification emails', f.valuationNotificationEmails),
+    ].filter(Boolean).join('\n'));
+
+    const newAgent = [
+      line('New agent name', f.newAgentName),
+      line('New agent email', f.newAgentEmail),
+      line('New agent phone', f.newAgentPhone),
+      line('New agent address', f.newAgentAddress),
+      line('Microsite / IVT URL', f.micrositeUrl),
+    ].filter(Boolean);
+    if (newAgent.length) sections.push(['NEW AGENT JOINING', ...newAgent].join('\n'));
+
+    if (f.notes && f.notes.trim()) sections.push(['NOTES', f.notes.trim()].join('\n'));
+
+    // Drop empty single-header sections (a header with no data lines).
+    const description = sections.filter(s => s.includes('\n')).join('\n\n');
+
+    const networkLabel = f.network === 'Guild' ? 'guild'
+      : /fine\s*&?\s*country/i.test(f.network || '') ? 'fine-and-country' : null;
+
+    const summary = `New Onboarding Setup — ${f.brand}${f.branch ? ` (${f.branch})` : ''}`;
+
+    const key = await this.createTicket({
+      projectKey,
+      summary,
+      description,
+      labels: ['onboarding', 'portal-onboarding', ...(networkLabel ? [networkLabel] : [])],
+      reporterEmail: params.reporterEmail,
+      internalNote: `Portal onboarding request submitted by ${params.reporterName || params.reporterEmail || 'portal user'}${params.reporterEmail ? ` (${params.reporterEmail})` : ''}.`,
+      issueTypeName,
+    });
+
+    // Set BC Account Number if the org has one — scopes it to the customer's
+    // Onboarding/Support dashboards. Non-fatal.
+    const bc = (params.bcAccount || '').trim();
+    if (bc && this.jiraClient) {
+      try {
+        await this.jiraClient.updateFields(key, { customfield_14626: bc });
+      } catch (err) {
+        console.warn('[portal-jira] Failed to set BC Account on onboarding ticket', key, ':', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return key;
+  }
+
+  /** QA ticket for an onboarding build — mirrors the "Quality Assurance - …" NT
+   *  pattern, linked to the setup ticket. Optionally auto-assigns via setting. */
+  async createQaTicket(params: {
+    brand: string;
+    branch?: string;
+    network?: string;
+    bymUrl?: string;
+    setupKey: string;
+  }): Promise<string> {
+    const projectKey = this.settings.get('portal_onboarding_qa_project')
+      || this.settings.get('portal_onboarding_project') || 'NT';
+    const issueTypeName = this.settings.get('portal_onboarding_issue_type') || 'Service Request';
+
+    const suffix = `${params.brand}${params.branch ? ` - ${params.branch}` : ''}${params.network ? ` (${params.network})` : ''}`;
+    const summary = `Quality Assurance - ${suffix}`;
+    const description = [
+      'Hi team,',
+      '',
+      `Please test the system build for: ${params.brand}${params.branch ? ` — ${params.branch}` : ''}${params.network ? ` (${params.network})` : ''}`,
+      `BYM URL: ${params.bymUrl?.trim() || '(to be confirmed)'}`,
+      `Linked setup request: ${params.setupKey}`,
+      '',
+      'Any questions, let me know.',
+    ].join('\n');
+
+    const key = await this.createTicket({
+      projectKey,
+      summary,
+      description,
+      labels: ['qa', 'onboarding-qa'],
+      issueTypeName,
+    });
+
+    const qaAssignee = this.settings.get('portal_qa_assignee_account_id');
+    if (qaAssignee && this.jiraClient) {
+      try {
+        await this.jiraClient.updateFields(key, { assignee: { accountId: qaAssignee } });
+      } catch (err) {
+        console.warn('[portal-jira] Failed to assign QA ticket', key, ':', err instanceof Error ? err.message : err);
+      }
+    }
+
+    return key;
+  }
+
   async linkIssues(newKey: string, originalKey: string): Promise<void> {
     if (!this.jiraClient) return;
     const linkTypeName = this.settings.get('jira_link_type_name') || 'Relates';

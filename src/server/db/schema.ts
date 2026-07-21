@@ -2016,6 +2016,12 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'feat_raise_ticket') IS NULL
      ALTER TABLE portal_organisations ADD feat_raise_ticket BIT NOT NULL CONSTRAINT DF_portal_org_raise_ticket DEFAULT 0;`,
 
+    // Which routes the "Raise a Ticket" top-of-form selector offers this org.
+    // CSV of {support, development, onboarding}. NULL/empty → the default pair
+    // (support,development) so existing orgs behave exactly as before.
+    `IF COL_LENGTH('portal_organisations', 'support_routes') IS NULL
+     ALTER TABLE portal_organisations ADD support_routes NVARCHAR(200) NULL;`,
+
     // Per-org branding — auto-suggested from the org's website, admin-editable,
     // applied to the portal shell (logo, primary/secondary colours, font).
     `IF COL_LENGTH('portal_organisations', 'brand_website_url') IS NULL

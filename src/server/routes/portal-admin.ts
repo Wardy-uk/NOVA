@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { query, queryOne, execute } from '../services/database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { getMetrics, getTopSearches, getEventCounts, getKbDeflectionTarget } from '../services/portal-analytics.js';
+import { parseSupportRoutes } from '../../shared/portal-types.js';
 import { fetchOrgBranding } from '../services/portal-branding.js';
 import type { LlmService } from '../services/llm-service.js';
 
@@ -339,6 +340,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         feat_support: number;
         feat_onboarding: number;
         feat_raise_ticket: number;
+        support_routes: string | null;
         brand_website_url: string | null;
         brand_logo_url: string | null;
         brand_primary: string | null;
@@ -348,7 +350,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
-                po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket,
+                po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket, po.support_routes,
                 po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
@@ -360,6 +362,49 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
       res.json({ ok: true, data: orgs });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list organisations' });
+    }
+  });
+
+  // Delete an organisation. Blocked while it still has portal users (home or
+  // additional membership) — reassign/remove those first. Set ?force=1 to delete
+  // anyway, which also clears additional-org memberships pointing at it.
+  router.delete('/organisations/:id', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (!id) { res.status(400).json({ ok: false, error: 'Valid organisation ID is required' }); return; }
+    const force = req.query.force === '1' || req.query.force === 'true';
+
+    try {
+      const org = await queryOne<{ id: number; name: string }>(
+        `SELECT id, name FROM portal_organisations WHERE id = ?`,
+        [id],
+      );
+      if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
+
+      const home = await queryOne<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM portal_users WHERE org_id = ? AND access_state <> 'removed'`,
+        [id],
+      );
+      if ((home?.n ?? 0) > 0) {
+        res.status(409).json({ ok: false, error: `${org.name} still has ${home!.n} active user(s) as their home organisation. Move or remove them before deleting.` });
+        return;
+      }
+
+      const memberCount = await queryOne<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM portal_user_orgs WHERE org_id = ?`,
+        [id],
+      );
+      if ((memberCount?.n ?? 0) > 0 && !force) {
+        res.status(409).json({ ok: false, error: `${org.name} is granted as an additional organisation to ${memberCount!.n} user(s). Re-send with force to delete anyway.` });
+        return;
+      }
+
+      // Clear dependent rows, then the org itself.
+      await execute(`DELETE FROM portal_user_orgs WHERE org_id = ?`, [id]);
+      await execute(`DELETE FROM portal_org_jira_mapping WHERE org_id = ?`, [id]);
+      await execute(`DELETE FROM portal_organisations WHERE id = ?`, [id]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to delete organisation' });
     }
   });
 
@@ -395,7 +440,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -434,6 +479,16 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
            SET feat_get_help = ?, feat_kb = ?, feat_support = ?, feat_onboarding = ?, feat_raise_ticket = ?, updated_at = GETUTCDATE()
            WHERE id = ?`,
           [bit(features.getHelp), bit(features.kb), bit(features.support), bit(features.onboarding), bit(features.raiseTicket), orgId],
+        );
+      }
+      // Which Raise-a-Ticket routes this org offers. Normalise via the shared
+      // parser (dedupe/order/validate) then store as CSV; null → default pair.
+      if (support_routes !== undefined) {
+        const raw = Array.isArray(support_routes) ? support_routes.join(',') : String(support_routes ?? '');
+        const routes = parseSupportRoutes(raw);
+        await execute(
+          `UPDATE portal_organisations SET support_routes = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [routes.join(','), orgId],
         );
       }
       // Per-org branding

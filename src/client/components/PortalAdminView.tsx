@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import type { PortalMetrics } from '../../shared/portal-types.js';
+import type { PortalMetrics, PortalSupportRoute } from '../../shared/portal-types.js';
+import { PORTAL_SUPPORT_ROUTE_LABELS, PORTAL_SUPPORT_ROUTE_ORDER, parseSupportRoutes } from '../../shared/portal-types.js';
 
 const API = '/api/portal/admin';
 
@@ -665,6 +666,7 @@ function OrgsPanel() {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
+    support_routes: string | null;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
@@ -700,6 +702,7 @@ function OrgRow({ org, onSaved }: {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
+    support_routes: string | null;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
@@ -707,6 +710,8 @@ function OrgRow({ org, onSaved }: {
 }) {
   const [bc, setBc] = useState(org.bc_account_number || '');
   const [reporters, setReporters] = useState(org.scope_reporters || '');
+  const [routes, setRoutes] = useState<PortalSupportRoute[]>(parseSupportRoutes(org.support_routes));
+  const [deleting, setDeleting] = useState(false);
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
   });
@@ -719,9 +724,13 @@ function OrgRow({ org, onSaved }: {
 
   const origFeatures = { getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket };
   const origBrand = { websiteUrl: org.brand_website_url || '', logoUrl: org.brand_logo_url || '', primary: org.brand_primary || '', secondary: org.brand_secondary || '', font: org.brand_font || '' };
+  const origRoutes = parseSupportRoutes(org.support_routes);
+  const toggleRoute = (r: PortalSupportRoute) =>
+    setRoutes(prev => prev.includes(r) ? prev.filter(x => x !== r) : PORTAL_SUPPORT_ROUTE_ORDER.filter(x => x === r || prev.includes(x)));
   const dirty =
     (bc.trim() || null) !== (org.bc_account_number || null) ||
     (reporters.trim() || null) !== (org.scope_reporters || null) ||
+    routes.join(',') !== origRoutes.join(',') ||
     FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]) ||
     (Object.keys(brand) as Array<keyof typeof brand>).some(k => brand[k] !== origBrand[k]);
 
@@ -761,6 +770,7 @@ function OrgRow({ org, onSaved }: {
           bc_account_number: bc.trim() || null,
           scope_reporters: reporters.trim() || null,
           features,
+          support_routes: routes,
           branding: {
             websiteUrl: brand.websiteUrl.trim() || null,
             logoUrl: brand.logoUrl.trim() || null,
@@ -776,6 +786,32 @@ function OrgRow({ org, onSaved }: {
       console.error('Failed to save org scope:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteOrg = async () => {
+    const first = window.confirm(`Delete "${org.name}"? This removes the organisation and its Jira mapping. It cannot be undone.`);
+    if (!first) return;
+    setDeleting(true);
+    try {
+      let res = await fetch(`${API}/organisations/${org.id}`, { method: 'DELETE', headers: authHeaders() });
+      let d = await res.json();
+      if (!d.ok && res.status === 409 && /additional organisation/i.test(d.error || '')) {
+        if (window.confirm(`${d.error}\n\nDelete anyway and clear those memberships?`)) {
+          res = await fetch(`${API}/organisations/${org.id}?force=1`, { method: 'DELETE', headers: authHeaders() });
+          d = await res.json();
+        } else {
+          setDeleting(false);
+          return;
+        }
+      }
+      if (d.ok) onSaved();
+      else window.alert(d.error || 'Failed to delete organisation');
+    } catch (err) {
+      window.alert('Failed to delete organisation');
+      console.error('Failed to delete org:', err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -809,15 +845,25 @@ function OrgRow({ org, onSaved }: {
           <span className="text-xs font-mono text-gray-500">{org.domain || 'no domain'}</span>
           <span className="text-xs text-gray-500">{org.user_count} user{org.user_count === 1 ? '' : 's'}</span>
         </div>
-        {dirty && (
+        <div className="flex items-center gap-2">
+          {dirty && (
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 font-medium"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          )}
           <button
-            onClick={save}
-            disabled={saving}
-            className="px-3 py-1.5 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 font-medium"
+            onClick={deleteOrg}
+            disabled={deleting || org.user_count > 0}
+            title={org.user_count > 0 ? 'Move or remove this org’s users before deleting' : 'Delete organisation'}
+            className="px-3 py-1.5 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
           >
-            {saving ? 'Saving…' : 'Save changes'}
+            {deleting ? 'Deleting…' : 'Delete'}
           </button>
-        )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -837,6 +883,18 @@ function OrgRow({ org, onSaved }: {
               {f.label}
             </label>
           ))}
+          {features.raiseTicket && (
+            <div className="pt-2 space-y-1">
+              <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Raise-a-Ticket routes</div>
+              {PORTAL_SUPPORT_ROUTE_ORDER.map(r => (
+                <label key={r} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={routes.includes(r)} onChange={() => toggleRoute(r)} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+                  {PORTAL_SUPPORT_ROUTE_LABELS[r]}
+                </label>
+              ))}
+              <p className="text-[10px] text-gray-500">One route → selector hidden. None ticked → defaults to Support + Development.</p>
+            </div>
+          )}
         </div>
 
         {/* Branding */}

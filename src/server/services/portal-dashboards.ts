@@ -10,6 +10,7 @@ import type {
   PortalOrgFeatures,
   PortalOrgBranding,
 } from '../../shared/portal-types.js';
+import { parseSupportRoutes } from '../../shared/portal-types.js';
 
 // Customer-facing Onboarding + Support dashboards.
 //
@@ -105,8 +106,8 @@ export class PortalDashboardService {
   // tenant, not a privileged one. (Internal staff always have a real org row —
   // the portal auth middleware creates 'nurtur-internal' on first request.)
   async getOrgFeatures(orgId: number): Promise<PortalOrgFeatures> {
-    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number }>(
-      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket FROM portal_organisations WHERE id = ?`,
+    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number; support_routes: string | null }>(
+      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket, support_routes FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
     if (!row) {
@@ -119,6 +120,7 @@ export class PortalDashboardService {
       support: !!row.feat_support,
       onboarding: !!row.feat_onboarding,
       raiseTicket: !!row.feat_raise_ticket,
+      supportRoutes: parseSupportRoutes(row.support_routes),
     };
   }
 

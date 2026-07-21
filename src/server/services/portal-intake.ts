@@ -1,6 +1,6 @@
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
-import type { PortalTicketCreateInput, PortalNetworkRequestInput } from '../../shared/portal-types.js';
+import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput } from '../../shared/portal-types.js';
 import { execute, queryOne } from './database.js';
 import { trackEvent } from './portal-analytics.js';
 import { EscalationLogService } from './escalation-log-service.js';
@@ -377,6 +377,71 @@ export class PortalIntakeService {
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: ticketKey, category: 'network_request' });
 
     return { ticketKey };
+  }
+
+  /** Onboarding Request → a "setup" ticket (build the systems) plus a linked "QA"
+   *  ticket (test the build). Returns the setup key (used for attachments) and the
+   *  QA key. */
+  async submitOnboardingRequest(
+    input: PortalOnboardingRequestInput,
+    portalUserId: number,
+    orgId: number,
+    userEmail: string,
+    userName: string,
+  ): Promise<{ ticketKey: string; qaKey: string | null }> {
+    await trackEvent('form_completed', portalUserId, orgId, { category: 'onboarding_request' });
+
+    const org = await queryOne<{ bc_account_number: string | null }>(
+      `SELECT bc_account_number FROM portal_organisations WHERE id = ?`,
+      [orgId],
+    );
+
+    let setupKey: string;
+    try {
+      setupKey = await this.portalJira.createOnboardingRequest({
+        fields: input,
+        reporterEmail: userEmail,
+        reporterName: userName,
+        bcAccount: org?.bc_account_number?.trim() || undefined,
+      });
+    } catch (err) {
+      console.error('[portal-intake] Onboarding setup ticket creation failed:', err);
+      throw new Error('We couldn\'t create your onboarding request right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
+
+    // QA ticket — best-effort. A failure here must not lose the setup ticket the
+    // customer just submitted, so log and continue.
+    let qaKey: string | null = null;
+    try {
+      qaKey = await this.portalJira.createQaTicket({
+        brand: input.brand,
+        branch: input.branch,
+        network: input.network,
+        bymUrl: input.bymUrl,
+        setupKey,
+      });
+      await this.portalJira.linkIssues(qaKey, setupKey);
+    } catch (err) {
+      console.warn('[portal-intake] Onboarding QA ticket/link failed for', setupKey, ':', err instanceof Error ? err.message : err);
+    }
+
+    // Record submissions so the customer can view/attach to these tickets.
+    await execute(
+      `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+       VALUES (?, ?, ?, ?)`,
+      [portalUserId, setupKey, JSON.stringify(input), 'onboarding_request'],
+    );
+    if (qaKey) {
+      await execute(
+        `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+         VALUES (?, ?, ?, ?)`,
+        [portalUserId, qaKey, JSON.stringify({ linkedSetup: setupKey }), 'onboarding_qa'],
+      );
+    }
+
+    await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: setupKey, category: 'onboarding_request' });
+
+    return { ticketKey: setupKey, qaKey };
   }
 
   getProjectForCategory(category: string, subcategory?: string): string {
