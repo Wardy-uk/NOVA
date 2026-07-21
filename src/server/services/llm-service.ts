@@ -103,10 +103,12 @@ const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
     failover: { provider: 'openai' },
   },
   cheap: {
-    // Use the vision-capable OpenRouter default (gemini-2.0-flash-lite-001).
-    // deepseek-chat-v3 is text-only and 404s the moment an image is attached,
-    // which took out triage on days when this tier served image tickets.
-    primary: { provider: 'openrouter' },
+    // Anthropic Haiku primary: cheap, vision-capable, reliable. OpenRouter was
+    // pure liability here — deepseek-chat-v3 404'd on images and
+    // gemini-2.0-flash-lite-001 returns "No endpoints found" — and every cheap
+    // call already fell up to Haiku after the wasted OpenRouter attempt. This
+    // just removes the doomed hop.
+    primary: { provider: 'anthropic' },
     failover: { provider: 'openai' },
   },
 };
