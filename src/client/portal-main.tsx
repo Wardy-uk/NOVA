@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 
 import { createRoot } from 'react-dom/client';
 import './styles/globals.css';
 import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgBranding, PortalOrgMembershipSummary } from '../shared/portal-types.js';
+import { PORTAL_ROLE_RANK } from '../shared/portal-types.js';
 import PortalLayout from './components/portal/PortalLayout.js';
 import PortalLogin from './components/portal/PortalLogin.js';
 import PortalToastContainer, { showPortalToast } from './components/portal/PortalToast.js';
@@ -16,8 +17,9 @@ const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
 const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
 const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalOnboardingDashboard.js'));
 const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
+const PortalAbout = lazy(() => import('./components/portal/PortalAbout.js'));
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
@@ -383,11 +385,12 @@ function PortalApp() {
     if ((view === 'support-dashboard' && !features.support) ||
         (view === 'onboarding-dashboard' && !features.onboarding) ||
         (view === 'raise-ticket' && !features.raiseTicket) ||
+        (view === 'about' && (!user || PORTAL_ROLE_RANK[user.role] < PORTAL_ROLE_RANK.manager)) ||
         (view === 'kb' && !features.kb) ||
         (view === 'chat' && !features.getHelp)) {
       setView('home');
     }
-  }, [features, view]);
+  }, [features, view, user]);
 
   // SSE connection for real-time portal events
   const sseRef = useRef<EventSource | null>(null);
@@ -495,6 +498,7 @@ function PortalApp() {
         {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
         {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}
         {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
+        {view === 'about' && PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>

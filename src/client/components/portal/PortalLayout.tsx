@@ -1,7 +1,8 @@
 import React from 'react';
-import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgMembershipSummary } from '../../../shared/portal-types.js';
+import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgMembershipSummary, PortalUserRole } from '../../../shared/portal-types.js';
+import { PORTAL_ROLE_RANK } from '../../../shared/portal-types.js';
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about';
 
 interface Props {
   user: PortalAuthPayload;
@@ -16,18 +17,23 @@ interface Props {
   onSwitchOrg?: (orgId: number) => void;
 }
 
-// Nav items gated by a per-org feature flag carry a `feature` key.
-const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?: keyof PortalOrgFeatures }> = [
+// Nav items gated by a per-org feature flag carry a `feature` key; items gated by
+// portal role carry a `minRole` (visible to that role and above).
+const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?: keyof PortalOrgFeatures; minRole?: PortalUserRole }> = [
   { view: 'home', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
   { view: 'tickets', label: 'My Tickets', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
   { view: 'raise-ticket', label: 'Raise a Ticket', icon: 'M12 4v16m8-8H4', feature: 'raiseTicket' },
   { view: 'support-dashboard', label: 'Support', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', feature: 'support' },
   { view: 'onboarding-dashboard', label: 'Onboarding', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', feature: 'onboarding' },
   { view: 'kb', label: 'Knowledge Base', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', feature: 'kb' },
+  { view: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', minRole: 'manager' },
 ];
 
 export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl, orgs, activeOrgId, onSwitchOrg }: Props) {
-  const navItems = NAV_ITEMS.filter(item => !item.feature || !features || features[item.feature]);
+  const navItems = NAV_ITEMS.filter(item =>
+    (!item.feature || !features || features[item.feature]) &&
+    (!item.minRole || PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK[item.minRole]),
+  );
 
   // Only show the switcher when there is somewhere to switch to.
   const canSwitch = !!onSwitchOrg && !!orgs && orgs.length > 1;
