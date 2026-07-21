@@ -2022,6 +2022,15 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'support_routes') IS NULL
      ALTER TABLE portal_organisations ADD support_routes NVARCHAR(200) NULL;`,
 
+    // One-time backfill: the code default is now Support-only, but orgs that were
+    // already live on the Raise-a-Ticket form (feat_raise_ticket = 1) before this
+    // column existed relied on the old support+development default. Pin them to
+    // both so their behaviour is unchanged. Only fills NULLs — never overrides an
+    // admin's explicit choice, and won't re-run once set.
+    `UPDATE portal_organisations
+     SET support_routes = 'support,development'
+     WHERE feat_raise_ticket = 1 AND support_routes IS NULL;`,
+
     // Per-org branding — auto-suggested from the org's website, admin-editable,
     // applied to the portal shell (logo, primary/secondary colours, font).
     `IF COL_LENGTH('portal_organisations', 'brand_website_url') IS NULL

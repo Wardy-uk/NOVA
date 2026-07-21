@@ -210,8 +210,10 @@ export const PORTAL_SUPPORT_ROUTE_LABELS: Record<PortalSupportRoute, string> = {
 /** Order routes appear in the selector / admin config. */
 export const PORTAL_SUPPORT_ROUTE_ORDER: PortalSupportRoute[] = ['support', 'development', 'onboarding'];
 
-/** Default when an org has no explicit config — preserves prior behaviour. */
-export const DEFAULT_PORTAL_SUPPORT_ROUTES: PortalSupportRoute[] = ['support', 'development'];
+/** Default when an org has no explicit config — just the Support route.
+ *  (Orgs already live on the form before this default existed are backfilled to
+ *  support+development by a schema migration, so their behaviour is unchanged.) */
+export const DEFAULT_PORTAL_SUPPORT_ROUTES: PortalSupportRoute[] = ['support'];
 
 /** Parse the stored CSV into a validated, de-duped, ordered route list. */
 export function parseSupportRoutes(raw: string | null | undefined): PortalSupportRoute[] {

@@ -892,7 +892,7 @@ function OrgRow({ org, onSaved }: {
                   {PORTAL_SUPPORT_ROUTE_LABELS[r]}
                 </label>
               ))}
-              <p className="text-[10px] text-gray-500">One route → selector hidden. None ticked → defaults to Support + Development.</p>
+              <p className="text-[10px] text-gray-500">One route → selector hidden. None ticked → defaults to Support only.</p>
             </div>
           )}
         </div>
