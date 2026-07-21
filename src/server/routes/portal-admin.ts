@@ -300,12 +300,15 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
 
     try {
-      // Role is optional — NULL means "same role as in their home org".
+      // Role is optional — NULL means "same role as in their home org". Upsert so
+      // this endpoint both adds a membership and changes its role.
       const role = typeof req.body?.role === 'string' && req.body.role ? normalisePortalRole(req.body.role) : null;
       await execute(
-        `IF NOT EXISTS (SELECT 1 FROM portal_user_orgs WHERE portal_user_id = ? AND org_id = ?)
-         INSERT INTO portal_user_orgs (portal_user_id, org_id, role) VALUES (?, ?, ?)`,
-        [id, orgId, id, orgId, role],
+        `IF EXISTS (SELECT 1 FROM portal_user_orgs WHERE portal_user_id = ? AND org_id = ?)
+           UPDATE portal_user_orgs SET role = ? WHERE portal_user_id = ? AND org_id = ?;
+         ELSE
+           INSERT INTO portal_user_orgs (portal_user_id, org_id, role) VALUES (?, ?, ?);`,
+        [id, orgId, role, id, orgId, id, orgId, role],
       );
       res.json({ ok: true });
     } catch (err) {

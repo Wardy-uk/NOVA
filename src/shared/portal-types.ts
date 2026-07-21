@@ -119,6 +119,9 @@ export interface PortalOrgMembershipSummary {
   orgName: string;
   kind: 'home' | 'member' | 'view-as';
   canWrite: boolean;
+  /** The user's effective role in THIS org (per-membership, home falls back to
+   *  their base role). Drives what they can see/do while switched into it. */
+  role: PortalUserRole;
 }
 
 export interface PortalMyOrgsResponse {

@@ -15,6 +15,8 @@ interface Props {
   orgs?: PortalOrgMembershipSummary[];
   activeOrgId?: number | null;
   onSwitchOrg?: (orgId: number) => void;
+  /** Effective role in the active org (may differ from the home-org role). */
+  role?: PortalUserRole;
 }
 
 // Nav items gated by a per-org feature flag carry a `feature` key; items gated by
@@ -30,10 +32,11 @@ const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?
   { view: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', minRole: 'manager' },
 ];
 
-export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl, orgs, activeOrgId, onSwitchOrg }: Props) {
+export default function PortalLayout({ user, currentView, onNavigate, onLogout, children, features, logoUrl, orgs, activeOrgId, onSwitchOrg, role }: Props) {
+  const effectiveRole = role ?? user.role;
   const navItems = NAV_ITEMS.filter(item =>
     (!item.feature || !features || features[item.feature]) &&
-    (!item.minRole || PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK[item.minRole]),
+    (!item.minRole || PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK[item.minRole]),
   );
 
   // Only show the switcher when there is somewhere to switch to.

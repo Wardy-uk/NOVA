@@ -376,6 +376,11 @@ function PortalApp() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // The user's effective role in the org they're currently viewing. A user can be
+  // e.g. org_admin in one org and viewer in another, so nav/guards key off this,
+  // not the home-org role in the token.
+  const effectiveRole = orgs.find(o => o.orgId === activeOrgId)?.role ?? user?.role ?? 'requester';
+
   // Until features load, keep Get Help + KB visible (existing default) but treat
   // the customer dashboards as opt-in so they don't flash for orgs without them.
   const resolvedFeatures: PortalOrgFeatures = features ?? { getHelp: true, kb: true, support: false, onboarding: false };
@@ -386,13 +391,13 @@ function PortalApp() {
     if ((view === 'support-dashboard' && !features.support) ||
         (view === 'onboarding-dashboard' && !features.onboarding) ||
         (view === 'raise-ticket' && !features.raiseTicket) ||
-        (view === 'about' && (!user || PORTAL_ROLE_RANK[user.role] < PORTAL_ROLE_RANK.manager)) ||
-        (view === 'escalations' && (!user || PORTAL_ROLE_RANK[user.role] < PORTAL_ROLE_RANK.org_admin)) ||
+        (view === 'about' && PORTAL_ROLE_RANK[effectiveRole] < PORTAL_ROLE_RANK.manager) ||
+        (view === 'escalations' && PORTAL_ROLE_RANK[effectiveRole] < PORTAL_ROLE_RANK.org_admin) ||
         (view === 'kb' && !features.kb) ||
         (view === 'chat' && !features.getHelp)) {
       setView('home');
     }
-  }, [features, view, user]);
+  }, [features, view, effectiveRole]);
 
   // SSE connection for real-time portal events
   const sseRef = useRef<EventSource | null>(null);
@@ -487,6 +492,7 @@ function PortalApp() {
       orgs={orgs}
       activeOrgId={activeOrgId}
       onSwitchOrg={handleSwitchOrg}
+      role={effectiveRole}
     >
       <Suspense fallback={fallback}>
         {view === 'home' && <PortalHome onNavigate={setView} onViewTicket={handleViewTicket} portalUser={user} features={resolvedFeatures} />}
@@ -500,8 +506,8 @@ function PortalApp() {
         {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
         {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}
         {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
-        {view === 'about' && PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} />}
-        {view === 'escalations' && PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK.org_admin && <PortalEscalations />}
+        {view === 'about' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} />}
+        {view === 'escalations' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin && <PortalEscalations />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>

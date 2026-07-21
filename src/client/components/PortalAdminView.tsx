@@ -666,12 +666,22 @@ function UsersPanel() {
 // Extra organisations a user may switch into, on top of their home org. Home org is
 // implicit and changed via Edit, not here. Internal staff need no rows — they get
 // read-only view-as on every org automatically.
+const MEMBERSHIP_ROLES: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Same as home' },
+  { value: 'requester', label: 'Requester' },
+  { value: 'leader', label: 'Leader' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'org_admin', label: 'Organisation admin' },
+  { value: 'admin', label: 'Portal admin' },
+];
+
 function UserOrgMemberships({ user, orgs }: {
   user: { id: number; org_name: string; auth_type: 'oidc' | 'local' | 'internal' };
   orgs: Array<{ id: number; name: string }>;
 }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [addOrgId, setAddOrgId] = useState('');
+  const [addRole, setAddRole] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { data: memberships, loading } = useFetch<Array<{ org_id: number; org_name: string; role: string | null }>>(
@@ -688,13 +698,13 @@ function UserOrgMemberships({ user, orgs }: {
     );
   }
 
-  const mutate = async (fn: () => Promise<Response>) => {
+  const mutate = async (fn: () => Promise<Response>, resetAdd = false) => {
     setBusy(true);
     setError(null);
     try {
       const data = await (await fn()).json();
       if (!data.ok) throw new Error(data.error || 'Failed');
-      setAddOrgId('');
+      if (resetAdd) { setAddOrgId(''); setAddRole(''); }
       setReloadKey(k => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -703,11 +713,12 @@ function UserOrgMemberships({ user, orgs }: {
     }
   };
 
-  const add = () => mutate(() => fetch(`${API}/users/${user.id}/orgs`, {
+  // POST upserts — used to both add a membership and change an existing role.
+  const upsert = (orgId: number, role: string, resetAdd = false) => mutate(() => fetch(`${API}/users/${user.id}/orgs`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ org_id: Number(addOrgId) }),
-  }));
+    body: JSON.stringify({ org_id: orgId, role: role || undefined }),
+  }), resetAdd);
 
   const remove = (orgId: number) => mutate(() => fetch(`${API}/users/${user.id}/orgs/${orgId}`, {
     method: 'DELETE',
@@ -716,12 +727,13 @@ function UserOrgMemberships({ user, orgs }: {
 
   const granted = new Set((memberships || []).map(m => m.org_id));
   const available = orgs.filter(o => o.name !== user.org_name && !granted.has(o.id));
+  const selectCls = 'px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-100';
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-400">
-        Home organisation: <span className="text-gray-200">{user.org_name}</span> (change via Edit).
-        Additional organisations below can be switched into with full access.
+        Home organisation: <span className="text-gray-200">{user.org_name}</span> (role changed via Edit).
+        Additional organisations below can be switched into, each with its own role — so a user can be an admin in one and a viewer in another.
       </p>
 
       {loading ? (
@@ -729,15 +741,24 @@ function UserOrgMemberships({ user, orgs }: {
       ) : (memberships || []).length === 0 ? (
         <p className="text-xs text-gray-500">No additional organisations.</p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
+        <ul className="space-y-1.5">
           {(memberships || []).map(m => (
-            <li key={m.org_id} className="flex items-center gap-2 px-2 py-1 rounded bg-gray-800 border border-gray-700 text-xs text-gray-200">
-              {m.org_name}
+            <li key={m.org_id} className="flex items-center gap-2 text-xs text-gray-200">
+              <span className="min-w-[180px] truncate">{m.org_name}</span>
+              <select
+                value={m.role || ''}
+                disabled={busy}
+                onChange={e => upsert(m.org_id, e.target.value)}
+                className={selectCls}
+                aria-label={`Role in ${m.org_name}`}
+              >
+                {MEMBERSHIP_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
               <button
                 onClick={() => remove(m.org_id)}
                 disabled={busy}
                 aria-label={`Remove ${m.org_name}`}
-                className="text-red-300 hover:text-red-200 disabled:opacity-50"
+                className="text-red-300 hover:text-red-200 disabled:opacity-50 text-sm leading-none"
               >
                 ×
               </button>
@@ -746,7 +767,7 @@ function UserOrgMemberships({ user, orgs }: {
         </ul>
       )}
 
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 flex-wrap">
         <label className="flex flex-col gap-1 text-xs text-gray-400">
           Add organisation
           <select
@@ -758,8 +779,14 @@ function UserOrgMemberships({ user, orgs }: {
             {available.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-xs text-gray-400">
+          Role
+          <select value={addRole} onChange={e => setAddRole(e.target.value)} className="px-2 py-1 text-sm bg-gray-800 border border-gray-600 rounded text-gray-100">
+            {MEMBERSHIP_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+        </label>
         <button
-          onClick={add}
+          onClick={() => upsert(Number(addOrgId), addRole, true)}
           disabled={!addOrgId || busy}
           className="px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
         >

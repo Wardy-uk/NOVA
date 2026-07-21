@@ -26,7 +26,7 @@ export function createPortalDashboardRoutes(settings: FileSettingsQueries | unde
       res.json({
         ok: true,
         data: {
-          orgs: memberships.map(m => ({ orgId: m.orgId, orgName: m.orgName, kind: m.kind, canWrite: m.canWrite })),
+          orgs: memberships.map(m => ({ orgId: m.orgId, orgName: m.orgName, kind: m.kind, canWrite: m.canWrite, role: m.role })),
           activeOrgId: req.portalUser.orgId,
         },
       });
