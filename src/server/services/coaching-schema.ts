@@ -6,7 +6,7 @@ export const CoachingSynthesisSchema = z.object({
     type: flexString,
     message: flexString,
     severity: flexEnum(['info', 'warning', 'critical'] as const),
-    evidenceTickets: z.array(flexString),
+    evidenceTickets: z.array(flexString).default([]),
   })),
   strengths: z.array(flexString),
   improvements: z.array(flexString),

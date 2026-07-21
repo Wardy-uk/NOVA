@@ -37,4 +37,13 @@ Based on the scores above:
 - Resolution check failures are important — they mean the ticket closure was incomplete.
 - Keep the coaching message under 200 words.
 
-Respond with valid JSON matching the schema. No markdown fencing.
+Respond with valid JSON matching this exact shape. No markdown fencing, no commentary before or after the JSON. Every nudge MUST include an "evidenceTickets" array (use [] if none apply).
+
+{
+  "nudges": [
+    { "type": "string", "message": "string", "severity": "info|warning|critical", "evidenceTickets": ["NT-123"] }
+  ],
+  "strengths": ["string"],
+  "improvements": ["string"],
+  "coachingMessage": "string"
+}

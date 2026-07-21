@@ -364,14 +364,43 @@ async function logCall(
 
 function extractJson(raw: string): string {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-  const braceStart = raw.indexOf('{');
-  const braceEnd = raw.lastIndexOf('}');
-  if (braceStart !== -1 && braceEnd > braceStart) return raw.slice(braceStart, braceEnd + 1);
-  const bracketStart = raw.indexOf('[');
-  const bracketEnd = raw.lastIndexOf(']');
-  if (bracketStart !== -1 && bracketEnd > bracketStart) return raw.slice(bracketStart, bracketEnd + 1);
-  return raw.trim();
+  const source = fenced ? fenced[1].trim() : raw;
+
+  // Scan from the first opening bracket and return the first *balanced* object
+  // or array. Brace-counting (ignoring braces inside strings) survives trailing
+  // prose — even prose that itself contains braces — which the old
+  // indexOf/lastIndexOf approach mangled into invalid JSON.
+  const balanced = firstBalancedJson(source);
+  if (balanced) return balanced;
+
+  return source.trim();
+}
+
+function firstBalancedJson(s: string): string | null {
+  const open = s.search(/[{[]/);
+  if (open === -1) return null;
+  const closeFor = s[open] === '{' ? '}' : ']';
+  const openCh = s[open];
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = open; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === openCh) depth++;
+    else if (ch === closeFor) {
+      depth--;
+      if (depth === 0) return s.slice(open, i + 1);
+    }
+  }
+  return null;
 }
 
 // ── Public API ──
