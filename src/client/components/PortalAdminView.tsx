@@ -26,7 +26,7 @@ function useFetch<T>(path: string, deps: unknown[] = []) {
   return { data, loading };
 }
 
-type Tab = 'overview' | 'users' | 'orgs' | 'sessions' | 'settings';
+type Tab = 'overview' | 'users' | 'orgs' | 'sessions' | 'settings' | 'about';
 
 export default function PortalAdminView() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -36,7 +36,7 @@ export default function PortalAdminView() {
       <h1 className="text-xl font-bold">Portal Administration</h1>
 
       <div className="flex gap-1 bg-gray-800 rounded-lg p-0.5">
-        {(['overview', 'users', 'orgs', 'sessions', 'settings'] as Tab[]).map(t => (
+        {(['overview', 'users', 'orgs', 'sessions', 'settings', 'about'] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -54,6 +54,118 @@ export default function PortalAdminView() {
       {tab === 'orgs' && <OrgsPanel />}
       {tab === 'sessions' && <SessionsPanel />}
       {tab === 'settings' && <SettingsPanel />}
+      {tab === 'about' && <AboutPanel />}
+    </div>
+  );
+}
+
+// ── About / documentation ────────────────────────────────────────────────────
+
+function AboutCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-gray-800 rounded-lg p-5 space-y-2">
+      <h2 className="text-sm font-semibold text-white uppercase tracking-wide">{title}</h2>
+      <div className="text-sm text-gray-300 space-y-2 leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
+function AboutPanel() {
+  const roles: Array<{ name: string; can: string }> = [
+    { name: 'Requester', can: 'Raise and track their own tickets. The default for new / self-service users.' },
+    { name: 'Leader', can: 'Everything a Requester can, plus view every ticket in their organisation (not just their own).' },
+    { name: 'Manager', can: 'Everything a Leader can, plus escalate a ticket (creates a linked Escalation request).' },
+    { name: 'Org Admin', can: 'A senior customer contact. Full visibility of the organisation’s tickets.' },
+    { name: 'Admin', can: 'Nurtur staff. Full access, including this Portal Administration area.' },
+  ];
+  const features: Array<{ name: string; desc: string }> = [
+    { name: 'Get Help', desc: 'The guided AI chat / intake assistant that helps a customer describe their issue and deflect to KB where possible.' },
+    { name: 'Knowledge Base', desc: 'Searchable help articles synced from Confluence.' },
+    { name: 'Support', desc: 'The customer Support dashboard — a live view of their open support tickets, scoped to their organisation.' },
+    { name: 'Onboarding', desc: 'The customer Onboarding dashboard — progress of their setup / go-live tickets.' },
+    { name: 'Raise a Ticket', desc: 'The Guild / Fine & Country network intake form. Enables the route selector and the Onboarding Request form.' },
+  ];
+  const routes: Array<{ name: string; desc: string }> = [
+    { name: 'Raise to Support', desc: 'A standard support request → lands in the NT service desk queue.' },
+    { name: 'Triaged for Development', desc: 'A request that needs the dev team → raised and tagged for Tier 3 / Development.' },
+    { name: 'Onboarding Request', desc: 'A full new-office / new-agent set-up form. Creates TWO linked tickets: a setup ticket (build the systems) and a QA ticket (test the build). Supports file attachments.' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <AboutCard title="What the portal is">
+        <p>
+          The customer portal is the self-service front door for Nurtur’s networks (Guild, Fine &amp; Country and other
+          customers). Customers sign in to raise and track tickets, chat with the Get Help assistant, search the
+          knowledge base, watch their support &amp; onboarding progress, and — where enabled — submit network and
+          onboarding requests that flow straight into Jira.
+        </p>
+        <p>Everything a customer sees is controlled per organisation from this admin area.</p>
+      </AboutCard>
+
+      <AboutCard title="Organisations">
+        <p>An <strong>organisation</strong> is a customer tenant. Each portal user has one <strong>home organisation</strong> and can optionally be granted additional ones.</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>Home organisation</strong> — the org a user lands in. Set when the user is created and changed via <em>Users → Edit</em>.</li>
+          <li><strong>Additional organisations</strong> — extra orgs a user can switch into with full access. Managed via the <em>Orgs</em> button on a user row. Internal <span className="font-mono">@nurtur.tech</span> staff automatically get read-only access to every org and don’t need these.</li>
+          <li><strong>Domain</strong> — an email domain (e.g. <span className="font-mono">acme.co.uk</span>) that maps signed-in users and their tickets to this org.</li>
+          <li><strong>BC Account # &amp; Reporters</strong> — the “customer scope”. A ticket belongs to the org if its BC Account matches <em>or</em> its reporter is in the reporter list. This scopes the Support &amp; Onboarding dashboards.</li>
+          <li><strong>Branding</strong> — per-org logo, colours and font applied to the portal shell (can be auto-fetched from the org’s website).</li>
+        </ul>
+        <p className="text-gray-400 text-xs">Add orgs with <em>+ Add organisation</em> on the Orgs tab. Deleting an org shows exactly which users would be removed first (see below).</p>
+      </AboutCard>
+
+      <AboutCard title="Roles">
+        <p>Roles are cumulative — each includes everything below it.</p>
+        <ul className="space-y-1">
+          {roles.map(r => (
+            <li key={r.name} className="flex gap-2">
+              <span className="shrink-0 font-medium text-teal-300 min-w-[90px]">{r.name}</span>
+              <span>{r.can}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-gray-400 text-xs">
+          Auth types: <strong>oidc</strong> (Microsoft/Entra SSO), <strong>local</strong> (portal password) and <strong>internal</strong> (Nurtur staff via their NOVA login). Only local users can be lifecycle-managed (password / disable / remove) from here.
+        </p>
+      </AboutCard>
+
+      <AboutCard title="Portal features (per organisation)">
+        <p>Each org’s tabs are toggled independently on the Orgs tab:</p>
+        <ul className="space-y-1">
+          {features.map(f => (
+            <li key={f.name} className="flex gap-2">
+              <span className="shrink-0 font-medium text-teal-300 min-w-[130px]">{f.name}</span>
+              <span>{f.desc}</span>
+            </li>
+          ))}
+        </ul>
+      </AboutCard>
+
+      <AboutCard title="Raise-a-Ticket routes">
+        <p>
+          When <strong>Raise a Ticket</strong> is enabled, the form shows a route selector at the top. Tick which routes an org gets on the Orgs tab.
+          If only one route is enabled the selector is hidden and that route is used automatically; if none are ticked it defaults to <strong>Support only</strong>.
+        </p>
+        <ul className="space-y-1">
+          {routes.map(r => (
+            <li key={r.name} className="flex gap-2">
+              <span className="shrink-0 font-medium text-teal-300 min-w-[150px]">{r.name}</span>
+              <span>{r.desc}</span>
+            </li>
+          ))}
+        </ul>
+      </AboutCard>
+
+      <AboutCard title="Deleting an organisation">
+        <p>Deleting is guarded. The confirmation lists every affected user before anything happens:</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Users <strong>homed</strong> in the org are permanently removed, along with their portal data (chat, submissions; CSAT links are unlinked, not deleted).</li>
+          <li>Anyone who also belongs to <strong>other organisations</strong> is flagged — move their home org first if you want to keep them.</li>
+          <li>Users homed elsewhere who are only <strong>members</strong> keep their accounts and just lose this membership.</li>
+        </ul>
+        <p className="text-gray-400 text-xs">Jira tickets, Microsoft/Entra identities and NOVA staff logins are never affected — the portal only references them.</p>
+      </AboutCard>
     </div>
   );
 }
