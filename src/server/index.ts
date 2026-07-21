@@ -120,6 +120,7 @@ import { createPortalCsatRoutes } from './routes/portal-csat.js';
 import { createCsatMetricsRoutes } from './routes/csat-metrics.js';
 import { createPortalDashboardRoutes } from './routes/portal-dashboards.js';
 import { createPortalEscalationRoutes } from './routes/portal-escalation.js';
+import { OnboardingEscalationService } from './services/onboarding-escalation-service.js';
 import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
@@ -4462,6 +4463,17 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 
   const portalJiraClient = buildOnboardingJiraClient();
   const portalJira = new PortalJiraService(settingsQueries, portalJiraClient);
+
+  // Onboarding escalation engine — scans each org's enabled policy and sends
+  // scheduled progress updates + escalations. Per-org policy is off by default,
+  // so nothing sends until an org admin enables it. Runs in-hours; deduped.
+  const escalationService = new OnboardingEscalationService(
+    settingsQueries,
+    portalJiraClient,
+    new EmailService(() => settingsQueries.getAll()),
+  );
+  setTimeout(() => { escalationService.runScan().catch(err => console.error('[escalation] initial scan failed:', err)); }, 150_000);
+  setInterval(() => { escalationService.runScan().catch(err => console.error('[escalation] scan failed:', err)); }, 3 * 60 * 60 * 1000);
   const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
   const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
   const portalKb = new PortalKbService(settingsQueries, mcpManager);

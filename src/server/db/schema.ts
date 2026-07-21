@@ -2021,6 +2021,20 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'escalation_policy') IS NULL
      ALTER TABLE portal_organisations ADD escalation_policy NVARCHAR(MAX) NULL;`,
 
+    // Dedup / audit log for the escalation engine — one row per (org, ticket,
+    // level day, kind) so each level fires exactly once per onboarding.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'onboarding_escalation_log') AND type = 'U')
+     CREATE TABLE onboarding_escalation_log (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       org_id INT NOT NULL,
+       ticket_key NVARCHAR(50) NOT NULL,
+       level_day INT NOT NULL,
+       kind NVARCHAR(30) NOT NULL,
+       recipients NVARCHAR(MAX) NULL,
+       fired_at DATETIME2 DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_onboarding_escalation UNIQUE (org_id, ticket_key, level_day, kind)
+     );`,
+
     // Which routes the "Raise a Ticket" top-of-form selector offers this org.
     // CSV of {support, development, onboarding}. NULL/empty → the default pair
     // (support,development) so existing orgs behave exactly as before.
