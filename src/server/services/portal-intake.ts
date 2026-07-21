@@ -1,7 +1,7 @@
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
 import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput } from '../../shared/portal-types.js';
-import { execute, queryOne } from './database.js';
+import { execute, queryOne, query } from './database.js';
 import { trackEvent } from './portal-analytics.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
@@ -396,6 +396,15 @@ export class PortalIntakeService {
       [orgId],
     );
 
+    // Standard head-office users flagged "include in setup" for this org — added
+    // to the setup ticket so the team provisions them alongside the new office.
+    const setupUsers = await query<{ display_name: string; email: string; role: string }>(
+      `SELECT display_name, email, role FROM portal_users
+       WHERE org_id = ? AND include_in_setup = 1 AND access_state <> 'removed'
+       ORDER BY display_name`,
+      [orgId],
+    );
+
     let setupKey: string;
     try {
       setupKey = await this.portalJira.createOnboardingRequest({
@@ -403,6 +412,7 @@ export class PortalIntakeService {
         reporterEmail: userEmail,
         reporterName: userName,
         bcAccount: org?.bc_account_number?.trim() || undefined,
+        includeUsers: setupUsers.map(u => ({ name: u.display_name, email: u.email, accessLevel: u.role })),
       });
     } catch (err) {
       console.error('[portal-intake] Onboarding setup ticket creation failed:', err);

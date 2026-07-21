@@ -19,8 +19,9 @@ const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalO
 const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
 const PortalAbout = lazy(() => import('./components/portal/PortalAbout.js'));
 const PortalEscalations = lazy(() => import('./components/portal/PortalEscalations.js'));
+const PortalOrgUsers = lazy(() => import('./components/portal/PortalOrgUsers.js'));
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about' | 'escalations';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about' | 'escalations' | 'org-users';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
@@ -393,6 +394,7 @@ function PortalApp() {
         (view === 'raise-ticket' && !features.raiseTicket) ||
         (view === 'about' && PORTAL_ROLE_RANK[effectiveRole] < PORTAL_ROLE_RANK.manager) ||
         (view === 'escalations' && PORTAL_ROLE_RANK[effectiveRole] < PORTAL_ROLE_RANK.org_admin) ||
+        (view === 'org-users' && PORTAL_ROLE_RANK[effectiveRole] < PORTAL_ROLE_RANK.org_admin) ||
         (view === 'kb' && !features.kb) ||
         (view === 'chat' && !features.getHelp)) {
       setView('home');
@@ -508,6 +510,7 @@ function PortalApp() {
         {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
         {view === 'about' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} />}
         {view === 'escalations' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin && <PortalEscalations />}
+        {view === 'org-users' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin && <PortalOrgUsers />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>

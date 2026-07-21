@@ -2002,6 +2002,11 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'scope_reporters') IS NULL
      ALTER TABLE portal_organisations ADD scope_reporters NVARCHAR(MAX) NULL;`,
 
+    // Marks a portal user as a "head office" contact to auto-include whenever an
+    // Onboarding Request is set up for their org.
+    `IF COL_LENGTH('portal_users', 'include_in_setup') IS NULL
+     ALTER TABLE portal_users ADD include_in_setup BIT NOT NULL CONSTRAINT DF_portal_users_include_setup DEFAULT 0;`,
+
     // Per-org portal feature toggles. Get Help + KB default on (existing behaviour);
     // the customer Support/Onboarding dashboards default off (opt-in per customer).
     `IF COL_LENGTH('portal_organisations', 'feat_get_help') IS NULL

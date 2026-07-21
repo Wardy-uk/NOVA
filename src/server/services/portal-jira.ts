@@ -709,6 +709,8 @@ export class PortalJiraService {
     reporterEmail?: string;
     reporterName?: string;
     bcAccount?: string;
+    /** Standard head-office users to provision alongside the new office. */
+    includeUsers?: Array<{ name?: string; email?: string; accessLevel?: string }>;
   }): Promise<string> {
     const f = params.fields;
     const projectKey = this.settings.get('portal_onboarding_project') || 'NT';
@@ -749,6 +751,13 @@ export class PortalJiraService {
         .filter(u => u.name || u.email)
         .map(u => `  • ${[u.name, u.email, u.accessLevel, u.jobTitle].filter(Boolean).join(' | ')}`);
       if (rows.length) sections.push(['USERS TO SET UP', ...rows].join('\n'));
+    }
+
+    if (params.includeUsers && params.includeUsers.length > 0) {
+      const rows = params.includeUsers
+        .filter(u => u.name || u.email)
+        .map(u => `  • ${[u.name, u.email, u.accessLevel].filter(Boolean).join(' | ')}`);
+      if (rows.length) sections.push(['HEAD OFFICE USERS TO INCLUDE IN SETUP', ...rows].join('\n'));
     }
 
     sections.push([

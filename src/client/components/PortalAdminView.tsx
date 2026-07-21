@@ -108,6 +108,7 @@ function AboutPanel() {
         <ul className="list-disc pl-5 space-y-1">
           <li><strong>Home organisation</strong> — the org a user lands in. Set when the user is created and changed via <em>Users → Edit</em>.</li>
           <li><strong>Additional organisations</strong> — extra orgs a user can switch into, each with <strong>its own role</strong> (e.g. admin in one, viewer in another). Managed via the <em>Orgs</em> button on a user row. Internal <span className="font-mono">@nurtur.tech</span> staff automatically get read-only access to every org and don’t need these.</li>
+          <li><strong>Users &amp; “Include in setup”</strong> — org admins can also manage their org's users from the portal (the same users shown here — the two stay in sync). The <em>Include in setup</em> flag auto-adds a user to any Onboarding Request setup for that org; toggle it here on Edit or in the portal.</li>
           <li><strong>Domain</strong> — an email domain (e.g. <span className="font-mono">acme.co.uk</span>) that maps signed-in users and their tickets to this org.</li>
           <li><strong>BC Account # &amp; Reporters</strong> — the “customer scope”. A ticket belongs to the org if its BC Account matches <em>or</em> its reporter is in the reporter list. This scopes the Support &amp; Onboarding dashboards.</li>
           <li><strong>Branding</strong> — per-org logo, colours and font applied to the portal shell (can be auto-fetched from the org’s website).</li>
@@ -267,7 +268,7 @@ function UsersPanel() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [orgsForUserId, setOrgsForUserId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ display_name: '', role: 'requester', org_id: '', password: '' });
+  const [editForm, setEditForm] = useState({ display_name: '', role: 'requester', org_id: '', password: '', include_in_setup: false });
   const [form, setForm] = useState({
     email: '',
     display_name: '',
@@ -288,6 +289,7 @@ function UsersPanel() {
     role: string;
     auth_type: 'oidc' | 'local' | 'internal';
     access_state: 'active' | 'disabled' | 'removed';
+    include_in_setup: number;
   }>>(`${API}/users`, [reloadKey]);
   const { data: orgs } = useFetch<Array<{ id: number; name: string; domain: string | null }>>(`${API}/organisations`, [reloadKey]);
 
@@ -341,9 +343,9 @@ function UsersPanel() {
     }
   };
 
-  const startEdit = (u: { id: number; display_name: string; role: string; org_id: number }) => {
+  const startEdit = (u: { id: number; display_name: string; role: string; org_id: number; include_in_setup?: number }) => {
     setEditingId(u.id);
-    setEditForm({ display_name: u.display_name, role: u.role, org_id: String(u.org_id), password: '' });
+    setEditForm({ display_name: u.display_name, role: u.role, org_id: String(u.org_id), password: '', include_in_setup: !!u.include_in_setup });
     setError(null);
   };
 
@@ -357,6 +359,7 @@ function UsersPanel() {
       };
       if (editForm.org_id) body.org_id = Number(editForm.org_id);
       if (editForm.password) body.password = editForm.password;
+      body.include_in_setup = editForm.include_in_setup;
       const res = await fetch(`${API}/users/${id}`, {
         method: 'PUT',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -634,6 +637,15 @@ function UsersPanel() {
                           />
                         </label>
                       )}
+                      <label className="flex items-center gap-2 text-xs text-gray-300 self-end pb-1.5">
+                        <input
+                          type="checkbox"
+                          checked={editForm.include_in_setup}
+                          onChange={e => setEditForm(f => ({ ...f, include_in_setup: e.target.checked }))}
+                          className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500"
+                        />
+                        Include in systems setup
+                      </label>
                       <div className="flex gap-2">
                         <button
                           onClick={() => saveEdit(u.id)}

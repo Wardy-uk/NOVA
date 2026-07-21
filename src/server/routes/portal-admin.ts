@@ -69,10 +69,11 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         role: string;
         auth_type: string;
         access_state: string;
+        include_in_setup: number;
         ticket_count: number;
       }>(
         `SELECT pu.id, pu.email, pu.display_name, pu.org_id, po.name AS org_name, pu.last_login, pu.role,
-                pu.auth_type, pu.access_state,
+                pu.auth_type, pu.access_state, pu.include_in_setup,
                 (SELECT COUNT(*) FROM jira_issue_cache jic WHERE jic.reporter_email = pu.email) AS ticket_count
          FROM portal_users pu
          JOIN portal_organisations po ON pu.org_id = po.id
@@ -177,7 +178,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
   // Edit a portal user: display name, role, organisation, and optional password reset.
   router.put('/users/:id', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);
-    const { display_name, role, org_id, password } = req.body ?? {};
+    const { display_name, role, org_id, password, include_in_setup } = req.body ?? {};
     if (!id) {
       res.status(400).json({ ok: false, error: 'Valid user ID is required' });
       return;
@@ -202,6 +203,9 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     }
     if (typeof org_id === 'number' && org_id > 0) {
       sets.push('org_id = ?'); params.push(org_id);
+    }
+    if (typeof include_in_setup === 'boolean') {
+      sets.push('include_in_setup = ?'); params.push(include_in_setup ? 1 : 0);
     }
     if (typeof password === 'string' && password.length > 0) {
       if (password.length < 8) {
