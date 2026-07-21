@@ -298,6 +298,95 @@ export const PortalOnboardingRequestSchema = z.object({
 
 export type PortalOnboardingRequestInput = z.infer<typeof PortalOnboardingRequestSchema>;
 
+// ── Onboarding escalation policy (per org, configurable by org admins) ──
+// Multi-level schedule: at each day threshold NOVA can send a progress update to
+// the customer and/or raise an internal escalation to named recipients. Fires
+// once per onboarding per level; disabled by default until reviewed & enabled.
+
+export const EscalationRecipientSchema = z.object({
+  name: z.string().max(200),
+  email: z.string().max(200),
+});
+export type EscalationRecipient = z.infer<typeof EscalationRecipientSchema>;
+
+export const EscalationLevelSchema = z.object({
+  day: z.number().int().min(1).max(365),
+  name: z.string().min(1).max(120),
+  /** Send a scheduled progress update to the customer contacts. */
+  sendCustomerUpdate: z.boolean().default(false),
+  customerRecipients: z.array(EscalationRecipientSchema).max(30).default([]),
+  /** Raise an internal escalation to the escalation recipients. */
+  escalate: z.boolean().default(false),
+  escalationRecipients: z.array(EscalationRecipientSchema).max(30).default([]),
+  /** Also-informed contacts (cc'd for visibility, no action required). */
+  informRecipients: z.array(EscalationRecipientSchema).max(30).default([]),
+  note: z.string().max(2000).optional(),
+});
+export type EscalationLevel = z.infer<typeof EscalationLevelSchema>;
+
+export const OnboardingEscalationPolicySchema = z.object({
+  /** Master switch — nothing is sent while false. Defaults off for safety. */
+  enabled: z.boolean().default(false),
+  /** Count age in working days (Mon–Fri) rather than calendar days. */
+  workingDays: z.boolean().default(true),
+  levels: z.array(EscalationLevelSchema).max(20).default([]),
+});
+export type OnboardingEscalationPolicy = z.infer<typeof OnboardingEscalationPolicySchema>;
+
+/** Seed matching the Guild agreement. Emails left blank on purpose — an admin
+ *  fills the real addresses before enabling, so nothing is ever sent to a guessed
+ *  address. */
+export const DEFAULT_ESCALATION_POLICY: OnboardingEscalationPolicy = {
+  enabled: false,
+  workingDays: true,
+  levels: [
+    {
+      day: 7,
+      name: 'Day 7 — Progress Update',
+      sendCustomerUpdate: true,
+      customerRecipients: [],
+      escalate: false,
+      escalationRecipients: [],
+      informRecipients: [],
+      note: 'Progress update: completed activities, work in progress, dependencies, expected next milestones. Communicate proactively if meaningful progress happens sooner.',
+    },
+    {
+      day: 14,
+      name: 'Day 14 — Progress Update & First Escalation',
+      sendCustomerUpdate: true,
+      customerRecipients: [],
+      escalate: true,
+      escalationRecipients: [
+        { name: 'Nick Ward', email: '' },
+        { name: 'Abigail Brown', email: '' },
+        { name: 'Emma Maciver', email: '' },
+      ],
+      informRecipients: [{ name: 'Kim Rush', email: '' }],
+      note: 'Raised if the integration is not complete by Day 14. Kim Rush informed. Guild assistance may be requested where delays are member/customer-side.',
+    },
+    {
+      day: 21,
+      name: 'Day 21 — Progress Update & Second (Senior) Escalation',
+      sendCustomerUpdate: true,
+      customerRecipients: [],
+      escalate: true,
+      escalationRecipients: [
+        { name: 'Nick Ward', email: '' },
+        { name: 'Richard Combellack', email: '' },
+        { name: 'Paul Adams', email: '' },
+        { name: 'Emma Maciver', email: '' },
+        { name: 'Abigail Brown', email: '' },
+      ],
+      informRecipients: [
+        { name: 'Kim Rush', email: '' },
+        { name: 'Phillipa Legg', email: '' },
+        { name: 'Iain McKenzie', email: '' },
+      ],
+      note: 'Senior stakeholder escalation if still incomplete by Day 21. Coordination sits with Abigail Brown; Onboarding Team ensures it is raised in time.',
+    },
+  ],
+};
+
 // ── KB Articles ──
 
 export interface PortalKbArticle {

@@ -2,7 +2,7 @@ import React from 'react';
 import type { PortalAuthPayload, PortalOrgFeatures, PortalOrgMembershipSummary, PortalUserRole } from '../../../shared/portal-types.js';
 import { PORTAL_ROLE_RANK } from '../../../shared/portal-types.js';
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about' | 'escalations';
 
 interface Props {
   user: PortalAuthPayload;
@@ -26,6 +26,7 @@ const NAV_ITEMS: Array<{ view: PortalView; label: string; icon: string; feature?
   { view: 'support-dashboard', label: 'Support', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', feature: 'support' },
   { view: 'onboarding-dashboard', label: 'Onboarding', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', feature: 'onboarding' },
   { view: 'kb', label: 'Knowledge Base', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', feature: 'kb' },
+  { view: 'escalations', label: 'Escalations', icon: 'M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z', minRole: 'org_admin' },
   { view: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', minRole: 'manager' },
 ];
 

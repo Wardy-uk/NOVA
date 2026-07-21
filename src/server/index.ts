@@ -119,6 +119,7 @@ import { createPortalEventsRoutes } from './routes/portal-events.js';
 import { createPortalCsatRoutes } from './routes/portal-csat.js';
 import { createCsatMetricsRoutes } from './routes/csat-metrics.js';
 import { createPortalDashboardRoutes } from './routes/portal-dashboards.js';
+import { createPortalEscalationRoutes } from './routes/portal-escalation.js';
 import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
@@ -4499,6 +4500,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEventsRoutes());
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalDashboardRoutes(settingsQueries, portalJiraClient));
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEscalationRoutes());
 
   // Widget routes (public, CORS-gated, own auth via email identification)
   app.use('/api/portal/widget', portalGate, createWidgetChatRoutes(portalChat, settingsQueries));

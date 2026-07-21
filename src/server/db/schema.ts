@@ -2016,6 +2016,11 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'feat_raise_ticket') IS NULL
      ALTER TABLE portal_organisations ADD feat_raise_ticket BIT NOT NULL CONSTRAINT DF_portal_org_raise_ticket DEFAULT 0;`,
 
+    // Per-org onboarding escalation policy (JSON: enabled, workingDays, levels[]).
+    // Configured by org admins; drives scheduled progress updates + escalations.
+    `IF COL_LENGTH('portal_organisations', 'escalation_policy') IS NULL
+     ALTER TABLE portal_organisations ADD escalation_policy NVARCHAR(MAX) NULL;`,
+
     // Which routes the "Raise a Ticket" top-of-form selector offers this org.
     // CSV of {support, development, onboarding}. NULL/empty → the default pair
     // (support,development) so existing orgs behave exactly as before.

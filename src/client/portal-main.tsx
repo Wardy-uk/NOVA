@@ -18,8 +18,9 @@ const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
 const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalOnboardingDashboard.js'));
 const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
 const PortalAbout = lazy(() => import('./components/portal/PortalAbout.js'));
+const PortalEscalations = lazy(() => import('./components/portal/PortalEscalations.js'));
 
-type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about';
+type PortalView = 'home' | 'tickets' | 'ticket-detail' | 'new-request' | 'raise-ticket' | 'kb' | 'chat' | 'onboarding-dashboard' | 'support-dashboard' | 'about' | 'escalations';
 
 const PORTAL_TOKEN_KEY = 'portal_token';
 const NOVA_TOKEN_KEY = 'token';
@@ -386,6 +387,7 @@ function PortalApp() {
         (view === 'onboarding-dashboard' && !features.onboarding) ||
         (view === 'raise-ticket' && !features.raiseTicket) ||
         (view === 'about' && (!user || PORTAL_ROLE_RANK[user.role] < PORTAL_ROLE_RANK.manager)) ||
+        (view === 'escalations' && (!user || PORTAL_ROLE_RANK[user.role] < PORTAL_ROLE_RANK.org_admin)) ||
         (view === 'kb' && !features.kb) ||
         (view === 'chat' && !features.getHelp)) {
       setView('home');
@@ -499,6 +501,7 @@ function PortalApp() {
         {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}
         {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
         {view === 'about' && PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} />}
+        {view === 'escalations' && PORTAL_ROLE_RANK[user.role] >= PORTAL_ROLE_RANK.org_admin && <PortalEscalations />}
       </Suspense>
       <PortalToastContainer onViewTicket={handleViewTicket} />
     </PortalLayout>
