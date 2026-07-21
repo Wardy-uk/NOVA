@@ -675,6 +675,7 @@ function OrgsPanel() {
 
   return (
     <div className="space-y-3">
+      <AddOrg onCreated={() => setReloadKey(k => k + 1)} />
       {(orgs || []).map(o => (
         <OrgRow key={o.id} org={o} onSaved={() => setReloadKey(k => k + 1)} />
       ))}
@@ -685,6 +686,59 @@ function OrgsPanel() {
         A ticket belongs to the customer if its <span className="font-mono">BC Account #</span> matches
         <em> or</em> its reporter is in the reporter list. Both scope the customer Onboarding &amp; Support dashboards.
       </p>
+    </div>
+  );
+}
+
+function AddOrg({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [domain, setDomain] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const create = async () => {
+    if (!name.trim()) { setError('Name is required'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/organisations`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ name: name.trim(), domain: domain.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (d.ok) { setName(''); setDomain(''); setOpen(false); onCreated(); }
+      else setError(d.error || 'Failed to create organisation');
+    } catch {
+      setError('Failed to create organisation');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputCls = 'px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500';
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="px-3 py-1.5 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white font-medium">
+        + Add organisation
+      </button>
+    );
+  }
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 space-y-2">
+      <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">New organisation</div>
+      {error && <div className="text-xs text-red-300">{error}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Organisation name" className={`${inputCls} flex-1 min-w-[200px]`} />
+        <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="Email domain (optional) e.g. acme.co.uk" className={`${inputCls} flex-1 min-w-[200px]`} />
+        <button onClick={create} disabled={saving || !name.trim()} className="px-3 py-1.5 text-xs rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 font-medium">
+          {saving ? 'Creating…' : 'Create'}
+        </button>
+        <button onClick={() => { setOpen(false); setError(null); }} className="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200">Cancel</button>
+      </div>
     </div>
   );
 }
@@ -790,20 +844,24 @@ function OrgRow({ org, onSaved }: {
   };
 
   const deleteOrg = async () => {
-    const first = window.confirm(`Delete "${org.name}"? This removes the organisation and its Jira mapping. It cannot be undone.`);
-    if (!first) return;
+    if (!window.confirm(`Delete "${org.name}"? This removes the organisation and its Jira mapping. It cannot be undone.`)) return;
     setDeleting(true);
     try {
       let res = await fetch(`${API}/organisations/${org.id}`, { method: 'DELETE', headers: authHeaders() });
       let d = await res.json();
-      if (!d.ok && res.status === 409 && /additional organisation/i.test(d.error || '')) {
-        if (window.confirm(`${d.error}\n\nDelete anyway and clear those memberships?`)) {
-          res = await fetch(`${API}/organisations/${org.id}?force=1`, { method: 'DELETE', headers: authHeaders() });
-          d = await res.json();
-        } else {
+      // Org has users → backend asks for force. Confirm the cascade explicitly.
+      if (!d.ok && res.status === 409 && d.data?.needsForce) {
+        const { homeUsers = 0, memberUsers = 0 } = d.data;
+        const parts = [
+          homeUsers > 0 ? `${homeUsers} user(s) homed here` : null,
+          memberUsers > 0 ? `${memberUsers} additional membership(s)` : null,
+        ].filter(Boolean).join(' and ');
+        if (!window.confirm(`"${org.name}" has ${parts}.\n\nDelete the organisation AND permanently remove those users and their portal data (chat, submissions, CSAT links)? This cannot be undone.`)) {
           setDeleting(false);
           return;
         }
+        res = await fetch(`${API}/organisations/${org.id}?force=1`, { method: 'DELETE', headers: authHeaders() });
+        d = await res.json();
       }
       if (d.ok) onSaved();
       else window.alert(d.error || 'Failed to delete organisation');
@@ -857,8 +915,8 @@ function OrgRow({ org, onSaved }: {
           )}
           <button
             onClick={deleteOrg}
-            disabled={deleting || org.user_count > 0}
-            title={org.user_count > 0 ? 'Move or remove this org’s users before deleting' : 'Delete organisation'}
+            disabled={deleting}
+            title="Delete organisation"
             className="px-3 py-1.5 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
           >
             {deleting ? 'Deleting…' : 'Delete'}
@@ -883,18 +941,20 @@ function OrgRow({ org, onSaved }: {
               {f.label}
             </label>
           ))}
-          {features.raiseTicket && (
-            <div className="pt-2 space-y-1">
-              <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Raise-a-Ticket routes</div>
-              {PORTAL_SUPPORT_ROUTE_ORDER.map(r => (
-                <label key={r} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                  <input type="checkbox" checked={routes.includes(r)} onChange={() => toggleRoute(r)} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
-                  {PORTAL_SUPPORT_ROUTE_LABELS[r]}
-                </label>
-              ))}
-              <p className="text-[10px] text-gray-500">One route → selector hidden. None ticked → defaults to Support only.</p>
-            </div>
-          )}
+          <div className={`pt-2 space-y-1 ${features.raiseTicket ? '' : 'opacity-50'}`}>
+            <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Raise-a-Ticket routes</div>
+            {PORTAL_SUPPORT_ROUTE_ORDER.map(r => (
+              <label key={r} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" checked={routes.includes(r)} onChange={() => toggleRoute(r)} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+                {PORTAL_SUPPORT_ROUTE_LABELS[r]}
+              </label>
+            ))}
+            <p className="text-[10px] text-gray-500">
+              {features.raiseTicket
+                ? 'One route → selector hidden. None ticked → Support only.'
+                : 'Applies when “Raise a Ticket” is enabled. None ticked → Support only.'}
+            </p>
+          </div>
         </div>
 
         {/* Branding */}

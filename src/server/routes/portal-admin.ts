@@ -365,9 +365,34 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     }
   });
 
-  // Delete an organisation. Blocked while it still has portal users (home or
-  // additional membership) — reassign/remove those first. Set ?force=1 to delete
-  // anyway, which also clears additional-org memberships pointing at it.
+  // Create a new organisation directly (name required, domain optional).
+  router.post('/organisations', async (req: Request, res: Response) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const domain = typeof req.body?.domain === 'string' ? req.body.domain.trim().toLowerCase() : '';
+    if (!name) { res.status(400).json({ ok: false, error: 'Organisation name is required' }); return; }
+    try {
+      if (domain) {
+        const existing = await queryOne<{ id: number }>(
+          `SELECT TOP 1 id FROM portal_organisations WHERE LOWER(domain) = LOWER(?)`,
+          [domain],
+        );
+        if (existing) { res.status(409).json({ ok: false, error: `An organisation already uses domain ${domain}` }); return; }
+      }
+      const result = await queryOne<{ id: number }>(
+        `INSERT INTO portal_organisations (external_id, name, domain)
+         OUTPUT INSERTED.id VALUES (?, ?, ?)`,
+        [`local-org-${crypto.randomUUID()}`, name, domain || null],
+      );
+      res.json({ ok: true, data: { id: result!.id } });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create organisation' });
+    }
+  });
+
+  // Delete an organisation. Without force, blocked while it still has portal
+  // users (home or additional membership) so a real customer can't be wiped by a
+  // mis-click. With ?force=1 it cascades: the org's users and all their portal
+  // data (chat, submissions, memberships, CSAT links) are removed too.
   router.delete('/organisations/:id', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);
     if (!id) { res.status(400).json({ ok: false, error: 'Valid organisation ID is required' }); return; }
@@ -381,24 +406,54 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
       if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
 
       const home = await queryOne<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM portal_users WHERE org_id = ? AND access_state <> 'removed'`,
+        `SELECT COUNT(*) AS n FROM portal_users WHERE org_id = ?`,
         [id],
       );
-      if ((home?.n ?? 0) > 0) {
-        res.status(409).json({ ok: false, error: `${org.name} still has ${home!.n} active user(s) as their home organisation. Move or remove them before deleting.` });
-        return;
-      }
-
-      const memberCount = await queryOne<{ n: number }>(
+      const members = await queryOne<{ n: number }>(
         `SELECT COUNT(*) AS n FROM portal_user_orgs WHERE org_id = ?`,
         [id],
       );
-      if ((memberCount?.n ?? 0) > 0 && !force) {
-        res.status(409).json({ ok: false, error: `${org.name} is granted as an additional organisation to ${memberCount!.n} user(s). Re-send with force to delete anyway.` });
+      const homeUsers = home?.n ?? 0;
+      const memberUsers = members?.n ?? 0;
+
+      if ((homeUsers > 0 || memberUsers > 0) && !force) {
+        res.status(409).json({
+          ok: false,
+          error: `${org.name} has ${homeUsers} user(s) and ${memberUsers} additional membership(s).`,
+          data: { needsForce: true, homeUsers, memberUsers },
+        });
         return;
       }
 
-      // Clear dependent rows, then the org itself.
+      if (force) {
+        // Clear everything hanging off this org's home users, then the users,
+        // then the org's own dependent rows. Order respects the FK graph.
+        await execute(
+          `DELETE m FROM portal_chat_messages m
+             INNER JOIN portal_chat_sessions s ON s.id = m.session_id
+             INNER JOIN portal_users u ON u.id = s.portal_user_id
+           WHERE u.org_id = ?`, [id]);
+        await execute(
+          `DELETE s FROM portal_chat_sessions s
+             INNER JOIN portal_users u ON u.id = s.portal_user_id
+           WHERE u.org_id = ?`, [id]);
+        await execute(
+          `DELETE fs FROM portal_form_submissions fs
+             INNER JOIN portal_users u ON u.id = fs.portal_user_id
+           WHERE u.org_id = ?`, [id]);
+        await execute(
+          `UPDATE cs SET portal_user_id = NULL FROM portal_csat_surveys cs
+             INNER JOIN portal_users u ON u.id = cs.portal_user_id
+           WHERE u.org_id = ?`, [id]);
+        await execute(
+          `DELETE puo FROM portal_user_orgs puo
+             INNER JOIN portal_users u ON u.id = puo.portal_user_id
+           WHERE u.org_id = ?`, [id]);
+        await execute(`DELETE FROM portal_users WHERE org_id = ?`, [id]);
+      }
+
+      // Memberships that point INTO this org (from users homed elsewhere), then
+      // the mapping row, then the org.
       await execute(`DELETE FROM portal_user_orgs WHERE org_id = ?`, [id]);
       await execute(`DELETE FROM portal_org_jira_mapping WHERE org_id = ?`, [id]);
       await execute(`DELETE FROM portal_organisations WHERE id = ?`, [id]);
