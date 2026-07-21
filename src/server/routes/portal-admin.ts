@@ -389,6 +389,36 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     }
   });
 
+  // Preview what deleting an org would remove — the users homed here (hard
+  // deleted, flagged if they also belong to other orgs) and the count of users
+  // merely a member here (who just lose this one membership).
+  router.get('/organisations/:id/deletion-impact', async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string, 10);
+    if (!id) { res.status(400).json({ ok: false, error: 'Valid organisation ID is required' }); return; }
+    try {
+      const org = await queryOne<{ name: string }>(`SELECT name FROM portal_organisations WHERE id = ?`, [id]);
+      if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
+
+      const homeUsers = await query<{
+        id: number; email: string; display_name: string; role: string; auth_type: string; other_memberships: number;
+      }>(
+        `SELECT pu.id, pu.email, pu.display_name, pu.role, pu.auth_type,
+                (SELECT COUNT(*) FROM portal_user_orgs puo WHERE puo.portal_user_id = pu.id) AS other_memberships
+         FROM portal_users pu
+         WHERE pu.org_id = ?
+         ORDER BY pu.display_name`,
+        [id],
+      );
+      const memberOnly = await queryOne<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM portal_user_orgs WHERE org_id = ?`,
+        [id],
+      );
+      res.json({ ok: true, data: { orgName: org.name, homeUsers, memberOnlyCount: memberOnly?.n ?? 0 } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load deletion impact' });
+    }
+  });
+
   // Delete an organisation. Without force, blocked while it still has portal
   // users (home or additional membership) so a real customer can't be wiped by a
   // mis-click. With ?force=1 it cascades: the org's users and all their portal

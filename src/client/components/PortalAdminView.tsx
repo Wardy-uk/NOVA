@@ -743,6 +743,116 @@ function AddOrg({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+interface DeletionImpact {
+  orgName: string;
+  homeUsers: Array<{ id: number; email: string; display_name: string; role: string; auth_type: string; other_memberships: number }>;
+  memberOnlyCount: number;
+}
+
+function DeleteOrgModal({ orgId, orgName, onClose, onDeleted }: {
+  orgId: number; orgName: string; onClose: () => void; onDeleted: () => void;
+}) {
+  const [impact, setImpact] = useState<DeletionImpact | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/organisations/${orgId}/deletion-impact`, { headers: authHeaders() });
+        const d = await res.json();
+        if (cancelled) return;
+        if (d.ok) setImpact(d.data);
+        else setError(d.error || 'Failed to load impact');
+      } catch {
+        if (!cancelled) setError('Failed to load impact');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [orgId]);
+
+  const homeUsers = impact?.homeUsers ?? [];
+  const crossOrg = homeUsers.filter(u => u.other_memberships > 0);
+
+  const doDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      // The admin has seen the full impact list, so force the cascade.
+      const res = await fetch(`${API}/organisations/${orgId}?force=1`, { method: 'DELETE', headers: authHeaders() });
+      const d = await res.json();
+      if (d.ok) { onDeleted(); onClose(); }
+      else setError(d.error || 'Failed to delete organisation');
+    } catch {
+      setError('Failed to delete organisation');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="bg-gray-800 rounded-xl border border-gray-700 max-w-lg w-full p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-white">Delete “{orgName}”?</h3>
+
+        {loading ? (
+          <div className="h-16 bg-gray-900 rounded animate-pulse" />
+        ) : (
+          <>
+            {homeUsers.length === 0 ? (
+              <p className="text-sm text-gray-300">No users are homed in this organisation. This removes the organisation and its Jira mapping.</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-300">
+                  These <strong>{homeUsers.length}</strong> user(s) are homed here and will be <strong className="text-red-300">permanently removed</strong> along with their portal data (chat, submissions; CSAT links unlinked):
+                </p>
+                <ul className="max-h-48 overflow-y-auto rounded border border-gray-700 divide-y divide-gray-700">
+                  {homeUsers.map(u => (
+                    <li key={u.id} className="px-3 py-2 text-xs text-gray-200 flex items-center justify-between gap-2">
+                      <span className="truncate">
+                        {u.display_name} <span className="text-gray-500">({u.email})</span>
+                        <span className="ml-1 text-gray-500">· {u.role} · {u.auth_type}</span>
+                      </span>
+                      {u.other_memberships > 0 && (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200 text-[10px] font-medium">
+                          also in {u.other_memberships} other org{u.other_memberships === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {crossOrg.length > 0 && (
+                  <p className="text-xs text-amber-300">
+                    ⚠ {crossOrg.length} of these also belong to other organisations. Deleting removes them entirely — to keep them, first move their home org via <strong>Users → Edit</strong>, then delete.
+                  </p>
+                )}
+              </div>
+            )}
+            {(impact?.memberOnlyCount ?? 0) > 0 && (
+              <p className="text-xs text-gray-400">
+                {impact!.memberOnlyCount} user(s) homed elsewhere are members of this org — they keep their account and just lose this membership.
+              </p>
+            )}
+          </>
+        )}
+
+        {error && <div className="text-xs text-red-300">{error}</div>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} disabled={deleting} className="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50">Cancel</button>
+          <button onClick={doDelete} disabled={loading || deleting} className="px-3 py-1.5 text-xs rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50 font-medium">
+            {deleting ? 'Deleting…' : 'Delete organisation'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const FEATURE_DEFS: Array<{ key: 'getHelp' | 'kb' | 'support' | 'onboarding' | 'raiseTicket'; label: string }> = [
   { key: 'getHelp', label: 'Get Help' },
   { key: 'kb', label: 'Knowledge Base' },
@@ -765,7 +875,7 @@ function OrgRow({ org, onSaved }: {
   const [bc, setBc] = useState(org.bc_account_number || '');
   const [reporters, setReporters] = useState(org.scope_reporters || '');
   const [routes, setRoutes] = useState<PortalSupportRoute[]>(parseSupportRoutes(org.support_routes));
-  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
   });
@@ -843,36 +953,6 @@ function OrgRow({ org, onSaved }: {
     }
   };
 
-  const deleteOrg = async () => {
-    if (!window.confirm(`Delete "${org.name}"? This removes the organisation and its Jira mapping. It cannot be undone.`)) return;
-    setDeleting(true);
-    try {
-      let res = await fetch(`${API}/organisations/${org.id}`, { method: 'DELETE', headers: authHeaders() });
-      let d = await res.json();
-      // Org has users → backend asks for force. Confirm the cascade explicitly.
-      if (!d.ok && res.status === 409 && d.data?.needsForce) {
-        const { homeUsers = 0, memberUsers = 0 } = d.data;
-        const parts = [
-          homeUsers > 0 ? `${homeUsers} user(s) homed here` : null,
-          memberUsers > 0 ? `${memberUsers} additional membership(s)` : null,
-        ].filter(Boolean).join(' and ');
-        if (!window.confirm(`"${org.name}" has ${parts}.\n\nDelete the organisation AND permanently remove those users and their portal data (chat, submissions, CSAT links)? This cannot be undone.`)) {
-          setDeleting(false);
-          return;
-        }
-        res = await fetch(`${API}/organisations/${org.id}?force=1`, { method: 'DELETE', headers: authHeaders() });
-        d = await res.json();
-      }
-      if (d.ok) onSaved();
-      else window.alert(d.error || 'Failed to delete organisation');
-    } catch (err) {
-      window.alert('Failed to delete organisation');
-      console.error('Failed to delete org:', err);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   const hasBranding = !!(brand.websiteUrl || brand.logoUrl || brand.primary || brand.secondary || brand.font);
 
   const removeBranding = async () => {
@@ -914,15 +994,18 @@ function OrgRow({ org, onSaved }: {
             </button>
           )}
           <button
-            onClick={deleteOrg}
-            disabled={deleting}
+            onClick={() => setConfirmDelete(true)}
             title="Delete organisation"
-            className="px-3 py-1.5 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+            className="px-3 py-1.5 text-xs rounded bg-red-900/50 hover:bg-red-900/70 text-red-200 font-medium"
           >
-            {deleting ? 'Deleting…' : 'Delete'}
+            Delete
           </button>
         </div>
       </div>
+
+      {confirmDelete && (
+        <DeleteOrgModal orgId={org.id} orgName={org.name} onClose={() => setConfirmDelete(false)} onDeleted={onSaved} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Customer scope */}
