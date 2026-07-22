@@ -121,6 +121,8 @@ import { createCsatMetricsRoutes } from './routes/csat-metrics.js';
 import { createPortalDashboardRoutes } from './routes/portal-dashboards.js';
 import { createPortalEscalationRoutes } from './routes/portal-escalation.js';
 import { createPortalOrgUserRoutes } from './routes/portal-org-users.js';
+import { createErrorRoutes } from './routes/errors.js';
+import { captureError } from './services/error-log.js';
 import { OnboardingEscalationService } from './services/onboarding-escalation-service.js';
 import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
@@ -1216,6 +1218,7 @@ async function main() {
 
   app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
   app.use('/api/pipeline', requireRole('admin'), createPipelineUatRoutes({ settings: settingsQueries }));
+  app.use('/api/errors', requireRole('admin', 'super_admin'), createErrorRoutes());
   let boardMiLlm: import('./services/llm-service.js').LlmService | null = null;
   app.use('/api/board-mi', requireAreaAccess('mi', 'view'), createBoardMiRoutes(
     settingsQueries,
@@ -4550,6 +4553,27 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
       res.sendFile(path.join(clientDist, 'index.html'));
     });
   }
+
+  // Global safety nets — unhandled async errors and uncaught exceptions land in
+  // the central error log as critical instead of vanishing to stderr.
+  process.on('unhandledRejection', (reason) => {
+    captureError('process.unhandledRejection', reason, { severity: 'critical' });
+  });
+  process.on('uncaughtException', (err) => {
+    captureError('process.uncaughtException', err, { severity: 'critical' });
+    // Preserve crash-restart behaviour (the service manager restarts us); brief
+    // delay lets the log write flush first.
+    setTimeout(() => process.exit(1), 750);
+  });
+
+  // Express error-handling middleware — catches errors thrown in any route so
+  // API 500s land in the central error log instead of vanishing.
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    captureError('api', err, { context: { path: req.path, method: req.method } });
+    if (!res.headersSent) {
+      res.status(500).json({ ok: false, error: 'Internal server error' });
+    }
+  });
 
   // 5. Start server
   app.listen(PORT, () => {

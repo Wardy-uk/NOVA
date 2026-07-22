@@ -6,6 +6,7 @@ import { executeAndGetId, query } from './database.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AlertService } from './alert-service.js';
 import { sanitise, type RedactionEntry } from './pii-sanitiser.js';
+import { logError } from './error-log.js';
 
 // ── Types ──
 
@@ -670,6 +671,13 @@ export class LlmService {
       }
     }
 
+    // Every provider exhausted for this call type — business-critical (this is
+    // exactly the failure mode that silently killed agent triage).
+    await logError('llm', lastError ?? new Error('All LLM providers failed'), {
+      severity: 'critical',
+      context: { callType: options.callType, chain: orderedConfigs.map(c => `${c.provider}/${c.model}`).join(' → ') },
+      entityRef: ticketId ?? undefined,
+    });
     throw new Error(`All LLM providers failed. Last error: ${lastError?.message ?? 'unknown'}`);
   }
 

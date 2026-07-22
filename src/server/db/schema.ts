@@ -39,6 +39,27 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'teams') AND name = 'jira_project_key')
      ALTER TABLE teams ADD jira_project_key NVARCHAR(20) NULL;`,
 
+    // Centralised error log — one place for errors across every subsystem, so
+    // failures (especially business-critical ones) are visible/queryable instead
+    // of scattered through stdout. Written via services/error-log.ts logError().
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'error_log') AND type = 'U')
+     CREATE TABLE error_log (
+       id BIGINT IDENTITY(1,1) PRIMARY KEY,
+       occurred_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       source NVARCHAR(100) NOT NULL,
+       severity NVARCHAR(20) NOT NULL DEFAULT 'error',
+       message NVARCHAR(MAX) NOT NULL,
+       stack NVARCHAR(MAX) NULL,
+       context NVARCHAR(MAX) NULL,
+       entity_ref NVARCHAR(200) NULL,
+       resolved BIT NOT NULL DEFAULT 0,
+       resolved_at DATETIME2 NULL
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_error_log_occurred')
+     CREATE INDEX IX_error_log_occurred ON error_log (occurred_at DESC);`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_error_log_source_sev')
+     CREATE INDEX IX_error_log_source_sev ON error_log (source, severity, occurred_at DESC);`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_llm_calls') AND type = 'U')
      CREATE TABLE agent_llm_calls (
        id INT IDENTITY(1,1) PRIMARY KEY,
