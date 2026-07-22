@@ -115,7 +115,13 @@ export const FRT_BREACHED = `cf[14046] = breached()`;
 /** NOVA-Jira service account — splits Solved by Team vs NOVA. */
 export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
-const SOLVED_TRANSITION = `status CHANGED TO ("Resolved", "Closed", "Done")`;
+// "Solved today" = resolution set that day (resolutiondate), matching the trusted n8n
+// KPI exactly (verified 19–21/07: 0/29/22 vs n8n 0/30/22). The old
+// `status CHANGED TO (Resolved/Closed/Done) DURING` method counted a ticket again on
+// every resolve→close hop and swept in bulk/automation transitions, inflating Solved
+// 3–10× (214 vs 22 on 21/07). See [[reference-kpi-org-freeze-scheduler]] session.
+const SOLVED_ON_DAY = (day: string, nextDay: string) =>
+  `project = NT AND resolutiondate >= "${day}" AND resolutiondate < "${nextDay}"`;
 
 // ── Support (NT) — 22 KPIs ──
 
@@ -131,8 +137,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'count', direction: 'higher-better', dailyTarget: 120, monthlyTarget: null, rollup: 'sum',
     rag: { greenMin: 120, amberMin: 100 },
     compute: { kind: 'jql_count', jql: c =>
-      `project = NT AND statusCategory = Done AND ${SOLVED_TRANSITION} DURING ("${c.day}", "${c.nextDay}") ` +
-      `AND assignee != "${NOVA_JIRA_ACCOUNT_ID}"` },
+      `${SOLVED_ON_DAY(c.day, c.nextDay)} AND assignee != "${NOVA_JIRA_ACCOUNT_ID}"` },
     note: 'Team = everything not solved by NOVA (incl. unassigned). assignee != NOVA covers unassigned in JQL.',
   },
   {
@@ -140,8 +145,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'count', direction: 'higher-better', dailyTarget: 15, monthlyTarget: null, rollup: 'sum',
     rag: { greenMin: 15, amberMin: 8 },
     compute: { kind: 'jql_count', jql: c =>
-      `project = NT AND statusCategory = Done AND ${SOLVED_TRANSITION} DURING ("${c.day}", "${c.nextDay}") ` +
-      `AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"` },
+      `${SOLVED_ON_DAY(c.day, c.nextDay)} AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"` },
     note: 'Target 15 predates NOVA throughput (~61/day observed) — re-baseline.',
   },
   {
@@ -333,7 +337,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_legacy_solved_today', label: 'Tickets Solved Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 85, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 85, amberMin: 68 },
-    compute: { kind: 'jql_count', jql: (ctx) => `project = NT AND statusCategory = Done AND ${SOLVED_TRANSITION} DURING ("${ctx.day}", "${ctx.nextDay}")` },
+    compute: { kind: 'jql_count', jql: (ctx) => SOLVED_ON_DAY(ctx.day, ctx.nextDay) },
   },
   {
     key: 'nt_legacy_cc_total', label: 'Number of Tickets in Customer Care', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',

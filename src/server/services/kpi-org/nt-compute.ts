@@ -29,6 +29,14 @@ function slaBreached(field: unknown): boolean | null {
   return false;
 }
 
+/** "Resolved today" population = resolution set that day (resolutiondate), matching the
+ *  trusted n8n "Resolved Today" KPIs. Replaces the old
+ *  `status CHANGED TO (Resolved/Closed/Done) DURING` method, which counted each ticket
+ *  again on every resolve→close hop + bulk transitions (inflated 3–10×). Mirrors the
+ *  registry SOLVED_ON_DAY change so every "solved/resolved today" number is consistent. */
+const RESOLVED_DURING_DAY = (ctx: DayCtx) =>
+  `project = NT AND resolutiondate >= "${ctx.day}" AND resolutiondate < "${ctx.nextDay}"`;
+
 // CC customer-request types (cf12800 values) that count toward FCR.
 const CC_RT_VALUES = ['Incident (NT)', 'Chat (NT)', 'AI Request (NT)', 'Emailed request (NT)', 'GDPR (NT)', 'Service Request (NT)', 'TPJ Request (NT)'];
 const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
@@ -38,8 +46,7 @@ const isBot = (name: string) => BOT_PATTERNS.some(p => name.toLowerCase().includ
  *  legacy comment scan: FCR = an agent replied and the customer did NOT comment
  *  after the agent's first reply. Sampled to the first 30 tickets, like legacy. */
 async function computeFcr(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
-  const jql = `project = NT AND statusCategory = Done ` +
-    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const jql = RESOLVED_DURING_DAY(ctx);
   const res = await jira.searchJqlAll(jql, ['customfield_12800'], 2000);
   const ccTickets = res.issues.filter(iss => {
     const rt = ((iss.fields as Record<string, unknown> | undefined)?.customfield_12800 as { value?: string } | undefined)?.value ?? '';
@@ -69,9 +76,7 @@ async function computeFcr(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
 /** Avg hours from creation to first agent comment, over Tier-3/Dev tickets solved
  *  during the day. Mirrors the legacy "Bug Escalation-to-Ack" (sampled to 30). */
 async function computeBugAck(jira: JiraRestClient, ctx: DayCtx): Promise<number> {
-  const jql = `project = NT AND statusCategory = Done ` +
-    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}") ` +
-    `AND cf[12981] in ("Tier 3", "Development")`;
+  const jql = `${RESOLVED_DURING_DAY(ctx)} AND cf[12981] in ("Tier 3", "Development")`;
   const res = await jira.searchJqlAll(jql, ['created'], 2000);
   const sample = res.issues.slice(0, 30);
   const hours: number[] = [];
@@ -117,8 +122,7 @@ async function getResolvedSlaIssues(jira: JiraRestClient, ctx: DayCtx): Promise<
   if (resolvedSlaCache && resolvedSlaCache.day === ctx.day && Date.now() - resolvedSlaCache.ts < 120_000) {
     return resolvedSlaCache.issues;
   }
-  const jql = `project = NT AND statusCategory = Done ` +
-    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const jql = RESOLVED_DURING_DAY(ctx);
   const res = await jira.searchJqlAll(jql, ['customfield_14046', 'customfield_14048', 'customfield_12981'], 2000);
   resolvedSlaCache = { day: ctx.day, ts: Date.now(), issues: res.issues };
   return res.issues;
@@ -130,8 +134,7 @@ interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number;
  *  day (status transitioned to a Done status that day). Mirrors the legacy
  *  resolved-today snapshot: cf14046 (FRT), cf14048 (Resolution), cf12802.rating (CSAT). */
 async function resolvedAgg(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedAgg> {
-  const jql = `project = NT AND statusCategory = Done ` +
-    `AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+  const jql = RESOLVED_DURING_DAY(ctx);
   const res = await jira.searchJqlAll(jql, ['customfield_14046', 'customfield_14048', 'customfield_12802'], 2000);
   const agg: ResolvedAgg = { frtTotal: 0, frtBreached: 0, resTotal: 0, resBreached: 0, csatSum: 0, csatCount: 0 };
   for (const iss of res.issues) {
@@ -294,8 +297,7 @@ export async function computeNtKpi(
     }
 
     case 'first_line_rate': {
-      const solved = `project = NT AND statusCategory = Done AND ` +
-        `status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`;
+      const solved = RESOLVED_DURING_DAY(ctx);
       const total = await jira.jqlCount(solved);
       if (total < 0) return { value: null, failed: true };
       if (total === 0) return { value: 0, failed: false };
