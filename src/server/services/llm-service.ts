@@ -231,6 +231,14 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
+// Newer Claude models (Sonnet 5 / Haiku 4.5 / Opus 4.x …) reject the now-deprecated
+// `temperature` parameter with a 400. Send it only to models that still accept it
+// (OpenAI GPT, non-Claude OpenRouter models). Applies to direct Anthropic AND
+// OpenRouter `anthropic/claude-*` slugs.
+function acceptsTemperature(model: string): boolean {
+  return !/claude/i.test(model);
+}
+
 async function callAnthropic(
   systemPrompt: string,
   userMessage: string,
@@ -253,13 +261,14 @@ async function callAnthropic(
   }
   contentParts.push({ type: 'text', text: userMessage });
 
-  const response = await client.messages.create({
+  const params: Anthropic.MessageCreateParamsNonStreaming = {
     model,
     max_tokens: maxTokens,
-    temperature,
     system: systemPrompt,
     messages: [{ role: 'user', content: contentParts }],
-  });
+  };
+  if (acceptsTemperature(model)) params.temperature = temperature;
+  const response = await client.messages.create(params);
 
   const textBlock = response.content.find(b => b.type === 'text');
   return {
@@ -292,15 +301,16 @@ async function callOpenAI(
     userContent = parts;
   }
 
-  const response = await client.chat.completions.create({
+  const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
     model,
-    temperature,
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent as any },
     ],
-  });
+  };
+  if (acceptsTemperature(model)) params.temperature = temperature;
+  const response = await client.chat.completions.create(params);
 
   return {
     content: response.choices[0]?.message?.content ?? '',
@@ -641,6 +651,7 @@ export class LlmService {
         } catch (err) {
           const latencyMs = Date.now() - start;
           const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn(`[llm] ${config.provider} (${config.model}) call failed for ${options.callType}: ${errMsg.slice(0, 300)}`);
           await logCall(ticketId, options.callType, config.provider, config.model, inputTokens, outputTokens, latencyMs, false, errMsg, promptVersion, redactionsForLog);
           lastError = err instanceof Error ? err : new Error(errMsg);
 
