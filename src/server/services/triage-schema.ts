@@ -117,11 +117,14 @@ export const TriageResultSchema = z.object({
   recommended_tier: flexEnum(['customer_care', 'tier_2', 'tier_3', 'development'] as const),
   needs_customer_reply: flexBool,
   reasoning_trace: flexString,
+  // Optional secondary intel — the model often omits it, and a missing kb_gap
+  // must not fail the whole triage decision. Defaults to "no gap" so consumers
+  // always get a valid object.
   kb_gap: z.object({
     should_have_article: flexBool,
     reason: flexString,
     suggested_title: flexNullableString,
-  }),
+  }).optional().default({ should_have_article: false, reason: 'Not assessed', suggested_title: null }),
   quick_win: z.object({
     type: flexEnum(['spam', 'vendor_email', 'thank_you', 'kba_match', 'stale_no_response', 'duplicate', 'auto_resolved', 'none'] as const),
     confidence: flexConfidence,
