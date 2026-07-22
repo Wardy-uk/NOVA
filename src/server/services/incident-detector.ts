@@ -43,10 +43,10 @@ export class IncidentDetector {
       request_type: string | null; reporter_email: string | null;
       created_at: string;
     }>(
-      `SELECT issue_key, summary, component, request_type, reporter_email, created_at
+      `SELECT issue_key, summary, component, request_type, reporter_email, jira_created AS created_at
        FROM jira_issue_cache
-       WHERE created_at >= DATEADD(hour, -?, GETUTCDATE())
-       ORDER BY created_at DESC`,
+       WHERE jira_created >= DATEADD(hour, -?, GETUTCDATE())
+       ORDER BY jira_created DESC`,
       [windowHours],
     );
 

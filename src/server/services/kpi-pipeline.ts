@@ -8,6 +8,7 @@ import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
 import { query as localQuery } from './database.js';
+import { logError } from './error-log.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -639,6 +640,7 @@ export class KpiPipeline {
       });
     } catch (err) {
       console.error('[kpi-pipeline] Jira snapshot failed:', err instanceof Error ? err.message : err);
+      void logError('kpi-pipeline', err, { context: { phase: 'jira-snapshot' } });
       await this.monitor?.logRun({
         pipeline_name: 'kpi-snapshot', started_at: started, completed_at: new Date(),
         status: 'error', rows_affected: rowsAffected, error_message: err instanceof Error ? err.message : String(err),
@@ -977,6 +979,7 @@ export class KpiPipeline {
       });
     } catch (err) {
       console.error('[kpi-pipeline] EOD snapshot failed:', err instanceof Error ? err.message : err);
+      void logError('kpi-pipeline', err, { severity: 'critical', context: { phase: 'eod-snapshot' } });
       await this.monitor?.logRun({
         pipeline_name: 'kpi-eod-snapshot', started_at: started, completed_at: new Date(),
         status: 'error', rows_affected: 0, error_message: err instanceof Error ? err.message : String(err),

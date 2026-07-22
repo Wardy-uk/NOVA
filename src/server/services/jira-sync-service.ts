@@ -2,6 +2,7 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
 import { query, queryOne, execute } from './database.js';
+import { logError } from './error-log.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
@@ -226,6 +227,7 @@ export class JiraSyncService {
       this.consecutiveErrors++;
       const duration = Date.now() - start;
       console.error('[jira-sync] Full sync failed:', err instanceof Error ? err.message : err);
+      void logError('jira-sync', err, { severity: 'critical', context: { phase: 'full' } });
       await this.recordSync('full', issueCount, commentCount, duration, err instanceof Error ? err.message : String(err));
     } finally {
       this.syncing = false;
@@ -281,6 +283,7 @@ export class JiraSyncService {
     } catch (err) {
       this.consecutiveErrors++;
       console.error('[jira-sync] Incremental sync failed:', err instanceof Error ? err.message : err);
+      void logError('jira-sync', err, { context: { phase: 'incremental' } });
     } finally {
       this.syncing = false;
     }

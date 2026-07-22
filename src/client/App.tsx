@@ -46,6 +46,7 @@ import { TourOverlay, useTour } from './components/TourOverlay.js';
 import { SetupPortal } from './components/SetupPortal.js';
 const SurveyAdminView = lazy(() => import('./components/SurveyAdminView.js').then(m => ({ default: m.SurveyAdminView })));
 const PortalAdminView = lazy(() => import('./components/PortalAdminView.js'));
+const ErrorLogView = lazy(() => import('./components/ErrorLogView.js').then(m => ({ default: m.ErrorLogView })));
 import { SurveyRespondView } from './components/SurveyRespondView.js';
 import { StandupSubmitForm } from './components/StandupSubmitForm.js';
 import { OneToOneSubmitForm } from './components/OneToOneSubmitForm.js';
@@ -129,10 +130,10 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'backlog-board'
   | 'standup-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'admin-contract-terms' | 'my-feedback'
-  | 'help' | 'debug';
+  | 'error-log' | 'help' | 'debug';
 
 // Standalone views that don't belong to any area (no sub-tab bar)
-const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'admin-contract-terms', 'my-feedback']);
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'admin-contract-terms', 'my-feedback', 'error-log']);
 
 interface AreaDef {
   label: string;
@@ -923,6 +924,12 @@ export function App() {
                         >
                           Portal Admin
                         </button>
+                        <button
+                          onClick={() => { setView('error-log'); setShowUserMenu(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
+                        >
+                          Error Log
+                        </button>
                       </>
                     )}
                     <button
@@ -1437,6 +1444,11 @@ export function App() {
           {view === 'portal-admin' && (
             <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
               <PortalAdminView />
+            </Suspense>
+          )}
+          {view === 'error-log' && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <ErrorLogView />
             </Suspense>
           )}
           {view === 'my-feedback' && (

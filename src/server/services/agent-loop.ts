@@ -28,6 +28,7 @@ import { AutoRulesEngine } from './auto-rules-engine.js';
 import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
+import { logError } from './error-log.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { prepareTicketForClose, setRequestType, ensureAiRequestTypeIfEmpty } from './close-ticket-helper.js';
@@ -871,6 +872,7 @@ export class AgentLoop {
     } catch (err) {
       this.errorCount++;
       console.error(`[agent] Tick #${this.tickCount} failed:`, err instanceof Error ? err.message : err);
+      void logError('agent', err, { severity: 'critical', context: { tick: this.tickCount } });
     } finally {
       this.processing = false;
     }
