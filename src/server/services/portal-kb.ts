@@ -29,7 +29,7 @@ export class PortalKbService {
     }
   }
 
-  async syncFromConfluence(): Promise<{ added: number; updated: number }> {
+  async syncFromConfluence(): Promise<{ fetched: number; added: number; updated: number; skipped: number }> {
     const spaceKey = this.settings.get('kb_confluence_space')
       || this.settings.get('kb_confluence_space_keys')?.split(',')[0]?.trim()
       || 'NT';
@@ -76,50 +76,58 @@ export class PortalKbService {
     } catch (err) {
       if (pages.length === 0) {
         console.error('[portal-kb] Confluence full-space sync failed and no child pages available:', err instanceof Error ? err.message : err);
-        return { added: 0, updated: 0 };
+        return { fetched: 0, added: 0, updated: 0, skipped: 0 };
       }
       console.warn('[portal-kb] Full-space sync failed, continuing with child pages only:', err instanceof Error ? err.message : err);
     }
 
     if (pages.length === 0) {
       console.warn('[portal-kb] No pages found in space ' + spaceKey);
-      return { added: 0, updated: 0 };
+      return { fetched: 0, added: 0, updated: 0, skipped: 0 };
     }
 
     let added = 0, updated = 0;
+    const skipped: string[] = [];
 
     for (const page of pages) {
-      const bodyHtml = page.body?.storage?.value || '';
-      const bodyText = stripHtml(bodyHtml);
-      const labels = page.metadata?.labels?.results?.map(l => l.name).join(',') || '';
-      const category = this.deriveCategory(page.title, labels, bodyText);
-      const publishedAt = page.version?.when || new Date().toISOString();
+      // Per-page isolation: one bad page (oversized/odd body, encoding, etc.) must
+      // not abort the whole sync and leave the KB stuck at a partial count.
+      try {
+        const bodyHtml = page.body?.storage?.value || '';
+        const bodyText = stripHtml(bodyHtml);
+        const labels = page.metadata?.labels?.results?.map(l => l.name).join(',') || '';
+        const category = this.deriveCategory(page.title, labels, bodyText);
+        const publishedAt = page.version?.when || new Date().toISOString();
 
-      const existing = await queryOne<{ id: number }>(
-        `SELECT id FROM portal_kb_articles WHERE confluence_page_id = ?`,
-        [page.id],
-      );
+        const existing = await queryOne<{ id: number }>(
+          `SELECT id FROM portal_kb_articles WHERE confluence_page_id = ?`,
+          [page.id],
+        );
 
-      if (existing) {
-        await execute(
-          `UPDATE portal_kb_articles SET title = ?, body_html = ?, body_text = ?,
-           category = ?, labels = ?, updated_at = ?, synced_at = GETUTCDATE()
-           WHERE id = ?`,
-          [page.title, bodyHtml, bodyText, category, labels, publishedAt, existing.id],
-        );
-        updated++;
-      } else {
-        await execute(
-          `INSERT INTO portal_kb_articles (confluence_page_id, title, body_html, body_text, category, labels, published_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [page.id, page.title, bodyHtml, bodyText, category, labels, publishedAt, publishedAt],
-        );
-        added++;
+        if (existing) {
+          await execute(
+            `UPDATE portal_kb_articles SET title = ?, body_html = ?, body_text = ?,
+             category = ?, labels = ?, updated_at = ?, synced_at = GETUTCDATE()
+             WHERE id = ?`,
+            [page.title, bodyHtml, bodyText, category, labels, publishedAt, existing.id],
+          );
+          updated++;
+        } else {
+          await execute(
+            `INSERT INTO portal_kb_articles (confluence_page_id, title, body_html, body_text, category, labels, published_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [page.id, page.title, bodyHtml, bodyText, category, labels, publishedAt, publishedAt],
+          );
+          added++;
+        }
+      } catch (err) {
+        skipped.push(`${page.id} "${page.title}"`);
+        console.warn(`[portal-kb] Skipped page ${page.id} "${page.title}":`, err instanceof Error ? err.message : err);
       }
     }
 
-    console.log(`[portal-kb] Sync complete: ${added} added, ${updated} updated`);
-    return { added, updated };
+    console.log(`[portal-kb] Sync complete: fetched ${pages.length}, ${added} added, ${updated} updated, ${skipped.length} skipped${skipped.length ? ` [${skipped.join('; ')}]` : ''}`);
+    return { fetched: pages.length, added, updated, skipped: skipped.length };
   }
 
   private getConfluenceAuth(): { url: string; auth: string } {
