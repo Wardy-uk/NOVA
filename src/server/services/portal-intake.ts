@@ -2,6 +2,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
 import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput } from '../../shared/portal-types.js';
 import { execute, queryOne, query } from './database.js';
+import { logError } from './error-log.js';
 import { trackEvent } from './portal-analytics.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
@@ -286,6 +287,7 @@ export class PortalIntakeService {
       });
     } catch (err) {
       console.error('[portal-intake] Jira ticket creation failed:', err);
+      await logError('portal-intake', err, { severity: 'critical', context: { phase: 'ticket', category: input.category } });
       throw new Error('We couldn\'t create your ticket right now. Please try again, or contact us directly at support@nurtur.tech.');
     }
 
@@ -365,6 +367,7 @@ export class PortalIntakeService {
       });
     } catch (err) {
       console.error('[portal-intake] Network request creation failed:', err);
+      await logError('portal-intake', err, { severity: 'critical', context: { phase: 'network-request' } });
       throw new Error('We couldn\'t raise your ticket right now. Please try again, or contact us directly at support@nurtur.tech.');
     }
 
@@ -416,6 +419,7 @@ export class PortalIntakeService {
       });
     } catch (err) {
       console.error('[portal-intake] Onboarding setup ticket creation failed:', err);
+      await logError('portal-intake', err, { severity: 'critical', context: { phase: 'onboarding-setup' } });
       throw new Error('We couldn\'t create your onboarding request right now. Please try again, or contact us directly at support@nurtur.tech.');
     }
 

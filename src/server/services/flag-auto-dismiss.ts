@@ -1,5 +1,6 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, execute } from './database.js';
+import { logError } from './error-log.js';
 
 interface SweepResult {
   resolved: number;
@@ -25,39 +26,53 @@ export class FlagAutoDismissService {
     let aged_out = 0;
     let auto_handled = 0;
 
+    // Each sweep branch is isolated: one failing query must not abort the whole
+    // job (and its error surfaces centrally instead of killing the sweep).
     if (dismissResolved) {
-      const rows = await query<FlagRow>(
-        `SELECT f.id, f.ticket_key FROM agent_flagged_tickets f
-         INNER JOIN jira_issue_cache j ON f.ticket_key = j.issue_key
-         WHERE f.status = 'open' AND j.status_name IN ('Done', 'Resolved', 'Closed')`
-      );
-      for (const row of rows) {
-        await this.dismiss(row.id, row.ticket_key, 'ticket_resolved');
+      try {
+        const rows = await query<FlagRow>(
+          `SELECT f.id, f.ticket_key FROM agent_flagged_tickets f
+           INNER JOIN jira_issue_cache j ON f.ticket_key = j.issue_key
+           WHERE f.status = 'open' AND j.status_name IN ('Done', 'Resolved', 'Closed')`
+        );
+        for (const row of rows) {
+          await this.dismiss(row.id, row.ticket_key, 'ticket_resolved');
+        }
+        resolved = rows.length;
+      } catch (err) {
+        await logError('flag-auto-dismiss', err, { context: { phase: 'resolved' } });
       }
-      resolved = rows.length;
     }
 
-    const agedRows = await query<FlagRow>(
-      `SELECT id, ticket_key FROM agent_flagged_tickets
-       WHERE status = 'open' AND risk_score < ?
-       AND created_at < DATEADD(DAY, -?, GETUTCDATE())`,
-      [riskThreshold, ageDays]
-    );
-    for (const row of agedRows) {
-      await this.dismiss(row.id, row.ticket_key, 'aged_out');
+    try {
+      const agedRows = await query<FlagRow>(
+        `SELECT id, ticket_key FROM agent_flagged_tickets
+         WHERE status = 'open' AND risk_score < ?
+         AND flagged_at < DATEADD(DAY, -?, GETUTCDATE())`,
+        [riskThreshold, ageDays]
+      );
+      for (const row of agedRows) {
+        await this.dismiss(row.id, row.ticket_key, 'aged_out');
+      }
+      aged_out = agedRows.length;
+    } catch (err) {
+      await logError('flag-auto-dismiss', err, { context: { phase: 'aged_out' } });
     }
-    aged_out = agedRows.length;
 
-    const autoRows = await query<FlagRow>(
-      `SELECT f.id, f.ticket_key FROM agent_flagged_tickets f
-       WHERE f.status = 'open' AND EXISTS (
-         SELECT 1 FROM agent_auto_rule_log a WHERE a.ticket_key = f.ticket_key AND a.created_at > f.created_at
-       )`
-    );
-    for (const row of autoRows) {
-      await this.dismiss(row.id, row.ticket_key, 'auto_handled');
+    try {
+      const autoRows = await query<FlagRow>(
+        `SELECT f.id, f.ticket_key FROM agent_flagged_tickets f
+         WHERE f.status = 'open' AND EXISTS (
+           SELECT 1 FROM agent_auto_rule_log a WHERE a.ticket_key = f.ticket_key AND a.created_at > f.flagged_at
+         )`
+      );
+      for (const row of autoRows) {
+        await this.dismiss(row.id, row.ticket_key, 'auto_handled');
+      }
+      auto_handled = autoRows.length;
+    } catch (err) {
+      await logError('flag-auto-dismiss', err, { context: { phase: 'auto_handled' } });
     }
-    auto_handled = autoRows.length;
 
     return { resolved, aged_out, auto_handled, total: resolved + aged_out + auto_handled };
   }

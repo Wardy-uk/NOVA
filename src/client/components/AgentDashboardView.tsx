@@ -319,6 +319,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
   const [kbGaps, setKbGaps] = useState<KbGap[]>([]);
   const [costData, setCostData] = useState<CostSummary | null>(null);
+  const [costError, setCostError] = useState<string | null>(null);
   const [flaggedTickets, setFlaggedTickets] = useState<FlaggedTicket[]>([]);
   const [flaggedSummary, setFlaggedSummary] = useState<FlaggedSummary | null>(null);
   const [lifecycleBreakdown, setLifecycleBreakdown] = useState<LifecycleBreakdown | null>(null);
@@ -398,7 +399,8 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); });
     }
     if (tab === 'costs') {
-      api('/costs?days=30').then(r => { if (r.ok) setCostData(r.data); });
+      setCostError(null);
+      api('/costs?days=30').then(r => { if (r.ok) setCostData(r.data); else setCostError(r.error || 'Failed to load cost data'); });
     }
     if (tab === 'flagged') {
       api('/flagged').then(r => { if (r.ok) setFlaggedTickets(r.data); });
@@ -529,7 +531,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'training-signals' && <TrainingSignalsTab />}
       {tab === 'learning' && <LearningTab />}
       {tab === 'pipelines' && <PipelinesTab />}
-      {tab === 'costs' && <CostsTab data={costData} onPeriodChange={(days) => api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); })} />}
+      {tab === 'costs' && <CostsTab data={costData} error={costError} onPeriodChange={(days) => { setCostError(null); api(`/costs?days=${days}`).then(r => { if (r.ok) setCostData(r.data); else setCostError(r.error || 'Failed to load cost data'); }); }} />}
 
       {/* Detail panel */}
       {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} onRefresh={() => { refresh(); setSelected(null); }} />}
@@ -3724,7 +3726,7 @@ function FlaggedTab({ tickets, onRefresh }: { tickets: FlaggedTicket[]; onRefres
   );
 }
 
-function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriodChange: (days: number) => void }) {
+function CostsTab({ data, error, onPeriodChange }: { data: CostSummary | null; error?: string | null; onPeriodChange: (days: number) => void }) {
   const [days, setDays] = useState(30);
   const [modeCosts, setModeCosts] = useState<{ working: { cost: number; calls: number }; outOfHours: { cost: number; calls: number } } | null>(null);
 
@@ -3732,6 +3734,11 @@ function CostsTab({ data, onPeriodChange }: { data: CostSummary | null; onPeriod
     api(`/costs/by-mode?days=${days}`).then(r => r.ok && setModeCosts(r.data)).catch(() => {});
   }, [days]);
 
+  if (error) return (
+    <div className="text-sm py-8 text-center text-amber-400">
+      {/super admin/i.test(error) ? 'Cost data is restricted to super-admins.' : `Couldn't load cost data: ${error}`}
+    </div>
+  );
   if (!data) return <div className="text-sm text-neutral-500 py-8 text-center">Loading cost data...</div>;
 
   const totalModelCost = data.byModel.reduce((s, m) => s + m.cost, 0) || 1;
