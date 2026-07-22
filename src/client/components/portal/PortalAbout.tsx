@@ -4,6 +4,8 @@ import type { PortalAuthPayload } from '../../../shared/portal-types.js';
 interface Props {
   user: PortalAuthPayload;
   multiOrg?: boolean;
+  /** The org currently being viewed (may differ from the home org in the token). */
+  orgName?: string;
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -22,7 +24,8 @@ const ROLES: Array<{ name: string; can: string }> = [
   { name: 'Organisation Admin', can: 'A senior contact for the organisation, with full visibility of its requests.' },
 ];
 
-export default function PortalAbout({ user, multiOrg }: Props) {
+export default function PortalAbout({ user, multiOrg, orgName }: Props) {
+  const activeOrgName = orgName || user.orgName;
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <div>
@@ -41,7 +44,7 @@ export default function PortalAbout({ user, multiOrg }: Props) {
 
       <Card title="Your organisation">
         <p>
-          You’re signed in under <strong>{user.orgName}</strong>. Your requests, tickets and dashboards all belong to this
+          You’re viewing <strong>{activeOrgName}</strong>. Your requests, tickets and dashboards all belong to this
           organisation.
         </p>
         {multiOrg && (

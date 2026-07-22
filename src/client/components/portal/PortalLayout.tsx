@@ -44,6 +44,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
   const canSwitch = !!onSwitchOrg && !!orgs && orgs.length > 1;
   const active = orgs?.find(o => o.orgId === activeOrgId) ?? null;
   const viewingReadOnly = active?.canWrite === false;
+  const activeOrgName = active?.orgName ?? user.orgName;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -53,7 +54,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
               {logoUrl
-                ? <img src={logoUrl} alt={user.orgName || 'Logo'} className="h-8 max-w-[160px] object-contain" />
+                ? <img src={logoUrl} alt={activeOrgName || 'Logo'} className="h-8 max-w-[160px] object-contain" />
                 : <span className="text-xl font-heading font-extrabold tracking-tight text-brand">nurtur</span>}
               <span className="text-sm font-medium text-gray-600" aria-hidden="true">|</span>
               <span className="text-sm font-medium text-gray-600">Support Portal</span>
@@ -78,7 +79,7 @@ export default function PortalLayout({ user, currentView, onNavigate, onLogout, 
               )}
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-medium text-gray-900">{user.email}</div>
-                <div className="text-xs text-gray-600">{user.orgName}</div>
+                <div className="text-xs text-gray-600">{activeOrgName}</div>
               </div>
               <button
                 onClick={onLogout}
