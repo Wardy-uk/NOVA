@@ -6,11 +6,12 @@ import {
   PORTAL_ROLE_RANK,
   type OnboardingEscalationPolicy,
 } from '../../shared/portal-types.js';
+import type { OnboardingEscalationService } from '../services/onboarding-escalation-service.js';
 
 // Per-org onboarding escalation policy. Readable/editable by Org Admin and above.
-// Storage: portal_organisations.escalation_policy (JSON). No policy yet → the
-// Guild-agreement default is returned so admins start from a sensible template.
-export function createPortalEscalationRoutes(): Router {
+// Storage: portal_organisations.escalation_policy (JSON). No policy yet → a
+// neutral default template is returned so admins start from a sensible base.
+export function createPortalEscalationRoutes(escalation: OnboardingEscalationService): Router {
   const router = Router();
 
   const isOrgAdmin = (req: Request) =>
@@ -67,6 +68,37 @@ export function createPortalEscalationRoutes(): Router {
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to save escalation policy' });
+    }
+  });
+
+  // Onboarding tickets for the test-send picker.
+  router.get('/escalation-policy/onboardings', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!isOrgAdmin(req)) { res.status(403).json({ ok: false, error: 'Organisation admin access required' }); return; }
+    try {
+      const data = await escalation.listOrgOnboardings(req.portalUser.orgId);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load onboardings' });
+    }
+  });
+
+  // Fire a level's emails for selected tickets as a test — delivered only to the
+  // triggering admin, marked [TEST], nothing logged.
+  router.post('/escalation-policy/test-send', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!isOrgAdmin(req)) { res.status(403).json({ ok: false, error: 'Organisation admin access required' }); return; }
+    const levelDay = Number(req.body?.levelDay);
+    const ticketKeys = Array.isArray(req.body?.ticketKeys) ? req.body.ticketKeys.filter((k: unknown) => typeof k === 'string') : [];
+    if (!levelDay || ticketKeys.length === 0) {
+      res.status(400).json({ ok: false, error: 'Pick a level and at least one onboarding ticket.' });
+      return;
+    }
+    try {
+      const result = await escalation.testSend(req.portalUser.orgId, levelDay, ticketKeys, req.portalUser.email);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Test send failed' });
     }
   });
 

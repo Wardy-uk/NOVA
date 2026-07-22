@@ -100,6 +100,38 @@ export default function PortalEscalations() {
     return () => { cancelled = true; };
   }, []);
 
+  // ── Test send ──
+  const [onboardings, setOnboardings] = useState<Array<{ key: string; summary: string; stage: string; ageDays: number; reporterEmail: string | null }>>([]);
+  const [testLevel, setTestLevel] = useState<number | ''>('');
+  const [testTickets, setTestTickets] = useState<Record<string, boolean>>({});
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [testErr, setTestErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    pf('/api/portal/escalation-policy/onboardings')
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.ok) setOnboardings(d.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const sendTest = async () => {
+    const ticketKeys = Object.keys(testTickets).filter(k => testTickets[k]);
+    if (!testLevel || ticketKeys.length === 0) { setTestErr('Pick a level and at least one onboarding.'); return; }
+    setTestBusy(true); setTestErr(null); setTestMsg(null);
+    try {
+      const res = await pf('/api/portal/escalation-policy/test-send', { method: 'POST', body: JSON.stringify({ levelDay: testLevel, ticketKeys }) });
+      const d = await res.json();
+      if (d.ok) setTestMsg(d.data.note); else setTestErr(d.error || 'Test send failed');
+    } catch {
+      setTestErr('Test send failed');
+    } finally {
+      setTestBusy(false);
+    }
+  };
+
   const save = async () => {
     if (!policy) return;
     setSaving(true);
@@ -180,6 +212,51 @@ export default function PortalEscalations() {
         >
           {saving ? 'Saving…' : 'Save policy'}
         </button>
+      </div>
+
+      {/* Test send */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <h2 className="text-base font-semibold text-gray-900">Test send</h2>
+        <p className="text-xs text-gray-500">
+          Fire a level's emails now for the onboardings you pick, as if they'd hit that milestone. Everything is sent
+          <strong> only to you</strong>, marked <strong>[TEST]</strong> (noting who it would really go to). Nothing is logged and real escalations still fire normally.
+        </p>
+        {testErr && <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">{testErr}</div>}
+        {testMsg && <div className="p-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">{testMsg}</div>}
+
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Level to test</label>
+          <select value={testLevel} onChange={e => setTestLevel(e.target.value ? Number(e.target.value) : '')} className={inputCls}>
+            <option value="">Select a level…</option>
+            {policy.levels.map((l, i) => <option key={i} value={l.day}>{l.name}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Onboardings</label>
+          {onboardings.length === 0 ? (
+            <p className="text-xs text-gray-400">No open onboardings found for your organisation.</p>
+          ) : (
+            <ul className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {onboardings.map(o => (
+                <li key={o.key} className="px-3 py-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={!!testTickets[o.key]} onChange={e => setTestTickets(p => ({ ...p, [o.key]: e.target.checked }))} className="rounded border-gray-300 text-brand focus:ring-brand" />
+                    <span className="font-mono text-xs text-gray-500">{o.key}</span>
+                    <span className="truncate flex-1">{o.summary}</span>
+                    <span className="text-xs text-gray-400 whitespace-nowrap">{o.ageDays}d · {o.stage}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex justify-end">
+          <button type="button" onClick={sendTest} disabled={testBusy || !testLevel || Object.values(testTickets).every(v => !v)} className="px-5 py-2 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark disabled:opacity-50">
+            {testBusy ? 'Sending…' : 'Send test to me'}
+          </button>
+        </div>
       </div>
     </div>
   );

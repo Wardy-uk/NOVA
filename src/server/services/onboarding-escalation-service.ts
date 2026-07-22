@@ -149,6 +149,61 @@ export class OnboardingEscalationService {
     }
   }
 
+  /** Onboarding tickets for an org, for the test-send picker. */
+  async listOrgOnboardings(orgId: number): Promise<Array<{ key: string; summary: string; stage: string; ageDays: number; reporterEmail: string | null }>> {
+    const dashboard = await this.dashboards.getOnboardingDashboard(orgId);
+    return dashboard.rows.map(r => ({ key: r.key, summary: r.summary, stage: r.stage, ageDays: r.ageDays, reporterEmail: r.reporterEmail }));
+  }
+
+  /** Send the emails a given level WOULD fire for the selected tickets, as a test —
+   *  all delivered to `toEmail`, marked [TEST], showing the real intended
+   *  recipients. Writes nothing to the dedup log, so real sends still fire later. */
+  async testSend(orgId: number, levelDay: number, ticketKeys: string[], toEmail: string): Promise<{ sent: string[]; note: string }> {
+    if (!this.email.isConfigured()) throw new Error('Email is not configured.');
+    if (!toEmail?.trim()) throw new Error('No email address to send the test to.');
+
+    const org = await queryOne<{ name: string; escalation_policy: string | null }>(
+      `SELECT name, escalation_policy FROM portal_organisations WHERE id = ?`, [orgId],
+    );
+    if (!org?.escalation_policy) throw new Error('No escalation policy saved for this organisation yet — save it first.');
+    const parsed = OnboardingEscalationPolicySchema.safeParse(JSON.parse(org.escalation_policy));
+    if (!parsed.success) throw new Error('Saved escalation policy is invalid.');
+    const level = parsed.data.levels.find(l => l.day === levelDay);
+    if (!level) throw new Error(`No level configured for day ${levelDay}.`);
+
+    const dashboard = await this.dashboards.getOnboardingDashboard(orgId);
+    const rows = dashboard.rows.filter(r => ticketKeys.includes(r.key));
+    if (rows.length === 0) throw new Error('None of the selected tickets were found for this organisation.');
+
+    const sent: string[] = [];
+    for (const row of rows) {
+      if (level.sendCustomerUpdate) {
+        const base = this.customerUpdateEmail(org.name, row, level);
+        const intended = row.reporterEmail?.trim() || '(no requestor email on this ticket)';
+        await this.email.send(this.wrapTest(base, toEmail, `Progress update — would be sent to the requestor: ${intended}`));
+        sent.push(`${row.key} — progress update`);
+      }
+      if (level.escalate) {
+        const base = this.escalationEmail(org.name, row, level, { name: '', email: toEmail }, false);
+        const to = level.escalationRecipients.filter(r => r.email.trim()).map(r => r.email).join(', ') || '(none configured)';
+        const inform = level.informRecipients.filter(r => r.email.trim()).map(r => r.email).join(', ');
+        await this.email.send(this.wrapTest(base, toEmail, `Escalation — would be sent to: ${to}${inform ? `; also informed: ${inform}` : ''}`));
+        sent.push(`${row.key} — escalation`);
+      }
+    }
+    if (sent.length === 0) throw new Error('That level has neither a progress update nor an escalation enabled — nothing to test.');
+    return { sent, note: `Sent ${sent.length} test email(s) to ${toEmail}.` };
+  }
+
+  private wrapTest(base: { subject: string; html: string; text: string }, to: string, banner: string) {
+    return {
+      to,
+      subject: `[TEST] ${base.subject}`,
+      html: `<div style="background:#fff8e1;border:1px solid #f0d060;border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#6a5300">🧪 <strong>TEST</strong> — ${esc(banner)}. This onboarding has not actually reached this milestone; this message went only to you.</div>${base.html}`,
+      text: `*** TEST — ${banner}. This onboarding has not actually reached this milestone; this message went only to you. ***\n\n${base.text}`,
+    };
+  }
+
   private ticketLine(row: OnboardingDashboardRow): string {
     return `${row.summary} (${row.key})`;
   }
