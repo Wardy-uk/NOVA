@@ -10,7 +10,7 @@ import type {
   PortalOrgFeatures,
   PortalOrgBranding,
 } from '../../shared/portal-types.js';
-import { parseSupportRoutes } from '../../shared/portal-types.js';
+import { parseSupportRoutes, firstNameOnly } from '../../shared/portal-types.js';
 
 // Customer-facing Onboarding + Support dashboards.
 //
@@ -182,7 +182,7 @@ export class PortalDashboardService {
         key: iss.key,
         summary: f.summary || '',
         status: f.status?.name || 'Unknown',
-        owner: f.assignee?.displayName || null,
+        owner: firstNameOnly(f.assignee?.displayName),
         reporterEmail: f.reporter?.emailAddress || null,
         created: f.created || '',
         updated: f.updated || f.created || '',

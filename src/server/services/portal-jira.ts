@@ -10,6 +10,7 @@ import type {
   PortalStatusChange,
   PortalSlaStatus,
 } from '../../shared/portal-types.js';
+import { firstNameOnly } from '../../shared/portal-types.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 import { getOrgScope, CF_BC_ACCOUNT } from './portal-org-scope.js';
 
@@ -94,7 +95,7 @@ function buildCustomerVisibleStatusHistory(
           from: item.fromString ? mapJiraStatusToPortal(item.fromString, settings) : null,
           to: mapJiraStatusToPortal(item.toString || 'Unknown', settings),
           changedAt: entry.created,
-          changedBy: entry.author?.displayName || null,
+          changedBy: firstNameOnly(entry.author?.displayName),
         })),
     )
     .sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
@@ -297,7 +298,7 @@ export class PortalJiraService {
       priority: r.priority,
       created: r.created_at,
       updated: r.updated_at,
-      assignee: r.assignee,
+      assignee: firstNameOnly(r.assignee),
       reporter: r.reporter_email,
       latestComment: null,
     }));
@@ -385,7 +386,7 @@ export class PortalJiraService {
       .filter(comment => comment.jsdPublic !== false)
       .map(comment => ({
         id: comment.id,
-        author: comment.author?.displayName || 'Unknown',
+        author: firstNameOnly(comment.author?.displayName) || 'Unknown',
         body: extractJiraText(comment.body),
         created: comment.created,
         isInternal: false,
@@ -400,7 +401,7 @@ export class PortalJiraService {
       priority: fields.priority?.name || 'Medium',
       created: fields.created || new Date().toISOString(),
       updated: fields.updated || fields.created || new Date().toISOString(),
-      assignee: fields.assignee?.displayName || null,
+      assignee: firstNameOnly(fields.assignee?.displayName),
       reporter: fields.reporter?.emailAddress || fields.reporter?.displayName || null,
       latestComment: publicComments.length > 0 ? publicComments[0].body.slice(0, 200) : null,
       description: extractJiraText(fields.description),

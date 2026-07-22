@@ -74,6 +74,15 @@ const PORTAL_PRIORITY_RANK: Record<string, number> = {
   blocker: 0, 'business critical': 0, highest: 1, high: 2, medium: 3, low: 4, lowest: 5,
 };
 
+/** Customer-facing display of an agent's name: first name only (e.g. "Heidi
+ *  Power" → "Heidi"). Emails and blanks pass through unchanged. */
+export function firstNameOnly(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.includes('@')) return trimmed || null;
+  return trimmed.split(/\s+/)[0];
+}
+
 export function portalPriorityRank(priority: string | null | undefined): number {
   return PORTAL_PRIORITY_RANK[(priority || '').toLowerCase()] ?? 3;
 }
