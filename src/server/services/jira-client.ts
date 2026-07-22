@@ -502,7 +502,7 @@ export class JiraRestClient {
           payload.fields = Object.keys(fields).length > 0 ? fields : undefined;
           continue;
         }
-        if (!bcAccountHandled && /BC Account number is mandatory/i.test(msg)) {
+        if (!bcAccountHandled && /BC Account number is mandatory|BC Account Number with actual value.*does not match/i.test(msg)) {
           bcAccountHandled = true;
           const bcNumber = await this.resolveBcAccount(issueKey, options?.bcInfraFallback ?? false);
           if (bcNumber) {
@@ -530,13 +530,18 @@ export class JiraRestClient {
    * Resolve the real BC account number for a ticket blocked by the "BC Account
    * number is mandatory" validator. Gathers signals from the issue and defers to
    * the injected resolver. Returns:
-   *   - a string  → set it and retry the close;
-   *   - null      → resolved but no confident match → hold for a human;
-   *   - 'N/A'     → resolver unavailable (not configured) → legacy sentinel so
-   *                 closes still work when BC integration is off.
+   * Always returns a value that satisfies the ^CU\d{7}$ validator: the resolved
+   * customer account when a confident (>95%) match is found, otherwise the
+   * Nurtur catch-all CU0001778. Never returns 'N/A' — the validator is now a
+   * regex, so the old sentinel would fail the close.
    */
   private async resolveBcAccount(issueKey: string, infraFallback: boolean): Promise<string | null> {
-    if (!this.bcResolver) return 'N/A'; // no resolver wired → preserve legacy behaviour
+    const FALLBACK_BC = 'CU0001778';
+    const toValidBc = (v: unknown): string => {
+      const clean = typeof v === 'string' ? v.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+      return /^CU\d{7}$/.test(clean) ? clean : FALLBACK_BC;
+    };
+    if (!this.bcResolver) return FALLBACK_BC; // no resolver wired → safe catch-all
     let signals: {
       summary?: string | null; description?: string | null;
       organisationName?: string | null; reporterEmail?: string | null; bcAccountNumber?: string | null;
@@ -559,11 +564,11 @@ export class JiraRestClient {
     }
     try {
       const resolved = await this.bcResolver({ key: issueKey, ...signals }, { infraFallback });
-      // undefined → resolver unavailable → legacy 'N/A' sentinel; null → hold.
-      return resolved === undefined ? 'N/A' : resolved;
+      // Coerce whatever comes back to a validator-valid value; fall back otherwise.
+      return toValidBc(resolved);
     } catch (err) {
       console.error(`[JiraClient] BC resolver threw for ${issueKey}:`, err instanceof Error ? err.message : err);
-      return 'N/A'; // resolver error → don't strand the close; fall back to sentinel
+      return FALLBACK_BC; // resolver error → don't strand the close; use catch-all
     }
   }
 

@@ -2858,11 +2858,12 @@ export class AgentLoop {
           const { fields, comment } = buildResolveFields({
             tldr: `Approved for ${effectiveAction} by ${decidedBy ?? 'unknown'}`,
             resolution,
-            comment: `Ticket resolved — approved by ${decidedBy ?? 'unknown'} via NOVA.`,
+            comment: 'This ticket has been resolved. If you need any further help, please raise a new request.',
           });
+          // Quick Resolve validator requires a PUBLIC comment on the transition.
           await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, {
             fields,
-            comment: { ...comment, internal: true },
+            comment: { ...comment, internal: false },
           });
           console.log(`[agent] Transitioned ${ticketKey} to Resolved after approved ${effectiveAction}`);
         } catch (err) {

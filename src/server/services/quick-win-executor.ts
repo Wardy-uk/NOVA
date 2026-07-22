@@ -81,9 +81,13 @@ export class QuickWinExecutor {
         requestTypeOverride: SILENT_CANCEL_TYPES.has(qw.type) ? 'Emailed request' : undefined,
       });
 
-      // Post the close comment ONCE here. The transition below intentionally does
-      // not carry a comment, otherwise the same text would be posted twice.
-      // spam/vendor = internal team note; everything else = public customer comment.
+      // Build the close comment. It must ride WITH the transition — the NT
+      // "Quick Resolve" validator checks for a public comment added ON the
+      // transition, not one posted separately. spam/vendor/silent-cancel stay
+      // internal (the 'cancel' transition has no public-comment validator);
+      // everything else is a public customer comment.
+      let commentText: string;
+      let commentInternal: boolean;
       if (qw.type === 'kba_match') {
         // Find the best KB match URL from the inputs (stored by reasoner alongside the decision)
         const kbMatches = (decision.inputs.kb_matches as Array<{ title: string; url: string; relevance: number }> | undefined) ?? [];
@@ -91,13 +95,14 @@ export class QuickWinExecutor {
         const articleTitle = bestMatch?.title ?? qw.suggested_kba ?? 'our knowledge base';
         const articleUrl = bestMatch?.url;
         const articleRef = articleUrl ? `[${articleTitle}](${articleUrl})` : articleTitle;
-        const comment = `This question is covered by our knowledge base article: ${articleRef}. Please take a look — it should have everything you need. We're closing this ticket now, but if you need further help just raise a new request.`;
-        await this.jiraClient.addComment(ticketKey, comment, { internal: false });
+        commentText = `This question is covered by our knowledge base article: ${articleRef}. Please take a look — it should have everything you need. We're closing this ticket now, but if you need further help just raise a new request.`;
+        commentInternal = false;
       } else if (SILENT_CANCEL_TYPES.has(qw.type)) {
-        await this.jiraClient.addComment(ticketKey, INTERNAL_CLOSE_COMMENTS[qw.type], { internal: true });
+        commentText = INTERNAL_CLOSE_COMMENTS[qw.type];
+        commentInternal = true;
       } else {
-        const comment = CLOSE_COMMENTS[qw.type] || `This ticket has been closed. If you still need help, please raise a new request.`;
-        await this.jiraClient.addComment(ticketKey, comment, { internal: false });
+        commentText = CLOSE_COMMENTS[qw.type] || `This ticket has been closed. If you still need help, please raise a new request.`;
+        commentInternal = false;
       }
 
       // Find and execute transition — try primary name, then fallbacks
@@ -123,26 +128,20 @@ export class QuickWinExecutor {
       };
       try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
 
-      if (['resolve', 'cancel'].includes(targetTransition)) {
-        try {
-          const resolution = resMap[qw.type] || 'No Fault Found';
-          // Comment was already posted above — only set the resolution fields here,
-          // do NOT pass a comment or it would be duplicated on the ticket.
-          const { fields } = buildResolveFields({
-            tldr: `Quick win auto-close: ${qw.type}`,
-            resolution,
-            comment: '',
-          });
-          await this.jiraClient.transitionIssue(ticketKey, transitionId, { fields });
-        } catch (err) {
-          console.warn(`[quick-win] Failed to set resolve fields on ${ticketKey}:`, err instanceof Error ? err.message : err);
-          await this.jiraClient.transitionIssue(ticketKey, transitionId, {
-            fields: { resolution: { name: 'Done' } },
-          });
-        }
-      } else {
-        await this.jiraClient.transitionIssue(ticketKey, transitionId);
-      }
+      const resolution = resMap[qw.type] || 'No Fault Found';
+      const { fields, comment } = buildResolveFields({
+        tldr: `Quick win auto-close: ${qw.type}`,
+        resolution,
+        comment: commentText,
+      });
+      // Attach the comment IN the transition and set the full resolve fields.
+      // No bare-payload fallback: if Jira rejects the transition, let it throw so
+      // the ticket stays OPEN for a human, rather than firing a stripped payload
+      // that fails every validator and strands the ticket half-closed.
+      await this.jiraClient.transitionIssue(ticketKey, transitionId, {
+        fields,
+        comment: { ...comment, internal: commentInternal },
+      });
 
       // Mark as executed
       await executeAndGetId(

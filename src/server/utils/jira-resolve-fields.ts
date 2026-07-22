@@ -4,7 +4,7 @@ const CF_NURTUR_PRODUCT = 'customfield_13183';
 const CF_PRODUCT_SUB_CATEGORY = 'customfield_14527';
 const CF_RESOLUTION_TYPE = 'customfield_14494';
 
-function textToAdf(text: string): object {
+export function textToAdf(text: string): object {
   return {
     type: 'doc',
     version: 1,

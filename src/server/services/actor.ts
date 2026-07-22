@@ -6,7 +6,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
-import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { buildResolveFields, textToAdf } from '../utils/jira-resolve-fields.js';
 import { setRequestType } from './close-ticket-helper.js';
 import { reviewComment } from './comment-review.js';
 
@@ -349,7 +349,7 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
           const resMapRaw = this.settings.get('agent_resolution_type_map');
           let resMap: Record<string, string> = {};
           try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch {}
-          const resolution = resMap[decision.action] || 'Tech Services Fix';
+          const resolution = resMap[decision.action] || 'Fix By Tech Services';
           const { fields: resolveFields } = buildResolveFields({
             tldr: (decision.output.tldr as string) || `Resolved by NOVA agent (${decision.action})`,
             resolution,
@@ -360,7 +360,14 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
           console.warn(`[actor] Failed to build resolve fields for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
         }
       }
-      await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, { fields: existingFields });
+      // Quick Resolve requires a public comment ON the transition — use NOVA's
+      // customer reply if there is one, otherwise a neutral closing note.
+      const closeText = (decision.output.draft_response as string)?.trim()
+        || 'This ticket has been resolved. If you need any further help, please raise a new request.';
+      await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, {
+        fields: existingFields,
+        comment: { body: textToAdf(closeText), internal: false },
+      });
     } else {
       await this.jiraClient.transitionIssue(decision.ticketKey, transitionId, {
         fields: (decision.output.fields as Record<string, unknown>) ?? undefined,

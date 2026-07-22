@@ -10,10 +10,12 @@
  * organisation), NOT necessarily the reporter (plugin/infra reporters like
  * smart.plugin.manager@wpengine.com are not customers).
  *
- * Hard rule (Nick): NEVER invent a value. If BC returns zero or ambiguous
- * matches, return null → the caller holds the ticket for a human. The 'N/A'
- * sentinel in jira-client.transitionIssue remains only as the last-resort
- * fallback for callers that opt into it.
+ * Policy (Nick, 22 Jul 2026): prefer the customer's real BC account, but never
+ * let a missing one block a close. If no confident match resolves from any
+ * signal, fall back to Nurtur's own BC account (CU0001778) so the mandatory
+ * ^CU\d{7}$ validator is satisfied and the ticket can close. (This supersedes
+ * the earlier "never invent a value → hold" rule — holding was the main thing
+ * blocking NOVA's closes.)
  *
  * Signal priority (most reliable first):
  *   1. A BC account number already on the ticket (real, non-sentinel) — trust it.
@@ -23,7 +25,7 @@
  *
  * A signal "resolves" only when it yields exactly ONE distinct BC customer, OR
  * when 2+ match but exactly one is an *exact* match (org name / email domain).
- * Otherwise → try the next signal; still ambiguous at the end → hold for human.
+ * Otherwise → try the next signal; still nothing at the end → CU0001778 fallback.
  *
  * Infra notifications (PMTA / BYM-infra with no real customer) are the one
  * exception: callers handling those pass `{ infraFallback: true }`, and when no
@@ -33,8 +35,20 @@
 
 import type { BusinessCentralClient, BcRawCustomer } from './bc-client.js';
 
-/** Nurtur's own BC account — used to close Nurtur-internal infra notifications (PMTA/BYM). */
+/** Nurtur's own BC account — the catch-all when no confident customer resolves. */
 export const NURTUR_BC_ACCOUNT = 'CU0001778';
+
+/**
+ * Coerce a value to the exact BC account format the Jira validator demands
+ * (^CU\d{7}$). Strips stray punctuation/whitespace (e.g. "CU0001474." → the
+ * malformed trailing dot that failed NT-24707) and uppercases. Returns null if
+ * it still doesn't conform, so the caller resolves a real one or falls back.
+ */
+export function sanitiseBcNumber(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return /^CU\d{7}$/.test(cleaned) ? cleaned : null;
+}
 
 export interface ResolverTicket {
   key?: string;
@@ -52,7 +66,7 @@ export interface BcResolution {
   /** Human-readable explanation — used for internal "needs manual lookup" notes and logs. */
   reason: string;
   /** Which signal produced the match (when resolved). */
-  signal?: 'existing' | 'organisation' | 'domain' | 'reporter' | 'infra';
+  signal?: 'existing' | 'organisation' | 'domain' | 'reporter' | 'infra' | 'fallback';
 }
 
 export interface ResolveOptions {
@@ -174,9 +188,11 @@ export async function resolveBcAccountDetailed(
   ticket: ResolverTicket,
   opts: ResolveOptions = {},
 ): Promise<BcResolution> {
-  // 1. Trust an existing real value on the ticket.
+  // 1. Trust an existing real value on the ticket — but only if it's well-formed
+  //    (a malformed one like "CU0001474." fails the validator; re-resolve instead).
   if (!isSentinel(ticket.bcAccountNumber)) {
-    return { number: ticket.bcAccountNumber!.trim(), reason: 'ticket already carries a BC account number', signal: 'existing' };
+    const existing = sanitiseBcNumber(ticket.bcAccountNumber);
+    if (existing) return { number: existing, reason: 'ticket already carries a BC account number', signal: 'existing' };
   }
 
   let sawAmbiguous = false;
@@ -222,17 +238,15 @@ export async function resolveBcAccountDetailed(
     if (hit.ambiguous) sawAmbiguous = true;
   }
 
-  // 5. Infra notifications (PMTA/BYM) have no customer by design — close them
-  //    against Nurtur's own BC account instead of holding, if the caller opted in.
-  //    Never do this when a signal was merely ambiguous — that needs a human.
-  if (opts.infraFallback && !sawAmbiguous) {
-    return { number: NURTUR_BC_ACCOUNT, reason: 'no customer resolved — Nurtur-internal infra notification, using Nurtur BC account', signal: 'infra' };
-  }
-
+  // 5. No confident (>95%) BC match from any signal — fall back to Nurtur's own
+  //    BC account so the ^CU\d{7}$ validator is satisfied and the close proceeds.
+  //    This covers both "no match" and "ambiguous" (2+ matches, none exact):
+  //    both are below the confidence bar, so we never write a guessed customer —
+  //    just the safe Nurtur catch-all.
   const why = sawAmbiguous
-    ? 'BC matches were ambiguous with no exact org/domain match — needs manual lookup before close'
-    : 'no BC account could be resolved from organisation, domain, or reporter — needs manual lookup before close';
-  return { number: null, reason: why };
+    ? 'BC matches were ambiguous with no exact org/domain match — using Nurtur catch-all CU0001778'
+    : 'no confident BC match from organisation, domain, or reporter — using Nurtur catch-all CU0001778';
+  return { number: NURTUR_BC_ACCOUNT, reason: why, signal: 'fallback' };
 }
 
 /**
