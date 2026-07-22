@@ -33,6 +33,7 @@ const LeaderboardRebuild = lazy(() => import('./components/LeaderboardRebuild.js
 const KpiRebuildHistory = lazy(() => import('./components/KpiRebuildHistory.js').then(m => ({ default: m.KpiRebuildHistory })));
 const KpiRebuildLegacy = lazy(() => import('./components/KpiRebuildLegacy.js').then(m => ({ default: m.KpiRebuildLegacy })));
 const OperationalIndicators = lazy(() => import('./components/OperationalIndicators.js').then(m => ({ default: m.OperationalIndicators })));
+const KpiTrackerExport = lazy(() => import('./components/KpiTrackerExport.js').then(m => ({ default: m.KpiTrackerExport })));
 const KpiRebuildTrends = lazy(() => import('./components/KpiRebuildTrends.js').then(m => ({ default: m.KpiRebuildTrends })));
 const TpjMaintenanceView = lazy(() => import('./components/TpjMaintenanceView.js').then(m => ({ default: m.TpjMaintenanceView })));
 const QAView = lazy(() => import('./components/QAView.js').then(m => ({ default: m.QAView })));
@@ -119,7 +120,7 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
-  | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'csat-adoption' | 'tpj-maintenance'
+  | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'kpi-rebuild-tracker' | 'csat-adoption' | 'tpj-maintenance'
   | 'backfill-status'
   | 'surveys' | 'people-roster' | 'people-profile' | 'people-121-setup' | 'people-121-overview'
   | 'training-matrix' | 'training-summary'
@@ -233,6 +234,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-rebuild-trends', label: 'Trends' },
       { view: 'kpi-rebuild-operational', label: 'Operational Indicators' },
       { view: 'kpi-rebuild-legacy', label: 'Legacy KPIs' },
+      { view: 'kpi-rebuild-tracker', label: 'Tracker Export' },
       { view: 'csat-adoption', label: 'CSAT Adoption' },
       { view: 'tpj-maintenance', label: 'TPJ Maintenance' },
     ],
@@ -1182,6 +1184,9 @@ export function App() {
           )}
           {view === 'kpi-rebuild-legacy' && (
             <KpiRebuildLegacy />
+          )}
+          {view === 'kpi-rebuild-tracker' && (
+            <KpiTrackerExport />
           )}
           {view === 'csat-adoption' && (
             <CsatAdoptionView />

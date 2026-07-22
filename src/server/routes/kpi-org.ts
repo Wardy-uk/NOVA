@@ -40,6 +40,47 @@ function enrich(row: OrgKpiDailyRow) {
   };
 }
 
+// Fixed row order of Nick's "Daily KPI Tracker" spreadsheet (rows 07–40), mapped to
+// registry KPI keys. kpiKey === null → rendered as a blank row (kept so the block
+// pastes into the sheet in exact row alignment). Column metadata (Daily/Monthly KPI,
+// People, Individual Responsible) is intentionally excluded — it lives in the sheet.
+const TRACKER_ROWS: { label: string; kpiKey: string | null }[] = [
+  { label: 'New Tickets', kpiKey: 'nt_legacy_new_tickets' },
+  { label: 'Total Solved', kpiKey: 'nt_legacy_solved_today' },
+  { label: 'Solved by NOVA', kpiKey: 'nt_solved_nova' },
+  { label: 'Number of Tickets in CC - Incidents', kpiKey: 'nt_legacy_cc_incidents' },
+  { label: 'Number of Tickets in CC - Service Requests', kpiKey: 'nt_legacy_cc_service_requests' },
+  { label: 'Number of Tickets in CC - TPJ', kpiKey: 'nt_legacy_cc_tpj' },
+  { label: 'Number of Tickets in Production', kpiKey: 'nt_legacy_production' },
+  { label: 'Number of Tickets in Tier 2', kpiKey: 'nt_legacy_tier2' },
+  { label: 'Number of Tickets in Tier 3', kpiKey: 'nt_legacy_tier3' },
+  { label: 'Number of Tickets in Development', kpiKey: 'nt_legacy_development' },
+  { label: 'Number of TPJ Tickets in Dev', kpiKey: null },                         // row 17 — blank per spec
+  { label: 'Number of Tickets With No Reply in CC - Incidents', kpiKey: 'nt_lg_noreply_cc_incidents_over_sla_actionable' },
+  { label: 'Number of Tickets With No Reply in CC - Service Requests', kpiKey: 'nt_lg_noreply_cc_service_requests_over_sla_actionable' },
+  { label: 'Number of Tickets With No Reply in CC - TPJ', kpiKey: 'nt_lg_noreply_cc_tpj_over_sla_actionable' },
+  { label: 'Number of Tickets With No Reply in Tier 2', kpiKey: 'nt_lg_noreply_tier_2_over_sla_actionable' },
+  { label: 'Number of Tickets With No Reply in Tier 3', kpiKey: 'nt_lg_noreply_tier_3_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (actionable) (Incidents)', kpiKey: 'nt_lg_oversla_cc_incidents_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (actionable) (Service Requests)', kpiKey: 'nt_lg_oversla_cc_service_requests_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (actionable) (TPJ)', kpiKey: 'nt_lg_oversla_cc_tpj_over_sla_actionable' },
+  { label: 'Number of Tier 2 tickets over SLA (actionable)', kpiKey: 'nt_lg_oversla_tier_2_over_sla_actionable' },
+  { label: 'Number of Tier 3 tickets over SLA (actionable)', kpiKey: 'nt_lg_oversla_tier_3_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (Not actionable) (Incidents)', kpiKey: 'nt_lg_oversla_notact_cc_incidents_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (Not actionable) (Service Requests)', kpiKey: 'nt_lg_oversla_notact_cc_service_requests_over_sla_actionable' },
+  { label: 'Number of CC tickets over SLA (Not actionable) (TPJ)', kpiKey: 'nt_lg_oversla_notact_cc_tpj_over_sla_actionable' },
+  { label: 'Number of Tier 2 tickets over SLA (not actionable)', kpiKey: 'nt_lg_oversla_notact_tier_2_over_sla_actionable' },
+  { label: 'Number of Tier 3 tickets over SLA (not actionable)', kpiKey: 'nt_lg_oversla_notact_tier_3_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in CC (Incident)', kpiKey: 'nt_lg_oldest_cc_incidents_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in CC (Service Requests)', kpiKey: 'nt_lg_oldest_cc_service_requests_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in CC (TPJ)', kpiKey: 'nt_lg_oldest_cc_tpj_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in Production', kpiKey: 'nt_lg_oldest_production_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in Tier 2', kpiKey: 'nt_lg_oldest_tier_2_over_sla_actionable' },
+  { label: 'Oldest actionable ticket (days) in Tier 3', kpiKey: 'nt_lg_oldest_tier_3_over_sla_actionable' },
+  { label: 'Failed Jobs remaining on Board', kpiKey: null },                        // row 39 — blank per spec
+  { label: 'No. of CI In Progress (unmitigated)', kpiKey: null },                    // row 40 — blank per spec
+];
+
 export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
   const router = Router();
 
@@ -105,6 +146,50 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
         }
       }
       res.json({ ok: true, data: grid });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Daily KPI Tracker export — the spreadsheet grid (fixed 34-row order × weekday date
+  // columns) for copy-paste into the sheet. /support/tracker-export?from=YYYY-MM-DD&to=YYYY-MM-DD
+  router.get('/support/tracker-export', async (req, res) => {
+    const { from, to } = req.query as { from?: string; to?: string };
+    if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
+    try {
+      // kpiKey → (date → value) from the stored table.
+      const stored = await getTeamRange('Support', from, to);
+      const byKey = new Map<string, Map<string, number | null>>();
+      for (const r of stored) {
+        if (!byKey.has(r.kpi_key)) byKey.set(r.kpi_key, new Map());
+        byKey.get(r.kpi_key)!.set(r.kpi_date, r.value);
+      }
+      // Live overlay for today (the stored today column is a partial mid-day capture).
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (from <= todayUk && todayUk <= to) {
+        const jira = deps.getJiraClient();
+        if (jira) {
+          try {
+            const snap = await getSupportLiveSnapshot(jira);
+            for (const it of snap.items) {
+              if (!byKey.has(it.key)) byKey.set(it.key, new Map());
+              byKey.get(it.key)!.set(todayUk, it.value);
+            }
+          } catch { /* keep stored today value on live-compute failure */ }
+        }
+      }
+      // Weekday columns only (Mon–Fri) across the range, matching the tracker.
+      const dates: string[] = [];
+      const end = new Date(`${to}T00:00:00Z`);
+      for (const d = new Date(`${from}T00:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        const dow = d.getUTCDay();
+        if (dow !== 0 && dow !== 6) dates.push(d.toISOString().slice(0, 10));
+      }
+      const rows = TRACKER_ROWS.map(row => ({
+        label: row.label,
+        values: dates.map(dt => (row.kpiKey ? (byKey.get(row.kpiKey)?.get(dt) ?? null) : null)),
+      }));
+      res.json({ ok: true, data: { dates, rows } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }
