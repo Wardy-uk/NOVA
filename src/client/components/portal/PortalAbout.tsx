@@ -76,7 +76,7 @@ export default function PortalAbout({ user, multiOrg }: Props) {
           <li><strong>Support</strong> / <strong>Onboarding</strong> — live dashboards of your support and onboarding tickets, where enabled.</li>
           <li><strong>Knowledge Base</strong> — searchable help articles; often the fastest way to an answer.</li>
           <li><strong>Users</strong> — <em>(Organisation Admins)</em> manage your organisation's portal users and their roles. Tick <strong>Include in setup</strong> to auto-add head-office contacts whenever a new office is set up.</li>
-          <li><strong>Escalations</strong> — <em>(Organisation Admins)</em> set the schedule for onboarding progress updates and escalations for your organisation.</li>
+          <li><strong>Escalations</strong> — <em>(Organisation Admins)</em> set the schedule for onboarding progress updates and escalations for your organisation, and send yourself a test to preview them.</li>
         </ul>
       </Card>
 

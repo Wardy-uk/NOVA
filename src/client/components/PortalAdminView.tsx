@@ -164,6 +164,7 @@ function AboutPanel() {
           <li><strong>Progress updates</strong> go automatically to the onboarding’s <strong>requestor</strong> — not a broadcast list.</li>
           <li><strong>Escalations</strong> email the configured internal contacts (with an "also inform" cc list), once per level, deduped and audited.</li>
           <li>Counts in working days, sends only in working hours, and stays off until an admin adds recipients and enables it.</li>
+          <li><strong>Test send</strong> — an admin can fire any level's emails for chosen onboardings on demand; the [TEST] emails go only to the person running the test, and nothing is logged.</li>
         </ul>
       </AboutCard>
 
