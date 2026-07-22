@@ -6,7 +6,7 @@
 import type { JiraRestClient } from '../jira-client.js';
 import { query } from '../database.js';
 import type { OrgKpi, DayCtx } from './registry.js';
-import { NOT_ACTIONABLE_STATUSES } from './registry.js';
+import { NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF } from './registry.js';
 
 /** Port of kpi-pipeline.ts isSlaBreached — true if any cycle is breached / over time.
  *  Returns null when the SLA field is absent (ticket excluded from compliance %). */
@@ -222,7 +222,15 @@ export async function computeNtKpi(
       return { value: null, failed: false };
 
     case 'jql_count': {
-      const n = await jira.jqlCount(c.jql(ctx));
+      let jql = c.jql(ctx);
+      if (ctx.asOf) {
+        // Historical reconstruction. Pure open-stock counts rebuild via NT_OPEN_ASOF.
+        // SLA-breach counts (breached()) need per-ticket cycle parsing (not reconstructed
+        // yet) — return null so they stay blank rather than wrong.
+        if (jql.includes('breached()')) return { value: null, failed: false };
+        jql = jql.split(NT_OPEN).join(NT_OPEN_ASOF(ctx.day, ctx.nextDay));
+      }
+      const n = await jira.jqlCount(jql);
       return n < 0 ? { value: null, failed: true } : { value: n, failed: false };
     }
 
@@ -251,16 +259,22 @@ export async function computeNtKpi(
     }
 
     case 'no_reply':
+      // No-reply is a live operational state; its fields (cf14081/cf14185) aren't
+      // versioned in Jira's changelog, so it can't be reconstructed for a past day.
+      if (ctx.asOf) return { value: null, failed: false };
       return { value: await countNoReply(jira, c.bucketJql, now), failed: false };
 
     case 'oldest_actionable': {
-      const jql = `${c.bucketJql} AND status not in (${NOT_ACTIONABLE_LIST}) ORDER BY created ASC`;
+      const bucket = ctx.asOf ? c.bucketJql.split(NT_OPEN).join(NT_OPEN_ASOF(ctx.day, ctx.nextDay)) : c.bucketJql;
+      const jql = `${bucket} AND status not in (${NOT_ACTIONABLE_LIST}) ORDER BY created ASC`;
       const res = await jira.searchJql(jql, ['created'], 1);
       const oldest = res.issues[0];
       if (!oldest) return { value: 0, failed: false };
       const created = parseDate((oldest.fields as Record<string, unknown>).created);
       if (!created) return { value: 0, failed: false };
-      const days = Math.floor((now.getTime() - created.getTime()) / 86_400_000);
+      // As-of: age measured to end of `day`, not now.
+      const ref = ctx.asOf ? new Date(`${ctx.nextDay}T00:00:00Z`) : now;
+      const days = Math.floor((ref.getTime() - created.getTime()) / 86_400_000);
       return { value: Math.max(0, days), failed: false };
     }
 

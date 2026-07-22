@@ -25,6 +25,10 @@ export interface DayCtx {
   day: string;
   /** YYYY-MM-DD — the day after (exclusive upper bound for JQL ranges). */
   nextDay: string;
+  /** When true, open-stock computes reconstruct the count AS OF `day` (historical
+   *  backfill) using NT_OPEN_ASOF instead of the live NT_OPEN. Flow/outcome KPIs are
+   *  unaffected (already date-bounded). Ignored by the live capture/freeze. */
+  asOf?: boolean;
 }
 
 export type ComputeSpec =
@@ -79,6 +83,13 @@ export interface OrgKpi {
 
 /** "Open / still on the board" — whole Done category plus named statuses (belt & braces). */
 export const NT_OPEN = `project = NT AND statusCategory != Done AND status NOT IN (Closed, Resolved)`;
+
+/** As-of-a-past-day equivalent of NT_OPEN: tickets that existed by `nextDay` and whose
+ *  status WAS NOT Closed/Resolved on `day`. Used to reconstruct historical open-stock
+ *  counts from Jira (statusCategory can't be queried historically; `status WAS ... ON`
+ *  can). Validated against the live wallboard (today: 74 vs 78 for CC Incidents). */
+export const NT_OPEN_ASOF = (day: string, nextDay: string) =>
+  `project = NT AND created < "${nextDay}" AND status WAS NOT IN (Closed, Resolved) ON "${day}"`;
 
 /** Canonical request-type field = JSM customer request type (customfield_12800), values suffixed "(NT)". */
 const RT = 'cf[12800]';
