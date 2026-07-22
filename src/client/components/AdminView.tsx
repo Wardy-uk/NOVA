@@ -1889,6 +1889,24 @@ export function AdminView() {
                     >
                       {kbSyncing === 'purge-confluence' ? 'Purging…' : 'Purge Confluence'}
                     </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Purge ALL KB chunks for TFS docs? This cannot be undone.')) return;
+                        setKbSyncing('purge-tfs');
+                        setKbSyncResult(null);
+                        try {
+                          const res = await fetch('/api/kb-admin/chunks/tfs-docs', { method: 'DELETE' });
+                          const json = await res.json();
+                          setKbSyncResult({ source: 'purge', ok: json.ok, message: json.ok ? `Deleted ${json.data?.deleted ?? 0} chunks` : (json.error || 'Purge failed') });
+                        } catch (e) {
+                          setKbSyncResult({ source: 'purge', ok: false, message: e instanceof Error ? e.message : 'Purge failed' });
+                        } finally { setKbSyncing(null); }
+                      }}
+                      disabled={kbSyncing !== null}
+                      className="px-4 py-2 bg-red-900/40 text-red-300 font-medium rounded text-sm hover:bg-red-900/60 transition-colors disabled:opacity-40"
+                    >
+                      {kbSyncing === 'purge-tfs' ? 'Purging…' : 'Purge TFS'}
+                    </button>
                   </>
                 )}
               </div>

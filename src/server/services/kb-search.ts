@@ -48,11 +48,18 @@ export class KbSearchService {
 
       if (chunks.length === 0) return [];
 
-      const scored = chunks.map(chunk => {
-        const chunkEmbedding = this.embedder!.deserializeEmbedding(chunk.embedding);
-        const similarity = cosineSimilarity(queryEmbedding, chunkEmbedding);
-        return { chunk, similarity };
-      });
+      // Only compare same-dimension vectors. During an embedding-model switch the
+      // index can briefly hold vectors from two models (e.g. 1536-d OpenAI + 768-d
+      // local); skip mismatches so triage keeps working on the correctly-embedded
+      // subset instead of scoring garbage / NaN.
+      const dim = queryEmbedding.length;
+      const scored = chunks
+        .map(chunk => {
+          const chunkEmbedding = this.embedder!.deserializeEmbedding(chunk.embedding);
+          if (chunkEmbedding.length !== dim) return null;
+          return { chunk, similarity: cosineSimilarity(queryEmbedding, chunkEmbedding) };
+        })
+        .filter((x): x is { chunk: ChunkRow; similarity: number } => x !== null);
 
       scored.sort((a, b) => b.similarity - a.similarity);
 
