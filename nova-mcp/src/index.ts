@@ -2618,6 +2618,49 @@ server.tool(
 // Server startup
 // ═════════════════════════════════════════════════════════════════════
 
+server.tool(
+  'nova_recent_errors',
+  "Recent entries from NOVA's central error log — business-critical failures across subsystems (llm, agent, jira-sync, api, portal, kpi-pipeline, etc.). Use this to diagnose \"what is failing right now\" instead of grepping server logs.",
+  {
+    source: z.string().optional().describe('Filter by subsystem, e.g. "llm", "agent", "jira-sync", "api"'),
+    severity: z.enum(['error', 'critical']).optional().describe('Filter by severity'),
+    sinceHours: z.number().default(24).describe('Look back this many hours (default 24)'),
+    unresolvedOnly: z.boolean().default(true).describe('Only unresolved errors (default true)'),
+    limit: z.number().default(50).describe('Max rows (default 50, max 500)'),
+  },
+  async ({ source, severity, sinceHours, unresolvedOnly, limit }) => {
+    try {
+      const params: Record<string, string | number> = { sinceHours, limit };
+      if (source) params.source = source;
+      if (severity) params.severity = severity;
+      if (unresolvedOnly) params.resolved = 'false';
+      const rows = await api<unknown[]>('/api/errors', params);
+      return toolResult(
+        `${rows.length} error(s) in the last ${sinceHours}h${source ? ` from ${source}` : ''}${severity ? ` (${severity})` : ''}`,
+        rows,
+      );
+    } catch (err) {
+      return toolResult(`Failed to fetch errors: ${err instanceof Error ? err.message : String(err)}`, { error: true });
+    }
+  },
+);
+
+server.tool(
+  'nova_error_summary',
+  'Counts of NOVA errors grouped by subsystem and severity over a window — a quick health snapshot of what is failing and how much.',
+  {
+    sinceHours: z.number().default(24).describe('Look back this many hours (default 24)'),
+  },
+  async ({ sinceHours }) => {
+    try {
+      const rows = await api<unknown[]>('/api/errors/summary', { sinceHours });
+      return toolResult(`Error summary for the last ${sinceHours}h (${rows.length} group(s))`, rows);
+    } catch (err) {
+      return toolResult(`Failed to fetch error summary: ${err instanceof Error ? err.message : String(err)}`, { error: true });
+    }
+  },
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
