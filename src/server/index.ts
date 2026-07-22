@@ -213,7 +213,7 @@ import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 */
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
-import { captureSupportNt, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
+import { captureSupportNt, recaptureSupportFlows, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
@@ -1767,14 +1767,25 @@ async function main() {
       kpiPipeline.collectDerivedKpis().catch(err => console.error('[kpi-pipeline] Derived KPIs startup failed:', err instanceof Error ? err.message : err));
     }, 120_000);
 
-    // Org KPI (Layer 1) capture — freeze Support/NT KPIs at 18:00 UK each day.
-    jobRegistry.register('kpi-org-capture', 'Org KPI capture (Support/NT 18:00 freeze)', async () => {
+    // Org KPI (Layer 1) capture — freeze Support/NT KPIs at end of day (18:00 UK).
+    // Runs once per UK day on the FIRST tick at/after 18:00, guarded by a date in
+    // settings — NOT a narrow 10-minute window. A missed/slow tick or an evening
+    // restart still performs the freeze, instead of losing the whole day (the old
+    // `ukMin < 10` window silently dropped the freeze, leaving the board frozen at
+    // the morning startup-capture snapshot).
+    jobRegistry.register('kpi-org-capture', 'Org KPI capture (Support/NT end-of-day freeze)', async () => {
+      if (!agentJiraClient) return;
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
-      const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
-      if (ukHour === 18 && ukMin < 10 && agentJiraClient) {
+      const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (ukHour >= 18 && settingsQueries.get('kpi_org_freeze_day') !== todayUk) {
         await captureSupportNt(agentJiraClient);
         await captureAgentKpis(settingsQueries, agentJiraClient);
+        settingsQueries.set('kpi_org_freeze_day', todayUk);
+        // Yesterday is now fully complete — re-capture its flow KPIs (New Tickets /
+        // Solved) so their columns reflect the whole day, not the 18:00-partial freeze.
+        const y = new Date(); y.setUTCDate(y.getUTCDate() - 1);
+        await recaptureSupportFlows(agentJiraClient, y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }));
       }
     }, 10 * 60 * 1000);
 

@@ -84,7 +84,27 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     const { from, to } = req.query as { from?: string; to?: string };
     if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
     try {
-      res.json({ ok: true, data: await getOrgHistoryGrid('Support', from, to) });
+      const grid = await getOrgHistoryGrid('Support', from, to);
+      // Today's stored column freezes at the last capture (startup / 18:00). When the
+      // range includes today (UK), overlay a fresh 60s-cached live recompute so the grid
+      // reflects current counts instead of an early-day snapshot. Prior days stay frozen.
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (from <= todayUk && todayUk <= grid.dates[grid.dates.length - 1]) {
+        const jira = deps.getJiraClient();
+        if (jira) {
+          try {
+            const snap = await getSupportLiveSnapshot(jira);
+            const live = new Map(snap.items.map(it => [it.key, it]));
+            for (const g of grid.groups) {
+              for (const row of g.rows) {
+                const it = live.get(row.key);
+                if (it) row.cells[todayUk] = { value: it.value, rag: it.rag };
+              }
+            }
+          } catch { /* keep stored today column on live-compute failure */ }
+        }
+      }
+      res.json({ ok: true, data: grid });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

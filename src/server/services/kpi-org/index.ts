@@ -69,6 +69,35 @@ export async function captureSupportNt(jira: JiraRestClient, now: Date = new Dat
 }
 
 /**
+ * Re-capture the FLOW KPIs (rollup=sum, e.g. New Tickets / Solved) for a completed
+ * UK day. The 18:00 freeze only sees tickets created/solved up to 18:00, so the
+ * evening is lost; once the day is over its date-bounded JQL yields the true full-day
+ * total. Only flows are touched — stocks (open counts) are point-in-time and must keep
+ * their 18:00 snapshot. Never throws.
+ */
+export async function recaptureSupportFlows(jira: JiraRestClient, day: string): Promise<{ day: string; computed: number; failed: number }> {
+  await ensureOrgKpiTable();
+  const ctx: DayCtx = { day, nextDay: addDay(day) };
+  const now = new Date(`${day}T18:00:00Z`); // freeze instant is irrelevant for flow JQLs
+  const flows = SUPPORT_NT_KPIS.filter(k => k.rollup === 'sum' && k.compute.kind !== 'manual');
+  let computed = 0, failed = 0;
+  for (const kpi of flows) {
+    try {
+      const r = await computeNtKpi(kpi, jira, ctx, now);
+      if (r.failed) { failed++; continue; }
+      const source = kpi.compute.kind === 'escalation_log' ? 'escalation_log' : 'jira';
+      await saveComputed(kpi, day, r.value, source);
+      computed++;
+    } catch (err) {
+      failed++;
+      console.warn(`[kpi-org] flow re-capture failed for ${kpi.key} on ${day}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  console.log(`[kpi-org] flow re-capture ${day}: ${computed} computed, ${failed} failed`);
+  return { day, computed, failed };
+}
+
+/**
  * Startup tasks for the org engine — run fire-and-forget from the server bootstrap
  * so the Legacy KPIs view populates after a deploy without anyone POSTing:
  *   1. Initial history backfill — once (settings flag), capped to the last 90 days.
@@ -99,6 +128,10 @@ export async function runKpiOrgStartupTasks(settings: SettingsQueries, jira: Jir
     if (settings.get('kpi_org_startup_capture_day') !== today) {
       await captureSupportNt(jira);
       settings.set('kpi_org_startup_capture_day', today);
+      // Yesterday is now complete — re-capture its flows to correct the 18:00 partial-day
+      // freeze (evening tickets). Once per UK day, so a mid-morning restart still fixes it.
+      const y = new Date(); y.setUTCDate(y.getUTCDate() - 1);
+      await recaptureSupportFlows(jira, ukDay(y));
     }
   } catch (err) {
     console.warn('[kpi-org] startup capture failed:', err instanceof Error ? err.message : err);
