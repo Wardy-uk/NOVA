@@ -57,9 +57,11 @@ export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClien
   // Reconstruct every non-manual flow (sum) + stock (latest) KPI from Jira. Stocks use
   // asOf (NT_OPEN_ASOF); flows are date-bounded so asOf is irrelevant. Skip the expensive
   // resolved-today outcome family (rollup 'average') — not on the tracker and slow to
-  // reconstruct 200+ days. Unreconstructable stocks (over-SLA, no-reply) return null and
-  // are written blank, overwriting the previously inflated legacy values.
-  const defs = SUPPORT_NT_KPIS.filter(k => k.compute.kind !== 'manual' && (k.rollup === 'sum' || k.rollup === 'latest'));
+  // reconstruct 200+ days. no_reply is EXCLUDED so its existing stored values are left
+  // untouched (its fields aren't versioned in Jira, so it can't be reconstructed and
+  // must not be blanked).
+  const defs = SUPPORT_NT_KPIS.filter(k =>
+    k.compute.kind !== 'manual' && k.compute.kind !== 'no_reply' && (k.rollup === 'sum' || k.rollup === 'latest'));
 
   let days = 0, written = 0;
   for (const day of dateRange(fromDay, toDay)) {

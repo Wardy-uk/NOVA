@@ -110,8 +110,8 @@ export const DEVELOPMENT_BUCKET = `${TIER} in ("Tier 3", "Development")`;
 
 /** Statuses where the ticket is NOT actionable (clock on an external party). */
 export const NOT_ACTIONABLE_STATUSES = ['Waiting On Requestor', 'Waiting On Partner', 'Waiting on Development'];
-const NOT_ACTIONABLE_JQL = `status in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
-const ACTIONABLE_JQL = `status not in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
+export const NOT_ACTIONABLE_JQL = `status in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
+export const ACTIONABLE_JQL = `status not in ("Waiting On Requestor", "Waiting On Partner", "Waiting on Development")`;
 
 /** Resolution SLA = cf14048 ("Resolution") and FRT = cf14046 ("First Reply Time").
  *  These are the SLA fields the legacy pipeline used. Their display names collide

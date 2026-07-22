@@ -6,7 +6,10 @@
 import type { JiraRestClient } from '../jira-client.js';
 import { query } from '../database.js';
 import type { OrgKpi, DayCtx } from './registry.js';
-import { NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF } from './registry.js';
+import {
+  NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF,
+  RES_BREACHED, FRT_BREACHED, ACTIONABLE_JQL, NOT_ACTIONABLE_JQL,
+} from './registry.js';
 
 /** Port of kpi-pipeline.ts isSlaBreached — true if any cycle is breached / over time.
  *  Returns null when the SLA field is absent (ticket excluded from compliance %). */
@@ -179,6 +182,58 @@ function parseDate(v: unknown): Date | null {
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
 
+// ── Historical over-SLA reconstruction ──
+// An over-SLA stock KPI's live JQL is `<bucket> AND cf[1404x] = breached() AND <actionability>`.
+// breached() is current-state, so it can't be re-queried for a past day. Instead we rebuild the
+// open+actionable+bucket population AS OF the day (via WAS/ON) and count tickets whose SLA had
+// actually breached by end of that day — the SLA field carries a per-cycle breachTime + breached
+// flag (present on completed AND ongoing cycles), so "breached as of D" is exact.
+interface SlaCycle { breached?: boolean; breachTime?: { epochMillis?: number } }
+interface SlaField { completedCycles?: SlaCycle[]; ongoingCycle?: SlaCycle }
+
+function slaBreachedAsOf(field: unknown, endMs: number): boolean {
+  const f = field as SlaField | undefined;
+  if (!f) return false;
+  const cycles = [...(f.completedCycles ?? []), ...(f.ongoingCycle ? [f.ongoingCycle] : [])];
+  for (const c of cycles) {
+    const bt = c.breachTime?.epochMillis;
+    if (c.breached === true && typeof bt === 'number' && bt <= endMs) return true;
+  }
+  return false;
+}
+
+// Small LRU of fetched populations (keyed by the as-of population JQL, unique per day/bucket/
+// actionability) so paired resolution+FRT KPIs sharing a population fetch Jira once.
+const breachPopCache = new Map<string, Array<{ fields?: Record<string, unknown> }>>();
+function cacheGetPut(key: string, make: () => Promise<Array<{ fields?: Record<string, unknown> }>>) {
+  const hit = breachPopCache.get(key);
+  if (hit) return Promise.resolve(hit);
+  return make().then(v => {
+    breachPopCache.set(key, v);
+    if (breachPopCache.size > 8) breachPopCache.delete(breachPopCache.keys().next().value as string);
+    return v;
+  });
+}
+
+async function computeBreachedAsOf(jira: JiraRestClient, liveJql: string, ctx: DayCtx): Promise<ComputeResult> {
+  const slaField = liveJql.includes(FRT_BREACHED) ? 'customfield_14046' : 'customfield_14048';
+  const actAsOf = `status WAS NOT IN (${NOT_ACTIONABLE_LIST}) ON "${ctx.day}"`;
+  const notActAsOf = `status WAS IN (${NOT_ACTIONABLE_LIST}) ON "${ctx.day}"`;
+  // Population = live JQL minus the breach filter, with open + actionability rebuilt as-of the day.
+  const popJql = liveJql
+    .split(NT_OPEN).join(NT_OPEN_ASOF(ctx.day, ctx.nextDay))
+    .split(` AND ${RES_BREACHED}`).join('')
+    .split(` AND ${FRT_BREACHED}`).join('')
+    .split(` AND ${ACTIONABLE_JQL}`).join(` AND ${actAsOf}`)
+    .split(` AND ${NOT_ACTIONABLE_JQL}`).join(` AND ${notActAsOf}`);
+  const issues = await cacheGetPut(popJql, async () =>
+    (await jira.searchJqlAll(popJql, ['customfield_14048', 'customfield_14046'], 3000)).issues);
+  const endMs = new Date(`${ctx.nextDay}T00:00:00Z`).getTime();
+  let n = 0;
+  for (const iss of issues) if (slaBreachedAsOf((iss.fields ?? {})[slaField], endMs)) n++;
+  return { value: n, failed: false };
+}
+
 /** Jira fields the isNoReply predicate needs — request these when fetching for a no-reply check. */
 export const NO_REPLY_FIELDS = ['status', 'created', 'customfield_14081', 'customfield_14185'];
 
@@ -224,10 +279,9 @@ export async function computeNtKpi(
     case 'jql_count': {
       let jql = c.jql(ctx);
       if (ctx.asOf) {
-        // Historical reconstruction. Pure open-stock counts rebuild via NT_OPEN_ASOF.
-        // SLA-breach counts (breached()) need per-ticket cycle parsing (not reconstructed
-        // yet) — return null so they stay blank rather than wrong.
-        if (jql.includes('breached()')) return { value: null, failed: false };
+        // Historical reconstruction. SLA-breach counts (breached()) rebuild via per-ticket
+        // cycle breachTime; pure open-stock counts rebuild via NT_OPEN_ASOF.
+        if (jql.includes('breached()')) return computeBreachedAsOf(jira, jql, ctx);
         jql = jql.split(NT_OPEN).join(NT_OPEN_ASOF(ctx.day, ctx.nextDay));
       }
       const n = await jira.jqlCount(jql);
