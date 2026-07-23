@@ -68,7 +68,8 @@ export async function backfillOrg(settings: SettingsQueries, jira: JiraRestClien
     const ctx = { day, nextDay: addDay(day) };
     const now = new Date(`${day}T18:00:00Z`);
     for (const kpi of defs) {
-      const asOf = kpi.rollup === 'latest';
+      // Stocks + net_solved need as-of open counts; flows ignore asOf (no NT_OPEN in their JQL).
+      const asOf = kpi.rollup === 'latest' || kpi.compute.kind === 'net_solved';
       try {
         const r = await computeNtKpi(kpi, jira, { ...ctx, asOf }, now);
         if (!r.failed) { await saveComputed(kpi, day, r.value, 'reconstruct'); written++; }

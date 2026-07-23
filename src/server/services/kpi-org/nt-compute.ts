@@ -7,7 +7,7 @@ import type { JiraRestClient } from '../jira-client.js';
 import { query } from '../database.js';
 import type { OrgKpi, DayCtx } from './registry.js';
 import {
-  NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF,
+  NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF, NOVA_SOLVED_ON_DAY,
   RES_BREACHED, FRT_BREACHED, ACTIONABLE_JQL, NOT_ACTIONABLE_JQL,
 } from './registry.js';
 
@@ -286,6 +286,28 @@ export async function computeNtKpi(
       }
       const n = await jira.jqlCount(jql);
       return n < 0 ? { value: null, failed: true } : { value: n, failed: false };
+    }
+
+    case 'net_solved': {
+      // Net throughput = open(prevDayEOD) − open(dayEOD) + created(day), floored at 0.
+      // Tickets that actually left the board (direct resolve counts double via reopen
+      // churn; resolutiondate undercounts). asOf → dayEOD open uses NT_OPEN_ASOF; live
+      // (today) uses NT_OPEN (partial-day "solved so far"). prev-day EOD is always as-of.
+      const prev = new Date(`${ctx.day}T00:00:00Z`); prev.setUTCDate(prev.getUTCDate() - 1);
+      const prevDay = prev.toISOString().slice(0, 10);
+      const openTodayJql = ctx.asOf ? NT_OPEN_ASOF(ctx.day, ctx.nextDay) : NT_OPEN;
+      const openPrevJql = NT_OPEN_ASOF(prevDay, ctx.day);
+      const createdJql = `project = NT AND created >= "${ctx.day}" AND created < "${ctx.nextDay}"`;
+      const [openToday, openPrev, created] = await Promise.all([
+        jira.jqlCount(openTodayJql), jira.jqlCount(openPrevJql), jira.jqlCount(createdJql),
+      ]);
+      if (openToday < 0 || openPrev < 0 || created < 0) return { value: null, failed: true };
+      let net = openPrev - openToday + created;
+      if (c.minusNova) {
+        const nova = await jira.jqlCount(NOVA_SOLVED_ON_DAY(ctx.day, ctx.nextDay));
+        if (nova > 0) net -= nova;
+      }
+      return { value: Math.max(0, net), failed: false };
     }
 
     case 'escalation_log': {

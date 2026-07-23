@@ -34,6 +34,12 @@ export interface DayCtx {
 export type ComputeSpec =
   // Count of issues matching a JQL query (uses jira.jqlCount).
   | { kind: 'jql_count'; jql: (ctx: DayCtx) => string }
+  // Net throughput = tickets that actually left the board that day:
+  // max(0, openTickets(prevDayEOD) − openTickets(dayEOD) + created(day)). Backlog-
+  // consistent (direct resolve counts are inflated ~2× by customer-reopen churn, and
+  // resolutiondate undercounts because many closes set no resolution). minusNova
+  // subtracts NOVA's own solves so Team + NOVA reconcile to the total.
+  | { kind: 'net_solved'; minusNova?: boolean }
   // Open bucket tickets, apply the isNoReply predicate in code.
   | { kind: 'no_reply'; bucketJql: string }
   // Oldest ACTIONABLE ticket in the bucket → age in whole days.
@@ -126,13 +132,12 @@ export const FRT_BREACHED = `cf[14046] = breached()`;
 /** NOVA-Jira service account — splits Solved by Team vs NOVA. */
 export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
-// "Solved today" = resolution set that day (resolutiondate), matching the trusted n8n
-// KPI exactly (verified 19–21/07: 0/29/22 vs n8n 0/30/22). The old
-// `status CHANGED TO (Resolved/Closed/Done) DURING` method counted a ticket again on
-// every resolve→close hop and swept in bulk/automation transitions, inflating Solved
-// 3–10× (214 vs 22 on 21/07). See [[reference-kpi-org-freeze-scheduler]] session.
-const SOLVED_ON_DAY = (day: string, nextDay: string) =>
-  `project = NT AND resolutiondate >= "${day}" AND resolutiondate < "${nextDay}"`;
+// NOVA's own solves for the day (first entry to a done status, by the NOVA account) —
+// a small direct attribution count. Total/Team Solved use net throughput (net_solved),
+// which is backlog-consistent; NOVA is subtracted from Team so the two reconcile.
+export const NOVA_SOLVED_ON_DAY = (day: string, nextDay: string) =>
+  `project = NT AND status CHANGED TO ("Resolved", "Done") DURING ("${day}", "${nextDay}") ` +
+  `AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"`;
 
 // ── Support (NT) — 22 KPIs ──
 
@@ -147,16 +152,14 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_solved_team', label: 'Solved by Team', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 120, monthlyTarget: null, rollup: 'sum',
     rag: { greenMin: 120, amberMin: 100 },
-    compute: { kind: 'jql_count', jql: c =>
-      `${SOLVED_ON_DAY(c.day, c.nextDay)} AND assignee != "${NOVA_JIRA_ACCOUNT_ID}"` },
-    note: 'Team = everything not solved by NOVA (incl. unassigned). assignee != NOVA covers unassigned in JQL.',
+    compute: { kind: 'net_solved', minusNova: true },
+    note: 'Net throughput (tickets that left the board) minus NOVA\'s own solves. NOT a per-agent count — that lives on the agent scorecard (solvedByAssignee).',
   },
   {
     key: 'nt_solved_nova', label: 'Solved by NOVA', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 15, monthlyTarget: null, rollup: 'sum',
     rag: { greenMin: 15, amberMin: 8 },
-    compute: { kind: 'jql_count', jql: c =>
-      `${SOLVED_ON_DAY(c.day, c.nextDay)} AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"` },
+    compute: { kind: 'jql_count', jql: c => NOVA_SOLVED_ON_DAY(c.day, c.nextDay) },
     note: 'Target 15 predates NOVA throughput (~61/day observed) — re-baseline.',
   },
   {
@@ -348,7 +351,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_legacy_solved_today', label: 'Tickets Solved Today', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 85, monthlyTarget: null, rollup: 'sum', rag: { greenMin: 85, amberMin: 68 },
-    compute: { kind: 'jql_count', jql: (ctx) => SOLVED_ON_DAY(ctx.day, ctx.nextDay) },
+    compute: { kind: 'net_solved' },
   },
   {
     key: 'nt_legacy_cc_total', label: 'Number of Tickets in Customer Care', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
