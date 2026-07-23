@@ -4,7 +4,7 @@
 // tier-2 quality read & aggregated from the existing QA/GR/CSAT pipelines; tier-3
 // derived + configurable RAG. Mirrors kpi-pipeline's proven SQL.
 
-import type { JiraRestClient } from '../jira-client.js';
+import type { JiraRestClient, JiraIssue } from '../jira-client.js';
 import type { SettingsQueries } from '../../db/settings-store.js';
 import { query } from '../database.js';
 import { getKpiPool } from '../kpi-pipeline.js';
@@ -104,19 +104,53 @@ function ukWeekStart(now: Date): string {
 function ukDay(now: Date): string { return now.toISOString().slice(0, 10); }
 function addDay(day: string): string { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
 
-/** Bucket solved-during-window tickets by current assignee accountId. */
-async function solvedByAssignee(jira: JiraRestClient, fromDay: string, toDay: string): Promise<Map<string, number>> {
-  const jql = `project = NT AND status CHANGED TO ("Resolved","Closed","Done") DURING ("${fromDay}","${toDay}")`;
-  const res = await jira.searchJqlAll(jql, ['assignee'], 2000);
+// Cap on per-ticket changelog fetches for resolver attribution — protects the capture
+// runtime + Jira from a huge window. Above it, fall back to current-assignee.
+const RESOLVER_FETCH_CAP = 500;
+
+/** Bucket tickets solved during the window by agent. Counts a ticket once if it entered
+ *  Resolved/Done that day (excludes the archival "Closed" step). When attributeResolver
+ *  is set (daily capture only — too slow for the live path), credit goes to the agent who
+ *  performed the resolve transition (from the changelog), not the current assignee. */
+async function solvedByAssignee(
+  jira: JiraRestClient, fromDay: string, toDay: string, attributeResolver = false,
+): Promise<Map<string, number>> {
+  const jql = `project = NT AND status CHANGED TO ("Resolved","Done") DURING ("${fromDay}","${toDay}")`;
+  const res = await jira.searchJqlAll(jql, ['assignee'], 3000);
   const map = new Map<string, number>();
+  const assigneeOf = (issue: JiraIssue) =>
+    ((issue.fields as Record<string, unknown>)?.assignee as { accountId?: string } | undefined)?.accountId ?? null;
+
+  if (!attributeResolver || res.issues.length > RESOLVER_FETCH_CAP) {
+    for (const issue of res.issues) { const a = assigneeOf(issue); if (a) map.set(a, (map.get(a) || 0) + 1); }
+    return map;
+  }
+
+  const DONE = new Set(['Resolved', 'Done']);
+  const fromMs = Date.parse(`${fromDay}T00:00:00Z`), toMs = Date.parse(`${toDay}T00:00:00Z`);
   for (const issue of res.issues) {
-    const acc = (issue.fields as Record<string, unknown>)?.assignee as { accountId?: string } | undefined;
-    if (acc?.accountId) map.set(acc.accountId, (map.get(acc.accountId) || 0) + 1);
+    let resolver: string | null = null;
+    try {
+      const full = await jira.getIssue(issue.key, ['assignee'], { expand: ['changelog'] });
+      const histories = ((full as { changelog?: { histories?: Array<{ created: string; author?: { accountId?: string }; items?: Array<{ field?: string; toString?: string }> }> } } | null)?.changelog?.histories) ?? [];
+      for (const h of histories) {
+        const t = Date.parse(h.created);
+        if (isNaN(t) || t < fromMs || t >= toMs) continue;
+        if ((h.items ?? []).some(it => it.field === 'status' && it.toString && DONE.has(it.toString))) {
+          resolver = h.author?.accountId ?? resolver; // last resolve in window wins
+        }
+      }
+    } catch { /* fall back to assignee below */ }
+    const acc = resolver ?? assigneeOf(issue);
+    if (acc) map.set(acc, (map.get(acc) || 0) + 1);
   }
   return map;
 }
 
-export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRestClient, now: Date = new Date()): Promise<AgentKpiRow[]> {
+export async function computeAgentKpis(
+  settings: SettingsQueries, jira: JiraRestClient, now: Date = new Date(),
+  opts: { attributeResolver?: boolean } = {},
+): Promise<AgentKpiRow[]> {
   const pool = await getKpiPool(settings);
   const thresholds = getRagThresholds(settings);
   const day = ukDay(now);
@@ -168,10 +202,10 @@ export async function computeAgentKpis(settings: SettingsQueries, jira: JiraRest
     stats1.set(acc, s);
   }
 
-  // 3. Solved (transition JQL), bucket by assignee
+  // 3. Solved (entered Resolved/Done), credited to the resolver (capture) or assignee (live)
   const [solvedToday, solvedWeek] = await Promise.all([
-    solvedByAssignee(jira, day, tomorrow),
-    solvedByAssignee(jira, weekStart, tomorrow),
+    solvedByAssignee(jira, day, tomorrow, opts.attributeResolver),
+    solvedByAssignee(jira, weekStart, tomorrow, opts.attributeResolver),
   ]);
 
   // 4a. QA + Golden Rules (by agent name, today) — read existing pipelines

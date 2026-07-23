@@ -22,7 +22,9 @@ export async function captureAgentKpis(settings: SettingsQueries, jira: JiraRest
   const day = ukDay(now);
   try {
     await ensureAgentTable();
-    const rows = await computeAgentKpis(settings, jira, now);
+    // Capture runs once/day, so it can afford per-ticket changelog fetches to credit the
+    // actual resolver. The live snapshot path stays on current-assignee for speed.
+    const rows = await computeAgentKpis(settings, jira, now, { attributeResolver: true });
     await saveDay(day, rows);
     console.log(`[kpi-agent] capture ${day}: ${rows.length} agents`);
     return { day, agents: rows.length, failed: false };
