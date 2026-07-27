@@ -132,12 +132,17 @@ export const FRT_BREACHED = `cf[14046] = breached()`;
 /** NOVA-Jira service account — splits Solved by Team vs NOVA. */
 export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
-// NOVA's own solves for the day (first entry to a done status, by the NOVA account) —
-// a small direct attribution count. Total/Team Solved use net throughput (net_solved),
-// which is backlog-consistent; NOVA is subtracted from Team so the two reconcile.
+// Per-actor solve counts = tickets each moved to Resolved/Done that day (how many they
+// actually resolved). NOVA does ~76/day but sets no resolution, so resolutiondate showed
+// ~0 — the transition count is the real number. Total Solved uses net throughput
+// (net_solved); these per-actor counts measure resolutions performed, so Team + NOVA do
+// NOT sum to Total (bounced tickets get re-resolved).
 export const NOVA_SOLVED_ON_DAY = (day: string, nextDay: string) =>
   `project = NT AND status CHANGED TO ("Resolved", "Done") DURING ("${day}", "${nextDay}") ` +
   `AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"`;
+const TEAM_SOLVED_ON_DAY = (day: string, nextDay: string) =>
+  `project = NT AND status CHANGED TO ("Resolved", "Done") DURING ("${day}", "${nextDay}") ` +
+  `AND (assignee != "${NOVA_JIRA_ACCOUNT_ID}" OR assignee is EMPTY)`;
 
 // ── Support (NT) — 22 KPIs ──
 
@@ -152,8 +157,8 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     key: 'nt_solved_team', label: 'Solved by Team', team: 'Support', colA: 'Support', jiraSpace: 'NT',
     unit: 'count', direction: 'higher-better', dailyTarget: 120, monthlyTarget: null, rollup: 'sum',
     rag: { greenMin: 120, amberMin: 100 },
-    compute: { kind: 'net_solved', minusNova: true },
-    note: 'Net throughput (tickets that left the board) minus NOVA\'s own solves. NOT a per-agent count — that lives on the agent scorecard (solvedByAssignee).',
+    compute: { kind: 'jql_count', jql: c => TEAM_SOLVED_ON_DAY(c.day, c.nextDay) },
+    note: 'Tickets humans moved to Resolved/Done (resolutions performed). Total Solved is net throughput, so Team + NOVA do not sum to it.',
   },
   {
     key: 'nt_solved_nova', label: 'Solved by NOVA', team: 'Support', colA: 'Support', jiraSpace: 'NT',
