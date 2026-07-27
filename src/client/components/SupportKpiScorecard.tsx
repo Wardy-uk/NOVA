@@ -37,6 +37,9 @@ export function SupportKpiScorecard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  const isoDate = (d: Date) => d.toLocaleDateString('en-CA');
+  const [bfFrom, setBfFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 10); return isoDate(d); });
+  const [bfTo, setBfTo] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 1); return isoDate(d); });
 
   async function load() {
     setLoading(true);
@@ -99,6 +102,19 @@ export function SupportKpiScorecard() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Backfill failed'); }
   }
 
+  async function runBackfillRange() {
+    if (!bfFrom || !bfTo || bfFrom > bfTo) { setError('Pick a valid from/to range.'); return; }
+    if (!confirm(`Backfill Support KPIs ${bfFrom} → ${bfTo}? Recomputes from Jira in the background.`)) return;
+    try {
+      const r = await fetch('/api/kpi-org/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: bfFrom, to: bfTo }) });
+      const j = await r.json();
+      if (!j.ok) { setError(j.error ?? 'Backfill failed'); return; }
+      if (j.data.started === false) setBackfillMsg('A backfill is already running — watching progress…');
+      else setBackfillMsg(`Backfill started: ${j.data.from} → ${j.data.to} (${j.data.totalDays} days). Running in background…`);
+      pollBackfill();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Backfill failed'); }
+  }
+
   async function saveManual(key: string, value: number) {
     const day = new Date().toLocaleDateString('en-CA');
     await fetch('/api/kpi-org/manual', {
@@ -125,6 +141,13 @@ export function SupportKpiScorecard() {
             Backfill all
           </button>
         </div>
+      </div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-xs text-slate-400">Backfill range:</span>
+        <input type="date" value={bfFrom} onChange={e => setBfFrom(e.target.value)} className="px-2 py-1 text-xs rounded bg-black/30 border border-white/10" />
+        <span className="text-xs text-slate-500">→</span>
+        <input type="date" value={bfTo} onChange={e => setBfTo(e.target.value)} className="px-2 py-1 text-xs rounded bg-black/30 border border-white/10" />
+        <button onClick={runBackfillRange} className="px-3 py-1 text-xs rounded-lg bg-white/[0.06] hover:bg-white/[0.1]">Backfill range</button>
       </div>
       <p className="text-xs text-slate-500 mb-4">
         Jira KPIs freeze at 18:00 daily. Source: NT project · spec in agent_work/ba/org-kpis-spec.md
