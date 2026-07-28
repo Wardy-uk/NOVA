@@ -480,6 +480,12 @@ export class PortalDashboardService {
       .filter(i => !this.isOnboarding(i, onboardingTokens))
       .map(i => {
         const daysSinceUpdate = wholeDaysSince(i.updated);
+        const sprintState = this.sprintState(i, devStatuses);
+        const tierGroup = this.tierGroup(i, tierSupport, tierT3, tierDev);
+        // "No update 3+ days" only counts pre-development tickets (customer care /
+        // tier 2/3 triage). Development + awaiting-sprint tickets are expected to
+        // sit (waiting on sprints / automated Jira updates), so they're excluded.
+        const preDevelopment = sprintState === 'na' && tierGroup !== 'development';
         return {
           key: i.key,
           summary: i.summary,
@@ -489,12 +495,12 @@ export class PortalDashboardService {
           created: i.created,
           ageDays: wholeDaysSince(i.created),
           daysSinceUpdate,
-          stale: daysSinceUpdate >= 3,
+          stale: daysSinceUpdate >= 3 && preDevelopment,
           overSla: i.slaBreached,
           businessCritical: i.priorityId === blockerPriorityId || i.priority.toLowerCase() === 'blocker',
           priority: i.priority,
-          sprintState: this.sprintState(i, devStatuses),
-          tierGroup: this.tierGroup(i, tierSupport, tierT3, tierDev),
+          sprintState,
+          tierGroup,
           escalation: escalationTokens.some(t => i.requestType.toLowerCase().includes(t)),
         };
       });

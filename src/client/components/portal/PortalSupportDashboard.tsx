@@ -48,7 +48,7 @@ const TIER_KPIS: KpiDef[] = [
     icon: icon('M18.364 5.636a9 9 0 010 12.728m-3.536-3.536a4 4 0 010-5.656M12 12h.01') },
   { key: 't3', label: 'Tier 3', value: s => s.tierT3, color: CATEGORY_COLORS['tier 3'], ring: 'ring-indigo-400',
     icon: icon('M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z') },
-  { key: 'development', label: 'Development', value: s => s.tierDevelopment, color: CATEGORY_COLORS.development, ring: 'ring-green-400',
+  { key: 'development', label: 'In Development', value: s => s.allocatedSprint, color: CATEGORY_COLORS.development, ring: 'ring-green-400',
     icon: icon('M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4') },
   { key: 'awaiting', label: 'Awaiting sprint', value: s => s.awaitingSprint, color: '#7c3aed', ring: 'ring-violet-400',
     icon: icon('M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z') },
@@ -58,7 +58,7 @@ const ALL_KPIS = [...TOP_KPIS, ...TIER_KPIS];
 
 const TYPE_COLORS = ['#0d9488', '#6366f1', '#f59e0b', '#ec4899', '#64748b', '#0ea5e9'];
 
-export default function PortalSupportDashboard() {
+export default function PortalSupportDashboard({ isAdmin = false }: { isAdmin?: boolean }) {
   const [data, setData] = useState<SupportDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +98,7 @@ export default function PortalSupportDashboard() {
       case 'awaiting': return all.filter(r => r.sprintState === 'awaiting');
       case 'support': return all.filter(r => r.tierGroup === 'support');
       case 't3': return all.filter(r => r.tierGroup === 't3');
-      case 'development': return all.filter(r => r.tierGroup === 'development');
+      case 'development': return all.filter(r => r.sprintState === 'allocated');
       default: return all;
     }
   }, [data, filter, priority]);
@@ -116,6 +116,10 @@ export default function PortalSupportDashboard() {
   };
 
   const total = s?.total || 0;
+
+  // Over-SLA is admin-only (perception management) — hide the tile entirely for
+  // standard team users.
+  const topKpis = isAdmin ? TOP_KPIS : TOP_KPIS.filter(k => k.key !== 'sla');
 
   return (
     <div className="space-y-6">
@@ -146,7 +150,7 @@ export default function PortalSupportDashboard() {
 
       {/* KPI cards — row 1: health (5), row 2: tier breakdown (4) */}
       {[
-        { cards: TOP_KPIS, cls: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' },
+        { cards: topKpis, cls: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' },
         { cards: TIER_KPIS, cls: 'grid-cols-2 sm:grid-cols-4' },
       ].map((group, gi) => (
         <div key={gi} className={`grid gap-3 ${group.cls}`}>
@@ -250,7 +254,7 @@ export default function PortalSupportDashboard() {
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-gray-500 text-xs">{r.key}</span>
                         {r.businessCritical && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-semibold uppercase tracking-wide">Critical</span>}
-                        {r.overSla && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold uppercase tracking-wide">SLA</span>}
+                        {isAdmin && r.overSla && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold uppercase tracking-wide">SLA</span>}
                       </div>
                       <div className="text-gray-900 max-w-sm truncate">{r.summary}</div>
                     </td>

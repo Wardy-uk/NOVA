@@ -364,6 +364,7 @@ export class PortalIntakeService {
         notes: input.notes,
         triagedForDevelopment: input.supportTeam === 'development',
         reporterEmail: userEmail,
+        ccEmails: input.ccEmails,
       });
     } catch (err) {
       console.error('[portal-intake] Network request creation failed:', err);

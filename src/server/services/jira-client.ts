@@ -386,6 +386,13 @@ export class JiraRestClient {
     return this.send<{ issueId: string; issueKey: string }>('POST', '/rest/servicedeskapi/request', payload);
   }
 
+  /** Add request participants (they receive the same JSM correspondence as the
+   *  reporter). accountIds only — resolve emails via searchUsers first. */
+  async addRequestParticipants(issueIdOrKey: string, accountIds: string[]): Promise<void> {
+    if (accountIds.length === 0) return;
+    await this.send<unknown>('POST', `/rest/servicedeskapi/request/${encodeURIComponent(issueIdOrKey)}/participant`, { accountIds });
+  }
+
   async createIssueLink(payload: {
     type: { name: string };
     inwardIssue: { key: string };

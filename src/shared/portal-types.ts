@@ -205,6 +205,8 @@ export const PortalNetworkRequestSchema = z.object({
   hubspotLink: z.string().max(1000).optional(),
   notes: z.string().max(5000).optional(),
   supportTeam: z.enum(['development', 'support']),
+  /** Additional people to CC on the ticket (added as JSM request participants). */
+  ccEmails: z.array(z.string().max(200)).max(10).optional(),
 });
 
 export type PortalNetworkRequestInput = z.infer<typeof PortalNetworkRequestSchema>;
@@ -277,6 +279,8 @@ export const PortalOnboardingRequestSchema = z.object({
   users: z.array(OnboardingUserSchema).max(30).optional(),
   // Referral / CRM
   crmAccountName: z.string().max(300).optional(),
+  // The customer's designated (free) Lead Pro user — captured so it isn't assumed at setup.
+  leadProUser: z.string().max(200).optional(),
   // Magazine
   magazineReminderEmails: z.string().max(1000).optional(),
   magazineRegion: z.string().max(150).optional(),

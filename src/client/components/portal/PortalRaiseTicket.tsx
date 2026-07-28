@@ -47,6 +47,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
   const [requestType, setRequestType] = useState<RequestType>('broken');
   const [hubspotLink, setHubspotLink] = useState('');
   const [notes, setNotes] = useState('');
+  const [ccRecipients, setCcRecipients] = useState('');
 
   // ── Onboarding request fields ──
   const [ob, setOb] = useState({
@@ -55,7 +56,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
     offersSales: false, offersLettings: false,
     salesEmail: '', lettingsEmail: '', salesPhone: '', lettingsPhone: '',
     portalsOther: '', websiteProvider: '',
-    crmAccountName: '', magazineReminderEmails: '', magazineRegion: '',
+    crmAccountName: '', leadProUser: '', magazineReminderEmails: '', magazineRegion: '',
     dimSales: false, dimLettings: false, dimIncludeSoldLet: false, dimOrderBy: '', dimApprovalEmail: '',
     marketReportRegion: '',
     leadResponderPostcodes: '', leadContactName: '', leadContactEmail: '', leadContactPhone: '',
@@ -101,6 +102,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
           requestType,
           hubspotLink: hubspotLink || undefined,
           notes: notes || undefined,
+          ccEmails: ccRecipients.split(',').map(e => e.trim()).filter(Boolean).slice(0, 10) || undefined,
           supportTeam: route === 'development' ? 'development' : 'support',
         }),
       });
@@ -144,6 +146,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
           websiteProvider: ob.websiteProvider || undefined,
           users: users.length ? users : undefined,
           crmAccountName: ob.crmAccountName || undefined,
+          leadProUser: ob.leadProUser || undefined,
           magazineReminderEmails: ob.magazineReminderEmails || undefined,
           magazineRegion: ob.magazineRegion || undefined,
           dimSales: ob.dimSales,
@@ -322,6 +325,13 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
               <label htmlFor="rt-notes" className={labelCls}>Notes</label>
               <textarea id="rt-notes" value={notes} onChange={e => setNotes(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
             </div>
+
+            {/* CC / additional recipients */}
+            <div>
+              <label htmlFor="rt-cc" className={labelCls}>CC / additional recipients</label>
+              <input id="rt-cc" type="text" value={ccRecipients} onChange={e => setCcRecipients(e.target.value)} placeholder="email@example.com, another@example.com" className={inputCls} />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comma-separated email addresses. They'll receive the ticket's correspondence (must be portal users).</p>
+            </div>
           </>
         )}
 
@@ -455,6 +465,7 @@ function OnboardingForm({
 
       <Section title="Products & set-up">
         {text('crmAccountName', 'CRM / referral account name', 'Name as it appears on your CRM')}
+        {text('leadProUser', 'Lead Pro user', 'Named person for the free Lead Pro seat')}
         {text('magazineReminderEmails', 'Magazine reminder email(s)', 'Comma-separated')}
         {text('magazineRegion', 'Preferred magazine region')}
         <div className="flex gap-6">

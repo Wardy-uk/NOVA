@@ -506,7 +506,7 @@ function PortalApp() {
         {view === 'raise-ticket' && resolvedFeatures.raiseTicket && <PortalRaiseTicket onCreated={(key) => { handleViewTicket(key); }} routes={resolvedFeatures.supportRoutes} />}
         {view === 'kb' && resolvedFeatures.kb && <PortalKnowledgeBase onNavigate={setView} />}
         {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
-        {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard />}
+        {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard isAdmin={PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin} />}
         {view === 'onboarding-dashboard' && resolvedFeatures.onboarding && <PortalOnboardingDashboard />}
         {view === 'about' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.manager && <PortalAbout user={user} multiOrg={orgs.length > 1} orgName={orgs.find(o => o.orgId === activeOrgId)?.orgName} />}
         {view === 'escalations' && PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin && <PortalEscalations />}

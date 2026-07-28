@@ -613,6 +613,8 @@ export class PortalJiraService {
     triagedForDevelopment: boolean;
     reporterEmail?: string;
     bcAccount?: string;
+    /** Additional people to CC — added as JSM request participants (best-effort). */
+    ccEmails?: string[];
   }): Promise<string> {
     // The JSM Service Desk API must be called on the DIRECT site URL with Basic
     // auth — the api.atlassian.com/ex/jira/{cloudId} gateway (used by the injected
@@ -648,6 +650,8 @@ export class PortalJiraService {
       descLines.push('', `⚠ BUSINESS CRITICAL${params.businessCriticalReason ? `: ${params.businessCriticalReason}` : ''}`);
     }
     if (params.notes) { descLines.push('', `Notes: ${params.notes}`); }
+    const ccEmails = (params.ccEmails || []).map(e => e.trim()).filter(Boolean);
+    if (ccEmails.length) { descLines.push('', `CC: ${ccEmails.join(', ')}`); }
     const description = descLines.join('\n');
 
     // 1) Create the JSM customer request (sets request type + reporter natively).
@@ -698,6 +702,23 @@ export class PortalJiraService {
     } catch (err) {
       // Non-fatal: the ticket exists; log and still return the key.
       console.warn('[portal-jira] Failed to set extra fields on', created.issueKey, ':', err instanceof Error ? err.message : err);
+    }
+
+    // Add CC people as request participants so they get the ticket's
+    // correspondence. Resolve each email → accountId; skip any that aren't Jira
+    // users. Best-effort and non-fatal — the CC list is also in the description.
+    if (ccEmails.length) {
+      try {
+        const accountIds: string[] = [];
+        for (const email of ccEmails) {
+          const matches = await sdClient.searchUsers(email, 1);
+          const acct = matches.find(m => m.emailAddress?.toLowerCase() === email.toLowerCase()) || matches[0];
+          if (acct?.accountId) accountIds.push(acct.accountId);
+        }
+        if (accountIds.length) await sdClient.addRequestParticipants(created.issueKey, accountIds);
+      } catch (err) {
+        console.warn('[portal-jira] Failed to add CC participants on', created.issueKey, ':', err instanceof Error ? err.message : err);
+      }
     }
 
     return created.issueKey;
@@ -764,6 +785,7 @@ export class PortalJiraService {
     sections.push([
       'PRODUCTS & SET-UP',
       line('CRM / referral account name', f.crmAccountName),
+      line('Lead Pro user', f.leadProUser),
       line('Magazine reminder emails', f.magazineReminderEmails),
       line('Magazine region', f.magazineRegion),
       line('Digital magazine — properties', [f.dimSales ? 'Sales' : null, f.dimLettings ? 'Lettings' : null].filter(Boolean).join(', ') || null),
