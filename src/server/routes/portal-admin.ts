@@ -353,12 +353,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         brand_primary: string | null;
         brand_secondary: string | null;
         brand_font: string | null;
+        support_cc_email: string | null;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket, po.support_routes,
-                po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font,
+                po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font, po.support_cc_email,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -532,7 +533,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes, support_cc_email } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -581,6 +582,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         await execute(
           `UPDATE portal_organisations SET support_routes = ?, updated_at = GETUTCDATE() WHERE id = ?`,
           [routes.join(','), orgId],
+        );
+      }
+      // Shared CC address(es) copied on every raised ticket for this org.
+      if (support_cc_email !== undefined) {
+        await execute(
+          `UPDATE portal_organisations SET support_cc_email = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [support_cc_email ? String(support_cc_email).trim() : null, orgId],
         );
       }
       // Per-org branding

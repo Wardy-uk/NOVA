@@ -827,7 +827,7 @@ function OrgsPanel() {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
-    support_routes: string | null;
+    support_routes: string | null; support_cc_email: string | null;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
@@ -1027,7 +1027,7 @@ function OrgRow({ org, onSaved }: {
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
-    support_routes: string | null;
+    support_routes: string | null; support_cc_email: string | null;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
@@ -1036,6 +1036,7 @@ function OrgRow({ org, onSaved }: {
   const [bc, setBc] = useState(org.bc_account_number || '');
   const [reporters, setReporters] = useState(org.scope_reporters || '');
   const [routes, setRoutes] = useState<PortalSupportRoute[]>(parseSupportRoutes(org.support_routes));
+  const [ccEmail, setCcEmail] = useState(org.support_cc_email || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
@@ -1055,6 +1056,7 @@ function OrgRow({ org, onSaved }: {
   const dirty =
     (bc.trim() || null) !== (org.bc_account_number || null) ||
     (reporters.trim() || null) !== (org.scope_reporters || null) ||
+    (ccEmail.trim() || null) !== (org.support_cc_email || null) ||
     routes.join(',') !== origRoutes.join(',') ||
     FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]) ||
     (Object.keys(brand) as Array<keyof typeof brand>).some(k => brand[k] !== origBrand[k]);
@@ -1094,6 +1096,7 @@ function OrgRow({ org, onSaved }: {
         body: JSON.stringify({
           bc_account_number: bc.trim() || null,
           scope_reporters: reporters.trim() || null,
+          support_cc_email: ccEmail.trim() || null,
           features,
           support_routes: routes,
           branding: {
@@ -1174,6 +1177,8 @@ function OrgRow({ org, onSaved }: {
           <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">Customer scope</div>
           <input value={bc} onChange={e => setBc(e.target.value)} placeholder="BC Account # e.g. CU0002362" className={`w-full font-mono ${inputCls}`} />
           <textarea value={reporters} onChange={e => setReporters(e.target.value)} rows={3} placeholder="Reporters (one per line): email, display name, or account id" className={`w-full ${inputCls}`} />
+          <input value={ccEmail} onChange={e => setCcEmail(e.target.value)} placeholder="Shared CC email(s), comma-separated" className={`w-full ${inputCls}`} />
+          <div className="text-[11px] text-gray-500">Copied on every ticket raised for this org (added as a request participant, so must be a Jira user to receive notifications).</div>
         </div>
 
         {/* Features */}

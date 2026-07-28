@@ -2,8 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { PortalDashboardService } from '../services/portal-dashboards.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { JiraRestClient } from '../services/jira-client.js';
-import { canViewAllOrgTickets, canEscalateTicket } from '../../shared/portal-types.js';
+import { canViewAllOrgTickets, canEscalateTicket, PORTAL_ROLE_RANK } from '../../shared/portal-types.js';
 import { listMemberships } from '../services/portal-org-membership.js';
+import { getSlaMatrix } from '../services/portal-sla-matrix.js';
 
 // Customer-facing Onboarding + Support dashboards, scoped to the portal user's
 // organisation (→ BC Account Number OR reporter set). Queries Jira live so it
@@ -52,6 +53,22 @@ export function createPortalDashboardRoutes(settings: FileSettingsQueries | unde
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load branding' });
+    }
+  });
+
+  // SLA reference matrix for the About page — derived from live Jira SLA data.
+  // Admin-only (org_admin and above): it exposes internal SLA targets.
+  router.get('/sla-matrix', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (PORTAL_ROLE_RANK[req.portalUser.role] < PORTAL_ROLE_RANK.org_admin) {
+      res.status(403).json({ ok: false, error: 'Admin only' }); return;
+    }
+    if (!jira) { res.status(503).json({ ok: false, error: 'Jira is not configured' }); return; }
+    try {
+      const data = await getSlaMatrix(jira, { force: req.query.refresh === '1' });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to derive SLA matrix' });
     }
   });
 

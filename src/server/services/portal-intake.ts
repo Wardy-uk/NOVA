@@ -343,10 +343,14 @@ export class PortalIntakeService {
     await trackEvent('form_completed', portalUserId, orgId, { category: 'network_request' });
 
     // BC Account Number from the org's Customer Scope (Portal Admin → Orgs).
-    const org = await queryOne<{ bc_account_number: string | null }>(
-      `SELECT bc_account_number FROM portal_organisations WHERE id = ?`,
+    // support_cc_email is the org's shared address that gets copied on every
+    // raised ticket (added as a participant alongside any user-entered CC).
+    const org = await queryOne<{ bc_account_number: string | null; support_cc_email: string | null }>(
+      `SELECT bc_account_number, support_cc_email FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
+    const orgCc = (org?.support_cc_email || '').split(',').map(e => e.trim()).filter(Boolean);
+    const ccEmails = [...new Set([...(input.ccEmails || []), ...orgCc])];
 
     let ticketKey: string;
     try {
@@ -364,7 +368,7 @@ export class PortalIntakeService {
         notes: input.notes,
         triagedForDevelopment: input.supportTeam === 'development',
         reporterEmail: userEmail,
-        ccEmails: input.ccEmails,
+        ccEmails,
       });
     } catch (err) {
       console.error('[portal-intake] Network request creation failed:', err);

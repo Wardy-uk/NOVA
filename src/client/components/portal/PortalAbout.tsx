@@ -1,11 +1,83 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { PortalAuthPayload } from '../../../shared/portal-types.js';
+
+const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
+
+interface SlaMatrixRow { priority: string; firstResponse: string | null; resolution: string | null; sample: number }
+interface SlaMatrix { rows: SlaMatrixRow[]; sampledTickets: number; derivedAt: string }
 
 interface Props {
   user: PortalAuthPayload;
   multiOrg?: boolean;
   /** The org currently being viewed (may differ from the home org in the token). */
   orgName?: string;
+  /** Org Admin and above — unlocks the internal SLA reference. */
+  isAdmin?: boolean;
+}
+
+function SlaReferenceCard() {
+  const [matrix, setMatrix] = useState<SlaMatrix | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await pf('/api/portal/sla-matrix');
+        const d = await res.json();
+        if (!active) return;
+        if (d.ok) setMatrix(d.data);
+        else setError(d.error || 'Could not load SLA targets');
+      } catch {
+        if (active) setError('Could not load SLA targets');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <Card title="SLA targets (admin only)">
+      <p>
+        Response and resolution targets currently applied by our service desk, by priority. These are for your
+        reference as an organisation admin and aren’t shown to standard users.
+      </p>
+      {loading && <p className="text-gray-400 text-xs">Loading targets…</p>}
+      {error && <p className="text-amber-600 text-xs">{error}</p>}
+      {matrix && matrix.rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left text-gray-500 border-b border-gray-200">
+                <th className="py-1.5 pr-4 font-medium">Priority</th>
+                <th className="py-1.5 pr-4 font-medium">First response</th>
+                <th className="py-1.5 pr-4 font-medium">Resolution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.rows.map(r => (
+                <tr key={r.priority} className="border-b border-gray-100 last:border-0">
+                  <td className="py-1.5 pr-4 font-medium text-gray-900">{r.priority}</td>
+                  <td className="py-1.5 pr-4">{r.firstResponse || '—'}</td>
+                  <td className="py-1.5 pr-4">{r.resolution || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {matrix && matrix.rows.length === 0 && !loading && (
+        <p className="text-gray-400 text-xs">No SLA data available from recent tickets.</p>
+      )}
+      {matrix && (
+        <p className="text-gray-400 text-xs">
+          Derived from {matrix.sampledTickets} recent tickets’ live SLA data. Targets are indicative and set in Jira.
+        </p>
+      )}
+    </Card>
+  );
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -24,7 +96,7 @@ const ROLES: Array<{ name: string; can: string }> = [
   { name: 'Organisation Admin', can: 'A senior contact for the organisation, with full visibility of its requests.' },
 ];
 
-export default function PortalAbout({ user, multiOrg, orgName }: Props) {
+export default function PortalAbout({ user, multiOrg, orgName, isAdmin }: Props) {
   const activeOrgName = orgName || user.orgName;
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -98,6 +170,8 @@ export default function PortalAbout({ user, multiOrg, orgName }: Props) {
           You’ll only see the options your organisation has been set up with — if just one applies, the form skips straight to it.
         </p>
       </Card>
+
+      {isAdmin && <SlaReferenceCard />}
 
       <Card title="Need a hand?">
         <p>

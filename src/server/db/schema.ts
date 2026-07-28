@@ -2089,6 +2089,11 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'brand_font') IS NULL
      ALTER TABLE portal_organisations ADD brand_font NVARCHAR(100) NULL;`,
 
+    // Shared address(es) copied on every ticket raised for this org (added as
+    // JSM request participants alongside any user-entered CC). Comma-separated.
+    `IF COL_LENGTH('portal_organisations', 'support_cc_email') IS NULL
+     ALTER TABLE portal_organisations ADD support_cc_email NVARCHAR(400) NULL;`,
+
     // Portal escalations — links an original ticket to the Escalation request a
     // manager raised from it, so the portal can show/open the escalation.
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_escalations') AND type = 'U')
