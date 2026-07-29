@@ -106,6 +106,7 @@ export class GuildDashboardService {
     return {
       id: r.id,
       ref: r.onboarding_ref,
+      orgId: r.org_id,
       officeName: r.office_name,
       branchName: r.branch_name,
       submissionDate: r.submission_date,

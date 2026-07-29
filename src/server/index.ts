@@ -60,6 +60,7 @@ import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
 import { createGuildOnboardingRoutes } from './routes/guild-onboarding.js';
 import { GuildDashboardService } from './services/guild-dashboard.js';
+import { GuildDigestService } from './services/guild-digest.js';
 import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
 import { SalesQueries } from './db/sales-queries.js';
 import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
@@ -4503,6 +4504,19 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // Guild onboarding dashboard + manual capture (backlog #8, R5/R6) — internal staff.
   const guildDashboard = new GuildDashboardService(portalJiraClient, onboardingRecordQueries);
   app.use('/api/guild-onboarding', createGuildOnboardingRoutes({ dashboard: guildDashboard, records: onboardingRecordQueries, guild: guildOnboarding }));
+
+  // Guild digest (R8, Monday ~14:00 UTC) + INTS escalation sweep (R4, hourly).
+  // Both off by default (guild_digest_enabled / guild_ints_escalations_enabled).
+  const guildDigest = new GuildDigestService(guildDashboard, portalEmailService, (k) => settingsQueries.get(k));
+  jobRegistry.register('guild-weekly-digest', 'Guild onboarding weekly digest (Mon 14:00)', async () => {
+    const now = new Date();
+    if (now.getUTCDay() === 1 && now.getUTCHours() === 14 && now.getUTCMinutes() < 15) {
+      await guildDigest.sendWeeklyDigest();
+    }
+  }, 15 * 60 * 1000);
+  jobRegistry.register('guild-ints-escalations', 'Guild INTS escalation sweep', async () => {
+    await guildDigest.runIntsEscalations();
+  }, 60 * 60 * 1000);
   const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
   const portalKb = new PortalKbService(settingsQueries, mcpManager);
 

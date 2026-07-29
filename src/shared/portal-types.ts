@@ -766,6 +766,7 @@ export interface GuildMilestoneView {
 export interface GuildOnboardingRow {
   id: number;
   ref: string;
+  orgId: number | null;
   officeName: string | null;
   branchName: string | null;
   submissionDate: string;
