@@ -11,6 +11,7 @@ import { HelpView } from './components/HelpView.js';
 const AdminView = lazy(() => import('./components/AdminView.js').then(m => ({ default: m.AdminView })));
 const AdminContractTermsView = lazy(() => import('./components/AdminContractTermsView.js').then(m => ({ default: m.AdminContractTermsView })));
 const OnboardingConfigView = lazy(() => import('./components/OnboardingConfigView.js').then(m => ({ default: m.OnboardingConfigView })));
+const GuildOnboardingView = lazy(() => import('./components/GuildOnboardingView.js').then(m => ({ default: m.GuildOnboardingView })));
 import { OnboardingCalendar } from './components/OnboardingCalendar.js';
 import { OnboardingDashboard } from './components/OnboardingDashboard.js';
 import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
@@ -114,7 +115,7 @@ declare const __APP_VERSION__: string;
 
 type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
 type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
-  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue'
+  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue' | 'ob-guild'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
@@ -184,6 +185,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'delivery', label: 'Delivery' },
       { view: 'ob-overdue', label: 'Overdue' },
       { view: 'ob-calendar', label: 'Milestones' },
+      { view: 'ob-guild', label: 'Guild' },
       { view: 'onboarding-config', label: 'Onboarding Matrix' },
     ],
   },
@@ -1276,6 +1278,9 @@ export function App() {
           )}
           {view === 'onboarding-config' && (
             <OnboardingConfigView readOnly />
+          )}
+          {view === 'ob-guild' && (
+            <GuildOnboardingView />
           )}
 
           {/* Account Management */}

@@ -58,6 +58,8 @@ import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
 import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
 import { createOnboardingRoutes } from './routes/onboarding.js';
+import { createGuildOnboardingRoutes } from './routes/guild-onboarding.js';
+import { GuildDashboardService } from './services/guild-dashboard.js';
 import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
 import { SalesQueries } from './db/sales-queries.js';
 import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
@@ -4498,6 +4500,9 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
     ? new GuildOnboardingService(portalJiraClient, onboardingRecordQueries, (k) => settingsQueries.get(k))
     : null;
   const portalIntake = new PortalIntakeService(settingsQueries, portalJira, onboardingRecordQueries, guildOnboarding, portalEmailService);
+  // Guild onboarding dashboard + manual capture (backlog #8, R5/R6) — internal staff.
+  const guildDashboard = new GuildDashboardService(portalJiraClient, onboardingRecordQueries);
+  app.use('/api/guild-onboarding', createGuildOnboardingRoutes({ dashboard: guildDashboard, records: onboardingRecordQueries, guild: guildOnboarding }));
   const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
   const portalKb = new PortalKbService(settingsQueries, mcpManager);
 

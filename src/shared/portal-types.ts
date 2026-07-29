@@ -752,6 +752,42 @@ export interface OnboardingDashboardResponse {
   bcAccountNumber: string | null;
 }
 
+// ── Guild/BYM onboarding records dashboard (backlog #8) ──
+
+export interface GuildMilestoneView {
+  key: string;
+  label: string;
+  kind: 'ticket' | 'manual' | 'calculated';
+  state: 'done' | 'in_progress' | 'pending' | 'na';
+  detail: string | null;      // Jira status, entered value, or computed value
+  jiraKey: string | null;
+}
+
+export interface GuildOnboardingRow {
+  id: number;
+  ref: string;
+  officeName: string | null;
+  branchName: string | null;
+  submissionDate: string;
+  invoiceCommencementDate: string | null;
+  parentKey: string | null;
+  parentStatus: string | null;
+  status: string;             // record status: pending/success/partial/error
+  sla30Day: string;
+  slaDaysRemaining: number;   // negative = breached
+  slaRag: 'green' | 'amber' | 'red' | 'met';
+  slaBreached: boolean;
+  intsEscalationLevel: 0 | 7 | 14 | 21 | 30;
+  intsKey: string | null;
+  milestones: GuildMilestoneView[];
+  manualFields: Record<string, unknown>;
+}
+
+export interface GuildOnboardingDashboardResponse {
+  rows: GuildOnboardingRow[];
+  generatedAt: string;
+}
+
 export interface SupportDashboardRow {
   key: string;
   summary: string;
