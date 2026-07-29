@@ -54,7 +54,7 @@ export class GuildDashboardService {
     const out = new Map<string, string>();
     if (!this.jira || keys.length === 0) return out;
     // JQL `key in (...)`, paged; statuses only.
-    const jql = `key in (${keys.map(k => `"${k}"`).join(',')})`;
+    const jql = `key in (${keys.join(',')})`;
     try {
       const res = await this.jira.searchJqlAll(jql, ['status'], Math.max(100, keys.length));
       for (const iss of res.issues) {
