@@ -2644,6 +2644,36 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_onboarding_runs_ref' AND object_id = OBJECT_ID('onboarding_runs'))
      CREATE NONCLUSTERED INDEX IX_onboarding_runs_ref ON onboarding_runs(onboarding_ref);`,
 
+    // ── Guild/BYM onboarding records ──
+    // One row per customer onboarding set-up (backlog #8). Replaces the manual
+    // "BYM Onboarding Status.xlsx" Guild tracker: holds the submission + invoice
+    // dates, office/branch, the auto-created parent QA + 7 child Jira keys, and
+    // the staff-edited manual fields. The 30-day SLA clock runs from
+    // submission_date. `channel` scopes the pipeline (Guild only for now).
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'onboarding_records') AND type = 'U')
+     CREATE TABLE onboarding_records (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       onboarding_ref NVARCHAR(100) NOT NULL,
+       channel NVARCHAR(50) NOT NULL DEFAULT 'guild',
+       org_id INT NULL,
+       portal_submission_id INT NULL,
+       office_name NVARCHAR(300) NULL,
+       branch_name NVARCHAR(300) NULL,
+       submission_date DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       invoice_commencement_date DATE NULL,
+       parent_key NVARCHAR(50) NULL,
+       child_keys NVARCHAR(MAX) NULL,
+       manual_fields NVARCHAR(MAX) NULL,
+       status NVARCHAR(50) NOT NULL DEFAULT 'pending',
+       error_message NVARCHAR(MAX) NULL,
+       created_at DATETIME2 DEFAULT GETUTCDATE(),
+       updated_at DATETIME2 DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_onboarding_records_ref' AND object_id = OBJECT_ID('onboarding_records'))
+     CREATE UNIQUE NONCLUSTERED INDEX IX_onboarding_records_ref ON onboarding_records(onboarding_ref);`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_onboarding_records_org' AND object_id = OBJECT_ID('onboarding_records'))
+     CREATE NONCLUSTERED INDEX IX_onboarding_records_org ON onboarding_records(org_id);`,
+
     // ── Milestones ──
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'milestone_templates') AND type = 'U')

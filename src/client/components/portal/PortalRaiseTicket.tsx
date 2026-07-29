@@ -51,7 +51,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
 
   // ── Onboarding request fields ──
   const [ob, setOb] = useState({
-    brand: '', branch: '', network: 'Guild', registeredCompanyName: '', membershipArea: '',
+    brand: '', branch: '', invoiceCommencementDate: '', network: 'Guild', registeredCompanyName: '', membershipArea: '',
     addressLine: '', town: '', county: '', postcode: '',
     offersSales: false, offersLettings: false,
     salesEmail: '', lettingsEmail: '', salesPhone: '', lettingsPhone: '',
@@ -70,7 +70,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
   const [files, setFiles] = useState<File[]>([]);
 
   const canSubmitStandard = !!network && !!summary && !!agentNameBranch && !!detail;
-  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim();
+  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim() && !!ob.invoiceCommencementDate.trim();
 
   const uploadAttachments = async (ticketKey: string) => {
     for (const file of files) {
@@ -117,7 +117,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
   };
 
   const submitOnboarding = async () => {
-    if (!canSubmitOnboarding) { setError('Brand and Branch are required.'); return; }
+    if (!canSubmitOnboarding) { setError('Brand, Branch and Invoice commencement date are required.'); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -128,6 +128,7 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
         body: JSON.stringify({
           brand: ob.brand,
           branch: ob.branch,
+          invoiceCommencementDate: ob.invoiceCommencementDate,
           network: ob.network || undefined,
           registeredCompanyName: ob.registeredCompanyName || undefined,
           membershipArea: ob.membershipArea || undefined,
@@ -400,6 +401,11 @@ function OnboardingForm({
       <Section title="Business">
         {text('brand', 'Brand / Agent name', 'e.g. Property Cafe', true)}
         {text('branch', 'Branch', 'e.g. Bexhill', true)}
+        <div>
+          <label className={labelCls}>Invoice commencement date *</label>
+          <input type="date" value={ob.invoiceCommencementDate} onChange={e => setObField('invoiceCommencementDate', e.target.value)} className={inputCls} />
+          <p className="mt-1 text-xs text-gray-500">Required — the 30-day onboarding SLA runs from your submission and billing depends on this date.</p>
+        </div>
         <div>
           <label className={labelCls}>Network</label>
           <select value={ob.network} onChange={e => setObField('network', e.target.value)} className={inputCls}>

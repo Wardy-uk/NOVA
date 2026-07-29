@@ -6,6 +6,9 @@ import { logError } from './error-log.js';
 import { trackEvent } from './portal-analytics.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
+import type { OnboardingRecordQueries } from '../db/queries.js';
+import type { GuildOnboardingService } from './guild-onboarding.js';
+import type { EmailService } from './email.js';
 
 const URGENCY_TO_PRIORITY_HINT: Record<string, string> = {
   Normal: 'Medium',
@@ -237,6 +240,11 @@ export class PortalIntakeService {
   constructor(
     private settings: FileSettingsQueries,
     private portalJira: PortalJiraService,
+    // Guild onboarding pipeline (backlog #8) — optional; null keeps the legacy
+    // setup+QA path for all onboardings when Jira/records aren't wired.
+    private records: OnboardingRecordQueries | null = null,
+    private guild: GuildOnboardingService | null = null,
+    private email: EmailService | null = null,
   ) {}
 
   async submitTicket(
@@ -399,6 +407,15 @@ export class PortalIntakeService {
   ): Promise<{ ticketKey: string; qaKey: string | null }> {
     await trackEvent('form_completed', portalUserId, orgId, { category: 'onboarding_request' });
 
+    // Guild/BYM channel (backlog #8): one submission → a first-class onboarding
+    // record + QA parent + 7 linked children, replacing the legacy setup+QA pair.
+    // Off by default (guild_onboarding_enabled) so the feature ships dark until
+    // fully wired and Nick switches it on.
+    const guildEnabled = /^(true|1|on|yes)$/i.test(this.settings.get('guild_onboarding_enabled') || '');
+    if (guildEnabled && this.records && this.guild && /guild/i.test(input.network || '')) {
+      return this.submitGuildOnboarding(input, portalUserId, orgId, userEmail, userName);
+    }
+
     const org = await queryOne<{ bc_account_number: string | null }>(
       `SELECT bc_account_number FROM portal_organisations WHERE id = ?`,
       [orgId],
@@ -461,6 +478,75 @@ export class PortalIntakeService {
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: setupKey, category: 'onboarding_request' });
 
     return { ticketKey: setupKey, qaKey };
+  }
+
+  /** Guild/BYM onboarding (backlog #8): create the record, fan out the QA parent
+   *  + 7 linked children, alert the onboarding inbox. `ticketKey` is the QA
+   *  parent (the customer's single reference). */
+  private async submitGuildOnboarding(
+    input: PortalOnboardingRequestInput,
+    portalUserId: number,
+    orgId: number,
+    userEmail: string,
+    userName: string,
+  ): Promise<{ ticketKey: string; qaKey: string | null }> {
+    const ref = `GOB-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7)}`;
+    const recordId = await this.records!.create({
+      onboarding_ref: ref,
+      channel: 'guild',
+      org_id: orgId,
+      office_name: input.brand,
+      branch_name: input.branch,
+      invoice_commencement_date: input.invoiceCommencementDate || null,
+    });
+    const record = await this.records!.getById(recordId);
+    if (!record) throw new Error('Onboarding record vanished after creation');
+
+    let result;
+    try {
+      result = await this.guild!.createForRecord(record);
+    } catch (err) {
+      console.error('[portal-intake] Guild onboarding creation failed:', err);
+      await logError('portal-intake', err, { severity: 'critical', context: { phase: 'guild-onboarding', ref } });
+      throw new Error('We couldn\'t create your onboarding right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
+
+    // Record the submission against the QA parent so the customer can view/attach.
+    await execute(
+      `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+       VALUES (?, ?, ?, ?)`,
+      [portalUserId, result.parentKey, JSON.stringify({ ...input, onboardingRef: ref, childKeys: result.childKeys }), 'onboarding_request'],
+    );
+
+    await this.notifyOnboardingInbox(record, result, userName).catch(err =>
+      console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
+
+    await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_request' });
+    return { ticketKey: result.parentKey, qaKey: result.parentKey };
+  }
+
+  /** R2 — alert the onboarding inbox that a new Guild onboarding was submitted,
+   *  linking back to the NOVA record. Best-effort; needs `onboarding_inbox_email`. */
+  private async notifyOnboardingInbox(
+    record: { id: number; onboarding_ref: string; office_name: string | null; branch_name: string | null },
+    result: { parentKey: string; childKeys: Record<string, string> },
+    submittedBy: string,
+  ): Promise<void> {
+    const inbox = this.settings.get('onboarding_inbox_email');
+    if (!inbox || !this.email || !this.email.isConfigured()) return;
+    const base = (this.settings.get('app_base_url') || '').replace(/\/$/, '');
+    const link = base ? `${base}/portal/#onboarding-record/${record.id}` : `Onboarding record #${record.id}`;
+    const office = [record.office_name, record.branch_name].filter(Boolean).join(' — ') || 'New office';
+    const children = Object.entries(result.childKeys).map(([k, v]) => `${k}: ${v}`).join(', ');
+    await this.email.send({
+      to: inbox,
+      subject: `New Guild onboarding — ${office} (${result.parentKey})`,
+      text: `A new Guild onboarding was submitted by ${submittedBy}.\n\nOffice/branch: ${office}\nQA parent: ${result.parentKey}\nChildren: ${children}\nRef: ${record.onboarding_ref}\n\nNOVA record: ${link}`,
+      html: `<p>A new Guild onboarding was submitted by <strong>${submittedBy}</strong>.</p>`
+        + `<p><strong>Office/branch:</strong> ${office}<br><strong>QA parent:</strong> ${result.parentKey}<br>`
+        + `<strong>Children:</strong> ${children}<br><strong>Ref:</strong> ${record.onboarding_ref}</p>`
+        + `<p><a href="${link}">Open the NOVA onboarding record</a></p>`,
+    });
   }
 
   getProjectForCategory(category: string, subcategory?: string): string {

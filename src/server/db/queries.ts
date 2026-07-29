@@ -1218,6 +1218,62 @@ export class OnboardingRunQueries {
   }
 }
 
+// ─── Guild/BYM Onboarding Records (backlog #8) ───────────────────────────────
+
+export interface OnboardingRecord {
+  id: number; onboarding_ref: string; channel: string;
+  org_id: number | null; portal_submission_id: number | null;
+  office_name: string | null; branch_name: string | null;
+  submission_date: string; invoice_commencement_date: string | null;
+  parent_key: string | null; child_keys: string | null;
+  manual_fields: string | null;
+  status: 'pending' | 'success' | 'partial' | 'error';
+  error_message: string | null; created_at: string; updated_at: string;
+}
+
+export class OnboardingRecordQueries {
+  async getByRef(ref: string): Promise<OnboardingRecord | undefined> {
+    return queryOne<OnboardingRecord>(`SELECT TOP 1 * FROM onboarding_records WHERE onboarding_ref = ?`, [ref]);
+  }
+  async getById(id: number): Promise<OnboardingRecord | undefined> {
+    return queryOne<OnboardingRecord>(`SELECT TOP 1 * FROM onboarding_records WHERE id = ?`, [id]);
+  }
+  async listByOrg(orgId: number): Promise<OnboardingRecord[]> {
+    return query<OnboardingRecord>(`SELECT * FROM onboarding_records WHERE org_id = ? ORDER BY submission_date DESC`, [orgId]);
+  }
+  async listByChannel(channel: string): Promise<OnboardingRecord[]> {
+    return query<OnboardingRecord>(`SELECT * FROM onboarding_records WHERE channel = ? ORDER BY submission_date DESC`, [channel]);
+  }
+
+  async create(r: {
+    onboarding_ref: string; channel?: string; org_id?: number | null;
+    portal_submission_id?: number | null; office_name?: string | null; branch_name?: string | null;
+    invoice_commencement_date?: string | null; manual_fields?: string | null;
+  }): Promise<number> {
+    return executeAndGetId(
+      `INSERT INTO onboarding_records (onboarding_ref, channel, org_id, portal_submission_id, office_name, branch_name, invoice_commencement_date, manual_fields)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [r.onboarding_ref, r.channel ?? 'guild', r.org_id ?? null, r.portal_submission_id ?? null,
+       r.office_name ?? null, r.branch_name ?? null, r.invoice_commencement_date ?? null, r.manual_fields ?? null]
+    );
+  }
+
+  async update(id: number, updates: Partial<Pick<OnboardingRecord,
+    'status' | 'parent_key' | 'child_keys' | 'manual_fields' | 'error_message' | 'invoice_commencement_date' | 'office_name' | 'branch_name'>>): Promise<boolean> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = ?`);
+      params.push(val ?? null);
+    }
+    if (fields.length === 0) return false;
+    fields.push(`updated_at = GETUTCDATE()`);
+    params.push(id);
+    await execute(`UPDATE onboarding_records SET ${fields.join(', ')} WHERE id = ?`, params);
+    return true;
+  }
+}
+
 // ─── Milestone Templates & Delivery Milestones ───────────────────────────────
 
 export interface MilestoneTemplate {

@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
 import { ATLAS_HTML, MAP_HTML } from './atlas-map-html.js';
 import { query, queryOne, execute } from './services/database.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, OnboardingRecordQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -127,6 +127,7 @@ import { OnboardingEscalationService } from './services/onboarding-escalation-se
 import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-auth-middleware.js';
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
+import { GuildOnboardingService } from './services/guild-onboarding.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { createContractsRoutes } from './routes/contracts.js';
@@ -4482,14 +4483,21 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // Onboarding escalation engine — scans each org's enabled policy and sends
   // scheduled progress updates + escalations. Per-org policy is off by default,
   // so nothing sends until an org admin enables it. Runs in-hours; deduped.
+  const portalEmailService = new EmailService(() => settingsQueries.getAll());
   const escalationService = new OnboardingEscalationService(
     settingsQueries,
     portalJiraClient,
-    new EmailService(() => settingsQueries.getAll()),
+    portalEmailService,
   );
   setTimeout(() => { escalationService.runScan().catch(err => console.error('[escalation] initial scan failed:', err)); }, 150_000);
   setInterval(() => { escalationService.runScan().catch(err => console.error('[escalation] scan failed:', err)); }, 3 * 60 * 60 * 1000);
-  const portalIntake = new PortalIntakeService(settingsQueries, portalJira);
+  // Guild/BYM onboarding pipeline (backlog #8) — needs a Jira client; when absent
+  // PortalIntakeService falls back to the legacy setup+QA path for all onboardings.
+  const onboardingRecordQueries = new OnboardingRecordQueries();
+  const guildOnboarding = portalJiraClient
+    ? new GuildOnboardingService(portalJiraClient, onboardingRecordQueries, (k) => settingsQueries.get(k))
+    : null;
+  const portalIntake = new PortalIntakeService(settingsQueries, portalJira, onboardingRecordQueries, guildOnboarding, portalEmailService);
   const portalChat = new PortalChatService(settingsQueries, typeof llmService !== 'undefined' ? llmService : null, portalJira);
   const portalKb = new PortalKbService(settingsQueries, mcpManager);
 

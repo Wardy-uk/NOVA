@@ -257,6 +257,9 @@ export const PortalOnboardingRequestSchema = z.object({
   // Business
   brand: z.string().min(1).max(300),
   branch: z.string().min(1).max(300),
+  // Mandatory (backlog #8, R1): the 30-day onboarding SLA and billing depend on
+  // it. Required at submission — the form rejects an empty value. YYYY-MM-DD.
+  invoiceCommencementDate: z.string().min(1, 'Invoice commencement date is required').max(20),
   network: z.string().max(120).optional(),           // Guild / Fine & Country / other
   registeredCompanyName: z.string().max(300).optional(),
   membershipArea: z.string().max(200).optional(),
