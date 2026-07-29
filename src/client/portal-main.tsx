@@ -15,7 +15,7 @@ const PortalRaiseTicket = lazy(() => import('./components/portal/PortalRaiseTick
 const PortalKnowledgeBase = lazy(() => import('./components/portal/PortalKnowledgeBase.js'));
 const PortalChat = lazy(() => import('./components/portal/PortalChat.js'));
 const PortalCSAT = lazy(() => import('./components/portal/PortalCSAT.js'));
-const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalOnboardingDashboard.js'));
+const PortalOnboardingDashboard = lazy(() => import('./components/portal/PortalGuildOnboarding.js'));
 const PortalSupportDashboard = lazy(() => import('./components/portal/PortalSupportDashboard.js'));
 const PortalAbout = lazy(() => import('./components/portal/PortalAbout.js'));
 const PortalEscalations = lazy(() => import('./components/portal/PortalEscalations.js'));

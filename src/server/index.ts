@@ -4553,7 +4553,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEventsRoutes());
-  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalDashboardRoutes(settingsQueries, portalJiraClient));
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalDashboardRoutes(settingsQueries, portalJiraClient, guildDashboard));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEscalationRoutes(escalationService));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalOrgUserRoutes());
 

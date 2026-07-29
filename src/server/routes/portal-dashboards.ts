@@ -5,11 +5,12 @@ import type { JiraRestClient } from '../services/jira-client.js';
 import { canViewAllOrgTickets, canEscalateTicket, PORTAL_ROLE_RANK } from '../../shared/portal-types.js';
 import { listMemberships } from '../services/portal-org-membership.js';
 import { getSlaMatrix } from '../services/portal-sla-matrix.js';
+import type { GuildDashboardService } from '../services/guild-dashboard.js';
 
 // Customer-facing Onboarding + Support dashboards, scoped to the portal user's
 // organisation (→ BC Account Number OR reporter set). Queries Jira live so it
 // spans every project. Mounted behind portalGate + portalAuth.
-export function createPortalDashboardRoutes(settings: FileSettingsQueries | undefined, jira: JiraRestClient | null): Router {
+export function createPortalDashboardRoutes(settings: FileSettingsQueries | undefined, jira: JiraRestClient | null, guildDashboard?: GuildDashboardService): Router {
   const router = Router();
   const service = new PortalDashboardService(settings, jira);
 
@@ -79,6 +80,19 @@ export function createPortalDashboardRoutes(settings: FileSettingsQueries | unde
       res.json({ ok: true, data });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load onboarding dashboard' });
+    }
+  });
+
+  // Guild/BYM onboarding tracker (backlog #8) — records-based, scoped to the
+  // portal user's org. Read-only for the customer; BYM staff edit fields in NOVA.
+  router.get('/dashboards/guild-onboarding', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!guildDashboard) { res.json({ ok: true, data: { rows: [], generatedAt: new Date().toISOString() } }); return; }
+    try {
+      const data = await guildDashboard.getDashboard({ orgId: req.portalUser.orgId });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load onboarding tracker' });
     }
   });
 
