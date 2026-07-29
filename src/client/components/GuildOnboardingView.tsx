@@ -26,6 +26,119 @@ function api<T = unknown>(path: string, opts?: RequestInit): Promise<{ ok: boole
   return fetch(`/api/guild-onboarding${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts }).then(r => r.json());
 }
 
+// ── Configuration panel (the guild_* / jira_ob_* global settings live here so
+//    they're not hidden in a UI-less flat settings file) ──
+
+const FLAG_KEYS: Array<{ key: string; label: string }> = [
+  { key: 'guild_onboarding_enabled', label: 'Enable Guild pipeline (form → QA parent + 7 children)' },
+  { key: 'guild_digest_enabled', label: 'Send Monday digest to Guild' },
+  { key: 'guild_ints_escalations_enabled', label: 'Run INTS day 7/14/21/30 escalations' },
+];
+const TEXT_GROUPS: Array<{ title: string; fields: Array<{ key: string; label: string; placeholder?: string }> }> = [
+  { title: 'Jira', fields: [
+    { key: 'jira_ob_project', label: 'Project key', placeholder: 'NT' },
+    { key: 'jira_ob_issue_type', label: 'Issue type', placeholder: 'Support' },
+    { key: 'jira_ob_link_type', label: 'Parent↔child link type', placeholder: 'Blocks' },
+    { key: 'jira_ob_request_type_field', label: 'Request-type field id', placeholder: 'e.g. customfield_12800' },
+    { key: 'jira_ob_rt_qa_id', label: 'QA parent request-type id' },
+    { key: 'jira_ob_rt_onboarding_id', label: 'Child request-type id' },
+  ] },
+  { title: 'Recipients', fields: [
+    { key: 'onboarding_inbox_email', label: 'Onboarding inbox (new-submission alert)' },
+    { key: 'guild_digest_recipients', label: 'Guild digest recipients (comma-separated)' },
+    { key: 'guild_ints_nudge_email', label: 'INTS day 7 — reminder' },
+    { key: 'guild_ints_lead_email', label: 'INTS day 14 — onboarding lead' },
+    { key: 'guild_ints_manager_email', label: 'INTS day 21 — manager' },
+  ] },
+  { title: 'Optional', fields: [
+    { key: 'app_base_url', label: 'App base URL (for links in emails)', placeholder: 'https://nova.nurtur.tech' },
+    { key: 'guild_ob_parent_label', label: 'Parent name label', placeholder: 'QA' },
+  ] },
+];
+const ALL_TEXT_KEYS = TEXT_GROUPS.flatMap(g => g.fields.map(f => f.key));
+
+function ConfigPanel() {
+  const [open, setOpen] = useState(false);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    fetch('/api/settings').then(r => r.json()).then(d => {
+      if (d.ok) {
+        const all = d.data as Record<string, string>;
+        const picked: Record<string, string> = {};
+        for (const { key } of FLAG_KEYS) picked[key] = all[key] || '';
+        for (const key of ALL_TEXT_KEYS) picked[key] = all[key] || '';
+        setVals(picked);
+      }
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [open, loaded]);
+
+  const set = (k: string, v: string) => { setVals(prev => ({ ...prev, [k]: v })); setSaved(false); };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      for (const [key, value] of Object.entries(vals)) {
+        await fetch(`/api/settings/${key}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+      }
+      setSaved(true);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="bg-[#2f353d] rounded-lg border border-[#3a424d]">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[#343b44]">
+        <span className="text-neutral-500 text-xs">{open ? '▾' : '▸'}</span>
+        <span className="text-sm text-neutral-200 font-medium">Configuration</span>
+        <span className="text-[11px] text-neutral-500">— enable flags, Jira, recipients</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-4 border-t border-[#3a424d]">
+          {!loaded && <div className="text-xs text-neutral-500">Loading settings…</div>}
+          {loaded && (
+            <>
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Enable</div>
+                {FLAG_KEYS.map(f => (
+                  <label key={f.key} className="flex items-center gap-2 text-xs text-neutral-300">
+                    <input type="checkbox" checked={vals[f.key] === 'true'} onChange={e => set(f.key, e.target.checked ? 'true' : 'false')} />
+                    {f.label}
+                  </label>
+                ))}
+              </div>
+              {TEXT_GROUPS.map(g => (
+                <div key={g.title} className="space-y-2">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wide">{g.title}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {g.fields.map(f => (
+                      <div key={f.key}>
+                        <label className="text-[10px] text-neutral-500">{f.label}</label>
+                        <input type="text" value={vals[f.key] ?? ''} placeholder={f.placeholder} onChange={e => set(f.key, e.target.value)}
+                          className="w-full mt-0.5 bg-[#242a31] border border-[#3a424d] rounded px-2 py-1 text-xs text-neutral-200" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center gap-3">
+                <button onClick={save} disabled={saving} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white">
+                  {saving ? 'Saving…' : 'Save configuration'}
+                </button>
+                {saved && <span className="text-xs text-green-400">Saved</span>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -166,6 +279,7 @@ export function GuildOnboardingView() {
         </div>
         <button onClick={load} className="text-xs text-neutral-400 hover:text-neutral-200">Refresh</button>
       </div>
+      <ConfigPanel />
       {loading && <div className="text-sm text-neutral-500">Loading…</div>}
       {error && <div className="text-sm text-red-400">{error}</div>}
       {!loading && !error && rows.length === 0 && (
