@@ -1,6 +1,6 @@
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
-import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput } from '../../shared/portal-types.js';
+import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput, PortalMembershipApplicationInput, PortalOnboardingSetupInput } from '../../shared/portal-types.js';
 import { execute, queryOne, query } from './database.js';
 import { logError } from './error-log.js';
 import { trackEvent } from './portal-analytics.js';
@@ -533,6 +533,118 @@ export class PortalIntakeService {
 
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_request' });
     return { ticketKey: result.parentKey, qaKey: result.parentKey };
+  }
+
+  private async isGuildEnabled(orgId: number): Promise<boolean> {
+    const row = await queryOne<{ guild_onboarding_enabled: number }>(
+      `SELECT guild_onboarding_enabled FROM portal_organisations WHERE id = ?`, [orgId]);
+    return !!row?.guild_onboarding_enabled;
+  }
+
+  private newRef(): string {
+    return `GOB-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  private async orgInbox(orgId: number): Promise<string> {
+    const row = await queryOne<{ onboarding_config: string | null }>(
+      `SELECT onboarding_config FROM portal_organisations WHERE id = ?`, [orgId]);
+    let inbox = this.settings.get('onboarding_inbox_email') || '';
+    try { if (row?.onboarding_config) { const c = JSON.parse(row.onboarding_config); if (c.inboxEmail) inbox = c.inboxEmail; } } catch { /* fallback */ }
+    return inbox;
+  }
+
+  /** Step 1 (backlog #8) — Membership Application. Creates the onboarding record
+   *  only; no tickets and no SLA until the setup form (step 2) arrives. */
+  async submitMembershipApplication(
+    input: PortalMembershipApplicationInput, portalUserId: number, orgId: number, _userEmail: string, userName: string,
+  ): Promise<{ recordId: number; ref: string }> {
+    if (!this.records || !(await this.isGuildEnabled(orgId))) {
+      throw new Error('Onboarding is not enabled for your organisation.');
+    }
+    await trackEvent('form_completed', portalUserId, orgId, { category: 'membership_application' });
+    const ref = this.newRef();
+    const recordId = await this.records.create({
+      onboarding_ref: ref, channel: 'guild', org_id: orgId,
+      office_name: input.brand, branch_name: input.branch,
+      invoice_commencement_date: input.invoiceCommencementDate || null,
+      stage: 'application', application_data: JSON.stringify(input),
+    });
+    const inbox = await this.orgInbox(orgId);
+    if (inbox && this.email?.isConfigured()) {
+      const office = [input.brand, input.branch].filter(Boolean).join(' — ');
+      await this.email.send({
+        to: inbox,
+        subject: `New Guild membership application — ${office}`,
+        text: `A new Guild membership application was submitted by ${userName} for ${office}. The setup form (which creates the tickets) will follow. NOVA ref: ${ref}.`,
+        html: `<p>A new Guild membership application was submitted by <strong>${userName}</strong> for <strong>${office}</strong>.</p><p>The setup form (which creates the tickets) will follow.</p><p>NOVA ref: ${ref}</p>`,
+      }).catch(err => console.warn('[portal-intake] application inbox alert failed:', err instanceof Error ? err.message : err));
+    }
+    return { recordId, ref };
+  }
+
+  /** Step 2 (backlog #8) — Setup form (Standard or Multi-branch). Attaches to an
+   *  existing application (if applicationId given) or creates a fresh record,
+   *  then fires the QA parent + 7 children and starts the 30-day SLA. */
+  async submitGuildSetup(
+    input: PortalOnboardingSetupInput, portalUserId: number, orgId: number, _userEmail: string, userName: string,
+  ): Promise<{ ticketKey: string; recordId: number }> {
+    if (!this.records || !this.guild || !(await this.isGuildEnabled(orgId))) {
+      throw new Error('Onboarding is not enabled for your organisation.');
+    }
+    await trackEvent('form_completed', portalUserId, orgId, { category: 'onboarding_setup' });
+    const now = new Date().toISOString();
+
+    let recordId: number;
+    if (input.applicationId) {
+      const existing = await this.records.getById(input.applicationId);
+      if (!existing || existing.org_id !== orgId) throw new Error('Application not found for your organisation.');
+      recordId = existing.id;
+      await this.records.update(recordId, {
+        stage: 'setup', plan_type: input.planType, setup_date: now, setup_data: JSON.stringify(input),
+        office_name: input.brand || existing.office_name, branch_name: input.branch || existing.branch_name,
+      });
+    } else {
+      recordId = await this.records.create({
+        onboarding_ref: this.newRef(), channel: 'guild', org_id: orgId,
+        office_name: input.brand, branch_name: input.branch,
+        invoice_commencement_date: input.invoiceCommencementDate || null,
+        stage: 'setup', plan_type: input.planType,
+      });
+      await this.records.update(recordId, { setup_date: now, setup_data: JSON.stringify(input) });
+    }
+
+    const record = await this.records.getById(recordId);
+    if (!record) throw new Error('Onboarding record vanished after creation');
+
+    let result;
+    try {
+      result = await this.guild.createForRecord(record);
+    } catch (err) {
+      console.error('[portal-intake] Guild setup creation failed:', err);
+      await logError('portal-intake', err, { severity: 'critical', context: { phase: 'guild-setup', recordId } });
+      throw new Error('We couldn\'t create your onboarding right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
+
+    await execute(
+      `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+       VALUES (?, ?, ?, ?)`,
+      [portalUserId, result.parentKey, JSON.stringify({ ...input, onboardingRef: record.onboarding_ref, childKeys: result.childKeys }), 'onboarding_request'],
+    );
+    await this.notifyOnboardingInbox(record, result, userName, await this.orgInbox(orgId)).catch(err =>
+      console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
+    await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_setup' });
+    return { ticketKey: result.parentKey, recordId };
+  }
+
+  /** List application-stage records for the org, for the setup form's picker. */
+  async listOpenApplications(orgId: number): Promise<Array<{ id: number; ref: string; office: string; submittedAt: string }>> {
+    if (!this.records) return [];
+    const rows = await this.records.listOpenApplications(orgId);
+    return rows.map(r => ({
+      id: r.id, ref: r.onboarding_ref,
+      office: [r.office_name, r.branch_name].filter(Boolean).join(' — ') || '(unnamed)',
+      submittedAt: r.submission_date,
+    }));
   }
 
   /** R2 — alert the onboarding inbox that a new Guild onboarding was submitted,

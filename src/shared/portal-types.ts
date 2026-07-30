@@ -317,6 +317,59 @@ export const PortalOnboardingRequestSchema = z.object({
 
 export type PortalOnboardingRequestInput = z.infer<typeof PortalOnboardingRequestSchema>;
 
+// ── Guild Membership Application (backlog #8 two-stage, step 1) ──
+// Mirrors the Guild "Membership Application Form (Single Office)". Creates the
+// onboarding record but NO tickets — the setup form (step 2) fires those.
+export const PortalMembershipApplicationSchema = z.object({
+  brand: z.string().min(1).max(300),          // Agent / Brand
+  branch: z.string().min(1).max(300),
+  membershipArea: z.string().max(200).optional(),
+  agencyTradingName: z.string().max(300).optional(),
+  websiteAddress: z.string().max(300).optional(),
+  businessEntity: z.string().max(60).optional(),   // Limited / Sole Trader / Partnership / LLP
+  companyName: z.string().max(300).optional(),
+  addressLine: z.string().max(300).optional(),
+  town: z.string().max(150).optional(),
+  county: z.string().max(150).optional(),
+  postcode: z.string().max(30).optional(),
+  companyRegNumber: z.string().max(60).optional(),
+  businessEstablished: z.string().max(20).optional(),
+  vatNumber: z.string().max(60).optional(),
+  contactName: z.string().max(200).optional(),
+  contactPosition: z.string().max(120).optional(),
+  contactEmail: z.string().max(200).optional(),
+  contactPhone: z.string().max(60).optional(),
+  directors: z.array(z.string().max(200)).max(20).optional(),
+  offersSales: z.boolean().optional(),
+  offersLettings: z.boolean().optional(),
+  differentCompany: z.boolean().optional(),
+  differentCompanyDetails: z.string().max(300).optional(),
+  redressScheme: z.string().max(60).optional(),   // PRS / TPO
+  amlRegistered: z.boolean().optional(),
+  icoRegistered: z.boolean().optional(),
+  cmpProvider: z.string().max(200).optional(),
+  tenancyDepositProvider: z.string().max(200).optional(),
+  piInsurer: z.string().max(200).optional(),
+  piExpiryDate: z.string().max(20).optional(),
+  accountsEmail: z.string().max(200).optional(),    // invoicing
+  crmSoftware: z.string().max(120).optional(),
+  crmSoftwareOther: z.string().max(200).optional(),
+  setupFormRecipientName: z.string().max(200).optional(),
+  setupFormRecipientEmail: z.string().max(200).optional(),
+  invoiceCommencementDate: z.string().max(20).optional(),
+  notes: z.string().max(5000).optional(),
+});
+export type PortalMembershipApplicationInput = z.infer<typeof PortalMembershipApplicationSchema>;
+
+// Setup-form submission (step 2): the existing onboarding request fields, plus
+// the plan type and (optionally) the application record it completes.
+export const PortalOnboardingSetupSchema = PortalOnboardingRequestSchema.extend({
+  planType: z.enum(['standard', 'multi']).default('standard'),
+  applicationId: z.number().int().positive().optional(),
+  branches: z.array(z.string().max(300)).max(50).optional(),  // multi-office: branch list
+});
+export type PortalOnboardingSetupInput = z.infer<typeof PortalOnboardingSetupSchema>;
+
 // ── Onboarding org config (per org, set by the org's admin) — recipients for
 //    the Guild pipeline's alerts/digest/INTS escalations (backlog #8, level 3) ──
 export const OnboardingOrgConfigSchema = z.object({

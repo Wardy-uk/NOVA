@@ -80,9 +80,11 @@ export class GuildDashboardService {
     const intsStatus = intsKey ? statusByKey.get(intsKey) ?? null : null;
     const intsDone = jiraStatusToState(intsStatus) === 'done';
 
-    const submission = new Date(r.submission_date);
-    const sla = computeSla(submission, now, parentDone);
-    const intsLevel = computeIntsLevel(submission, now, intsDone);
+    // SLA runs 30 days from the SETUP form (step 2); fall back to submission_date
+    // for legacy single-step records that never had a separate setup date.
+    const slaAnchor = new Date(r.setup_date || r.submission_date);
+    const sla = computeSla(slaAnchor, now, parentDone);
+    const intsLevel = computeIntsLevel(slaAnchor, now, intsDone);
 
     const milestones: GuildMilestoneView[] = GUILD_MILESTONES.map(def => {
       if (def.kind === 'ticket') {

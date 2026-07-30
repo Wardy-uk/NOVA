@@ -3,7 +3,7 @@ import Busboy from 'busboy';
 import type { PortalJiraService } from '../services/portal-jira.js';
 import type { PortalIntakeService } from '../services/portal-intake.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import { PortalTicketCreateSchema, PortalNetworkRequestSchema, PortalOnboardingRequestSchema } from '../../shared/portal-types.js';
+import { PortalTicketCreateSchema, PortalNetworkRequestSchema, PortalOnboardingRequestSchema, PortalMembershipApplicationSchema, PortalOnboardingSetupSchema } from '../../shared/portal-types.js';
 import { trackEvent } from '../services/portal-analytics.js';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -147,6 +147,44 @@ export function createPortalTicketRoutes(
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit onboarding request' });
+    }
+  });
+
+  // Two-stage Guild onboarding (backlog #8).
+  // Step 1 — Membership Application (record only, no tickets).
+  router.post('/onboarding/application', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    const parsed = PortalMembershipApplicationSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
+    try {
+      const result = await intakeService.submitMembershipApplication(parsed.data, req.portalUser.userId, req.portalUser.orgId, req.portalUser.email, req.portalUser.orgName);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit application' });
+    }
+  });
+
+  // Step 2 — Setup form (Standard / Multi-branch): attaches + fires tickets + SLA.
+  router.post('/onboarding/setup', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    const parsed = PortalOnboardingSetupSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
+    try {
+      const result = await intakeService.submitGuildSetup(parsed.data, req.portalUser.userId, req.portalUser.orgId, req.portalUser.email, req.portalUser.orgName);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit setup form' });
+    }
+  });
+
+  // Application-stage records the setup form can attach to.
+  router.get('/onboarding/open-applications', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    try {
+      const data = await intakeService.listOpenApplications(req.portalUser.orgId);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load applications' });
     }
   });
 

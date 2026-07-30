@@ -1229,6 +1229,13 @@ export interface OnboardingRecord {
   manual_fields: string | null;
   status: 'pending' | 'success' | 'partial' | 'error';
   error_message: string | null; created_at: string; updated_at: string;
+  // Two-stage model (backlog #8): 'application' (no tickets) → 'setup' (QA + 7
+  // children created). setup_date anchors the 30-day SLA. plan_type: standard|multi.
+  stage: 'application' | 'setup';
+  plan_type: string | null;
+  setup_date: string | null;
+  application_data: string | null;
+  setup_data: string | null;
 }
 
 export class OnboardingRecordQueries {
@@ -1245,21 +1252,31 @@ export class OnboardingRecordQueries {
     return query<OnboardingRecord>(`SELECT * FROM onboarding_records WHERE channel = ? ORDER BY submission_date DESC`, [channel]);
   }
 
+  /** Application-stage records for an org awaiting a setup form (for the
+   *  "attach to application" picker on the setup forms). */
+  async listOpenApplications(orgId: number): Promise<OnboardingRecord[]> {
+    return query<OnboardingRecord>(
+      `SELECT * FROM onboarding_records WHERE org_id = ? AND stage = 'application' ORDER BY submission_date DESC`, [orgId]);
+  }
+
   async create(r: {
     onboarding_ref: string; channel?: string; org_id?: number | null;
     portal_submission_id?: number | null; office_name?: string | null; branch_name?: string | null;
     invoice_commencement_date?: string | null; manual_fields?: string | null;
+    stage?: 'application' | 'setup'; plan_type?: string | null; application_data?: string | null;
   }): Promise<number> {
     return executeAndGetId(
-      `INSERT INTO onboarding_records (onboarding_ref, channel, org_id, portal_submission_id, office_name, branch_name, invoice_commencement_date, manual_fields)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO onboarding_records (onboarding_ref, channel, org_id, portal_submission_id, office_name, branch_name, invoice_commencement_date, manual_fields, stage, plan_type, application_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [r.onboarding_ref, r.channel ?? 'guild', r.org_id ?? null, r.portal_submission_id ?? null,
-       r.office_name ?? null, r.branch_name ?? null, r.invoice_commencement_date ?? null, r.manual_fields ?? null]
+       r.office_name ?? null, r.branch_name ?? null, r.invoice_commencement_date ?? null, r.manual_fields ?? null,
+       r.stage ?? 'setup', r.plan_type ?? null, r.application_data ?? null]
     );
   }
 
   async update(id: number, updates: Partial<Pick<OnboardingRecord,
-    'status' | 'parent_key' | 'child_keys' | 'manual_fields' | 'error_message' | 'invoice_commencement_date' | 'office_name' | 'branch_name'>>): Promise<boolean> {
+    'status' | 'parent_key' | 'child_keys' | 'manual_fields' | 'error_message' | 'invoice_commencement_date' | 'office_name' | 'branch_name'
+    | 'stage' | 'plan_type' | 'setup_date' | 'setup_data'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {

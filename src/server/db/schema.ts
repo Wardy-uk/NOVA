@@ -2686,6 +2686,19 @@ async function runMigrations(): Promise<void> {
      CREATE UNIQUE NONCLUSTERED INDEX IX_onboarding_records_ref ON onboarding_records(onboarding_ref);`,
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_onboarding_records_org' AND object_id = OBJECT_ID('onboarding_records'))
      CREATE NONCLUSTERED INDEX IX_onboarding_records_org ON onboarding_records(org_id);`,
+    // Two-stage model (backlog #8 revision): application (step 1, no tickets) →
+    // setup form (step 2, creates QA + 7 children). SLA runs 30 days from
+    // setup_date. plan_type: 'standard' | 'multi'. *_data hold the captured forms.
+    `IF COL_LENGTH('onboarding_records', 'stage') IS NULL
+     ALTER TABLE onboarding_records ADD stage NVARCHAR(20) NOT NULL CONSTRAINT DF_onboarding_records_stage DEFAULT 'setup';`,
+    `IF COL_LENGTH('onboarding_records', 'plan_type') IS NULL
+     ALTER TABLE onboarding_records ADD plan_type NVARCHAR(20) NULL;`,
+    `IF COL_LENGTH('onboarding_records', 'setup_date') IS NULL
+     ALTER TABLE onboarding_records ADD setup_date DATETIME2 NULL;`,
+    `IF COL_LENGTH('onboarding_records', 'application_data') IS NULL
+     ALTER TABLE onboarding_records ADD application_data NVARCHAR(MAX) NULL;`,
+    `IF COL_LENGTH('onboarding_records', 'setup_data') IS NULL
+     ALTER TABLE onboarding_records ADD setup_data NVARCHAR(MAX) NULL;`,
 
     // ── Milestones ──
 
