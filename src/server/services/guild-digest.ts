@@ -1,22 +1,22 @@
 /**
  * Guild/BYM onboarding — weekly digest + INTS escalation sweep (backlog #8, R8/R4).
  *
- * R8: ONE Monday email to Guild covering ALL open deliveries (a digest, not one
- *     email per ticket). Replaces the per-update emails for the Guild channel —
- *     Guild status otherwise lives on the dashboard. (The general per-org
- *     escalation engine is untouched; it still serves non-Guild orgs.)
- * R4: INTS is the only child that escalates — day 7/14/21/30. Fired here to
- *     internal recipients, deduped via onboarding_escalation_log (kind guild_ints).
+ * Per-org (level 2/3): each runs only for orgs whose toggle is on
+ * (portal_organisations.guild_digest_enabled / guild_ints_escalations_enabled),
+ * using that org's recipient config (onboarding_config JSON, set by the org's
+ * admin on the "Onboarding Configuration" portal page).
  *
- * Recipients are settings-driven (exact addresses/roles are a BA item, spec §7).
+ * R8: ONE Monday email per org covering all its open deliveries (a digest, not
+ *     one email per ticket). Replaces per-update emails for the Guild channel.
+ * R4: INTS is the only child that escalates — day 7/14/21/30 — deduped via
+ *     onboarding_escalation_log (kind guild_ints).
  */
 import type { GuildDashboardService } from './guild-dashboard.js';
 import type { EmailService } from './email.js';
-import type { GuildOnboardingRow } from '../../shared/portal-types.js';
+import type { GuildOnboardingRow, OnboardingOrgConfig } from '../../shared/portal-types.js';
+import { OnboardingOrgConfigSchema, DEFAULT_ONBOARDING_ORG_CONFIG } from '../../shared/portal-types.js';
 import { INTS_LADDER } from './guild-onboarding-sla.js';
-import { execute, queryOne } from './database.js';
-
-type SettingsGet = (key: string) => string | undefined;
+import { query, queryOne, execute } from './database.js';
 
 function csv(v: string | undefined): string[] {
   return (v || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -32,40 +32,52 @@ export class GuildDigestService {
   constructor(
     private dashboard: GuildDashboardService,
     private email: EmailService,
-    private settingsGet: SettingsGet,
     private log: (msg: string) => void = console.log,
   ) {}
 
-  private enabled(key: string): boolean {
-    return /^(true|1|on|yes)$/i.test(this.settingsGet(key) || '');
+  /** Orgs whose given per-org toggle is on, with their parsed recipient config. */
+  private async orgsWithFlag(flagCol: 'guild_digest_enabled' | 'guild_ints_escalations_enabled'): Promise<Array<{ orgId: number; config: OnboardingOrgConfig }>> {
+    const rows = await query<{ id: number; onboarding_config: string | null }>(
+      `SELECT id, onboarding_config FROM portal_organisations WHERE ${flagCol} = 1`,
+    );
+    return rows.map(r => {
+      let config = DEFAULT_ONBOARDING_ORG_CONFIG;
+      if (r.onboarding_config) {
+        const parsed = OnboardingOrgConfigSchema.safeParse((() => { try { return JSON.parse(r.onboarding_config!); } catch { return {}; } })());
+        if (parsed.success) config = parsed.data;
+      }
+      return { orgId: r.id, config };
+    });
   }
 
-  /** R8 — Monday digest of every open Guild delivery, one email to Guild. */
-  async sendWeeklyDigest(): Promise<{ sent: boolean; rows: number }> {
-    if (!this.enabled('guild_digest_enabled')) return { sent: false, rows: 0 };
-    if (!this.email.isConfigured()) return { sent: false, rows: 0 };
-    const recipients = csv(this.settingsGet('guild_digest_recipients'));
-    if (recipients.length === 0) { this.log('[guild-digest] No recipients set'); return { sent: false, rows: 0 }; }
-
-    const { rows } = await this.dashboard.getDashboard();
-    const open = rows.filter(isOpen);
-    if (open.length === 0) { this.log('[guild-digest] No open deliveries — skipping'); return { sent: false, rows: 0 }; }
-
-    const html = this.buildDigestHtml(open);
-    const text = open.map(r =>
-      `${officeLabel(r)} — SLA ${r.slaBreached ? 'BREACHED' : `${r.slaDaysRemaining}d left`}`
-      + (r.intsEscalationLevel > 0 ? ` — INTS escalation day ${r.intsEscalationLevel}` : '')
-      + `\n  ${r.milestones.filter(m => m.kind === 'ticket').map(m => `${m.label}: ${m.detail || m.state}`).join('; ')}`,
-    ).join('\n\n');
-
-    await this.email.send({
-      to: recipients.join(', '),
-      subject: `Guild onboarding — weekly status (${open.length} open)`,
-      text,
-      html,
-    });
-    this.log(`[guild-digest] Sent weekly digest for ${open.length} open deliveries to ${recipients.join(', ')}`);
-    return { sent: true, rows: open.length };
+  /** R8 — one Monday digest per enabled org, to that org's recipients. */
+  async sendWeeklyDigest(): Promise<{ orgsSent: number; rows: number }> {
+    if (!this.email.isConfigured()) return { orgsSent: 0, rows: 0 };
+    const orgs = await this.orgsWithFlag('guild_digest_enabled');
+    let orgsSent = 0;
+    let totalRows = 0;
+    for (const { orgId, config } of orgs) {
+      const recipients = csv(config.digestRecipients);
+      if (recipients.length === 0) continue;
+      const { rows } = await this.dashboard.getDashboard({ orgId });
+      const open = rows.filter(isOpen);
+      if (open.length === 0) continue;
+      const html = this.buildDigestHtml(open);
+      const text = open.map(r =>
+        `${officeLabel(r)} — SLA ${r.slaBreached ? 'BREACHED' : `${r.slaDaysRemaining}d left`}`
+        + (r.intsEscalationLevel > 0 ? ` — INTS escalation day ${r.intsEscalationLevel}` : '')
+        + `\n  ${r.milestones.filter(m => m.kind === 'ticket').map(m => `${m.label}: ${m.detail || m.state}`).join('; ')}`,
+      ).join('\n\n');
+      await this.email.send({
+        to: recipients.join(', '),
+        subject: `Guild onboarding — weekly status (${open.length} open)`,
+        text, html,
+      });
+      orgsSent++;
+      totalRows += open.length;
+      this.log(`[guild-digest] org ${orgId}: sent digest for ${open.length} open → ${recipients.join(', ')}`);
+    }
+    return { orgsSent, rows: totalRows };
   }
 
   private buildDigestHtml(rows: GuildOnboardingRow[]): string {
@@ -95,41 +107,40 @@ export class GuildDigestService {
     </div>`;
   }
 
-  /** R4 — fire INTS escalations at each crossed threshold, once each. */
+  /** R4 — fire INTS escalations at each crossed threshold, once each, per enabled org. */
   async runIntsEscalations(): Promise<{ fired: number }> {
-    if (!this.enabled('guild_ints_escalations_enabled')) return { fired: 0 };
     if (!this.email.isConfigured()) return { fired: 0 };
-    const { rows } = await this.dashboard.getDashboard();
+    const orgs = await this.orgsWithFlag('guild_ints_escalations_enabled');
     let fired = 0;
-    for (const r of rows) {
-      if (!r.intsKey || r.orgId == null || r.intsEscalationLevel === 0) continue;
-      for (const day of INTS_LADDER) {
-        if (day > r.intsEscalationLevel) break;
-        const did = await this.fireIntsOnce(r, day);
-        if (did) fired++;
+    for (const { orgId, config } of orgs) {
+      const { rows } = await this.dashboard.getDashboard({ orgId });
+      for (const r of rows) {
+        if (!r.intsKey || r.orgId == null || r.intsEscalationLevel === 0) continue;
+        for (const day of INTS_LADDER) {
+          if (day > r.intsEscalationLevel) break;
+          if (await this.fireIntsOnce(r, day, config)) fired++;
+        }
       }
     }
     return { fired };
   }
 
-  private recipientsFor(day: number): string[] {
-    const fallback = csv(this.settingsGet('onboarding_inbox_email'));
-    if (day === 7) return csv(this.settingsGet('guild_ints_nudge_email')).concat(fallback);
-    if (day === 14) return csv(this.settingsGet('guild_ints_lead_email')).concat(fallback);
-    if (day === 21) return csv(this.settingsGet('guild_ints_manager_email')).concat(fallback);
+  private recipientsFor(day: number, config: OnboardingOrgConfig): string[] {
+    const fallback = csv(config.inboxEmail);
+    if (day === 7) return csv(config.intsNudgeEmail).concat(fallback);
+    if (day === 14) return csv(config.intsLeadEmail).concat(fallback);
+    if (day === 21) return csv(config.intsManagerEmail).concat(fallback);
     // Day 30 — SLA breach: lead + manager.
-    return csv(this.settingsGet('guild_ints_lead_email'))
-      .concat(csv(this.settingsGet('guild_ints_manager_email')))
-      .concat(fallback);
+    return csv(config.intsLeadEmail).concat(csv(config.intsManagerEmail)).concat(fallback);
   }
 
-  private async fireIntsOnce(r: GuildOnboardingRow, day: number): Promise<boolean> {
+  private async fireIntsOnce(r: GuildOnboardingRow, day: number, config: OnboardingOrgConfig): Promise<boolean> {
     const already = await queryOne<{ id: number }>(
       `SELECT id FROM onboarding_escalation_log WHERE org_id = ? AND ticket_key = ? AND level_day = ? AND kind = ?`,
       [r.orgId, r.intsKey, day, 'guild_ints'],
     );
     if (already) return false;
-    const recipients = [...new Set(this.recipientsFor(day))];
+    const recipients = [...new Set(this.recipientsFor(day, config))];
     if (recipients.length === 0) return false;
 
     const label = day === 7 ? 'Reminder' : day === 14 ? 'Escalation to onboarding lead'

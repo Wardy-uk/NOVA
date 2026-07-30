@@ -354,12 +354,16 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         brand_secondary: string | null;
         brand_font: string | null;
         support_cc_email: string | null;
+        guild_onboarding_enabled: number;
+        guild_digest_enabled: number;
+        guild_ints_escalations_enabled: number;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket, po.support_routes,
                 po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font, po.support_cc_email,
+                po.guild_onboarding_enabled, po.guild_digest_enabled, po.guild_ints_escalations_enabled,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -533,7 +537,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes, support_cc_email } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes, support_cc_email, guild } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -582,6 +586,17 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         await execute(
           `UPDATE portal_organisations SET support_routes = ?, updated_at = GETUTCDATE() WHERE id = ?`,
           [routes.join(','), orgId],
+        );
+      }
+      // Guild onboarding per-org enable toggles (backlog #8, level 2 — set by
+      // the portal admin). Each org is switched on individually.
+      if (guild && typeof guild === 'object') {
+        const bit = (v: unknown) => (v ? 1 : 0);
+        await execute(
+          `UPDATE portal_organisations
+           SET guild_onboarding_enabled = ?, guild_digest_enabled = ?, guild_ints_escalations_enabled = ?, updated_at = GETUTCDATE()
+           WHERE id = ?`,
+          [bit(guild.onboarding), bit(guild.digest), bit(guild.intsEscalations), orgId],
         );
       }
       // Shared CC address(es) copied on every raised ticket for this org.
@@ -695,6 +710,31 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update settings' });
+    }
+  });
+
+  // Guild onboarding GLOBAL config (backlog #8, level 1) — Jira wiring + optional
+  // keys shared across all orgs. Keeps the existing (orchestrator-shared) key
+  // names, so it can't reuse the portal_-prefixed /settings endpoint.
+  const GUILD_GLOBAL_KEYS = [
+    'jira_ob_project', 'jira_ob_issue_type', 'jira_ob_link_type', 'jira_ob_request_type_field',
+    'jira_ob_rt_qa_id', 'jira_ob_rt_onboarding_id', 'app_base_url', 'guild_ob_parent_label',
+  ];
+  router.get('/onboarding-global-config', (_req: Request, res: Response) => {
+    const out: Record<string, string> = {};
+    for (const k of GUILD_GLOBAL_KEYS) out[k] = settings.get(k) || '';
+    res.json({ ok: true, data: out });
+  });
+  router.put('/onboarding-global-config', (req: Request, res: Response) => {
+    const updates = req.body;
+    if (!updates || typeof updates !== 'object') { res.status(400).json({ ok: false, error: 'Body must be an object' }); return; }
+    try {
+      for (const [key, value] of Object.entries(updates)) {
+        if (GUILD_GLOBAL_KEYS.includes(key)) settings.set(key, String(value ?? ''));
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to save' });
     }
   });
 

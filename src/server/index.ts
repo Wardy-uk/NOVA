@@ -4507,7 +4507,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
 
   // Guild digest (R8, Monday ~14:00 UTC) + INTS escalation sweep (R4, hourly).
   // Both off by default (guild_digest_enabled / guild_ints_escalations_enabled).
-  const guildDigest = new GuildDigestService(guildDashboard, portalEmailService, (k) => settingsQueries.get(k));
+  const guildDigest = new GuildDigestService(guildDashboard, portalEmailService);
   jobRegistry.register('guild-weekly-digest', 'Guild onboarding weekly digest (Mon 14:00)', async () => {
     const now = new Date();
     if (now.getUTCDay() === 1 && now.getUTCHours() === 14 && now.getUTCMinutes() < 15) {

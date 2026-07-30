@@ -74,6 +74,66 @@ function LevelCard({ level, onChange, onRemove }: {
   );
 }
 
+// Guild onboarding recipients (backlog #8, level 3) — the org's own addresses
+// for the new-submission alert, weekly digest, and INTS escalations. Separate
+// from the escalation policy below; saved to /api/portal/onboarding-config.
+function OnboardingRecipientsCard() {
+  const FIELDS: Array<{ key: string; label: string; hint?: string }> = [
+    { key: 'inboxEmail', label: 'Onboarding inbox', hint: 'Alerted on each new onboarding' },
+    { key: 'digestRecipients', label: 'Weekly digest recipients', hint: 'Comma-separated' },
+    { key: 'intsNudgeEmail', label: 'INTS day 7 — reminder' },
+    { key: 'intsLeadEmail', label: 'INTS day 14 — onboarding lead' },
+    { key: 'intsManagerEmail', label: 'INTS day 21 — manager' },
+  ];
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    pf('/api/portal/onboarding-config').then(r => r.json())
+      .then(d => { if (!cancelled && d.ok) setVals(d.data || {}); })
+      .catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pf('/api/portal/onboarding-config', { method: 'PUT', body: JSON.stringify(vals) });
+      const d = await res.json();
+      if (d.ok) setSaved(true);
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return null;
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Onboarding notifications</h2>
+        <p className="text-xs text-gray-500">Who in your organisation receives onboarding alerts, the weekly status digest, and integration (INTS) escalations.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {FIELDS.map(f => (
+          <div key={f.key}>
+            <label className="text-xs font-medium text-gray-700">{f.label}</label>
+            {f.hint && <span className="text-[11px] text-gray-400 ml-1">{f.hint}</span>}
+            <input className={inputCls} value={vals[f.key] || ''} placeholder="email@company.com"
+              onChange={e => { setVals(prev => ({ ...prev, [f.key]: e.target.value })); setSaved(false); }} />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-end gap-3">
+        {saved && <span className="text-xs text-green-600">Saved.</span>}
+        <button onClick={save} disabled={saving} className="px-4 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark disabled:opacity-50 text-sm">
+          {saving ? 'Saving…' : 'Save recipients'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function PortalEscalations() {
   const [policy, setPolicy] = useState<OnboardingEscalationPolicy | null>(null);
   const [isDefault, setIsDefault] = useState(false);
@@ -162,10 +222,17 @@ export default function PortalEscalations() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Onboarding escalations</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Onboarding Configuration</h1>
         <p className="text-sm text-gray-600">
-          Scheduled progress updates and escalations for onboardings that aren’t complete by each day threshold.
+          Set who receives your onboarding notifications, and the schedule for progress updates and escalations.
         </p>
+      </div>
+
+      <OnboardingRecipientsCard />
+
+      <div className="pt-2">
+        <h2 className="text-lg font-semibold text-gray-900">Escalation schedule</h2>
+        <p className="text-sm text-gray-600">Progress updates and escalations for onboardings that aren’t complete by each day threshold.</p>
       </div>
 
       {isDefault && (

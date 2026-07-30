@@ -53,7 +53,7 @@ export default function PortalAdminView() {
       {tab === 'users' && <UsersPanel />}
       {tab === 'orgs' && <OrgsPanel />}
       {tab === 'sessions' && <SessionsPanel />}
-      {tab === 'settings' && <SettingsPanel />}
+      {tab === 'settings' && <><SettingsPanel /><GuildGlobalConfigPanel /></>}
       {tab === 'about' && <AboutPanel />}
     </div>
   );
@@ -828,6 +828,7 @@ function OrgsPanel() {
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
@@ -1028,6 +1029,7 @@ function OrgRow({ org, onSaved }: {
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
@@ -1037,6 +1039,9 @@ function OrgRow({ org, onSaved }: {
   const [reporters, setReporters] = useState(org.scope_reporters || '');
   const [routes, setRoutes] = useState<PortalSupportRoute[]>(parseSupportRoutes(org.support_routes));
   const [ccEmail, setCcEmail] = useState(org.support_cc_email || '');
+  const [guild, setGuild] = useState({
+    onboarding: !!org.guild_onboarding_enabled, digest: !!org.guild_digest_enabled, intsEscalations: !!org.guild_ints_escalations_enabled,
+  });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
@@ -1057,6 +1062,9 @@ function OrgRow({ org, onSaved }: {
     (bc.trim() || null) !== (org.bc_account_number || null) ||
     (reporters.trim() || null) !== (org.scope_reporters || null) ||
     (ccEmail.trim() || null) !== (org.support_cc_email || null) ||
+    guild.onboarding !== !!org.guild_onboarding_enabled ||
+    guild.digest !== !!org.guild_digest_enabled ||
+    guild.intsEscalations !== !!org.guild_ints_escalations_enabled ||
     routes.join(',') !== origRoutes.join(',') ||
     FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]) ||
     (Object.keys(brand) as Array<keyof typeof brand>).some(k => brand[k] !== origBrand[k]);
@@ -1097,6 +1105,7 @@ function OrgRow({ org, onSaved }: {
           bc_account_number: bc.trim() || null,
           scope_reporters: reporters.trim() || null,
           support_cc_email: ccEmail.trim() || null,
+          guild,
           features,
           support_routes: routes,
           branding: {
@@ -1179,6 +1188,23 @@ function OrgRow({ org, onSaved }: {
           <textarea value={reporters} onChange={e => setReporters(e.target.value)} rows={3} placeholder="Reporters (one per line): email, display name, or account id" className={`w-full ${inputCls}`} />
           <input value={ccEmail} onChange={e => setCcEmail(e.target.value)} placeholder="Shared CC email(s), comma-separated" className={`w-full ${inputCls}`} />
           <div className="text-[11px] text-gray-500">Copied on every ticket raised for this org (added as a request participant, so must be a Jira user to receive notifications).</div>
+
+          <div className="pt-3 mt-1 border-t border-gray-700 space-y-1">
+            <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">Guild onboarding</div>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={guild.onboarding} onChange={e => setGuild(p => ({ ...p, onboarding: e.target.checked }))} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+              Enable Guild pipeline (form → QA parent + 7 children)
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={guild.digest} onChange={e => setGuild(p => ({ ...p, digest: e.target.checked }))} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+              Send Monday digest
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={guild.intsEscalations} onChange={e => setGuild(p => ({ ...p, intsEscalations: e.target.checked }))} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+              Run INTS day 7/14/21/30 escalations
+            </label>
+            <div className="text-[11px] text-gray-500">Recipient addresses are set by the org's own admin on their Onboarding Configuration page.</div>
+          </div>
         </div>
 
         {/* Features */}
@@ -1316,6 +1342,69 @@ const KNOWN_PORTAL_SETTINGS: Array<{ key: string; placeholder: string; sensitive
 ];
 
 const KNOWN_KEYS = new Set(KNOWN_PORTAL_SETTINGS.map(s => s.key));
+
+// Guild onboarding GLOBAL config (backlog #8, level 1) — Jira wiring shared
+// across all orgs. Separate endpoint (keeps non-portal_ key names).
+function GuildGlobalConfigPanel() {
+  const FIELDS: Array<{ key: string; label: string; placeholder?: string; group: string }> = [
+    { key: 'jira_ob_project', label: 'Project key', placeholder: 'NT', group: 'Jira' },
+    { key: 'jira_ob_issue_type', label: 'Issue type', placeholder: 'Support', group: 'Jira' },
+    { key: 'jira_ob_link_type', label: 'Parent↔child link type', placeholder: 'Blocks', group: 'Jira' },
+    { key: 'jira_ob_request_type_field', label: 'Request-type field id', placeholder: 'e.g. customfield_12800', group: 'Jira' },
+    { key: 'jira_ob_rt_qa_id', label: 'QA parent request-type id', group: 'Jira' },
+    { key: 'jira_ob_rt_onboarding_id', label: 'Child request-type id', group: 'Jira' },
+    { key: 'app_base_url', label: 'App base URL (email links)', placeholder: 'https://nova.nurtur.tech', group: 'Optional' },
+    { key: 'guild_ob_parent_label', label: 'Parent name label', placeholder: 'QA', group: 'Optional' },
+  ];
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API}/onboarding-global-config`, { headers: authHeaders() })
+      .then(r => r.json()).then(d => { if (d.ok) setVals(d.data || {}); })
+      .catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await fetch(`${API}/onboarding-global-config`, { method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(vals) });
+      setSaved(true);
+    } catch { /* ignore */ } finally { setSaving(false); }
+  };
+
+  if (loading) return null;
+  const groups = ['Jira', 'Optional'];
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 space-y-1 mt-4">
+      <h3 className="text-sm font-semibold text-gray-200">Guild onboarding — global config</h3>
+      <p className="text-xs text-gray-500 mb-2">Shared across all orgs. Per-org enable toggles are on each org (Orgs tab); recipients are set by each org's admin in the portal.</p>
+      {groups.map(g => (
+        <div key={g}>
+          <h4 className="text-xs text-gray-500 uppercase tracking-wide mt-4 mb-2">{g}</h4>
+          <div className="space-y-3">
+            {FIELDS.filter(f => f.group === g).map(f => (
+              <div key={f.key} className="flex items-center gap-3">
+                <label className="text-xs text-gray-400 w-64 flex-shrink-0">{f.label}</label>
+                <input type="text" placeholder={f.placeholder} value={vals[f.key] || ''}
+                  onChange={e => { setVals(prev => ({ ...prev, [f.key]: e.target.value })); setSaved(false); }}
+                  className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center justify-end gap-3 pt-2">
+        {saved && <span className="text-xs text-green-400">Saved</span>}
+        <button onClick={save} disabled={saving} className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save global config'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function SettingsPanel() {
   const [settings, setSettings] = useState<Record<string, string>>({});

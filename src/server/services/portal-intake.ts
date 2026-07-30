@@ -409,11 +409,15 @@ export class PortalIntakeService {
 
     // Guild/BYM channel (backlog #8): one submission → a first-class onboarding
     // record + QA parent + 7 linked children, replacing the legacy setup+QA pair.
-    // Off by default (guild_onboarding_enabled) so the feature ships dark until
-    // fully wired and Nick switches it on.
-    const guildEnabled = /^(true|1|on|yes)$/i.test(this.settings.get('guild_onboarding_enabled') || '');
-    if (guildEnabled && this.records && this.guild && /guild/i.test(input.network || '')) {
-      return this.submitGuildOnboarding(input, portalUserId, orgId, userEmail, userName);
+    // Gated per-org (portal_organisations.guild_onboarding_enabled), set by the
+    // portal admin in Portal Admin → Org. Off for every org by default.
+    if (this.records && this.guild) {
+      const orgGuild = await queryOne<{ guild_onboarding_enabled: number }>(
+        `SELECT guild_onboarding_enabled FROM portal_organisations WHERE id = ?`, [orgId],
+      );
+      if (orgGuild?.guild_onboarding_enabled) {
+        return this.submitGuildOnboarding(input, portalUserId, orgId, userEmail, userName);
+      }
     }
 
     const org = await queryOne<{ bc_account_number: string | null }>(
@@ -518,7 +522,13 @@ export class PortalIntakeService {
       [portalUserId, result.parentKey, JSON.stringify({ ...input, onboardingRef: ref, childKeys: result.childKeys }), 'onboarding_request'],
     );
 
-    await this.notifyOnboardingInbox(record, result, userName).catch(err =>
+    // R2 alert — inbox from the org's Onboarding Configuration, else the global fallback.
+    const orgCfg = await queryOne<{ onboarding_config: string | null }>(
+      `SELECT onboarding_config FROM portal_organisations WHERE id = ?`, [orgId],
+    );
+    let inbox = this.settings.get('onboarding_inbox_email') || '';
+    try { if (orgCfg?.onboarding_config) { const c = JSON.parse(orgCfg.onboarding_config); if (c.inboxEmail) inbox = c.inboxEmail; } } catch { /* use fallback */ }
+    await this.notifyOnboardingInbox(record, result, userName, inbox).catch(err =>
       console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
 
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_request' });
@@ -531,8 +541,8 @@ export class PortalIntakeService {
     record: { id: number; onboarding_ref: string; office_name: string | null; branch_name: string | null },
     result: { parentKey: string; childKeys: Record<string, string> },
     submittedBy: string,
+    inbox: string,
   ): Promise<void> {
-    const inbox = this.settings.get('onboarding_inbox_email');
     if (!inbox || !this.email || !this.email.isConfigured()) return;
     const base = (this.settings.get('app_base_url') || '').replace(/\/$/, '');
     const link = base ? `${base}/portal/#onboarding-record/${record.id}` : `Onboarding record #${record.id}`;

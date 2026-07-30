@@ -317,6 +317,20 @@ export const PortalOnboardingRequestSchema = z.object({
 
 export type PortalOnboardingRequestInput = z.infer<typeof PortalOnboardingRequestSchema>;
 
+// ── Onboarding org config (per org, set by the org's admin) — recipients for
+//    the Guild pipeline's alerts/digest/INTS escalations (backlog #8, level 3) ──
+export const OnboardingOrgConfigSchema = z.object({
+  inboxEmail: z.string().max(400).optional().default(''),
+  digestRecipients: z.string().max(1000).optional().default(''),
+  intsNudgeEmail: z.string().max(400).optional().default(''),
+  intsLeadEmail: z.string().max(400).optional().default(''),
+  intsManagerEmail: z.string().max(400).optional().default(''),
+});
+export type OnboardingOrgConfig = z.infer<typeof OnboardingOrgConfigSchema>;
+export const DEFAULT_ONBOARDING_ORG_CONFIG: OnboardingOrgConfig = {
+  inboxEmail: '', digestRecipients: '', intsNudgeEmail: '', intsLeadEmail: '', intsManagerEmail: '',
+};
+
 // ── Onboarding escalation policy (per org, configurable by org admins) ──
 // Multi-level schedule: at each day threshold NOVA can send a progress update to
 // the customer and/or raise an internal escalation to named recipients. Fires

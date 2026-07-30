@@ -2094,6 +2094,19 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_organisations', 'support_cc_email') IS NULL
      ALTER TABLE portal_organisations ADD support_cc_email NVARCHAR(400) NULL;`,
 
+    // Guild/BYM onboarding (backlog #8) — per-org enable toggles (set by the
+    // portal admin in Portal Admin → Org) + org recipient config (set by the
+    // org's own admin on the "Onboarding Configuration" portal page, JSON:
+    // { inboxEmail, digestRecipients, intsNudgeEmail, intsLeadEmail, intsManagerEmail }).
+    `IF COL_LENGTH('portal_organisations', 'guild_onboarding_enabled') IS NULL
+     ALTER TABLE portal_organisations ADD guild_onboarding_enabled BIT NOT NULL CONSTRAINT DF_portal_org_guild_ob DEFAULT 0;`,
+    `IF COL_LENGTH('portal_organisations', 'guild_digest_enabled') IS NULL
+     ALTER TABLE portal_organisations ADD guild_digest_enabled BIT NOT NULL CONSTRAINT DF_portal_org_guild_digest DEFAULT 0;`,
+    `IF COL_LENGTH('portal_organisations', 'guild_ints_escalations_enabled') IS NULL
+     ALTER TABLE portal_organisations ADD guild_ints_escalations_enabled BIT NOT NULL CONSTRAINT DF_portal_org_guild_ints DEFAULT 0;`,
+    `IF COL_LENGTH('portal_organisations', 'onboarding_config') IS NULL
+     ALTER TABLE portal_organisations ADD onboarding_config NVARCHAR(MAX) NULL;`,
+
     // Portal escalations — links an original ticket to the Escalation request a
     // manager raised from it, so the portal can show/open the escalation.
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_escalations') AND type = 'U')

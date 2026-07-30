@@ -3,6 +3,8 @@ import { queryOne, execute } from '../services/database.js';
 import {
   DEFAULT_ESCALATION_POLICY,
   OnboardingEscalationPolicySchema,
+  OnboardingOrgConfigSchema,
+  DEFAULT_ONBOARDING_ORG_CONFIG,
   PORTAL_ROLE_RANK,
   type OnboardingEscalationPolicy,
 } from '../../shared/portal-types.js';
@@ -68,6 +70,43 @@ export function createPortalEscalationRoutes(escalation: OnboardingEscalationSer
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to save escalation policy' });
+    }
+  });
+
+  // Onboarding org config (backlog #8, level 3) — recipient addresses this org's
+  // admin sets for the Guild pipeline's alerts/digest/INTS escalations.
+  router.get('/onboarding-config', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!isOrgAdmin(req)) { res.status(403).json({ ok: false, error: 'Organisation admin access required' }); return; }
+    try {
+      const row = await queryOne<{ onboarding_config: string | null }>(
+        `SELECT onboarding_config FROM portal_organisations WHERE id = ?`,
+        [req.portalUser.orgId],
+      );
+      let config = DEFAULT_ONBOARDING_ORG_CONFIG;
+      if (row?.onboarding_config) {
+        const parsed = OnboardingOrgConfigSchema.safeParse(JSON.parse(row.onboarding_config));
+        if (parsed.success) config = parsed.data;
+      }
+      res.json({ ok: true, data: config });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load onboarding config' });
+    }
+  });
+
+  router.put('/onboarding-config', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!isOrgAdmin(req)) { res.status(403).json({ ok: false, error: 'Organisation admin access required' }); return; }
+    const parsed = OnboardingOrgConfigSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
+    try {
+      await execute(
+        `UPDATE portal_organisations SET onboarding_config = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+        [JSON.stringify(parsed.data), req.portalUser.orgId],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to save onboarding config' });
     }
   });
 
