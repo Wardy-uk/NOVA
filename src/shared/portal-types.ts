@@ -837,6 +837,9 @@ export interface GuildOnboardingRow {
   id: number;
   ref: string;
   orgId: number | null;
+  /** 'application' = awaiting the setup form (no tickets/SLA yet); 'setup' = live. */
+  stage: 'application' | 'setup';
+  planType: string | null;
   officeName: string | null;
   branchName: string | null;
   submissionDate: string;

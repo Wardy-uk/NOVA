@@ -47,12 +47,18 @@ function Row({ row }: { row: GuildOnboardingRow }) {
           <div className="text-sm font-medium text-gray-900 truncate">{office(row)}</div>
           <div className="text-[11px] text-gray-500">Submitted {row.submissionDate.slice(0, 10)}{row.invoiceCommencementDate ? ` · invoice starts ${row.invoiceCommencementDate}` : ''}</div>
         </div>
-        {row.intsEscalationLevel > 0 && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Integration — day {row.intsEscalationLevel}</span>
+        {row.stage === 'application' ? (
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Awaiting setup form</span>
+        ) : (
+          <>
+            {row.intsEscalationLevel > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Integration — day {row.intsEscalationLevel}</span>
+            )}
+            <span className="text-[11px] px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: RAG_COLOR[row.slaRag] }}>
+              {row.slaRag === 'met' ? 'Complete' : row.slaBreached ? 'Over 30 days' : `${row.slaDaysRemaining} days left`}
+            </span>
+          </>
         )}
-        <span className="text-[11px] px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: RAG_COLOR[row.slaRag] }}>
-          {row.slaRag === 'met' ? 'Complete' : row.slaBreached ? 'Over 30 days' : `${row.slaDaysRemaining} days left`}
-        </span>
       </button>
       {open && (
         <div className="px-4 pb-4 pt-1 border-t border-gray-100">
@@ -88,22 +94,24 @@ export default function PortalGuildOnboarding() {
   // No records for this org → keep the original live-Jira onboarding view.
   if (error || !rows || rows.length === 0) return <PortalOnboardingDashboard />;
 
-  const open = rows.filter(r => r.slaRag !== 'met');
+  const applications = rows.filter(r => r.stage === 'application');
+  const inProgress = rows.filter(r => r.stage === 'setup' && r.slaRag !== 'met');
+  const completed = rows.filter(r => r.stage === 'setup' && r.slaRag === 'met');
+  const group = (title: string, list: GuildOnboardingRow[]) => list.length > 0 && (
+    <div>
+      <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 mt-4">{title}</div>
+      <div className="space-y-2">{list.map(r => <Row key={r.id} row={r} />)}</div>
+    </div>
+  );
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 mb-1">Onboarding</h1>
-        <p className="text-sm text-gray-600">Your set-ups and their progress. Each has a 30-day target from submission.</p>
+        <p className="text-sm text-gray-600">Your set-ups and their progress. The 30-day target starts when the setup form is submitted.</p>
       </div>
-      <div className="space-y-2">
-        {open.map(r => <Row key={r.id} row={r} />)}
-      </div>
-      {rows.some(r => r.slaRag === 'met') && (
-        <div>
-          <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 mt-4">Completed</div>
-          <div className="space-y-2">{rows.filter(r => r.slaRag === 'met').map(r => <Row key={r.id} row={r} />)}</div>
-        </div>
-      )}
+      {group('In progress', inProgress)}
+      {group('Awaiting setup form', applications)}
+      {group('Completed', completed)}
     </div>
   );
 }

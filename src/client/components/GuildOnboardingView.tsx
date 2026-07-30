@@ -105,14 +105,20 @@ function Row({ row, onChanged }: { row: GuildOnboardingRow; onChanged: () => voi
             {row.invoiceCommencementDate ? ` · invoice ${row.invoiceCommencementDate}` : ''}
           </div>
         </div>
-        {row.intsEscalationLevel > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: '#7f1d1d', color: '#fecaca' }}>
-            INTS D{row.intsEscalationLevel}
-          </span>
+        {row.stage === 'application' ? (
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-600 text-slate-100">Awaiting setup</span>
+        ) : (
+          <>
+            {row.intsEscalationLevel > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: '#7f1d1d', color: '#fecaca' }}>
+                INTS D{row.intsEscalationLevel}
+              </span>
+            )}
+            <span className="text-[10px] px-2 py-0.5 rounded text-white" style={{ backgroundColor: RAG_COLOR[row.slaRag] }}>
+              {row.slaRag === 'met' ? 'SLA met' : row.slaBreached ? 'SLA breached' : `${row.slaDaysRemaining}d left`}
+            </span>
+          </>
         )}
-        <span className="text-[10px] px-2 py-0.5 rounded text-white" style={{ backgroundColor: RAG_COLOR[row.slaRag] }}>
-          {row.slaRag === 'met' ? 'SLA met' : row.slaBreached ? 'SLA breached' : `${row.slaDaysRemaining}d left`}
-        </span>
         {row.status !== 'success' && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200">{row.status}</span>
         )}
@@ -126,7 +132,7 @@ function Row({ row, onChanged }: { row: GuildOnboardingRow; onChanged: () => voi
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-[10px] text-neutral-500 uppercase tracking-wide">Manual fields</div>
-              {row.status !== 'success' && (
+              {row.stage === 'setup' && row.status !== 'success' && (
                 <button onClick={retry} disabled={retrying} className="text-[11px] text-blue-400 hover:underline disabled:opacity-50">
                   {retrying ? 'Retrying…' : 'Retry ticket creation'}
                 </button>

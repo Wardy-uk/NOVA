@@ -109,6 +109,8 @@ export class GuildDashboardService {
       id: r.id,
       ref: r.onboarding_ref,
       orgId: r.org_id,
+      stage: r.stage,
+      planType: r.plan_type,
       officeName: r.office_name,
       branchName: r.branch_name,
       submissionDate: r.submission_date,

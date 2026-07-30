@@ -25,7 +25,9 @@ function officeLabel(r: GuildOnboardingRow): string {
   return [r.officeName, r.branchName].filter(Boolean).join(' — ') || '(unnamed)';
 }
 function isOpen(r: GuildOnboardingRow): boolean {
-  return r.slaRag !== 'met';
+  // Only setup-stage records are live deliveries; application-stage are still
+  // awaiting the setup form (no tickets/SLA yet).
+  return r.stage === 'setup' && r.slaRag !== 'met';
 }
 
 export class GuildDigestService {
