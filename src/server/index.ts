@@ -4550,7 +4550,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // req.portalUser.viewAs) and before every route that can mutate.
   const portalAuth = portalAuthMiddleware(settingsQueries, getRoles);
   const portalReadOnly = portalViewAsReadOnly();
-  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries));
+  app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalTicketRoutes(portalJira, portalIntake, settingsQueries, typeof llmService !== 'undefined' ? llmService : null));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalChatRoutes(portalChat, portalJira));
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalEventsRoutes());
   app.use('/api/portal', portalGate, portalAuth, portalReadOnly, createPortalDashboardRoutes(settingsQueries, portalJiraClient, guildDashboard));

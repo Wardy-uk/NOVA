@@ -15,6 +15,7 @@ export function createPortalTicketRoutes(
   portalJira: PortalJiraService,
   intakeService: PortalIntakeService,
   settings?: FileSettingsQueries,
+  llm?: import('../services/llm-service.js').LlmService | null,
 ): Router {
   const router = Router();
 
@@ -175,6 +176,40 @@ export function createPortalTicketRoutes(
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit setup form' });
     }
+  });
+
+  // Import a Guild form (PDF/xlsx) → extract + LLM-map → pre-fill fields.
+  router.post('/onboarding/import', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!llm) { res.status(503).json({ ok: false, error: 'AI extraction is not configured.' }); return; }
+    let formType: 'application' | 'setup' = 'application';
+    let fileBuf: Buffer | null = null;
+    let filename = '';
+    let tooBig = false;
+    let bb: ReturnType<typeof Busboy>;
+    try { bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE, files: 1 } }); }
+    catch { res.status(400).json({ ok: false, error: 'Invalid upload' }); return; }
+    bb.on('field', (name: string, val: string) => { if (name === 'formType' && (val === 'application' || val === 'setup')) formType = val; });
+    bb.on('file', (_f: string, stream: NodeJS.ReadableStream & { on(e: 'limit', l: () => void): void }, info: { filename: string }) => {
+      filename = info.filename || '';
+      const chunks: Buffer[] = [];
+      stream.on('data', (c: Buffer) => chunks.push(c));
+      stream.on('limit', () => { tooBig = true; });
+      stream.on('end', () => { fileBuf = Buffer.concat(chunks); });
+    });
+    bb.on('finish', async () => {
+      if (tooBig) { res.status(400).json({ ok: false, error: 'File too large (max 10 MB).' }); return; }
+      if (!fileBuf) { res.status(400).json({ ok: false, error: 'No file uploaded.' }); return; }
+      try {
+        const { importGuildForm } = await import('../services/guild-form-import.js');
+        const data = await importGuildForm(fileBuf, filename, formType, llm);
+        res.json({ ok: true, data });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Import failed' });
+      }
+    });
+    bb.on('error', () => { if (!res.headersSent) res.status(400).json({ ok: false, error: 'Upload error' }); });
+    req.pipe(bb);
   });
 
   // Application-stage records the setup form can attach to.

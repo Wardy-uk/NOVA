@@ -1,6 +1,6 @@
 {
   "name": "daypilot",
-  "version": "1.1.405",
+  "version": "1.1.406",
   "private": true,
   "type": "module",
   "scripts": {
@@ -37,6 +37,7 @@
     "mssql": "^12.2.0",
     "nodemailer": "^8.0.1",
     "openai": "^6.22.0",
+    "pdf-parse": "^1.1.1",
     "react-chartjs-2": "^5.3.1",
     "xlsx": "^0.18.5",
     "zod": "^3.24.0"

@@ -60,6 +60,53 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   });
   const setAppField = (k: keyof typeof app, v: string | boolean) => setApp(prev => ({ ...prev, [k]: v }));
   const guildOb = route === 'onboarding' && !!guildOnboarding;
+  const [importing, setImporting] = useState(false);
+
+  const applyImport = (data: Record<string, unknown>) => {
+    const str = (v: unknown) => (v == null ? '' : Array.isArray(v) ? v.join('\n') : String(v));
+    const bool = (v: unknown) => v === true || v === 'true' || v === 'yes' || v === 'Yes';
+    if (obFormType === 'application') {
+      setApp(prev => {
+        const next = { ...prev };
+        for (const k of Object.keys(prev) as Array<keyof typeof prev>) {
+          if (!(k in data)) continue;
+          next[k] = (typeof prev[k] === 'boolean' ? bool(data[k]) : str(data[k])) as never;
+        }
+        return next;
+      });
+    } else {
+      setOb(prev => {
+        const next = { ...prev };
+        for (const k of Object.keys(prev) as Array<keyof typeof prev>) {
+          if (!(k in data)) continue;
+          next[k] = (typeof prev[k] === 'boolean' ? bool(data[k]) : str(data[k])) as never;
+        }
+        return next;
+      });
+      if (Array.isArray(data.portals)) {
+        setPortalsSel(prev => { const n = { ...prev }; for (const p of Object.keys(n)) n[p] = (data.portals as unknown[]).some(x => String(x).toLowerCase() === p.toLowerCase()); return n; });
+      }
+      if (Array.isArray(data.users) && data.users.length) {
+        setObUsers((data.users as Array<Record<string, unknown>>).map(u => ({
+          name: str(u.name), email: str(u.email), accessLevel: str(u.accessLevel), jobTitle: str(u.jobTitle),
+        })));
+      }
+    }
+  };
+
+  const handleImport = async (file: File) => {
+    setImporting(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('formType', obFormType === 'application' ? 'application' : 'setup');
+      fd.append('file', file);
+      const res = await pf('/api/portal/onboarding/import', { method: 'POST', body: fd });
+      const d = await res.json();
+      if (d.ok) applyImport(d.data);
+      else setError(d.error || 'Import failed');
+    } catch { setError('Import failed'); }
+    finally { setImporting(false); }
+  };
 
   // Load open applications when a setup form (standard/multi) is active, for the
   // "attach to application" picker.
@@ -352,6 +399,16 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
                   ? 'Step 1 — the membership application. No setup tickets are created yet.'
                   : 'Step 2 — the setup form. Creates the setup tickets and starts the 30-day SLA.'}
               </p>
+            </div>
+
+            {/* Import from the Guild form (backlog #8, stage 3) */}
+            <div className="flex items-center gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
+              <label className="cursor-pointer px-3 py-1.5 bg-brand text-white rounded-lg text-sm hover:bg-brand-dark">
+                {importing ? 'Reading…' : 'Import from Guild form'}
+                <input type="file" accept=".pdf,.xlsx,.xls" className="hidden" disabled={importing}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ''; }} />
+              </label>
+              <p className="text-xs text-gray-500">Upload the {obFormType === 'multi' ? 'multi-office set-up spreadsheet' : obFormType === 'application' ? 'Guild application PDF' : 'Guild set-up PDF'} to pre-fill this form. Review before submitting; phone numbers aren't imported.</p>
             </div>
 
             {obFormType === 'application' ? (
