@@ -637,12 +637,13 @@ export class PortalIntakeService {
   }
 
   /** List application-stage records for the org, for the setup form's picker. */
-  async listOpenApplications(orgId: number): Promise<Array<{ id: number; ref: string; office: string; submittedAt: string }>> {
+  async listOpenApplications(orgId: number): Promise<Array<{ id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string }>> {
     if (!this.records) return [];
     const rows = await this.records.listOpenApplications(orgId);
     return rows.map(r => ({
       id: r.id, ref: r.onboarding_ref,
       office: [r.office_name, r.branch_name].filter(Boolean).join(' — ') || '(unnamed)',
+      brand: r.office_name, branch: r.branch_name,
       submittedAt: r.submission_date,
     }));
   }

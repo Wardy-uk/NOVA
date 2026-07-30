@@ -20,7 +20,7 @@ const OB_FORM_LABELS: Record<ObFormType, string> = {
   standard: 'Raise Standard Onboarding',
   multi: 'Raise Multi Branch Onboarding',
 };
-interface OpenApplication { id: number; ref: string; office: string; submittedAt: string }
+interface OpenApplication { id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string }
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -47,6 +47,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   const [applicationId, setApplicationId] = useState<number | ''>('');
   const [openApps, setOpenApps] = useState<OpenApplication[]>([]);
   const [branches, setBranches] = useState('');   // multi-office: one branch per line
+  const [applicationTouched, setApplicationTouched] = useState(false);  // manual override of auto-match
   const [app, setApp] = useState({
     brand: '', branch: '', membershipArea: '', agencyTradingName: '', websiteAddress: '',
     businessEntity: '', companyName: '', addressLine: '', town: '', county: '', postcode: '',
@@ -116,6 +117,18 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
     pf('/api/portal/onboarding/open-applications')
       .then(r => r.json()).then(d => { if (d.ok) setOpenApps(d.data); }).catch(() => {});
   }, [guildOb, obFormType]);
+
+  // Auto-match the setup form to an open application by Brand + Branch (works
+  // especially well after Import). The dropdown stays a manual override; once the
+  // user changes it themselves, auto-matching backs off.
+  React.useEffect(() => {
+    if (!guildOb || obFormType === 'application' || applicationTouched) return;
+    const b = ob.brand.trim().toLowerCase(), br = ob.branch.trim().toLowerCase();
+    if (!b || !br) return;
+    const match = openApps.find(a => (a.brand || '').trim().toLowerCase() === b && (a.branch || '').trim().toLowerCase() === br);
+    setApplicationId(match ? match.id : '');
+  }, [openApps, ob.brand, ob.branch, guildOb, obFormType, applicationTouched]);
+  const autoMatched = !applicationTouched && applicationId !== '';
 
   // ── Shared submission state ──
   const [submitting, setSubmitting] = useState(false);
@@ -450,11 +463,15 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
                 {/* Attach to an existing application */}
                 <div>
                   <label className={labelCls}>Link to a membership application</label>
-                  <select value={applicationId} onChange={e => setApplicationId(e.target.value ? Number(e.target.value) : '')} className={inputCls}>
+                  <select value={applicationId} onChange={e => { setApplicationId(e.target.value ? Number(e.target.value) : ''); setApplicationTouched(true); }} className={inputCls}>
                     <option value="">— New / not linked —</option>
                     {openApps.map(a => <option key={a.id} value={a.id}>{a.office} ({a.ref})</option>)}
                   </select>
-                  <p className="mt-1 text-xs text-gray-500">Pick the application this setup completes, so it's tracked as one onboarding.</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {autoMatched
+                      ? '✓ Auto-matched to the application with the same Brand & Branch. Change it here if that\'s wrong.'
+                      : 'Pick the application this setup completes, so it\'s tracked as one onboarding.'}
+                  </p>
                 </div>
                 {obFormType === 'multi' && (
                   <div>
