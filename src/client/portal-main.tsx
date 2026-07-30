@@ -114,10 +114,14 @@ async function portalFetch(path: string, opts: RequestInit = {}): Promise<Respon
     return new Response(JSON.stringify({ ok: false, error: 'Session expired' }), { status: 401 });
   }
   const activeOrg = getActiveOrgId();
+  // For FormData bodies (file uploads) the browser must set multipart/form-data
+  // with its own boundary — never force application/json, or the server parses
+  // the multipart boundary as JSON.
+  const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   const res = await fetch(path, {
     ...opts,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(activeOrg ? { 'X-Portal-Org': activeOrg } : {}),
       ...opts.headers,
