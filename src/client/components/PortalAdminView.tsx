@@ -1380,7 +1380,7 @@ function GuildGlobalConfigPanel() {
   return (
     <div className="bg-gray-800 rounded-lg p-4 space-y-1 mt-4">
       <h3 className="text-sm font-semibold text-gray-200">Guild onboarding — global config</h3>
-      <p className="text-xs text-gray-500 mb-2">Shared across all orgs. Per-org enable toggles are on each org (Orgs tab); recipients are set by each org's admin in the portal.</p>
+      <p className="text-xs text-gray-500 mb-2">Shared across all orgs. These inherit from the existing onboarding integration — usually already set, only change if blank or wrong. Per-org enable toggles are on each org (Orgs tab); recipients are set by each org's admin in the portal.</p>
       {groups.map(g => (
         <div key={g}>
           <h4 className="text-xs text-gray-500 uppercase tracking-wide mt-4 mb-2">{g}</h4>

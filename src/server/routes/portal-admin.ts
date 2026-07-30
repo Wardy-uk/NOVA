@@ -716,21 +716,33 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
   // Guild onboarding GLOBAL config (backlog #8, level 1) — Jira wiring + optional
   // keys shared across all orgs. Keeps the existing (orchestrator-shared) key
   // names, so it can't reuse the portal_-prefixed /settings endpoint.
-  const GUILD_GLOBAL_KEYS = [
-    'jira_ob_project', 'jira_ob_issue_type', 'jira_ob_link_type', 'jira_ob_request_type_field',
-    'jira_ob_rt_qa_id', 'jira_ob_rt_onboarding_id', 'app_base_url', 'guild_ob_parent_label',
+  // Each key falls back to the pre-existing onboarding-orchestrator setting, so
+  // the card shows what's ALREADY configured rather than blank (matches the
+  // resolution order in guild-onboarding.ts / onboarding-orchestrator.ts).
+  const GUILD_GLOBAL_KEYS: Array<{ key: string; fallback?: string }> = [
+    { key: 'jira_ob_project', fallback: 'jira_onboarding_project' },
+    { key: 'jira_ob_issue_type', fallback: 'jira_onboarding_issue_type' },
+    { key: 'jira_ob_link_type', fallback: 'jira_link_type_name' },
+    { key: 'jira_ob_request_type_field', fallback: 'jira_request_type_field' },
+    { key: 'jira_ob_rt_qa_id', fallback: 'jira_rt_delivery_qa_id' },
+    { key: 'jira_ob_rt_onboarding_id', fallback: 'jira_rt_onboarding_id' },
+    { key: 'app_base_url' },
+    { key: 'guild_ob_parent_label' },
   ];
   router.get('/onboarding-global-config', (_req: Request, res: Response) => {
     const out: Record<string, string> = {};
-    for (const k of GUILD_GLOBAL_KEYS) out[k] = settings.get(k) || '';
+    for (const { key, fallback } of GUILD_GLOBAL_KEYS) {
+      out[key] = settings.get(key) || (fallback ? settings.get(fallback) : '') || '';
+    }
     res.json({ ok: true, data: out });
   });
   router.put('/onboarding-global-config', (req: Request, res: Response) => {
     const updates = req.body;
     if (!updates || typeof updates !== 'object') { res.status(400).json({ ok: false, error: 'Body must be an object' }); return; }
     try {
+      const allowed = new Set(GUILD_GLOBAL_KEYS.map(k => k.key));
       for (const [key, value] of Object.entries(updates)) {
-        if (GUILD_GLOBAL_KEYS.includes(key)) settings.set(key, String(value ?? ''));
+        if (allowed.has(key)) settings.set(key, String(value ?? ''));
       }
       res.json({ ok: true });
     } catch (err) {
