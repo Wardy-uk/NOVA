@@ -61,6 +61,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   const setAppField = (k: keyof typeof app, v: string | boolean) => setApp(prev => ({ ...prev, [k]: v }));
   const guildOb = route === 'onboarding' && !!guildOnboarding;
   const [importing, setImporting] = useState(false);
+  const [showImportWarning, setShowImportWarning] = useState(false);
 
   const applyImport = (data: Record<string, unknown>) => {
     const str = (v: unknown) => (v == null ? '' : Array.isArray(v) ? v.join('\n') : String(v));
@@ -102,7 +103,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
       fd.append('file', file);
       const res = await pf('/api/portal/onboarding/import', { method: 'POST', body: fd });
       const d = await res.json();
-      if (d.ok) applyImport(d.data);
+      if (d.ok) { applyImport(d.data); setShowImportWarning(true); }
       else setError(d.error || 'Import failed');
     } catch { setError('Import failed'); }
     finally { setImporting(false); }
@@ -364,6 +365,28 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
 
   return (
     <div className="max-w-2xl mx-auto">
+      {showImportWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 5a2 2 0 00-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" /></svg>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Check the imported details</h2>
+            </div>
+            <p className="text-sm text-gray-600">
+              We've pre-filled this form from the file you uploaded. Automated extraction can make mistakes —
+              <strong> it is your responsibility to validate the imported data before submitting this request.</strong>
+              Phone numbers aren't imported and will need adding.
+            </p>
+            <div className="flex justify-end">
+              <button onClick={() => setShowImportWarning(false)} className="px-5 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark text-sm">
+                I understand
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Raise a Ticket</h1>
       <p className="text-sm text-gray-600 mb-6">Raise a support, development or onboarding request.</p>
 
