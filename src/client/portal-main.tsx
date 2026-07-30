@@ -503,7 +503,7 @@ function PortalApp() {
           <PortalTicketDetail ticketKey={selectedTicketKey} onBack={() => setView('tickets')} onRefreshRef={ticketRefreshRef} />
         )}
         {view === 'new-request' && <PortalNewRequest onCreated={(key) => { handleViewTicket(key); }} onNavigate={setView} />}
-        {view === 'raise-ticket' && resolvedFeatures.raiseTicket && <PortalRaiseTicket onCreated={(key) => { handleViewTicket(key); }} routes={resolvedFeatures.supportRoutes} />}
+        {view === 'raise-ticket' && resolvedFeatures.raiseTicket && <PortalRaiseTicket onCreated={(key) => { handleViewTicket(key); }} routes={resolvedFeatures.supportRoutes} guildOnboarding={resolvedFeatures.guildOnboarding} />}
         {view === 'kb' && resolvedFeatures.kb && <PortalKnowledgeBase onNavigate={setView} />}
         {view === 'chat' && resolvedFeatures.getHelp && <PortalChat autoStart onNavigateToTicket={handleViewTicket} />}
         {view === 'support-dashboard' && resolvedFeatures.support && <PortalSupportDashboard isAdmin={PORTAL_ROLE_RANK[effectiveRole] >= PORTAL_ROLE_RANK.org_admin} />}

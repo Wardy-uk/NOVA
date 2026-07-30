@@ -107,8 +107,8 @@ export class PortalDashboardService {
   // tenant, not a privileged one. (Internal staff always have a real org row —
   // the portal auth middleware creates 'nurtur-internal' on first request.)
   async getOrgFeatures(orgId: number): Promise<PortalOrgFeatures> {
-    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number; support_routes: string | null }>(
-      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket, support_routes FROM portal_organisations WHERE id = ?`,
+    const row = await queryOne<{ feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number; support_routes: string | null; guild_onboarding_enabled: number }>(
+      `SELECT feat_get_help, feat_kb, feat_support, feat_onboarding, feat_raise_ticket, support_routes, guild_onboarding_enabled FROM portal_organisations WHERE id = ?`,
       [orgId],
     );
     if (!row) {
@@ -122,6 +122,7 @@ export class PortalDashboardService {
       onboarding: !!row.feat_onboarding,
       raiseTicket: !!row.feat_raise_ticket,
       supportRoutes: parseSupportRoutes(row.support_routes),
+      guildOnboarding: !!row.guild_onboarding_enabled,
     };
   }
 

@@ -9,7 +9,18 @@ interface Props {
   onCreated: (ticketKey: string) => void;
   /** Routes this org's selector offers. Falls back to the default pair. */
   routes?: PortalSupportRoute[];
+  /** Guild two-stage onboarding (backlog #8) — splits the onboarding route into
+   *  the three Guild forms (Membership Application / Standard / Multi-Branch). */
+  guildOnboarding?: boolean;
 }
+
+type ObFormType = 'application' | 'standard' | 'multi';
+const OB_FORM_LABELS: Record<ObFormType, string> = {
+  application: 'Raise Membership Application',
+  standard: 'Raise Standard Onboarding',
+  multi: 'Raise Multi Branch Onboarding',
+};
+interface OpenApplication { id: number; ref: string; office: string; submittedAt: string }
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -27,9 +38,36 @@ interface OnboardingUser {
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm';
 const labelCls = 'block text-sm font-medium text-gray-700 mb-1';
 
-export default function PortalRaiseTicket({ onCreated, routes }: Props) {
+export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }: Props) {
   const enabledRoutes = (routes && routes.length > 0 ? routes : DEFAULT_PORTAL_SUPPORT_ROUTES);
   const [route, setRoute] = useState<PortalSupportRoute>(enabledRoutes[0]);
+
+  // ── Guild two-stage onboarding (backlog #8) ──
+  const [obFormType, setObFormType] = useState<ObFormType>('application');
+  const [applicationId, setApplicationId] = useState<number | ''>('');
+  const [openApps, setOpenApps] = useState<OpenApplication[]>([]);
+  const [branches, setBranches] = useState('');   // multi-office: one branch per line
+  const [app, setApp] = useState({
+    brand: '', branch: '', membershipArea: '', agencyTradingName: '', websiteAddress: '',
+    businessEntity: '', companyName: '', addressLine: '', town: '', county: '', postcode: '',
+    companyRegNumber: '', businessEstablished: '', vatNumber: '',
+    contactName: '', contactPosition: '', contactEmail: '', contactPhone: '',
+    directors: '', offersSales: false, offersLettings: false,
+    redressScheme: '', amlRegistered: false, icoRegistered: false,
+    cmpProvider: '', tenancyDepositProvider: '', piInsurer: '', piExpiryDate: '',
+    accountsEmail: '', crmSoftware: '', crmSoftwareOther: '',
+    setupFormRecipientName: '', setupFormRecipientEmail: '', invoiceCommencementDate: '', notes: '',
+  });
+  const setAppField = (k: keyof typeof app, v: string | boolean) => setApp(prev => ({ ...prev, [k]: v }));
+  const guildOb = route === 'onboarding' && !!guildOnboarding;
+
+  // Load open applications when a setup form (standard/multi) is active, for the
+  // "attach to application" picker.
+  React.useEffect(() => {
+    if (!guildOb || obFormType === 'application') return;
+    pf('/api/portal/onboarding/open-applications')
+      .then(r => r.json()).then(d => { if (d.ok) setOpenApps(d.data); }).catch(() => {});
+  }, [guildOb, obFormType]);
 
   // ── Shared submission state ──
   const [submitting, setSubmitting] = useState(false);
@@ -70,7 +108,8 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
   const [files, setFiles] = useState<File[]>([]);
 
   const canSubmitStandard = !!network && !!summary && !!agentNameBranch && !!detail;
-  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim() && !!ob.invoiceCommencementDate.trim();
+  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim();
+  const canSubmitApplication = !!app.brand.trim() && !!app.branch.trim();
 
   const uploadAttachments = async (ticketKey: string) => {
     for (const file of files) {
@@ -186,9 +225,63 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
     }
   };
 
-  const handleSubmit = () => (route === 'onboarding' ? submitOnboarding() : submitStandard());
+  // Step 1 — Membership Application (Guild two-stage). Creates the record only.
+  const submitApplication = async () => {
+    if (!canSubmitApplication) { setError('Brand and Branch are required.'); return; }
+    setSubmitting(true); setError(null);
+    try {
+      const res = await pf('/api/portal/onboarding/application', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...app,
+          directors: app.directors.split('\n').map(s => s.trim()).filter(Boolean),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) setSuccess(data.data.ref);
+      else setError(data.error || 'Failed to submit application');
+    } catch { setError('Failed to submit application'); }
+    finally { setSubmitting(false); }
+  };
+
+  // Step 2 — Setup form (Standard / Multi). Fires the QA parent + 7 children.
+  const submitSetup = async (planType: 'standard' | 'multi') => {
+    if (!canSubmitOnboarding) { setError('Brand and Branch are required.'); return; }
+    setSubmitting(true); setError(null);
+    try {
+      const portals = Object.keys(portalsSel).filter(k => portalsSel[k]);
+      const users = obUsers.filter(u => u.name.trim() || u.email.trim());
+      const res = await pf('/api/portal/onboarding/setup', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...ob,
+          planType,
+          applicationId: applicationId || undefined,
+          branches: planType === 'multi' ? branches.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
+          portals,
+          users,
+          invoiceCommencementDate: ob.invoiceCommencementDate || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (files.length > 0) await uploadAttachments(data.data.ticketKey);
+        setSuccess(data.data.ticketKey);
+      } else setError(data.error || 'Failed to submit setup form');
+    } catch { setError('Failed to submit setup form'); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleSubmit = () => {
+    if (guildOb) {
+      if (obFormType === 'application') return submitApplication();
+      return submitSetup(obFormType === 'multi' ? 'multi' : 'standard');
+    }
+    return route === 'onboarding' ? submitOnboarding() : submitStandard();
+  };
 
   if (success) {
+    const wasApplication = guildOb && obFormType === 'application';
     return (
       <div className="max-w-2xl mx-auto text-center py-16">
         <div className="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-6">
@@ -197,26 +290,30 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
           </svg>
         </div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          {route === 'onboarding' ? 'Onboarding Request Submitted' : 'Ticket Raised'}
+          {wasApplication ? 'Membership Application Submitted' : route === 'onboarding' ? 'Onboarding Request Submitted' : 'Ticket Raised'}
         </h2>
         <p className="text-gray-600 mb-6">
-          Your request <span className="font-mono font-medium text-brand">{success}</span> has been logged.
-          {route === 'onboarding'
-            ? ' A linked QA ticket has been created for the build. The team will pick it up shortly.'
+          Your {wasApplication ? 'application' : 'request'} <span className="font-mono font-medium text-brand">{success}</span> has been logged.
+          {wasApplication
+            ? ' No setup tickets are created yet — submit the setup form when you\'re ready and it will start the onboarding.'
+            : route === 'onboarding'
+            ? ' The setup tickets have been created and the 30-day SLA has started. The team will pick it up shortly.'
             : ' The support team will pick it up shortly.'}
         </p>
         <button
-          onClick={() => onCreated(success)}
+          onClick={() => (wasApplication ? setSuccess(null) : onCreated(success))}
           className="px-6 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark transition-colors"
         >
-          View Ticket
+          {wasApplication ? 'Done' : 'View Ticket'}
         </button>
       </div>
     );
   }
 
   const showSelector = enabledRoutes.length > 1;
-  const canSubmit = route === 'onboarding' ? canSubmitOnboarding : canSubmitStandard;
+  const canSubmit = guildOb
+    ? (obFormType === 'application' ? canSubmitApplication : canSubmitOnboarding)
+    : (route === 'onboarding' ? canSubmitOnboarding : canSubmitStandard);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -240,7 +337,56 @@ export default function PortalRaiseTicket({ onCreated, routes }: Props) {
           </div>
         )}
 
-        {route === 'onboarding' ? (
+        {guildOb ? (
+          <>
+            {/* Which Guild form (backlog #8) */}
+            <div>
+              <label className={labelCls}>Which form? *</label>
+              <select value={obFormType} onChange={e => { setObFormType(e.target.value as ObFormType); setError(null); }} className={inputCls}>
+                <option value="application">{OB_FORM_LABELS.application}</option>
+                <option value="standard">{OB_FORM_LABELS.standard}</option>
+                <option value="multi">{OB_FORM_LABELS.multi}</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                {obFormType === 'application'
+                  ? 'Step 1 — the membership application. No setup tickets are created yet.'
+                  : 'Step 2 — the setup form. Creates the setup tickets and starts the 30-day SLA.'}
+              </p>
+            </div>
+
+            {obFormType === 'application' ? (
+              <MembershipApplicationForm app={app} setAppField={setAppField} />
+            ) : (
+              <>
+                {/* Attach to an existing application */}
+                <div>
+                  <label className={labelCls}>Link to a membership application</label>
+                  <select value={applicationId} onChange={e => setApplicationId(e.target.value ? Number(e.target.value) : '')} className={inputCls}>
+                    <option value="">— New / not linked —</option>
+                    {openApps.map(a => <option key={a.id} value={a.id}>{a.office} ({a.ref})</option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">Pick the application this setup completes, so it's tracked as one onboarding.</p>
+                </div>
+                {obFormType === 'multi' && (
+                  <div>
+                    <label className={labelCls}>Branches (one per line)</label>
+                    <textarea value={branches} onChange={e => setBranches(e.target.value)} rows={4} placeholder={'Branch A\nBranch B\nBranch C'} className={`${inputCls} resize-none`} />
+                  </div>
+                )}
+                <OnboardingForm
+                  ob={ob}
+                  setObField={setObField}
+                  portalsSel={portalsSel}
+                  setPortalsSel={setPortalsSel}
+                  users={obUsers}
+                  setUsers={setObUsers}
+                  files={files}
+                  setFiles={setFiles}
+                />
+              </>
+            )}
+          </>
+        ) : route === 'onboarding' ? (
           <OnboardingForm
             ob={ob}
             setObField={setObField}
@@ -543,6 +689,121 @@ function OnboardingForm({
           </ul>
         )}
         <p className="text-xs text-gray-400">PDF, images, Office docs, CSV, TXT, ZIP up to 10 MB each.</p>
+      </Section>
+    </div>
+  );
+}
+
+// Step 1 form — Guild Membership Application (backlog #8). Mirrors the Guild
+// "Membership Application Form (Single Office)". Creates the record; no tickets.
+function MembershipApplicationForm({ app, setAppField }: {
+  app: Record<string, string | boolean>;
+  setAppField: (k: string, v: string | boolean) => void;
+}) {
+  const text = (k: string, label: string, placeholder?: string, required?: boolean) => (
+    <div>
+      <label className={labelCls}>{label}{required ? ' *' : ''}</label>
+      <input type="text" value={String(app[k] ?? '')} onChange={e => setAppField(k, e.target.value)} placeholder={placeholder} className={inputCls} />
+    </div>
+  );
+  const check = (k: string, label: string) => (
+    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+      <input type="checkbox" checked={!!app[k]} onChange={e => setAppField(k, e.target.checked)} className="rounded border-gray-300 text-brand focus:ring-brand" />
+      {label}
+    </label>
+  );
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="border-t border-gray-100 pt-4 space-y-3">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</h3>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-gray-600">The membership application. Once countersigned, complete the setup form to start the onboarding.</p>
+
+      <Section title="Business">
+        {text('brand', 'Agent / Brand', 'e.g. Property Cafe', true)}
+        {text('branch', 'Branch', 'e.g. Bexhill', true)}
+        {text('membershipArea', 'Guild Membership Area / Location')}
+        {text('agencyTradingName', 'Agency trading name')}
+        {text('websiteAddress', 'Website address')}
+        <div>
+          <label className={labelCls}>Business entity</label>
+          <select value={String(app.businessEntity ?? '')} onChange={e => setAppField('businessEntity', e.target.value)} className={inputCls}>
+            <option value="">Select…</option>
+            <option value="Limited Company">Limited Company</option>
+            <option value="Sole Trader">Sole Trader</option>
+            <option value="Traditional Partnership">Traditional Partnership</option>
+            <option value="LLP">Limited Liability Partnership (LLP)</option>
+          </select>
+        </div>
+        {text('companyName', 'Registered company name')}
+        {text('addressLine', 'Business address')}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {text('town', 'Town')}
+          {text('county', 'County')}
+          {text('postcode', 'Postcode')}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {text('companyRegNumber', 'Company reg. number')}
+          {text('businessEstablished', 'Established (year)')}
+          {text('vatNumber', 'VAT number')}
+        </div>
+      </Section>
+
+      <Section title="Contact">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {text('contactName', 'Contact name')}
+          {text('contactPosition', 'Contact position')}
+          {text('contactEmail', 'Contact email')}
+          {text('contactPhone', 'Contact phone')}
+        </div>
+        <div>
+          <label className={labelCls}>Directors / business owners (one per line)</label>
+          <textarea value={String(app.directors ?? '')} onChange={e => setAppField('directors', e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+        </div>
+      </Section>
+
+      <Section title="Compliance">
+        <div className="flex gap-6">
+          {check('offersSales', 'Offers Sales')}
+          {check('offersLettings', 'Offers Lettings')}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {text('redressScheme', 'Redress scheme (PRS / TPO)')}
+          <div className="flex items-end gap-6">
+            {check('amlRegistered', 'AML registered')}
+            {check('icoRegistered', 'ICO registered')}
+          </div>
+          {text('cmpProvider', 'Client Money Protection provider')}
+          {text('tenancyDepositProvider', 'Tenancy Deposit Scheme provider')}
+          {text('piInsurer', 'PI insurer')}
+          {text('piExpiryDate', 'PI policy expiry (YYYY-MM-DD)')}
+        </div>
+      </Section>
+
+      <Section title="Integration & invoicing">
+        {text('crmSoftware', 'Estate agency software (CRM)')}
+        {text('crmSoftwareOther', 'CRM — other (if not listed)')}
+        {text('accountsEmail', 'Accounts email (for invoicing)')}
+        <div>
+          <label className={labelCls}>Invoice commencement date</label>
+          <input type="date" value={String(app.invoiceCommencementDate ?? '')} onChange={e => setAppField('invoiceCommencementDate', e.target.value)} className={inputCls} />
+        </div>
+      </Section>
+
+      <Section title="Setup form recipient">
+        <p className="text-xs text-gray-500">Who should the setup form go to for completion?</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {text('setupFormRecipientName', 'Full name')}
+          {text('setupFormRecipientEmail', 'Email address')}
+        </div>
+      </Section>
+
+      <Section title="Notes">
+        <textarea value={String(app.notes ?? '')} onChange={e => setAppField('notes', e.target.value)} rows={3} className={`${inputCls} resize-none`} />
       </Section>
     </div>
   );

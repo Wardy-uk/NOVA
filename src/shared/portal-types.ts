@@ -257,9 +257,9 @@ export const PortalOnboardingRequestSchema = z.object({
   // Business
   brand: z.string().min(1).max(300),
   branch: z.string().min(1).max(300),
-  // Mandatory (backlog #8, R1): the 30-day onboarding SLA and billing depend on
-  // it. Required at submission — the form rejects an empty value. YYYY-MM-DD.
-  invoiceCommencementDate: z.string().min(1, 'Invoice commencement date is required').max(20),
+  // Captured on the Membership Application (backlog #8 two-stage). Optional here
+  // on the setup form. YYYY-MM-DD.
+  invoiceCommencementDate: z.string().max(20).optional(),
   network: z.string().max(120).optional(),           // Guild / Fine & Country / other
   registeredCompanyName: z.string().max(300).optional(),
   membershipArea: z.string().max(200).optional(),
@@ -788,6 +788,9 @@ export interface PortalOrgFeatures {
   /** Which routes the Raise-a-Ticket top selector offers this org. Absent →
    *  the default pair (support, development). */
   supportRoutes?: PortalSupportRoute[];
+  /** Guild two-stage onboarding (backlog #8) enabled for this org → the
+   *  onboarding route offers the three Guild forms instead of the legacy one. */
+  guildOnboarding?: boolean;
 }
 
 // ── Customer Dashboards (Onboarding + Support) ──
