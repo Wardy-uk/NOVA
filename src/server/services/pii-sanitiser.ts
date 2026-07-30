@@ -72,11 +72,13 @@ function redactPhones(text: string, entries: RedactionEntry[]): string {
   return result;
 }
 
-export function sanitise(text: string): RedactionResult {
+export function sanitise(text: string, opts?: { skipPhones?: boolean }): RedactionResult {
   const redactions: RedactionEntry[] = [];
   let sanitised = text;
   sanitised = redactCards(sanitised, redactions);
   sanitised = redactApiKeys(sanitised, redactions);
-  sanitised = redactPhones(sanitised, redactions);
+  // Phone redaction can be skipped for trusted extraction (e.g. Guild form
+  // import), where the phone number is legitimate data the user is submitting.
+  if (!opts?.skipPhones) sanitised = redactPhones(sanitised, redactions);
   return { sanitised, redactions };
 }

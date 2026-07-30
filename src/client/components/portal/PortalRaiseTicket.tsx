@@ -409,7 +409,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
             <p className="text-sm text-gray-600">
               We've pre-filled this form from the file you uploaded. Automated extraction can make mistakes —
               <strong> it is your responsibility to validate the imported data before submitting this request.</strong>
-              Phone numbers aren't imported and will need adding.
             </p>
             <div className="flex justify-end">
               <button onClick={() => setShowImportWarning(false)} className="px-5 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark text-sm">
@@ -454,7 +453,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
                 <input type="file" accept=".pdf,.xlsx,.xls" className="hidden" disabled={importing}
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ''; }} />
               </label>
-              <p className="text-xs text-gray-500">Upload the {obFormType === 'multi' ? 'multi-office set-up spreadsheet' : obFormType === 'application' ? 'Guild application PDF' : 'Guild set-up PDF'} to pre-fill this form. Review before submitting; phone numbers aren't imported.</p>
+              <p className="text-xs text-gray-500">Upload the {obFormType === 'multi' ? 'multi-office set-up spreadsheet' : obFormType === 'application' ? 'Guild application PDF' : 'Guild set-up PDF'} to pre-fill this form. Review before submitting.</p>
             </div>
 
             {obFormType === 'application' ? (

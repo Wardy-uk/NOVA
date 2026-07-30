@@ -25,6 +25,10 @@ export interface LlmCallOptions {
   maxTokens?: number;
   temperature?: number;
   images?: LlmImageContent[];
+  /** Skip phone-number redaction for trusted extraction (e.g. Guild form import,
+   *  where the phone is legitimate data the user is submitting). Cards/secrets
+   *  are still redacted. */
+  skipPhoneRedaction?: boolean;
 }
 
 export interface LlmResult<T = unknown> {
@@ -595,8 +599,9 @@ export class LlmService {
     console.log(`[llm] ${options.callType} → tier=${tier} → ${selectedProvider.provider}/${selectedProvider.model} | circuits: ${circuitStates}${tripped.length > 0 ? ' (FAILOVER)' : ''}`);
 
     const jsonInstruction = '\n\nRespond with valid JSON only. No markdown fencing, no commentary. Every string field must be a plain string value, never an object or array. For example: "summary": "text here" NOT "summary": {"description": "text here"}';
-    const sysResult = sanitise(systemPrompt);
-    const userResult = sanitise(userMessage);
+    const sanitiseOpts = { skipPhones: options.skipPhoneRedaction === true };
+    const sysResult = sanitise(systemPrompt, sanitiseOpts);
+    const userResult = sanitise(userMessage, sanitiseOpts);
     const allRedactions = [...sysResult.redactions, ...userResult.redactions];
     const redactionsForLog = allRedactions.length > 0 ? allRedactions : null;
     if (allRedactions.length > 0) {

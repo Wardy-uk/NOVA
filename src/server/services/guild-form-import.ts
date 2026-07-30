@@ -53,9 +53,9 @@ export async function importGuildForm(
     `For "users", each item is { name, email, accessLevel, jobTitle }. Do not invent values — omit unknowns.`,
   ].join(' ');
 
-  const result = await llm.call(system, text, z.record(z.unknown()), { callType: 'guild_form_import', tier: 'standard' });
-
-  // Drop redaction placeholders so redacted phones don't pre-fill as noise.
+  // Phones import fine (skipPhoneRedaction); cards/secrets still redacted, so
+  // drop any remaining redaction placeholders rather than pre-fill them as noise.
+  const result = await llm.call(system, text, z.record(z.unknown()), { callType: 'guild_form_import', tier: 'standard', skipPhoneRedaction: true });
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(result.data)) {
     if (typeof v === 'string' && /\[REDACTED/i.test(v)) continue;
