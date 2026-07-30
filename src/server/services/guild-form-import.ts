@@ -18,6 +18,10 @@ const require = createRequire(import.meta.url);
 
 export type GuildImportFormType = 'application' | 'setup';
 
+// Big cap so the whole Guild form is sent — the application form is 20 pages
+// with the actual data fields only from ~page 7 (after the T&C boilerplate).
+const MAX_EXTRACT_CHARS = 120_000;
+
 async function extractText(buffer: Buffer, filename: string): Promise<string> {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
@@ -26,12 +30,12 @@ async function extractText(buffer: Buffer, filename: string): Promise<string> {
     return wb.SheetNames
       .map(n => `# Sheet: ${n}\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`)
       .join('\n\n')
-      .slice(0, 24000);
+      .slice(0, MAX_EXTRACT_CHARS);
   }
   // PDF — pdf-parse is CJS.
   const pdfParse = require('pdf-parse') as (b: Buffer) => Promise<{ text: string }>;
   const parsed = await pdfParse(buffer);
-  return String(parsed.text || '').slice(0, 24000);
+  return String(parsed.text || '').slice(0, MAX_EXTRACT_CHARS);
 }
 
 /** Extract the form text and map it to the target form's fields via the LLM.
@@ -47,9 +51,11 @@ export async function importGuildForm(
   const formName = formType === 'application' ? 'Guild Membership Application' : 'Guild Membership Set-Up';
 
   const system = [
-    `You extract structured data from a "${formName}" form and return it as JSON.`,
-    `Only output these keys (omit any you cannot determine): ${keys.join(', ')}.`,
-    `Rules: booleans as true/false; dates as YYYY-MM-DD; list fields (e.g. directors, users, portals) as JSON arrays; emails and names verbatim.`,
+    `You extract structured data from a "${formName}" form (a DocuSign PDF) and return it as JSON.`,
+    `IMPORTANT layout note: the document text lists blank field LABELS first, and the user's ENTERED VALUES appear grouped together separately — often at the end of the page or section, or right after a "Docusign Envelope ID" line — NOT next to each label. Associate each value to its label by order, position and context.`,
+    `Ignore the Membership Terms & Conditions / legal boilerplate, page headers/footers, "Docusign Envelope ID" lines, and signatures — none of that is form data.`,
+    `Only output these keys (omit any you genuinely cannot find): ${keys.join(', ')}.`,
+    `Rules: booleans as true/false (a ticked checkbox = true); dates as YYYY-MM-DD; list fields (e.g. directors, users, portals) as JSON arrays; emails, names, phone numbers and addresses verbatim.`,
     `For "users", each item is { name, email, accessLevel, jobTitle }. Do not invent values — omit unknowns.`,
   ].join(' ');
 
