@@ -118,18 +118,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
       .then(r => r.json()).then(d => { if (d.ok) setOpenApps(d.data); }).catch(() => {});
   }, [guildOb, obFormType]);
 
-  // Auto-match the setup form to an open application by Brand + Branch (works
-  // especially well after Import). The dropdown stays a manual override; once the
-  // user changes it themselves, auto-matching backs off.
-  React.useEffect(() => {
-    if (!guildOb || obFormType === 'application' || applicationTouched) return;
-    const b = ob.brand.trim().toLowerCase(), br = ob.branch.trim().toLowerCase();
-    if (!b || !br) return;
-    const match = openApps.find(a => (a.brand || '').trim().toLowerCase() === b && (a.branch || '').trim().toLowerCase() === br);
-    setApplicationId(match ? match.id : '');
-  }, [openApps, ob.brand, ob.branch, guildOb, obFormType, applicationTouched]);
-  const autoMatched = !applicationTouched && applicationId !== '';
-
   // ── Shared submission state ──
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +155,19 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   const [portalsSel, setPortalsSel] = useState<Record<string, boolean>>({ Rightmove: false, Zoopla: false, 'On The Market': false });
   const [obUsers, setObUsers] = useState<OnboardingUser[]>([{ name: '', email: '', accessLevel: '', jobTitle: '' }]);
   const [files, setFiles] = useState<File[]>([]);
+
+  // Auto-match the setup form to an open application by Brand + Branch (works
+  // especially well after Import). Manual override via the dropdown; once the
+  // user changes it themselves, auto-matching backs off. (Placed after `ob` is
+  // declared — its deps read ob.brand/ob.branch at render time.)
+  React.useEffect(() => {
+    if (!guildOb || obFormType === 'application' || applicationTouched) return;
+    const b = ob.brand.trim().toLowerCase(), br = ob.branch.trim().toLowerCase();
+    if (!b || !br) return;
+    const match = openApps.find(a => (a.brand || '').trim().toLowerCase() === b && (a.branch || '').trim().toLowerCase() === br);
+    setApplicationId(match ? match.id : '');
+  }, [openApps, ob.brand, ob.branch, guildOb, obFormType, applicationTouched]);
+  const autoMatched = !applicationTouched && applicationId !== '';
 
   const canSubmitStandard = !!network && !!summary && !!agentNameBranch && !!detail;
   const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim();
