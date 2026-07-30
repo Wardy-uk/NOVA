@@ -358,7 +358,25 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
     );
   }
 
-  const showSelector = enabledRoutes.length > 1;
+  // Top-level "What do you need?" options. When Guild onboarding is enabled, the
+  // single 'onboarding' route expands into the three named Guild forms.
+  const selectorOptions: Array<{ value: string; label: string }> = [];
+  for (const r of enabledRoutes) {
+    if (r === 'onboarding' && guildOnboarding) {
+      selectorOptions.push({ value: 'ob:application', label: OB_FORM_LABELS.application });
+      selectorOptions.push({ value: 'ob:standard', label: OB_FORM_LABELS.standard });
+      selectorOptions.push({ value: 'ob:multi', label: OB_FORM_LABELS.multi });
+    } else {
+      selectorOptions.push({ value: r, label: PORTAL_SUPPORT_ROUTE_LABELS[r] });
+    }
+  }
+  const selectedValue = guildOb ? `ob:${obFormType}` : route;
+  const onSelectRoute = (v: string) => {
+    setError(null);
+    if (v.startsWith('ob:')) { setRoute('onboarding'); setObFormType(v.slice(3) as ObFormType); }
+    else setRoute(v as PortalSupportRoute);
+  };
+  const showSelector = selectorOptions.length > 1;
   const canSubmit = guildOb
     ? (obFormType === 'application' ? canSubmitApplication : canSubmitOnboarding)
     : (route === 'onboarding' ? canSubmitOnboarding : canSubmitStandard);
@@ -399,9 +417,9 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
         {showSelector && (
           <div>
             <label htmlFor="rt-route" className={labelCls}>What do you need? *</label>
-            <select id="rt-route" value={route} onChange={e => { setRoute(e.target.value as PortalSupportRoute); setError(null); }} className={inputCls}>
-              {enabledRoutes.map(r => (
-                <option key={r} value={r}>{PORTAL_SUPPORT_ROUTE_LABELS[r]}</option>
+            <select id="rt-route" value={selectedValue} onChange={e => onSelectRoute(e.target.value)} className={inputCls}>
+              {selectorOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
@@ -409,20 +427,11 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
 
         {guildOb ? (
           <>
-            {/* Which Guild form (backlog #8) */}
-            <div>
-              <label className={labelCls}>Which form? *</label>
-              <select value={obFormType} onChange={e => { setObFormType(e.target.value as ObFormType); setError(null); }} className={inputCls}>
-                <option value="application">{OB_FORM_LABELS.application}</option>
-                <option value="standard">{OB_FORM_LABELS.standard}</option>
-                <option value="multi">{OB_FORM_LABELS.multi}</option>
-              </select>
-              <p className="mt-1 text-xs text-gray-500">
-                {obFormType === 'application'
-                  ? 'Step 1 — the membership application. No setup tickets are created yet.'
-                  : 'Step 2 — the setup form. Creates the setup tickets and starts the 30-day SLA.'}
-              </p>
-            </div>
+            <p className="text-xs text-gray-500">
+              {obFormType === 'application'
+                ? 'Step 1 — the membership application. No setup tickets are created yet.'
+                : 'Step 2 — the setup form. Creates the setup tickets and starts the 30-day SLA.'}
+            </p>
 
             {/* Import from the Guild form (backlog #8, stage 3) */}
             <div className="flex items-center gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
