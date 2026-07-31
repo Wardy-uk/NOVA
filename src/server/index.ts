@@ -330,13 +330,17 @@ async function main() {
       // Always match by canonical username — never let email match hijack the wrong account
       const existing = await userQueries.getByUsername(u.username);
       if (existing) {
-        await userQueries.update(existing.id, {
-          display_name: u.display_name || existing.display_name,
-          email: u.email || existing.email,
-          role: u.role,
-          ...(teamId ? { team_id: teamId } : {}),
-        });
-        seedUpdated++;
+        // Never overwrite role or team on an existing account — those are managed
+        // in Admin → Users and this seed runs on every boot, so writing them here
+        // silently reverted any role change at the next restart. Only backfill
+        // identity fields that are actually missing.
+        const patch: { display_name?: string; email?: string } = {};
+        if (!existing.display_name && u.display_name) patch.display_name = u.display_name;
+        if (!existing.email && u.email) patch.email = u.email;
+        if (Object.keys(patch).length > 0) {
+          await userQueries.update(existing.id, patch);
+          seedUpdated++;
+        }
       } else {
         const newId = await userQueries.create({
           username: u.username,
