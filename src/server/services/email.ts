@@ -22,6 +22,7 @@ export interface EmailOptions {
   subject: string;
   text: string;
   html?: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
 export class EmailService {
@@ -98,6 +99,7 @@ export class EmailService {
       subject: opts.subject,
       text: opts.text,
       html: opts.html,
+      attachments: opts.attachments,
     });
   }
 

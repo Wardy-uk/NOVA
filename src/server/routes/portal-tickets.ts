@@ -166,16 +166,40 @@ export function createPortalTicketRoutes(
   });
 
   // Step 2 — Setup form (Standard / Multi-branch): attaches + fires tickets + SLA.
+  // Multipart: 'payload' (JSON) + optional 'form' file (the imported Guild form,
+  // attached to the QA ticket + onboarding email).
   router.post('/onboarding/setup', async (req: Request, res: Response) => {
     if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
-    const parsed = PortalOnboardingSetupSchema.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
-    try {
-      const result = await intakeService.submitGuildSetup(parsed.data, req.portalUser.userId, req.portalUser.orgId, req.portalUser.email, req.portalUser.orgName);
-      res.json({ ok: true, data: result });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit setup form' });
-    }
+    const pu = req.portalUser;
+    let bb: ReturnType<typeof Busboy>;
+    try { bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE, files: 1 } }); }
+    catch { res.status(400).json({ ok: false, error: 'Invalid upload' }); return; }
+    let payloadRaw = '';
+    let fileBuf: Buffer | null = null, filename = '', mimeType = '', tooBig = false;
+    bb.on('field', (n: string, v: string) => { if (n === 'payload') payloadRaw = v; });
+    bb.on('file', (_f: string, stream: NodeJS.ReadableStream & { on(e: 'limit', l: () => void): void }, info: { filename: string; mimeType: string }) => {
+      filename = info.filename || 'form'; mimeType = info.mimeType || 'application/octet-stream';
+      const chunks: Buffer[] = [];
+      stream.on('data', (c: Buffer) => chunks.push(c));
+      stream.on('limit', () => { tooBig = true; });
+      stream.on('end', () => { fileBuf = Buffer.concat(chunks); });
+    });
+    bb.on('finish', async () => {
+      if (tooBig) { res.status(400).json({ ok: false, error: 'Attached form too large (max 10 MB).' }); return; }
+      let body: unknown;
+      try { body = JSON.parse(payloadRaw || '{}'); } catch { res.status(400).json({ ok: false, error: 'Invalid payload' }); return; }
+      const parsed = PortalOnboardingSetupSchema.safeParse(body);
+      if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
+      const formFile = fileBuf ? { buffer: fileBuf, filename, mimeType } : null;
+      try {
+        const result = await intakeService.submitGuildSetup(parsed.data, pu.userId, pu.orgId, pu.email, pu.orgName, formFile);
+        res.json({ ok: true, data: result });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit setup form' });
+      }
+    });
+    bb.on('error', () => { if (!res.headersSent) res.status(400).json({ ok: false, error: 'Upload error' }); });
+    req.pipe(bb);
   });
 
   // Import a Guild form (PDF/xlsx) → extract + LLM-map → pre-fill fields.

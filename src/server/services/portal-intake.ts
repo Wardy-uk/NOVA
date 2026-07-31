@@ -588,7 +588,8 @@ export class PortalIntakeService {
    *  then fires the QA parent + 7 children and starts the 30-day SLA. */
   async submitGuildSetup(
     input: PortalOnboardingSetupInput, portalUserId: number, orgId: number, userEmail: string, userName: string,
-  ): Promise<{ ticketKey: string; recordId: number }> {
+    formFile?: { buffer: Buffer; filename: string; mimeType: string } | null,
+  ): Promise<{ ticketKey: string; recordId: number; childKeys: Record<string, string> }> {
     if (!this.records || !this.guild || !(await this.isGuildEnabled(orgId))) {
       throw new Error('Onboarding is not enabled for your organisation.');
     }
@@ -633,10 +634,18 @@ export class PortalIntakeService {
        VALUES (?, ?, ?, ?)`,
       [portalUserId, result.parentKey, JSON.stringify({ ...input, onboardingRef: record.onboarding_ref, childKeys: result.childKeys }), 'onboarding_request'],
     );
-    await this.notifyOnboardingInbox(record, result, userName, await this.orgInbox(orgId)).catch(err =>
+
+    // The imported Guild form (if any) → attach to the QA parent (item 4) and
+    // include on the onboarding inbox email (item 3).
+    if (formFile) {
+      await this.portalJira.uploadAttachment(result.parentKey, orgId, formFile.filename, formFile.buffer, formFile.mimeType)
+        .catch(err => console.warn('[portal-intake] Attaching form to QA failed:', err instanceof Error ? err.message : err));
+    }
+    const emailAttachments = formFile ? [{ filename: formFile.filename, content: formFile.buffer, contentType: formFile.mimeType }] : undefined;
+    await this.notifyOnboardingInbox(record, result, userName, await this.orgInbox(orgId), emailAttachments).catch(err =>
       console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_setup' });
-    return { ticketKey: result.parentKey, recordId };
+    return { ticketKey: result.parentKey, recordId, childKeys: result.childKeys };
   }
 
   /** List application-stage records for the org, for the setup form's picker. */
@@ -658,6 +667,7 @@ export class PortalIntakeService {
     result: { parentKey: string; childKeys: Record<string, string> },
     submittedBy: string,
     inbox: string,
+    attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>,
   ): Promise<void> {
     if (!inbox || !this.email || !this.email.isConfigured()) return;
     const base = (this.settings.get('app_base_url') || '').replace(/\/$/, '');
@@ -672,6 +682,7 @@ export class PortalIntakeService {
         + `<p><strong>Office/branch:</strong> ${office}<br><strong>QA parent:</strong> ${result.parentKey}<br>`
         + `<strong>Children:</strong> ${children}<br><strong>Ref:</strong> ${record.onboarding_ref}</p>`
         + `<p><a href="${link}">Open the NOVA onboarding record</a></p>`,
+      attachments,
     });
   }
 

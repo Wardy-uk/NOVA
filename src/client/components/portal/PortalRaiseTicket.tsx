@@ -63,6 +63,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   const guildOb = route === 'onboarding' && !!guildOnboarding;
   const [importing, setImporting] = useState(false);
   const [showImportWarning, setShowImportWarning] = useState(false);
+  const [importedFile, setImportedFile] = useState<File | null>(null);  // the Guild form used for import → attached to QA + email
 
   const applyImport = (data: Record<string, unknown>) => {
     const str = (v: unknown) => (v == null ? '' : Array.isArray(v) ? v.join('\n') : String(v));
@@ -104,7 +105,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
       fd.append('file', file);
       const res = await pf('/api/portal/onboarding/import', { method: 'POST', body: fd });
       const d = await res.json();
-      if (d.ok) { applyImport(d.data); setShowImportWarning(true); }
+      if (d.ok) { applyImport(d.data); setImportedFile(file); setShowImportWarning(true); }
       else setError(d.error || 'Import failed');
     } catch { setError('Import failed'); }
     finally { setImporting(false); }
@@ -313,21 +314,25 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
     try {
       const portals = Object.keys(portalsSel).filter(k => portalsSel[k]);
       const users = obUsers.filter(u => u.name.trim() || u.email.trim());
-      const res = await pf('/api/portal/onboarding/setup', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...ob,
-          planType,
-          applicationId: applicationId || undefined,
-          branches: planType === 'multi' ? branches.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
-          portals,
-          users,
-          invoiceCommencementDate: ob.invoiceCommencementDate || undefined,
-        }),
-      });
+      const payload = {
+        ...ob,
+        planType,
+        applicationId: applicationId || undefined,
+        branches: planType === 'multi' ? branches.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
+        portals,
+        users,
+        invoiceCommencementDate: ob.invoiceCommencementDate || undefined,
+      };
+      // Multipart: payload + the imported Guild form (attached server-side to QA + email).
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify(payload));
+      if (importedFile) fd.append('form', importedFile);
+      const res = await pf('/api/portal/onboarding/setup', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.ok) {
-        if (files.length > 0) await uploadAttachments(data.data.ticketKey);
+        // Attachments section → the Digital Design child ticket (item 2).
+        const designKey = data.data.childKeys?.design;
+        if (files.length > 0 && designKey) await uploadAttachments(designKey);
         setSuccess(data.data.ticketKey);
       } else setError(data.error || 'Failed to submit setup form');
     } catch { setError('Failed to submit setup form'); }
@@ -797,7 +802,7 @@ function OnboardingForm({
             ))}
           </ul>
         )}
-        <p className="text-xs text-gray-400">PDF, images, Office docs, CSV, TXT, ZIP up to 10 MB each.</p>
+        <p className="text-xs text-gray-400">PDF, images, Office docs, CSV, TXT, ZIP up to 10 MB each. Attach the logo and any branding/compliance documents here.</p>
       </Section>
     </div>
   );
