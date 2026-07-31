@@ -1613,7 +1613,9 @@ export function AdminView() {
                       <div key={field.key}>
                         <label className="block text-xs text-neutral-400 mb-2">{field.label}</label>
                         <p className="text-[10px] text-neutral-500 mb-2">
-                          Map Azure AD group Object IDs to NOVA roles. Users not in any mapped group will be denied SSO access.
+                          Map Azure AD group Object IDs to NOVA roles. Applied on every SSO login, overwriting the user's role.
+                          Users in no mapped group are reset to Viewer. Turn off "Roles from Azure groups" above to manage roles
+                          in Admin → Users instead — the mapping below is kept for when you switch back.
                         </p>
                         {mappings.length > 0 && (
                           <div className="border border-[#3a424d] rounded overflow-hidden mb-2">
