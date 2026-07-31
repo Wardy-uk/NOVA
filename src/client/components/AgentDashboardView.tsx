@@ -293,6 +293,12 @@ function checkSuperAdmin(role: string): boolean {
   return role.split(',').map(r => r.trim()).includes('super_admin');
 }
 
+// Agent lifecycle controls (start/stop/pause/resume/override hours) are open to admins too
+function checkAgentController(role: string): boolean {
+  const roles = role.split(',').map(r => r.trim());
+  return roles.includes('super_admin') || roles.includes('admin');
+}
+
 interface LifecycleBreakdown {
   [key: string]: number;
 }
@@ -307,6 +313,7 @@ interface ApprovalHealth {
 
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
+  const canControlAgent = checkAgentController(userRole);
   const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'kb-health' | 'training-signals' | 'learning' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
@@ -433,7 +440,7 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           {status && <StatusPill state={status.state} shadow={status.shadowMode} shadowEnum={status.shadowModeEnum} mode={status.mode} weekendOverrideUntil={status.weekendOverrideUntil} />}
         </div>
         <div className="flex items-center gap-2">
-          {isSuperAdmin && status?.state === 'running' && (
+          {canControlAgent && status?.state === 'running' && (
             <div className="relative">
               {status.weekendOverrideUntil ? (
                 <button onClick={async () => { const r = await api('/weekend-override', { method: 'DELETE' }); if (r.ok) setStatus(r.data); }} className="px-3 py-1 text-xs font-medium rounded bg-orange-600 hover:bg-orange-500 text-white transition-colors">
@@ -451,16 +458,16 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
               }} onClose={() => setOverrideOpen(false)} />}
             </div>
           )}
-          {isSuperAdmin && status?.state === 'stopped' && (
+          {canControlAgent && status?.state === 'stopped' && (
             <ControlBtn label="Start" onClick={() => doAction('start')} color="green" />
           )}
-          {isSuperAdmin && status?.state === 'running' && (
+          {canControlAgent && status?.state === 'running' && (
             <>
               <ControlBtn label="Pause" onClick={() => doAction('pause')} color="amber" />
               <ControlBtn label="Stop" onClick={() => doAction('stop')} color="red" />
             </>
           )}
-          {isSuperAdmin && status?.state === 'paused' && (
+          {canControlAgent && status?.state === 'paused' && (
             <>
               <ControlBtn label="Resume" onClick={() => doAction('resume')} color="green" />
               <ControlBtn label="Stop" onClick={() => doAction('stop')} color="red" />

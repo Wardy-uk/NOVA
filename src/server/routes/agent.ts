@@ -103,7 +103,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.getWorkingHoursDebug() });
   });
 
-  router.post('/start', requireSuperAdmin(), async (_req, res) => {
+  router.post('/start', requireRole('admin', 'super_admin'), async (_req, res) => {
     agentLoop.start();
     // Clear any permanent disable flag
     deps?.settingsQueries?.set('agent_disabled', 'false');
@@ -111,7 +111,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/stop', requireSuperAdmin(), async (_req, res) => {
+  router.post('/stop', requireRole('admin', 'super_admin'), async (_req, res) => {
     agentLoop.stop();
     // Stop only affects this process — agent will auto-start on next deploy/restart.
     // To prevent auto-start across restarts, use POST /disable instead.
@@ -125,17 +125,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: { ...agentLoop.status, disabled: true } });
   });
 
-  router.post('/pause', requireSuperAdmin(), (_req, res) => {
+  router.post('/pause', requireRole('admin', 'super_admin'), (_req, res) => {
     agentLoop.pause();
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/resume', requireSuperAdmin(), (_req, res) => {
+  router.post('/resume', requireRole('admin', 'super_admin'), (_req, res) => {
     agentLoop.resume();
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.post('/weekend-override', requireSuperAdmin(), (req, res) => {
+  router.post('/weekend-override', requireRole('admin', 'super_admin'), (req, res) => {
     const { until } = req.body as { until?: string };
     if (!until) {
       res.json({ ok: false, error: 'Missing "until" datetime' });
@@ -150,7 +150,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     res.json({ ok: true, data: agentLoop.status });
   });
 
-  router.delete('/weekend-override', requireSuperAdmin(), (_req, res) => {
+  router.delete('/weekend-override', requireRole('admin', 'super_admin'), (_req, res) => {
     agentLoop.clearWeekendOverride();
     res.json({ ok: true, data: agentLoop.status });
   });
