@@ -46,6 +46,13 @@ const fmtDate = (iso: string | null) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const fmtDateTime = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
 const priorityClass = (p: string | null) => {
   switch ((p ?? '').toLowerCase()) {
     case 'highest': case 'critical': return 'bg-red-500/20 text-red-300';
@@ -193,7 +200,7 @@ export function NovaQueueView() {
                   {t.ai?.reasoning && (
                     <div className="mt-1 text-sm text-gray-400 whitespace-pre-line">{t.ai.reasoning}</div>
                   )}
-                  <div className="mt-2 text-xs text-gray-500">Created {fmtDate(t.jira_created)} · Updated {fmtDate(t.jira_updated)}</div>
+                  <div className="mt-2 text-xs text-gray-500">Created {fmtDateTime(t.jira_created)} · Updated {fmtDate(t.jira_updated)}</div>
                 </div>
                 {/* Action */}
                 <div className="shrink-0">
