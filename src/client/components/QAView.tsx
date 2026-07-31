@@ -152,23 +152,30 @@ const C = {
   blueDim: '#1d4ed8',
 };
 
+// Historic rows hold mixed casing ('Green', 'GREEN', …) — compare case-insensitively
+// or every non-upper-case badge falls through to grey.
+const normGrade = (grade?: string) => (grade ?? '').trim().toUpperCase();
+
 function gradeColour(grade?: string) {
-  if (grade === 'GREEN') return C.green;
-  if (grade === 'AMBER') return C.amber;
-  if (grade === 'RED')   return C.red;
+  const g = normGrade(grade);
+  if (g === 'GREEN') return C.green;
+  if (g === 'AMBER') return C.amber;
+  if (g === 'RED')   return C.red;
   return C.text3;
 }
 
 function gradeBg(grade?: string) {
-  if (grade === 'GREEN') return C.greenBg;
-  if (grade === 'AMBER') return C.amberBg;
-  if (grade === 'RED')   return C.redBg;
+  const g = normGrade(grade);
+  if (g === 'GREEN') return C.greenBg;
+  if (g === 'AMBER') return C.amberBg;
+  if (g === 'RED')   return C.redBg;
   return C.bg3;
 }
 
+// Must match the QA_GRADE_BANDS used server-side, or the number and the badge disagree.
 function scoreColour(score: number) {
-  if (score >= 7) return C.green;
-  if (score >= 5) return C.amber;
+  if (score >= 7.5) return C.green;
+  if (score >= 4.5) return C.amber;
   return C.red;
 }
 

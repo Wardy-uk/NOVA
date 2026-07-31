@@ -2,7 +2,7 @@ import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import type { JiraRestClient } from './jira-client.js';
-import { QaTicketResultSchema, type QaTicketResult } from './qa-schemas.js';
+import { QaTicketResultSchema, qaOverallOf, qaGradeOf, type QaTicketResult } from './qa-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
@@ -244,9 +244,10 @@ export class QaPipeline {
     const fields = issue.fields as any;
     const assignee = fields.assignee?.displayName ?? 'Unassigned';
 
-    const computedScore = Math.round(
-      (qa.accuracyScore * 0.35 + qa.clarityScore * 0.25 + qa.toneScore * 0.20 + qa.closureScore * 0.20) * 100
-    ) / 100;
+    // Grade is derived from the weighted score, never taken from the LLM — the two
+    // used to disagree on ~11% of tickets.
+    const computedScore = qaOverallOf(qa);
+    const computedGrade = qaGradeOf(computedScore);
 
     const resolutionChecksJson = JSON.stringify(qa.resolutionChecks ?? {});
 
@@ -261,7 +262,7 @@ export class QaPipeline {
     request.input('clarityScore', sql.Float, qa.clarityScore);
     request.input('toneScore', sql.Float, qa.toneScore);
     request.input('closureScore', sql.Float, qa.closureScore);
-    request.input('grade', sql.NVarChar, qa.grade);
+    request.input('grade', sql.NVarChar, computedGrade);
     request.input('isConcerning', sql.Bit, qa.isConcerning ? 1 : 0);
     // severity column is INT (1=low, 2=medium, 3=high); map the LLM's string label.
     const severityMap: Record<string, number> = { low: 1, medium: 2, high: 3 };

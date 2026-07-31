@@ -30,7 +30,9 @@ export interface CommentReview extends CommentReviewRaw { overallScore: number }
 
 /** Overall = weakest of the three rules. Single definition for every consumer. */
 export function overallOf(r: { rule1Score?: number; rule2Score?: number; rule3Score?: number }): number {
-  return Math.min(r.rule1Score, r.rule2Score, r.rule3Score);
+  // Fallbacks are unreachable for schema-validated input; they exist because the
+  // server tsconfig infers every zod field as optional.
+  return Math.min(r.rule1Score ?? 1, r.rule2Score ?? 1, r.rule3Score ?? 1);
 }
 
 export interface ReviewCommentInput {
