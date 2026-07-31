@@ -137,11 +137,19 @@ export const NOVA_JIRA_ACCOUNT_ID = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f
 // ~0 — the transition count is the real number. Total Solved uses net throughput
 // (net_solved); these per-actor counts measure resolutions performed, so Team + NOVA do
 // NOT sum to Total (bounced tickets get re-resolved).
+//
+// The DURING bounds MUST carry an explicit time. A date-only end bound is rounded up to
+// 23:59 of that day, so DURING ("day", "nextDay") silently spans 48 hours — it double-
+// counted every solve on consecutive days and roughly doubled both figures (29 Jul: 265
+// vs the true 138). Use TX_DURING_DAY for any `CHANGED ... DURING` day window.
+export const TX_DURING_DAY = (day: string, nextDay: string) =>
+  `DURING ("${day} 00:00", "${nextDay} 00:00")`;
+
 export const NOVA_SOLVED_ON_DAY = (day: string, nextDay: string) =>
-  `project = NT AND status CHANGED TO ("Resolved", "Done") DURING ("${day}", "${nextDay}") ` +
+  `project = NT AND status CHANGED TO ("Resolved", "Done") ${TX_DURING_DAY(day, nextDay)} ` +
   `AND assignee = "${NOVA_JIRA_ACCOUNT_ID}"`;
 const TEAM_SOLVED_ON_DAY = (day: string, nextDay: string) =>
-  `project = NT AND status CHANGED TO ("Resolved", "Done") DURING ("${day}", "${nextDay}") ` +
+  `project = NT AND status CHANGED TO ("Resolved", "Done") ${TX_DURING_DAY(day, nextDay)} ` +
   `AND (assignee != "${NOVA_JIRA_ACCOUNT_ID}" OR assignee is EMPTY)`;
 
 // ── Support (NT) — 22 KPIs ──

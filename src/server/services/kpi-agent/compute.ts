@@ -116,7 +116,9 @@ const RESOLVER_FETCH_CAP = 500;
 async function solvedByAssignee(
   jira: JiraRestClient, fromDay: string, toDay: string, attributeResolver = false,
 ): Promise<Map<string, number>> {
-  const jql = `project = NT AND status CHANGED TO ("Resolved","Done") DURING ("${fromDay}","${toDay}")`;
+  // Explicit times on both bounds — a date-only end bound rounds up to 23:59 of that day,
+  // which silently added a whole extra day to the window (see TX_DURING_DAY in registry.ts).
+  const jql = `project = NT AND status CHANGED TO ("Resolved","Done") DURING ("${fromDay} 00:00","${toDay} 00:00")`;
   const res = await jira.searchJqlAll(jql, ['assignee'], 3000);
   const map = new Map<string, number>();
   const assigneeOf = (issue: JiraIssue) =>

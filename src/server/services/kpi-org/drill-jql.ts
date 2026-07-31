@@ -44,15 +44,15 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
     case 'resolved_outcome':
     case 'fcr': {
       const ctx = dayCtx(now);
-      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`, applyNoReply: false };
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day} 00:00", "${ctx.nextDay} 00:00")`, applyNoReply: false };
     }
     case 'first_line_rate': {
       const ctx = dayCtx(now);
-      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")`, applyNoReply: false };
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day} 00:00", "${ctx.nextDay} 00:00")`, applyNoReply: false };
     }
     case 'bug_ack': {
       const ctx = dayCtx(now);
-      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}") AND cf[12981] in ("Tier 3", "Development")`, applyNoReply: false };
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day} 00:00", "${ctx.nextDay} 00:00") AND cf[12981] in ("Tier 3", "Development")`, applyNoReply: false };
     }
     case 'ai_metric':
       return { message: 'AI agent throughput is tracked in the approval queue — no ticket drill-down.' };
@@ -61,7 +61,7 @@ export function resolveKpiDrill(kpiKeyOrLabel: string, now: Date): DrillJql | Dr
     case 'resolved_sla': {
       const ctx = dayCtx(now);
       const tierClause = c.tier ? ` AND cf[12981] = "${c.tier}"` : '';
-      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day}", "${ctx.nextDay}")${tierClause}`, applyNoReply: false };
+      return { jql: `project = NT AND statusCategory = Done AND status CHANGED TO ("Resolved", "Closed", "Done") DURING ("${ctx.day} 00:00", "${ctx.nextDay} 00:00")${tierClause}`, applyNoReply: false };
     }
     case 'escalation_accuracy':
       return { message: 'Escalation accuracy is derived from the escalation log — no ticket drill-down.' };
