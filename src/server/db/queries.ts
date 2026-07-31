@@ -1291,6 +1291,12 @@ export class OnboardingRecordQueries {
     await execute(`UPDATE onboarding_records SET ${fields.join(', ')} WHERE id = ?`, params);
     return true;
   }
+
+  /** Remove the NOVA onboarding record. Does NOT touch the Jira tickets. */
+  async delete(id: number): Promise<boolean> {
+    await execute(`DELETE FROM onboarding_records WHERE id = ?`, [id]);
+    return true;
+  }
 }
 
 // ─── Milestone Templates & Delivery Milestones ───────────────────────────────

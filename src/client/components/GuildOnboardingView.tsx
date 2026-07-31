@@ -88,10 +88,17 @@ function Row({ row, onChanged }: { row: GuildOnboardingRow; onChanged: () => voi
   const [retrying, setRetrying] = useState(false);
   const office = [row.officeName, row.branchName].filter(Boolean).join(' — ') || '(unnamed)';
 
+  const [deleting, setDeleting] = useState(false);
   const retry = async () => {
     setRetrying(true);
     try { await api(`/records/${row.id}/retry`, { method: 'POST' }); onChanged(); }
     finally { setRetrying(false); }
+  };
+  const del = async () => {
+    if (!window.confirm(`Delete the onboarding record for "${office}"?\n\nThis removes it from NOVA only — the Jira tickets (${row.parentKey || 'none'} + children) are NOT deleted.`)) return;
+    setDeleting(true);
+    try { await api(`/records/${row.id}`, { method: 'DELETE' }); onChanged(); }
+    finally { setDeleting(false); }
   };
 
   return (
@@ -139,6 +146,11 @@ function Row({ row, onChanged }: { row: GuildOnboardingRow; onChanged: () => voi
               )}
             </div>
             <ManualPanel row={row} onSaved={onChanged} />
+          </div>
+          <div className="flex justify-end border-t border-[#3a424d] pt-3">
+            <button onClick={del} disabled={deleting} className="text-[11px] text-red-400 hover:text-red-300 hover:underline disabled:opacity-50">
+              {deleting ? 'Deleting…' : 'Delete onboarding record'}
+            </button>
           </div>
         </div>
       )}

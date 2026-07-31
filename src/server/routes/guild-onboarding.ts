@@ -50,6 +50,17 @@ export function createGuildOnboardingRoutes(deps: {
     res.json({ ok: true, data: current });
   });
 
+  // Delete the NOVA onboarding record (does not affect the Jira tickets).
+  router.delete('/records/:id', async (req: Request, res: Response) => {
+    const role = (req as { user?: { role?: string } }).user?.role;
+    if (role === 'viewer') { res.status(403).json({ ok: false, error: 'View-only role cannot delete onboarding records' }); return; }
+    const id = parseInt(req.params.id as string, 10);
+    const record = await deps.records.getById(id);
+    if (!record) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
+    await deps.records.delete(id);
+    res.json({ ok: true });
+  });
+
   // Re-run creation for a partial/failed record — idempotent, safe to repeat.
   router.post('/records/:id/retry', async (req: Request, res: Response) => {
     if (!deps.guild) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
