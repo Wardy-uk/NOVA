@@ -68,6 +68,7 @@ interface GRResult {
   rule3Pass: number;
   Summary: string | null;
   SuggestedRewrite: string | null;
+  CommentBody: string | null;
   Assignee: string | null;
   Updater: string | null;
   ticketPriority: string | null;
@@ -733,7 +734,7 @@ export function QAView() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr>
-                    {['Ticket', 'Agent', 'Score', 'Own', 'Action', 'Time', 'Priority', 'Date', ''].map(h => (
+                    {['Ticket', 'Agent', 'Rules passed', 'Own', 'Action', 'Time', 'Priority', 'Date', ''].map(h => (
                       <th key={h} style={th}>{h}</th>
                     ))}
                   </tr>
@@ -745,6 +746,9 @@ export function QAView() {
                         const key = `${r.IssueKey}-${r.CommentId}`;
                         const expanded = grExpanded === key;
                         const ruleColour = (pass: number) => pass ? C.green : C.red;
+                        // Count of rules passed — NOT OverallScore, which is the weakest
+                        // rule's 1-3 score and reads as a pass count when rendered as "n/3".
+                        const passed = (r.rule1Pass ? 1 : 0) + (r.rule2Pass ? 1 : 0) + (r.rule3Pass ? 1 : 0);
                         return (
                           <>
                             <tr key={key} onClick={() => setGrExpanded(expanded ? null : key)} style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
@@ -755,7 +759,12 @@ export function QAView() {
                                 }
                               </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text1 }}>{r.Updater ?? r.Assignee ?? '—'}</td>
-                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: Number(r.OverallScore) >= 2.5 ? C.green : Number(r.OverallScore) >= 1.5 ? C.amber : C.red }}>{r.OverallScore}/3</td>
+                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: passed === 3 ? C.green : passed >= 2 ? C.amber : C.red }}>
+                                {passed}/3
+                                <span style={{ marginLeft: '0.4rem', fontWeight: 400, fontSize: '0.75rem', color: C.text3 }} title="Weakest rule score (1–3)">
+                                  (weakest {r.OverallScore})
+                                </span>
+                              </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule1Pass) }}>{r.rule1Pass ? '✓' : '✗'} {r.Rule1Score}</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule2Pass) }}>{r.rule2Pass ? '✓' : '✗'} {r.Rule2Score}</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule3Pass) }}>{r.rule3Pass ? '✓' : '✗'} {r.Rule3Score}</td>
@@ -767,8 +776,16 @@ export function QAView() {
                               <tr key={`${key}-detail`} style={{ background: C.bg0, borderBottom: `1px solid ${C.border}` }}>
                                 <td colSpan={9} style={{ padding: 0 }}>
                                   <div style={{ padding: '0.875rem 1.25rem', borderLeft: `3px solid ${C.teal}`, marginLeft: '0.75rem' }}>
+                                    {r.CommentBody && (
+                                      <div style={{ marginBottom: '0.75rem' }}>
+                                        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: C.text3, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>
+                                          What {r.Updater ?? 'the agent'} actually wrote
+                                        </div>
+                                        <div style={{ fontSize: '0.85rem', color: C.text1, lineHeight: 1.5, whiteSpace: 'pre-wrap', background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.5rem 0.75rem' }}>{r.CommentBody}</div>
+                                      </div>
+                                    )}
                                     {r.Summary && <div style={{ fontSize: '0.85rem', color: C.text2, marginBottom: '0.5rem', lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Summary:</strong> {r.Summary}</div>}
-                                    {r.SuggestedRewrite && <div style={{ fontSize: '0.85rem', color: C.text2, lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Suggested Rewrite:</strong> {r.SuggestedRewrite}</div>}
+                                    {r.SuggestedRewrite && <div style={{ fontSize: '0.85rem', color: C.text2, lineHeight: 1.5 }}><strong style={{ color: C.text1 }}>Suggested rewrite (NOVA's wording, not the agent's):</strong> {r.SuggestedRewrite}</div>}
                                   </div>
                                 </td>
                               </tr>

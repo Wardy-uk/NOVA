@@ -13,7 +13,9 @@ import { loadPrompt } from './prompt-loader.js';
 export const CommentReviewSchema = z.object({
   issueKey: z.string(),
   commentId: z.string(),
-  overallScore: z.number().min(1).max(3),
+  // Derived, never trusted from the LLM — see overallOf(). Defaulted rather than
+  // optional so the prompt may omit it while the inferred type stays required.
+  overallScore: z.number().min(1).max(3).default(1),
   rule1Score: z.number().min(1).max(3),
   rule2Score: z.number().min(1).max(3),
   rule3Score: z.number().min(1).max(3),
@@ -21,7 +23,15 @@ export const CommentReviewSchema = z.object({
   suggestedRewrite: z.string(),
 });
 
-export type CommentReview = z.infer<typeof CommentReviewSchema>;
+/** Exactly what the LLM returns (overallScore absent). */
+export type CommentReviewRaw = z.infer<typeof CommentReviewSchema>;
+/** What callers get back — overallScore always present, always derived. */
+export interface CommentReview extends CommentReviewRaw { overallScore: number }
+
+/** Overall = weakest of the three rules. Single definition for every consumer. */
+export function overallOf(r: { rule1Score?: number; rule2Score?: number; rule3Score?: number }): number {
+  return Math.min(r.rule1Score, r.rule2Score, r.rule3Score);
+}
 
 export interface ReviewCommentInput {
   commentBody: string;
@@ -51,12 +61,12 @@ export async function reviewComment(
     passThreshold: input.passThreshold ?? 2,
   });
 
-  const result = await llmService.call<CommentReview>(
+  const result = await llmService.call<CommentReviewRaw>(
     prompt,
     payload,
     CommentReviewSchema,
     { temperature: 0.1, ticketId: input.issueKey ?? null, callType: 'gr_comment_review' },
   );
 
-  return result.data;
+  return { ...result.data, overallScore: overallOf(result.data) };
 }

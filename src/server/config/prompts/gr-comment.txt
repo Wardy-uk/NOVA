@@ -47,13 +47,11 @@ Timeframe Score 3 (PASS): "I'll have an update for you by 3pm today."
 Timeframe Score 2 (PASS at threshold 2): "I'll update you tomorrow morning."
 Timeframe Score 1 (FAIL): "As soon as possible."
 
-OVERALL SCORE = MINIMUM of the three rule scores.
-
 SUGGESTED REWRITE
 Rewrite the comment to score 3/3/3. Concise (2-4 sentences). Include: explicit owner + role, concrete action, specific timeframe. Tone: professional, empathetic, British English.
 
 SUMMARY
-One sentence: main weakness and why the overall score was given.
+One sentence naming the main weakness. Do NOT state an overall score — that is derived from the three rule scores outside this prompt.
 
 OUTPUT — return STRICT JSON only, no markdown:
-{"issueKey":"string","commentId":"string","overallScore":number,"rule1Score":number,"rule2Score":number,"rule3Score":number,"summary":"string","suggestedRewrite":"string"}
+{"issueKey":"string","commentId":"string","rule1Score":number,"rule2Score":number,"rule3Score":number,"summary":"string","suggestedRewrite":"string"}

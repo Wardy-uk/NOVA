@@ -8,7 +8,7 @@ import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
 import { extractText } from './shared/adf-utils.js';
 import type { CoachingEngine } from './coach.js';
-import { CommentReviewSchema } from './comment-review.js';
+import { CommentReviewSchema, overallOf } from './comment-review.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -34,7 +34,9 @@ async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool
   return pool;
 }
 
-const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot'];
+// NOVA posts public comments under "NOVA-Jira" — its own replies must not be
+// QA'd as if they were an agent's, or they land in the team's Golden Rules stats.
+const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot', 'nova-jira'];
 
 const CLOSURE_PATTERNS = [
   'issue has been resolved',
@@ -348,7 +350,7 @@ export class GrPipeline {
     const request = p.request();
     request.input('issueKey', sql.NVarChar(50), data.issueKey);
     request.input('commentId', sql.NVarChar(50), data.commentId);
-    request.input('overallScore', sql.Float, Math.min(r.rule1Score, r.rule2Score, r.rule3Score));
+    request.input('overallScore', sql.Float, overallOf(r));
     request.input('rule1Score', sql.Float, r.rule1Score);
     request.input('rule2Score', sql.Float, r.rule2Score);
     request.input('rule3Score', sql.Float, r.rule3Score);

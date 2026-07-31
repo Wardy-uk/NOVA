@@ -727,7 +727,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       // Build SELECT columns dynamically
       const selCols = ['IssueKey', 'CommentId', 'OverallScore'];
       for (const c of ['Rule1Score', 'Rule2Score', 'Rule3Score', 'rule1Pass', 'rule2Pass', 'rule3Pass',
-                        'Summary', 'SuggestedRewrite', 'Assignee', 'Updater', 'ticketPriority', 'ticketType']) {
+                        'Summary', 'SuggestedRewrite', 'CommentBody', 'Assignee', 'Updater', 'ticketPriority', 'ticketType']) {
         if (has(c)) selCols.push(c);
       }
       const result = await p.request().query(`
