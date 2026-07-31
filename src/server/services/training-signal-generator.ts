@@ -67,8 +67,8 @@ export class TrainingSignalGenerator {
   }
 
   async generateWeeklySignals(): Promise<number> {
-    const agents = await query<{ assignee_account_id: string; assignee_display_name: string }>(
-      `SELECT DISTINCT assignee_account_id, assignee_display_name
+    const agents = await query<{ assignee_account_id: string; assignee_display: string | null }>(
+      `SELECT DISTINCT assignee_account_id, assignee_display
        FROM jira_issue_cache
        WHERE assignee_account_id IS NOT NULL
          AND jira_updated >= DATEADD(day, -30, GETUTCDATE())`,
@@ -76,8 +76,11 @@ export class TrainingSignalGenerator {
 
     let signalCount = 0;
     for (const agent of agents) {
-      const signals = await this.analyseAgent(agent.assignee_account_id, agent.assignee_display_name);
-      signalCount += signals;
+      try {
+        signalCount += await this.analyseAgent(agent.assignee_account_id, agent.assignee_display ?? agent.assignee_account_id);
+      } catch (err) {
+        console.warn(`[training-signals] Analysis failed for ${agent.assignee_display}:`, err instanceof Error ? err.message : err);
+      }
     }
     return signalCount;
   }

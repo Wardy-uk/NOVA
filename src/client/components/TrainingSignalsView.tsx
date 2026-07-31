@@ -25,6 +25,7 @@ export function TrainingSignalsView() {
   const [agentFilter, setAgentFilter] = useState<string>('');
   const [showActioned, setShowActioned] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [genResult, setGenResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -41,7 +42,11 @@ export function TrainingSignalsView() {
 
   const generate = async () => {
     setGenerating(true);
-    await api('/generate', 'POST');
+    setGenResult(null);
+    const r = await api('/generate', 'POST');
+    setGenResult(r.ok
+      ? { ok: true, msg: `Generated ${r.data?.signals_generated ?? 0} signal(s)` }
+      : { ok: false, msg: r.error || 'Generation failed' });
     await load();
     setGenerating(false);
   };
@@ -55,6 +60,8 @@ export function TrainingSignalsView() {
     switch (t) {
       case 'high_escalation_rate': return 'High Escalation Rate';
       case 'low_qa_score': return 'Low QA Score';
+      case 'low_gr_score': return 'Low Golden Rules Score';
+      case 'high_resolution_fail_rate': return 'Resolution Checks Failing';
       case 'slow_response': return 'Slow Response';
       case 'frequent_nudge': return 'Frequent Nudges';
       case 'missing_skill': return 'Missing Skill';
@@ -66,6 +73,8 @@ export function TrainingSignalsView() {
     switch (t) {
       case 'high_escalation_rate': return 'text-red-400 bg-red-900/20';
       case 'low_qa_score': return 'text-amber-400 bg-amber-900/20';
+      case 'low_gr_score': return 'text-amber-400 bg-amber-900/20';
+      case 'high_resolution_fail_rate': return 'text-red-400 bg-red-900/20';
       case 'frequent_nudge': return 'text-orange-400 bg-orange-900/20';
       default: return 'text-neutral-400 bg-neutral-900/20';
     }
@@ -91,6 +100,9 @@ export function TrainingSignalsView() {
           className="px-3 py-1 bg-[#5ec1ca]/20 text-[#5ec1ca] text-xs rounded hover:bg-[#5ec1ca]/30 disabled:opacity-50">
           {generating ? 'Generating...' : 'Generate Signals'}
         </button>
+        {genResult && (
+          <span className={`text-xs ${genResult.ok ? 'text-green-400' : 'text-red-400'}`}>{genResult.msg}</span>
+        )}
       </div>
 
       {/* Team Heatmap */}
