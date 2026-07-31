@@ -124,6 +124,10 @@ const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
   },
 };
 
+// Different-vendor fallback. Only worth reaching once every Claude leg across
+// every tier has been tried, so it is sorted to the end of the chain.
+const LAST_RESORT_PROVIDER: LlmProvider = 'openai';
+
 const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   triage: 'standard',
   respond: 'reasoning',
@@ -590,6 +594,16 @@ export class LlmService {
         }
       }
     }
+
+    // Push the cross-vendor last resort to the back of the chain. The tier
+    // fall-up otherwise interleaves it: a `standard` call tried OpenAI's weakest
+    // model at position 3, before Claude's reasoning tier at position 4, so a
+    // blip on Haiku produced gpt-4.1-mini output when Sonnet 5 was still
+    // untried. Stable sort — order within each group (tier, then primary →
+    // failover → failover2) is unchanged, and the reasoning tier is unaffected
+    // because OpenAI already sits last there.
+    configs.sort((a, b) =>
+      Number(a.provider === LAST_RESORT_PROVIDER) - Number(b.provider === LAST_RESORT_PROVIDER));
 
     // Filter by circuit breaker, but keep circuit-broken ones as last resort
     const available = configs.filter(c => !isCircuitOpen(c.provider));
