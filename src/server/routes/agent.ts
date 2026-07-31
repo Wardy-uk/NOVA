@@ -3574,7 +3574,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const qa = deps?.qaPipeline;
       if (!qa) { res.status(503).json({ ok: false, error: 'QA pipeline not available' }); return; }
       const hours = parseInt(req.query.hours as string, 10) || 24;
-      const results = await qa.scoreRecentlyResolved(hours);
+      const force = req.query.force === '1' || req.query.force === 'true';
+      const results = await qa.scoreRecentlyResolved(hours, { force });
       res.json({ ok: true, data: { scored: results.length, results } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'QA scoring failed' });

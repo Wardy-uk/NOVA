@@ -8,6 +8,11 @@ import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
 import { extractText } from './shared/adf-utils.js';
 import { execute } from './database.js';
+import { logError } from './error-log.js';
+
+// Assignees that are not human agents — their closes belong to the AI-learning
+// pipeline, not agent QA. Mirrors BOT_PATTERNS in gr-pipeline.ts.
+const BOT_ASSIGNEES = ['nova', 'automation', 'nurtur support', 'jira service', 'servicedesk', 'bot'];
 
 
 let pool: sql.ConnectionPool | null = null;
@@ -52,21 +57,24 @@ export class QaPipeline {
     return tableSuffix(this.target);
   }
 
-  async scoreRecentlyResolved(lookbackHours: number = 24): Promise<QaTicketResult[]> {
+  async scoreRecentlyResolved(lookbackHours: number = 24, opts: { force?: boolean } = {}): Promise<QaTicketResult[]> {
     const started = new Date();
     let rowsAffected = 0;
+    let failed = 0;
     try {
-      const since = new Date(Date.now() - lookbackHours * 3600000)
-        .toISOString().replace('T', ' ').slice(0, 16);
-
-      const jql = `project = ${this.jiraProject} AND statusCategory = Done AND resolved >= "${since}" ORDER BY resolved DESC`;
-      console.log(`[qa-pipeline] Searching: ${jql.slice(0, 140)} → target=${this.target}`);
+      // Match on the status TRANSITION, not `resolved`. NOVA's own closes and other
+      // automated transitions never set resolutiondate — 232 of 241 tickets missed in
+      // the 7 days to 2026-07-31 were missing for exactly this reason, and the gap fell
+      // unevenly across agents (13%-100% coverage), making per-agent QA non-comparable.
+      const days = Math.max(1, Math.ceil(lookbackHours / 24));
+      const jql = `project = ${this.jiraProject} AND status CHANGED TO ("Done", "Closed", "Resolved") DURING (-${days}d, now()) ORDER BY updated DESC`;
+      console.log(`[qa-pipeline] Searching: ${jql.slice(0, 160)} → target=${this.target}`);
       const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'description', 'issuetype', 'priority', 'status',
         'resolution', 'assignee', 'reporter', 'comment', 'created', 'resolutiondate',
-      ], 500);
+      ], 2000);
       const issues = result?.issues ?? [];
-      console.log(`[qa-pipeline] Jira returned ${issues.length} resolved tickets`);
+      console.log(`[qa-pipeline] Jira returned ${issues.length} tickets closed in the last ${days}d`);
 
       if (issues.length === 0) {
         await this.monitor?.logRun({
@@ -77,11 +85,17 @@ export class QaPipeline {
         return [];
       }
 
-      const alreadyScored = await this.getAlreadyScored(issues.map(i => i.key));
-      const toScore = issues.filter(i => !alreadyScored.has(i.key));
+      // Agent QA only covers human-worked tickets. NOVA's own closes are scored by the
+      // AI-learning pipeline, not here — counting them as agent work skews the team stats.
+      const humanIssues = issues.filter(i => !this.isBotAssignee((i.fields as any)?.assignee?.displayName));
+      const skippedBot = issues.length - humanIssues.length;
+
+      const alreadyScored = opts.force ? new Set<string>() : await this.getAlreadyScored(humanIssues.map(i => i.key));
+      const toScore = humanIssues.filter(i => !alreadyScored.has(i.key));
+
+      console.log(`[qa-pipeline] ${issues.length} closed → ${humanIssues.length} human-worked (${skippedBot} bot/unassigned) → ${toScore.length} to score, ${alreadyScored.size} already scored${opts.force ? ' [FORCE]' : ''}`);
 
       if (toScore.length === 0) {
-        console.log(`[qa-pipeline] All ${issues.length} resolved tickets already scored`);
         await this.monitor?.logRun({
           pipeline_name: 'qa-scoring', started_at: started, completed_at: new Date(),
           status: 'success', rows_affected: 0, error_message: null,
@@ -104,17 +118,24 @@ export class QaPipeline {
             await this.saveQaResult(issue, qaResult);
             results.push(qaResult);
             rowsAffected++;
+          } else {
+            failed++;
+            await logError('qa-pipeline', new Error('scoreSingle returned no result'), { entityRef: issue.key });
           }
         } catch (err) {
-          console.warn(`[qa-pipeline] Failed to score ${issue.key}:`, err instanceof Error ? err.message : err);
+          // Was a console.warn only, so silent gaps in coverage looked like full coverage.
+          failed++;
+          await logError('qa-pipeline', err, { entityRef: issue.key, context: { stage: 'scoreSingle' } });
         }
       }
 
-      console.log(`[qa-pipeline] Scored ${results.length}/${toScore.length} → ${this.s || 'live'}`);
+      const coveragePct = toScore.length > 0 ? Math.round(results.length / toScore.length * 100) : 100;
+      console.log(`[qa-pipeline] Scored ${results.length}/${toScore.length} (${coveragePct}% coverage, ${failed} failed) → ${this.s || 'live'}`);
 
       await this.monitor?.logRun({
         pipeline_name: 'qa-scoring', started_at: started, completed_at: new Date(),
-        status: 'success', rows_affected: rowsAffected, error_message: null,
+        status: failed > 0 ? 'error' : 'success', rows_affected: rowsAffected,
+        error_message: failed > 0 ? `${failed} ticket(s) failed to score` : null,
         duration_ms: Date.now() - started.getTime(),
       });
       return results;
@@ -182,6 +203,12 @@ export class QaPipeline {
     } catch { return []; }
   }
 
+  private isBotAssignee(displayName: string | undefined): boolean {
+    if (!displayName) return true; // Unassigned — no agent to attribute the score to.
+    const lower = displayName.toLowerCase();
+    return BOT_ASSIGNEES.some(pat => lower.includes(pat));
+  }
+
   private isChatTicket(issue: any): boolean {
     const fields = issue.fields as any;
     const cf13482 = fields.customfield_13482;
@@ -230,7 +257,10 @@ export class QaPipeline {
       const s = this.s;
       const keyList = ticketKeys.map(k => `'${k.replace(/'/g, "''")}'`).join(',');
       const result = await p.request().query(
-        `SELECT DISTINCT issueKey FROM dbo.jira_qa_results${s} WHERE issueKey IN (${keyList}) AND qaType IN ('resolved', 'excluded', 'ticket_full') AND CreatedAt >= DATEADD(day, -1, GETDATE())`,
+        // 30 days, not 1 — a 1-day window let multi-day backfills re-insert rows for
+        // tickets already scored, which is how duplicate issueKeys accumulated.
+        // Use opts.force on scoreRecentlyResolved to deliberately re-score.
+        `SELECT DISTINCT issueKey FROM dbo.jira_qa_results${s} WHERE issueKey IN (${keyList}) AND qaType IN ('resolved', 'excluded', 'ticket_full') AND CreatedAt >= DATEADD(day, -30, GETDATE())`,
       );
       return new Set(result.recordset.map((r: any) => r.issueKey));
     } catch {
