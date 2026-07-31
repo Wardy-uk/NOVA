@@ -68,6 +68,8 @@ export class AgentLoop {
   private currentMode: AgentMode = 'full';
   private modeChangedAt: Date | null = null;
   private recentlyProcessedTickets = new Map<string, number>();
+  /** Poisoned tickets already reported to the error log — so we alert once, not every tick. */
+  private reportedPoisonTickets = new Set<string>();
 
   private perceiver: Perceiver;
   private reasoner: Reasoner;
@@ -773,6 +775,22 @@ export class AgentLoop {
         }
       }
 
+      // 1.93 POISON-TICKET GUARD — drop tickets whose triage has never once
+      // succeeded after repeated attempts. Without this they retry every 30
+      // minutes indefinitely, burning the chain on a call that cannot work.
+      if (dedupedLlmEvents.length > 0) {
+        const poisoned = await this.getPoisonedTicketKeys(dedupedLlmEvents.map(e => e.ticketKey));
+        if (poisoned.size > 0) {
+          for (let i = dedupedLlmEvents.length - 1; i >= 0; i--) {
+            const event = dedupedLlmEvents[i];
+            if (!poisoned.has(event.ticketKey)) continue;
+            console.warn(`[agent] Skipping ${event.ticketKey} — triage has failed persistently, left for a human`);
+            this.recentlyProcessedTickets.set(`${event.ticketKey}:${event.eventType}`, Date.now());
+            dedupedLlmEvents.splice(i, 1);
+          }
+        }
+      }
+
       // 1.95 ATTACHMENT CONTENT — download image attachments for multimodal AI processing
       if (this.settings.get('agent_attachment_processing_enabled') !== 'false') {
         await this.downloadAttachmentContent(dedupedLlmEvents);
@@ -883,6 +901,73 @@ export class AgentLoop {
     if (!val) return fallback;
     const parsed = parseInt(val, 10);
     return isNaN(parsed) ? fallback : parsed;
+  }
+
+  /**
+   * Identify tickets that can never be triaged, so the loop stops retrying them.
+   *
+   * A triage failure leaves no decision, so the ticket is only suppressed for the
+   * 30-minute dedup window and then comes straight back. For a ticket that fails
+   * deterministically (a malformed attachment, a description the model always
+   * chokes on) that is an unbounded loop: in the week to 31 Jul 2026 four tickets
+   * generated 1,000 of 2,413 triage calls and never once succeeded.
+   *
+   * `agent_llm_calls` already records every attempt, so it answers this directly —
+   * no extra table, and the count survives a service restart. Two conditions stop
+   * this misfiring:
+   *  - only failures *since the last successful triage* count, so a ticket that
+   *    recovers is never held against its old failures. "Never succeeded" is too
+   *    strict: the worst offenders have exactly one lucky success in their history
+   *    (NT-25521 had 1 success and 650 subsequent failures).
+   *  - the failures must span several hours, so a provider outage — which fails
+   *    every ticket at once — can't permanently poison a healthy one.
+   */
+  private async getPoisonedTicketKeys(ticketKeys: string[]): Promise<Set<string>> {
+    const poisoned = new Set<string>();
+    if (ticketKeys.length === 0) return poisoned;
+
+    const minFailures = this.getNumber('agent_triage_poison_threshold', 25);
+    if (minFailures <= 0) return poisoned;
+
+    try {
+      const placeholders = ticketKeys.map(() => '?').join(',');
+      const rows = await query<{ ticket_id: string; fails: number; span_hours: number }>(
+        `SELECT c.ticket_id,
+                COUNT(*) AS fails,
+                DATEDIFF(hour, MIN(c.created_at), MAX(c.created_at)) AS span_hours
+         FROM agent_llm_calls c
+         OUTER APPLY (
+           SELECT MAX(s.created_at) AS last_ok
+           FROM agent_llm_calls s
+           WHERE s.ticket_id = c.ticket_id AND s.call_type = 'triage' AND s.success = 1
+         ) ok
+         WHERE c.call_type = 'triage'
+           AND c.success = 0
+           AND c.ticket_id IN (${placeholders})
+           AND c.created_at >= DATEADD(day, -30, GETUTCDATE())
+           AND (ok.last_ok IS NULL OR c.created_at > ok.last_ok)
+         GROUP BY c.ticket_id
+         HAVING COUNT(*) >= ${minFailures}
+            AND DATEDIFF(hour, MIN(c.created_at), MAX(c.created_at)) >= 4`,
+        ticketKeys,
+      );
+
+      for (const row of rows) {
+        poisoned.add(row.ticket_id);
+        if (this.reportedPoisonTickets.has(row.ticket_id)) continue;
+        this.reportedPoisonTickets.add(row.ticket_id);
+        // Surface it once — a ticket dropping out of AI triage must not be silent.
+        await logError('agent', new Error(
+          `Triage permanently failing for ${row.ticket_id} — ${row.fails} failed attempts over ${row.span_hours}h with no success. `
+          + `Skipping AI triage for this ticket; it needs handling by a human.`,
+        ), { severity: 'error', entityRef: row.ticket_id, context: { fails: row.fails, spanHours: row.span_hours } });
+      }
+    } catch (err) {
+      // Never let this check block a tick — worst case we retry as before.
+      console.warn('[agent] Poison-ticket check failed:', err instanceof Error ? err.message : err);
+    }
+
+    return poisoned;
   }
 
   private async downloadAttachmentContent(events: import('./agent-types.js').TicketEvent[]): Promise<void> {
