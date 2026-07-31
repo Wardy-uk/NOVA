@@ -265,7 +265,7 @@ function CheckpointPanel({ data }: { data: CheckpointData | null }) {
           Export CSV
         </button>
       </div>
-      <p className="text-xs mb-3" style={{ color: C.text3 }}>Performance snapshots at Day 1 baseline and each checkpoint. WTD/MTD show rolling aggregates.</p>
+      <p className="text-xs mb-3" style={{ color: C.text3 }}>Performance over the last three complete months. WTD (week to date) and MTD (month to date) show rolling aggregates for the current period.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
           <thead>
@@ -458,7 +458,7 @@ function SlaSection({ data }: { data: any[] | null }) {
   const resKpis = kpis.filter(k => k.includes('Resolution'));
 
   const slaDisplayLabel = (kpi: string): string => {
-    const base = kpi.includes('FRT') ? 'FRT %' : 'Resolution %';
+    const base = kpi.includes('FRT') ? 'First Response Time %' : 'Resolution %';
     if (/resolved/i.test(kpi)) return `${base} (Resolved)`;
     if (/open/i.test(kpi)) return `${base} (Open Queue)`;
     return base;
@@ -485,7 +485,7 @@ function SlaSection({ data }: { data: any[] | null }) {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
         <div style={{ height: 280 }}>
-          <Line data={frtData} options={baseLineOptions('FRT Compliance %', 95, { labels: frtData.labels as string[] })} />
+          <Line data={frtData} options={baseLineOptions('First Response Time Compliance %', 95, { labels: frtData.labels as string[] })} />
         </div>
       </Card>
       <Card>
@@ -801,7 +801,7 @@ export const TrendsView = memo(function TrendsView() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold" style={{ color: C.text1 }}>Trends</h1>
-          <p className="text-xs mt-1" style={{ color: C.text3 }}>90-day performance framework &bull; Day 1 baseline: 16 Mar 2026</p>
+          <p className="text-xs mt-1" style={{ color: C.text3 }}>Rolling performance view &bull; last three complete months, plus week and month to date</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {ctl('4 Weeks', dateRange === '4w', () => setDateRange('4w'))}

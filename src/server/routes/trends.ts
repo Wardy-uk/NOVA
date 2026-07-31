@@ -40,41 +40,52 @@ function fmtSubtitle(dateStr: string): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
 
-function fmtMonthYear(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+function fmtLocalDate(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
-// Build dynamic checkpoint columns with date ranges
+function fmtMonthLabel(d: Date): string {
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+// Build dynamic checkpoint columns: last 3 complete calendar months, then WTD and MTD
 function buildCheckpointColumns(): CheckpointColumn[] {
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = fmtLocalDate(now);
 
-  // Last month: previous calendar month
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0); // last day of prev month
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lmStart = lastMonthStart.toISOString().slice(0, 10);
-  const lmEnd = lastMonthEnd.toISOString().slice(0, 10);
+  const columns: CheckpointColumn[] = [];
+
+  // Last 3 complete calendar months, oldest first (offset 3, 2, 1 months back)
+  for (let offset = 3; offset >= 1; offset--) {
+    const monthStart = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() - offset + 1, 0);
+    columns.push({
+      label: fmtMonthLabel(monthStart),
+      subtitle: `${fmtSubtitle(fmtLocalDate(monthStart))} – ${fmtSubtitle(fmtLocalDate(monthEnd))}`,
+      type: 'range',
+      start: fmtLocalDate(monthStart),
+      end: fmtLocalDate(monthEnd),
+    });
+  }
 
   // Week to date: Monday of current week → today
   const dayOfWeek = now.getDay(); // 0=Sun
   const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   const monday = new Date(now);
   monday.setDate(now.getDate() - mondayOffset);
-  const wtdStart = monday.toISOString().slice(0, 10);
+  const wtdStart = fmtLocalDate(monday);
 
   // Month to date: 1st of current month → today
-  const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const mtdStart = fmtLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
 
-  return [
-    { label: 'Last Month', subtitle: fmtMonthYear(lmStart), type: 'range', start: lmStart, end: lmEnd },
-    { label: 'Day 0', subtitle: fmtSubtitle(CHECKPOINT_DATES.day0), type: 'point', start: CHECKPOINT_DATES.day0, end: CHECKPOINT_DATES.day0 },
-    { label: 'Day 1', subtitle: fmtSubtitle(CHECKPOINT_DATES.day1), type: 'point', start: CHECKPOINT_DATES.day1, end: CHECKPOINT_DATES.day1 },
+  columns.push(
     { label: 'WTD', subtitle: `${fmtSubtitle(wtdStart)} – ${fmtSubtitle(today)}`, type: 'range', start: wtdStart, end: today },
     { label: 'MTD', subtitle: `${fmtSubtitle(mtdStart)} – ${fmtSubtitle(today)}`, type: 'range', start: mtdStart, end: today },
-    { label: 'Day 15', subtitle: fmtSubtitle(CHECKPOINT_DATES.day15), type: 'point', start: CHECKPOINT_DATES.day15, end: CHECKPOINT_DATES.day15 },
-    { label: 'Day 30', subtitle: fmtSubtitle(CHECKPOINT_DATES.day30), type: 'point', start: CHECKPOINT_DATES.day30, end: CHECKPOINT_DATES.day30 },
-  ];
+  );
+
+  return columns;
 }
 
 // Fixed checkpoint dates for backward compat (used by data-audit route)
@@ -129,7 +140,7 @@ interface CheckpointMetric {
 
 const CHECKPOINT_METRICS: CheckpointMetric[] = [
   {
-    key: 'frt_compliance', label: 'FRT Compliance %',
+    key: 'frt_compliance', label: 'First Response Time Compliance %',
     kpiPattern: 'FRT Compliance % (Resolved Today)', source: 'compliance',
     target: 95, direction: 'higher', expandable: true,
     metKpi: 'FRT Met (All)', breachedKpi: 'FRT Breached (All)',
@@ -210,7 +221,7 @@ const CHECKPOINT_METRICS: CheckpointMetric[] = [
     },
   },
   { key: 'csat', label: 'CSAT %', kpiPattern: 'CSAT%', target: null, direction: 'higher', expandable: false },
-  { key: 'fcr', label: 'FCR Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },
+  { key: 'fcr', label: 'First Contact Resolution Rate %', kpiPattern: 'FCR%', target: null, direction: 'higher', expandable: false },
   { key: 'l1_resolution', label: '1st Line Resolution Rate %', kpiPattern: '1st Line Resolution Rate%', target: null, direction: 'higher', expandable: false },
   { key: 'bug_ack', label: 'Bug Ack Time (hours)', kpiPattern: 'Bug Escalation-to-Ack%hours%', target: null, direction: 'lower', expandable: false },
   // Survey satisfaction scores (sourced from local SQLite, not SQL Server)
