@@ -244,6 +244,15 @@ function acceptsTemperature(model: string): boolean {
   return !/claude/i.test(model);
 }
 
+// A 4xx other than 429 is caused by the request itself, so retrying it verbatim
+// against the same provider is pure waste. (429 is handled by isRetryableError.)
+function isClientError(err: unknown): boolean {
+  const status = (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError)
+    ? err.status
+    : undefined;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 async function callAnthropic(
   systemPrompt: string,
   userMessage: string,
@@ -670,6 +679,12 @@ export class LlmService {
             recordFailure(config.provider);
             break;
           }
+
+          // A 4xx (bad request / auth / quota) is deterministic for this
+          // provider — an identical retry always fails, so move straight to the
+          // next leg instead of doubling the wasted calls. Not a circuit-breaker
+          // failure: the provider is healthy, this request is the problem.
+          if (isClientError(err)) break;
 
           if (attempt < RETRY_VALIDATION_ATTEMPTS) continue;
         }

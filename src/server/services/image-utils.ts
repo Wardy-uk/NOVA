@@ -63,6 +63,31 @@ export function getImageDimensions(base64: string, mimeType: string): ImageDimen
   return null;
 }
 
+/**
+ * Identify an image's real format from its magic bytes, ignoring whatever the
+ * source claimed. Jira routinely reports a JPEG screenshot as image/png (the
+ * filename extension is trusted over the content), and Anthropic rejects the
+ * mismatch with a 400 — so the declared type cannot be passed through as-is.
+ * Returns null when the bytes match no format a vision model accepts.
+ */
+export function sniffImageMimeType(base64: string): string | null {
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(base64, 'base64');
+  } catch {
+    return null;
+  }
+  if (buf.length < 12) return null;
+
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  // WEBP: "RIFF" .... "WEBP"
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+
+  return null;
+}
+
 export interface ImageScreenOptions {
   maxDimension: number;   // drop images whose largest side exceeds this
   maxCount: number;       // cap the number of images attached
@@ -81,8 +106,10 @@ export interface ImageScreenResult<T extends ScreenedImage> {
 
 /**
  * Filter a list of images down to what a vision model will accept: drop those
- * exceeding maxDimension (or maxBytes when dimensions are unreadable) and cap
- * the total count. Order is preserved; the first maxCount survivors are kept.
+ * whose real format isn't a supported one, drop those exceeding maxDimension
+ * (or maxBytes when dimensions are unreadable) and cap the total count. The
+ * declared mimeType is replaced with the one sniffed from the content. Order is
+ * preserved; the first maxCount survivors are kept.
  */
 export function screenImages<T extends ScreenedImage>(
   images: T[],
@@ -91,11 +118,23 @@ export function screenImages<T extends ScreenedImage>(
   const kept: T[] = [];
   const skipped: Array<{ image: T; reason: string }> = [];
 
-  for (const image of images) {
+  for (const declared of images) {
     if (kept.length >= opts.maxCount) {
-      skipped.push({ image, reason: `image cap of ${opts.maxCount} reached` });
+      skipped.push({ image: declared, reason: `image cap of ${opts.maxCount} reached` });
       continue;
     }
+
+    // Trust the bytes, not the declared type — a mismatch is a hard 400.
+    const actualMime = sniffImageMimeType(declared.base64);
+    if (!actualMime) {
+      skipped.push({ image: declared, reason: `unsupported image format (declared ${declared.mimeType})` });
+      continue;
+    }
+    const image = actualMime === declared.mimeType ? declared : { ...declared, mimeType: actualMime };
+    if (actualMime !== declared.mimeType) {
+      console.warn(`[image-utils] Corrected media type: declared ${declared.mimeType}, actually ${actualMime}`);
+    }
+
     const dims = getImageDimensions(image.base64, image.mimeType);
     if (dims) {
       const largest = Math.max(dims.width, dims.height);
