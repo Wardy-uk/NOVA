@@ -7,6 +7,7 @@ import type { GuildOnboardingRow, GuildMilestoneView } from '../../shared/portal
 
 const MANUAL_FIELDS: Array<{ key: string; label: string; type: 'date' | 'flag' | 'text' }> = [
   { key: 'dateReceived', label: 'Date Received', type: 'date' },
+  { key: 'crmCreated', label: 'CRM Created', type: 'flag' },
   { key: 'contractUploaded', label: 'Contract Uploaded', type: 'flag' },
   { key: 'deliverySheetUpdated', label: 'Delivery sheet updated', type: 'flag' },
   { key: 'billedDeliverySheet', label: 'Billed – Delivery Sheet', type: 'flag' },

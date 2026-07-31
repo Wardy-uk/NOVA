@@ -100,9 +100,9 @@ export class GuildDashboardService {
       if (def.calc === 'sla30Day') {
         return { key: def.key, label: def.label, kind: 'calculated', state: sla.rag === 'met' ? 'done' : (sla.breached ? 'na' : 'in_progress'), detail: sla.sla30Day, jiraKey: null };
       }
-      // crmCreated — rule pending BA (spec §7). Reflect a manual override if set.
+      // crmCreated — set manually (auto-calc rule TBD, spec §7).
       const crm = manual.crmCreated;
-      return { key: def.key, label: def.label, kind: 'calculated', state: crm ? 'done' : 'pending', detail: crm ? String(crm) : 'Rule pending (BA)', jiraKey: null };
+      return { key: def.key, label: def.label, kind: 'calculated', state: crm ? 'done' : 'pending', detail: crm ? 'Yes' : null, jiraKey: null };
     });
 
     return {
