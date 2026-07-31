@@ -726,6 +726,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     { key: 'jira_ob_request_type_field', fallback: 'jira_request_type_field' },
     { key: 'jira_ob_rt_qa_id', fallback: 'jira_rt_delivery_qa_id' },
     { key: 'jira_ob_rt_onboarding_id', fallback: 'jira_rt_onboarding_id' },
+    { key: 'onboarding_inbox_email' },
     { key: 'app_base_url' },
     { key: 'guild_ob_parent_label' },
   ];

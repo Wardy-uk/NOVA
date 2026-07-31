@@ -1353,6 +1353,7 @@ function GuildGlobalConfigPanel() {
     { key: 'jira_ob_request_type_field', label: 'Request-type field id', placeholder: 'e.g. customfield_12800', group: 'Jira' },
     { key: 'jira_ob_rt_qa_id', label: 'QA parent request-type id', group: 'Jira' },
     { key: 'jira_ob_rt_onboarding_id', label: 'Child request-type id', group: 'Jira' },
+    { key: 'onboarding_inbox_email', label: 'Onboarding inbox', placeholder: 'onboarding@nurtur.tech — alerted on each new onboarding', group: 'Notifications' },
     { key: 'app_base_url', label: 'App base URL (email links)', placeholder: 'https://nova.nurtur.tech', group: 'Optional' },
     { key: 'guild_ob_parent_label', label: 'Parent name label', placeholder: 'QA', group: 'Optional' },
   ];
@@ -1376,7 +1377,7 @@ function GuildGlobalConfigPanel() {
   };
 
   if (loading) return null;
-  const groups = ['Jira', 'Optional'];
+  const groups = ['Jira', 'Notifications', 'Optional'];
   return (
     <div className="bg-gray-800 rounded-lg p-4 space-y-1 mt-4">
       <h3 className="text-sm font-semibold text-gray-200">Guild onboarding — global config</h3>

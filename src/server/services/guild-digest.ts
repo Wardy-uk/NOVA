@@ -34,6 +34,7 @@ export class GuildDigestService {
   constructor(
     private dashboard: GuildDashboardService,
     private email: EmailService,
+    private settingsGet: (key: string) => string | undefined = () => undefined,
     private log: (msg: string) => void = console.log,
   ) {}
 
@@ -128,7 +129,8 @@ export class GuildDigestService {
   }
 
   private recipientsFor(day: number, config: OnboardingOrgConfig): string[] {
-    const fallback = csv(config.inboxEmail);
+    // Fallback to the global onboarding inbox if the org hasn't set INTS recipients.
+    const fallback = csv(this.settingsGet('onboarding_inbox_email'));
     if (day === 7) return csv(config.intsNudgeEmail).concat(fallback);
     if (day === 14) return csv(config.intsLeadEmail).concat(fallback);
     if (day === 21) return csv(config.intsManagerEmail).concat(fallback);

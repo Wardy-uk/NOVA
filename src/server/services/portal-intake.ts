@@ -522,13 +522,8 @@ export class PortalIntakeService {
       [portalUserId, result.parentKey, JSON.stringify({ ...input, onboardingRef: ref, childKeys: result.childKeys }), 'onboarding_request'],
     );
 
-    // R2 alert — inbox from the org's Onboarding Configuration, else the global fallback.
-    const orgCfg = await queryOne<{ onboarding_config: string | null }>(
-      `SELECT onboarding_config FROM portal_organisations WHERE id = ?`, [orgId],
-    );
-    let inbox = this.settings.get('onboarding_inbox_email') || '';
-    try { if (orgCfg?.onboarding_config) { const c = JSON.parse(orgCfg.onboarding_config); if (c.inboxEmail) inbox = c.inboxEmail; } } catch { /* use fallback */ }
-    await this.notifyOnboardingInbox(record, result, userName, inbox).catch(err =>
+    // R2 alert — global onboarding inbox.
+    await this.notifyOnboardingInbox(record, result, userName, this.orgInbox(orgId)).catch(err =>
       console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
 
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_request' });
@@ -545,12 +540,10 @@ export class PortalIntakeService {
     return `GOB-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7)}`;
   }
 
-  private async orgInbox(orgId: number): Promise<string> {
-    const row = await queryOne<{ onboarding_config: string | null }>(
-      `SELECT onboarding_config FROM portal_organisations WHERE id = ?`, [orgId]);
-    let inbox = this.settings.get('onboarding_inbox_email') || '';
-    try { if (row?.onboarding_config) { const c = JSON.parse(row.onboarding_config); if (c.inboxEmail) inbox = c.inboxEmail; } } catch { /* fallback */ }
-    return inbox;
+  /** The onboarding inbox is a GLOBAL setting (the Nurtur onboarding team address,
+   *  same for every org) — set on Portal Admin → Settings. */
+  private orgInbox(_orgId: number): string {
+    return this.settings.get('onboarding_inbox_email') || '';
   }
 
   /** Step 1 (backlog #8) — Membership Application. Creates the onboarding record
@@ -570,7 +563,7 @@ export class PortalIntakeService {
       stage: 'application', application_data: JSON.stringify(input),
       reporter_email: userEmail,
     });
-    const inbox = await this.orgInbox(orgId);
+    const inbox = this.orgInbox(orgId);
     if (inbox && this.email?.isConfigured()) {
       const office = [input.brand, input.branch].filter(Boolean).join(' — ');
       await this.email.send({
@@ -642,7 +635,7 @@ export class PortalIntakeService {
         .catch(err => console.warn('[portal-intake] Attaching form to QA failed:', err instanceof Error ? err.message : err));
     }
     const emailAttachments = formFile ? [{ filename: formFile.filename, content: formFile.buffer, contentType: formFile.mimeType }] : undefined;
-    await this.notifyOnboardingInbox(record, result, userName, await this.orgInbox(orgId), emailAttachments).catch(err =>
+    await this.notifyOnboardingInbox(record, result, userName, this.orgInbox(orgId), emailAttachments).catch(err =>
       console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_setup' });
     return { ticketKey: result.parentKey, recordId, childKeys: result.childKeys };

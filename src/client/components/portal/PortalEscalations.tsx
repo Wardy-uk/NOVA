@@ -79,7 +79,6 @@ function LevelCard({ level, onChange, onRemove }: {
 // from the escalation policy below; saved to /api/portal/onboarding-config.
 function OnboardingRecipientsCard() {
   const FIELDS: Array<{ key: string; label: string; hint?: string }> = [
-    { key: 'inboxEmail', label: 'Onboarding inbox', hint: 'Alerted on each new onboarding' },
     { key: 'digestRecipients', label: 'Weekly digest recipients', hint: 'Comma-separated' },
     { key: 'intsNudgeEmail', label: 'INTS day 7 — reminder' },
     { key: 'intsLeadEmail', label: 'INTS day 14 — onboarding lead' },
