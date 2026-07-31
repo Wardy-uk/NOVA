@@ -2699,6 +2699,10 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE onboarding_records ADD application_data NVARCHAR(MAX) NULL;`,
     `IF COL_LENGTH('onboarding_records', 'setup_data') IS NULL
      ALTER TABLE onboarding_records ADD setup_data NVARCHAR(MAX) NULL;`,
+    // Email of the portal user who submitted — the QA/child tickets are raised
+    // on behalf of this person (JSM raiseOnBehalfOf), not the NOVA service account.
+    `IF COL_LENGTH('onboarding_records', 'reporter_email') IS NULL
+     ALTER TABLE onboarding_records ADD reporter_email NVARCHAR(300) NULL;`,
 
     // ── Milestones ──
 

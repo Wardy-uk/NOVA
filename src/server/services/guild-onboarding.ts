@@ -47,6 +47,7 @@ interface GuildConfig {
   childRequestTypeId: string;
   linkTypeName: string;
   parentLabel: string;
+  serviceDeskId: string;
 }
 
 export interface GuildCreateResult {
@@ -81,7 +82,53 @@ export class GuildOnboardingService {
       childRequestTypeId: pick('jira_ob_rt_onboarding_id', 'jira_rt_onboarding_id'),
       linkTypeName: pick('jira_ob_link_type', 'jira_link_type_name') || 'Blocks',
       parentLabel: s('guild_ob_parent_label') || 'QA',
+      serviceDeskId: pick('jira_ob_service_desk_id', 'portal_nt_service_desk_id') || '50',
     };
+  }
+
+  /** JSM servicedeskapi must be called on the DIRECT site URL with Basic auth —
+   *  the api.atlassian.com gateway client rejects it. Build one from settings. */
+  private buildDirectClient(): JiraRestClient | null {
+    const siteUrl = (this.settingsGet('jira_url') || '').replace(/\/+$/, '');
+    const email = this.settingsGet('jira_username');
+    const token = this.settingsGet('jira_token');
+    if (siteUrl && email && token) return new JiraRestClient({ baseUrl: siteUrl, email, apiToken: token });
+    return null;
+  }
+
+  /** Create one ticket. Prefers a JSM customer request raised ON BEHALF OF the
+   *  submitter (so the reporter is the person, not the NOVA service account);
+   *  falls back to raising without a reporter, then to an agent createIssue. */
+  private async createTicket(
+    sdClient: JiraRestClient, cfg: GuildConfig, summary: string, descLines: string[],
+    requestTypeId: string, reporterEmail: string | null,
+  ): Promise<string> {
+    const descText = descLines.join('\n');
+    if (requestTypeId && cfg.serviceDeskId) {
+      const requestFieldValues = { summary, description: descText };
+      try {
+        const created = await sdClient.createServiceDeskRequest({ serviceDeskId: cfg.serviceDeskId, requestTypeId, requestFieldValues, raiseOnBehalfOf: reporterEmail || undefined });
+        return created.issueKey;
+      } catch (err) {
+        this.log(`[Guild] servicedesk create${reporterEmail ? ` on behalf of ${reporterEmail}` : ''} failed: ${err instanceof Error ? err.message : err}`);
+        if (reporterEmail) {
+          try {
+            const created = await sdClient.createServiceDeskRequest({ serviceDeskId: cfg.serviceDeskId, requestTypeId, requestFieldValues });
+            return created.issueKey;
+          } catch (err2) {
+            this.log(`[Guild] servicedesk create (no reporter) failed, falling back to createIssue: ${err2 instanceof Error ? err2.message : err2}`);
+          }
+        }
+      }
+    }
+    // Fallback: agent createIssue (reporter = service account).
+    const fields: Record<string, unknown> = {
+      project: { key: cfg.projectKey }, issuetype: { name: cfg.issueTypeName }, summary,
+      description: buildAdfDescription([{ text: descText }]),
+    };
+    if (cfg.requestTypeField && requestTypeId) fields[cfg.requestTypeField] = { id: requestTypeId };
+    const created = await this.jira.createIssue({ fields });
+    return created.key;
   }
 
   /** "{office} {branch}" trimmed — the shared suffix for every ticket name. */
@@ -112,49 +159,31 @@ export class GuildOnboardingService {
     const alreadyHadParent = !!parentKey;
     let createdCount = 0;
     let linkedCount = 0;
+    const sdClient = this.buildDirectClient() ?? this.jira;
+    const reporterEmail = record.reporter_email || null;
 
     try {
-      // 1. Parent QA
+      // 1. Parent QA — raised on behalf of the submitter.
       if (!parentKey) {
-        const fields: Record<string, unknown> = {
-          project: { key: cfg.projectKey },
-          issuetype: { name: cfg.issueTypeName },
-          summary: this.parentSummary(office, branch, cfg),
-          description: buildAdfDescription([
-            { heading: 'BYM – QA' },
-            { text: `Office: ${office}` },
-            { text: `Branch: ${branch}` },
-            { text: `Onboarding Ref: ${ref}` },
-            ...(record.invoice_commencement_date ? [{ text: `Invoice commencement: ${record.invoice_commencement_date}` }] : []),
-          ]),
-        };
-        if (cfg.requestTypeField && cfg.qaRequestTypeId) fields[cfg.requestTypeField] = { id: cfg.qaRequestTypeId };
-        const created = await this.jira.createIssue({ fields });
-        parentKey = created.key;
+        parentKey = await this.createTicket(sdClient, cfg,
+          this.parentSummary(office, branch, cfg),
+          ['BYM – QA', `Office: ${office}`, `Branch: ${branch}`, `Onboarding Ref: ${ref}`,
+            ...(record.invoice_commencement_date ? [`Invoice commencement: ${record.invoice_commencement_date}`] : [])],
+          cfg.qaRequestTypeId, reporterEmail);
         createdCount++;
         this.log(`${prefix} Created parent QA: ${parentKey}`);
         await this.records.update(record.id, { parent_key: parentKey });
       }
 
-      // 2. Children (fixed set)
+      // 2. Children (fixed set) — each raised on behalf of the submitter.
       for (const child of GUILD_CHILDREN) {
         if (childKeys[child.key]) continue;
-        const fields: Record<string, unknown> = {
-          project: { key: cfg.projectKey },
-          issuetype: { name: cfg.issueTypeName },
-          summary: this.childSummary(child.label, office, branch),
-          description: buildAdfDescription([
-            { heading: `${child.label} — Onboarding` },
-            { text: `Office: ${office}` },
-            { text: `Branch: ${branch}` },
-            { text: `Onboarding Ref: ${ref}` },
-          ]),
-        };
-        if (cfg.requestTypeField && cfg.childRequestTypeId) fields[cfg.requestTypeField] = { id: cfg.childRequestTypeId };
-        const created = await this.jira.createIssue({ fields });
-        childKeys[child.key] = created.key;
+        childKeys[child.key] = await this.createTicket(sdClient, cfg,
+          this.childSummary(child.label, office, branch),
+          [`${child.label} — Onboarding`, `Office: ${office}`, `Branch: ${branch}`, `Onboarding Ref: ${ref}`],
+          cfg.childRequestTypeId, reporterEmail);
         createdCount++;
-        this.log(`${prefix} Created child ${child.key}: ${created.key}`);
+        this.log(`${prefix} Created child ${child.key}: ${childKeys[child.key]}`);
         await this.records.update(record.id, { child_keys: JSON.stringify(childKeys) });
       }
 

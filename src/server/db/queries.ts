@@ -1236,6 +1236,7 @@ export interface OnboardingRecord {
   setup_date: string | null;
   application_data: string | null;
   setup_data: string | null;
+  reporter_email: string | null;
 }
 
 export class OnboardingRecordQueries {
@@ -1264,19 +1265,20 @@ export class OnboardingRecordQueries {
     portal_submission_id?: number | null; office_name?: string | null; branch_name?: string | null;
     invoice_commencement_date?: string | null; manual_fields?: string | null;
     stage?: 'application' | 'setup'; plan_type?: string | null; application_data?: string | null;
+    reporter_email?: string | null;
   }): Promise<number> {
     return executeAndGetId(
-      `INSERT INTO onboarding_records (onboarding_ref, channel, org_id, portal_submission_id, office_name, branch_name, invoice_commencement_date, manual_fields, stage, plan_type, application_data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO onboarding_records (onboarding_ref, channel, org_id, portal_submission_id, office_name, branch_name, invoice_commencement_date, manual_fields, stage, plan_type, application_data, reporter_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [r.onboarding_ref, r.channel ?? 'guild', r.org_id ?? null, r.portal_submission_id ?? null,
        r.office_name ?? null, r.branch_name ?? null, r.invoice_commencement_date ?? null, r.manual_fields ?? null,
-       r.stage ?? 'setup', r.plan_type ?? null, r.application_data ?? null]
+       r.stage ?? 'setup', r.plan_type ?? null, r.application_data ?? null, r.reporter_email ?? null]
     );
   }
 
   async update(id: number, updates: Partial<Pick<OnboardingRecord,
     'status' | 'parent_key' | 'child_keys' | 'manual_fields' | 'error_message' | 'invoice_commencement_date' | 'office_name' | 'branch_name'
-    | 'stage' | 'plan_type' | 'setup_date' | 'setup_data'>>): Promise<boolean> {
+    | 'stage' | 'plan_type' | 'setup_date' | 'setup_data' | 'reporter_email'>>): Promise<boolean> {
     const fields: string[] = [];
     const params: unknown[] = [];
     for (const [key, val] of Object.entries(updates)) {

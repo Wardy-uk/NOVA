@@ -556,7 +556,7 @@ export class PortalIntakeService {
   /** Step 1 (backlog #8) — Membership Application. Creates the onboarding record
    *  only; no tickets and no SLA until the setup form (step 2) arrives. */
   async submitMembershipApplication(
-    input: PortalMembershipApplicationInput, portalUserId: number, orgId: number, _userEmail: string, userName: string,
+    input: PortalMembershipApplicationInput, portalUserId: number, orgId: number, userEmail: string, userName: string,
   ): Promise<{ recordId: number; ref: string }> {
     if (!this.records || !(await this.isGuildEnabled(orgId))) {
       throw new Error('Onboarding is not enabled for your organisation.');
@@ -568,6 +568,7 @@ export class PortalIntakeService {
       office_name: input.brand, branch_name: input.branch,
       invoice_commencement_date: input.invoiceCommencementDate || null,
       stage: 'application', application_data: JSON.stringify(input),
+      reporter_email: userEmail,
     });
     const inbox = await this.orgInbox(orgId);
     if (inbox && this.email?.isConfigured()) {
@@ -586,7 +587,7 @@ export class PortalIntakeService {
    *  existing application (if applicationId given) or creates a fresh record,
    *  then fires the QA parent + 7 children and starts the 30-day SLA. */
   async submitGuildSetup(
-    input: PortalOnboardingSetupInput, portalUserId: number, orgId: number, _userEmail: string, userName: string,
+    input: PortalOnboardingSetupInput, portalUserId: number, orgId: number, userEmail: string, userName: string,
   ): Promise<{ ticketKey: string; recordId: number }> {
     if (!this.records || !this.guild || !(await this.isGuildEnabled(orgId))) {
       throw new Error('Onboarding is not enabled for your organisation.');
@@ -602,6 +603,7 @@ export class PortalIntakeService {
       await this.records.update(recordId, {
         stage: 'setup', plan_type: input.planType, setup_date: now, setup_data: JSON.stringify(input),
         office_name: input.brand || existing.office_name, branch_name: input.branch || existing.branch_name,
+        reporter_email: existing.reporter_email || userEmail,
       });
     } else {
       recordId = await this.records.create({
@@ -609,6 +611,7 @@ export class PortalIntakeService {
         office_name: input.brand, branch_name: input.branch,
         invoice_commencement_date: input.invoiceCommencementDate || null,
         stage: 'setup', plan_type: input.planType,
+        reporter_email: userEmail,
       });
       await this.records.update(recordId, { setup_date: now, setup_data: JSON.stringify(input) });
     }
