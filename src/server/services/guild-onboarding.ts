@@ -48,6 +48,8 @@ interface GuildConfig {
   linkTypeName: string;
   parentLabel: string;
   serviceDeskId: string;
+  currentTierField: string;
+  currentTierValue: string;
 }
 
 export interface GuildCreateResult {
@@ -83,6 +85,8 @@ export class GuildOnboardingService {
       linkTypeName: pick('jira_ob_link_type', 'jira_link_type_name') || 'Blocks',
       parentLabel: s('guild_ob_parent_label') || 'QA',
       serviceDeskId: pick('jira_ob_service_desk_id', 'portal_nt_service_desk_id') || '50',
+      currentTierField: s('jira_ob_current_tier_field') || 'customfield_12981',
+      currentTierValue: s('jira_ob_current_tier') || 'Production',
     };
   }
 
@@ -104,17 +108,18 @@ export class GuildOnboardingService {
     requestTypeId: string, reporterEmail: string | null,
   ): Promise<string> {
     const descText = descLines.join('\n');
+    let key = '';
     if (requestTypeId && cfg.serviceDeskId) {
       const requestFieldValues = { summary, description: descText };
       try {
         const created = await sdClient.createServiceDeskRequest({ serviceDeskId: cfg.serviceDeskId, requestTypeId, requestFieldValues, raiseOnBehalfOf: reporterEmail || undefined });
-        return created.issueKey;
+        key = created.issueKey;
       } catch (err) {
         this.log(`[Guild] servicedesk create${reporterEmail ? ` on behalf of ${reporterEmail}` : ''} failed: ${err instanceof Error ? err.message : err}`);
         if (reporterEmail) {
           try {
             const created = await sdClient.createServiceDeskRequest({ serviceDeskId: cfg.serviceDeskId, requestTypeId, requestFieldValues });
-            return created.issueKey;
+            key = created.issueKey;
           } catch (err2) {
             this.log(`[Guild] servicedesk create (no reporter) failed, falling back to createIssue: ${err2 instanceof Error ? err2.message : err2}`);
           }
@@ -122,13 +127,24 @@ export class GuildOnboardingService {
       }
     }
     // Fallback: agent createIssue (reporter = service account).
-    const fields: Record<string, unknown> = {
-      project: { key: cfg.projectKey }, issuetype: { name: cfg.issueTypeName }, summary,
-      description: buildAdfDescription([{ text: descText }]),
-    };
-    if (cfg.requestTypeField && requestTypeId) fields[cfg.requestTypeField] = { id: requestTypeId };
-    const created = await this.jira.createIssue({ fields });
-    return created.key;
+    if (!key) {
+      const fields: Record<string, unknown> = {
+        project: { key: cfg.projectKey }, issuetype: { name: cfg.issueTypeName }, summary,
+        description: buildAdfDescription([{ text: descText }]),
+      };
+      if (cfg.requestTypeField && requestTypeId) fields[cfg.requestTypeField] = { id: requestTypeId };
+      const created = await this.jira.createIssue({ fields });
+      key = created.key;
+    }
+    // Set Current Tier (e.g. Production) on the created ticket — best-effort.
+    if (key && cfg.currentTierField && cfg.currentTierValue) {
+      try {
+        await sdClient.updateFields(key, { [cfg.currentTierField]: { value: cfg.currentTierValue } });
+      } catch (err) {
+        this.log(`[Guild] set Current Tier on ${key} failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    return key;
   }
 
   /** "{office} {branch}" trimmed — the shared suffix for every ticket name. */
