@@ -22,17 +22,38 @@ function office(r: GuildOnboardingRow): string {
   return [r.officeName, r.branchName].filter(Boolean).join(' — ') || '(unnamed set-up)';
 }
 
-function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
+function MilestoneRow({ items }: { items: GuildMilestoneView[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {milestones.map(m => (
+      {items.map(m => (
         <div key={m.key} className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] bg-gray-50"
           style={{ borderColor: STATE_COLOR[m.state] }}
           title={`${m.label} — ${STATE_LABEL[m.state]}${m.detail ? ` (${m.detail})` : ''}`}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATE_COLOR[m.state] }} />
-          <span className="text-gray-700">{m.label}</span>
+          <span className="text-gray-700">{m.label}{m.kind === 'ticket' && m.jiraKey ? ` · ${m.jiraKey}` : ''}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
+  const tickets = milestones.filter(m => m.kind === 'ticket');
+  const manual = milestones.filter(m => m.kind !== 'ticket');
+  return (
+    <div className="space-y-3">
+      {manual.length > 0 && (
+        <div>
+          <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Manual / calculated</div>
+          <MilestoneRow items={manual} />
+        </div>
+      )}
+      {tickets.length > 0 && (
+        <div>
+          <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Tickets</div>
+          <MilestoneRow items={tickets} />
+        </div>
+      )}
     </div>
   );
 }

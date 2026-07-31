@@ -27,17 +27,38 @@ function api<T = unknown>(path: string, opts?: RequestInit): Promise<{ ok: boole
   return fetch(`/api/guild-onboarding${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts }).then(r => r.json());
 }
 
-function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
+function MilestoneRow({ items }: { items: GuildMilestoneView[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {milestones.map(m => (
+      {items.map(m => (
         <div key={m.key} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]"
           style={{ backgroundColor: '#242a31', border: `1px solid ${STATE_COLOR[m.state]}` }}
           title={`${m.label}${m.detail ? ` — ${m.detail}` : ''}${m.jiraKey ? ` (${m.jiraKey})` : ''}`}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATE_COLOR[m.state] }} />
-          <span className="text-neutral-300">{m.label}</span>
+          <span className="text-neutral-300">{m.label}{m.kind === 'ticket' && m.jiraKey ? ` · ${m.jiraKey}` : ''}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
+  const tickets = milestones.filter(m => m.kind === 'ticket');
+  const manual = milestones.filter(m => m.kind !== 'ticket');
+  return (
+    <div className="space-y-2">
+      {manual.length > 0 && (
+        <div>
+          <div className="text-[9px] text-neutral-600 uppercase tracking-wide mb-1">Manual / calculated</div>
+          <MilestoneRow items={manual} />
+        </div>
+      )}
+      {tickets.length > 0 && (
+        <div>
+          <div className="text-[9px] text-neutral-600 uppercase tracking-wide mb-1">Tickets</div>
+          <MilestoneRow items={tickets} />
+        </div>
+      )}
     </div>
   );
 }

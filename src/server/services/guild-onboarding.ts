@@ -161,6 +161,10 @@ export class GuildOnboardingService {
     let linkedCount = 0;
     const sdClient = this.buildDirectClient() ?? this.jira;
     const reporterEmail = record.reporter_email || null;
+    // Branding from the setup form → the Digital Design child ticket.
+    const setup: Record<string, unknown> = (() => { try { return record.setup_data ? JSON.parse(record.setup_data) : {}; } catch { return {}; } })();
+    const hexCode = typeof setup.hexCode === 'string' ? setup.hexCode.trim() : '';
+    const font = typeof setup.font === 'string' ? setup.font.trim() : '';
 
     try {
       // 1. Parent QA — raised on behalf of the submitter.
@@ -178,9 +182,16 @@ export class GuildOnboardingService {
       // 2. Children (fixed set) — each raised on behalf of the submitter.
       for (const child of GUILD_CHILDREN) {
         if (childKeys[child.key]) continue;
+        const descLines = [`${child.label} — Onboarding`, `Office: ${office}`, `Branch: ${branch}`, `Onboarding Ref: ${ref}`];
+        // Digital Design ticket carries the branding (hex + font) and a logo reminder.
+        if (child.key === 'design') {
+          if (hexCode) descLines.push(`Brand hex colour: ${hexCode}`);
+          if (font) descLines.push(`Brand font: ${font}`);
+          descLines.push('Logo: see attachment (please ensure the logo has been attached).');
+        }
         childKeys[child.key] = await this.createTicket(sdClient, cfg,
           this.childSummary(child.label, office, branch),
-          [`${child.label} — Onboarding`, `Office: ${office}`, `Branch: ${branch}`, `Onboarding Ref: ${ref}`],
+          descLines,
           cfg.childRequestTypeId, reporterEmail);
         createdCount++;
         this.log(`${prefix} Created child ${child.key}: ${childKeys[child.key]}`);

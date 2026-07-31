@@ -261,6 +261,9 @@ export const PortalOnboardingRequestSchema = z.object({
   // on the setup form. YYYY-MM-DD.
   invoiceCommencementDate: z.string().max(20).optional(),
   network: z.string().max(120).optional(),           // Guild / Fine & Country / other
+  // Branding for the Digital Design ticket (backlog #8).
+  hexCode: z.string().max(60).optional(),
+  font: z.string().max(120).optional(),
   registeredCompanyName: z.string().max(300).optional(),
   membershipArea: z.string().max(200).optional(),
   addressLine: z.string().max(300).optional(),

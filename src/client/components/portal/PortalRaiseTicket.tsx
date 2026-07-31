@@ -138,7 +138,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
 
   // ── Onboarding request fields ──
   const [ob, setOb] = useState({
-    brand: '', branch: '', invoiceCommencementDate: '', network: 'Guild', registeredCompanyName: '', membershipArea: '',
+    brand: '', branch: '', hexCode: '', font: '', invoiceCommencementDate: '', network: 'Guild', registeredCompanyName: '', membershipArea: '',
     addressLine: '', town: '', county: '', postcode: '',
     offersSales: false, offersLettings: false,
     salesEmail: '', lettingsEmail: '', salesPhone: '', lettingsPhone: '',
@@ -409,6 +409,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
             <p className="text-sm text-gray-600">
               We've pre-filled this form from the file you uploaded. Automated extraction can make mistakes —
               <strong> it is your responsibility to validate the imported data before submitting this request.</strong>
+              {obFormType !== 'application' && <><br /><br />Please also remember to <strong>attach the logo</strong> — it's needed for the Digital Design ticket.</>}
             </p>
             <div className="flex justify-end">
               <button onClick={() => setShowImportWarning(false)} className="px-5 py-2 bg-brand text-white rounded-lg hover:bg-brand-dark text-sm">
@@ -653,6 +654,8 @@ function OnboardingForm({
       <Section title="Business">
         {text('brand', 'Brand / Agent name', 'e.g. Property Cafe', true)}
         {text('branch', 'Branch', 'e.g. Bexhill', true)}
+        {text('hexCode', 'Brand hex colour', 'e.g. #0d9488 — for the Digital Design ticket')}
+        {text('font', 'Brand font', 'e.g. Montserrat — for the Digital Design ticket')}
         <div>
           <label className={labelCls}>Invoice commencement date *</label>
           <input type="date" value={ob.invoiceCommencementDate} onChange={e => setObField('invoiceCommencementDate', e.target.value)} className={inputCls} />
