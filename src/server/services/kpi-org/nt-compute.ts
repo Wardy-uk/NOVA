@@ -154,6 +154,8 @@ async function resolvedAgg(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedA
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const FIFTY_TWO_WEEKS_MS = 52 * 7 * 24 * 60 * 60 * 1000;
+/** Grace period before a ticket with no agent update counts as no-reply. */
+export const NO_REPLY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Port of kpi-pipeline.ts isNoReply, working off raw Jira issue fields. */
 function isNoReply(
@@ -167,9 +169,7 @@ function isNoReply(
   if (!created || now.getTime() - created.getTime() < FOUR_HOURS_MS) return false;
   if (agentNextUpdate && agentNextUpdate > now) return false;
   if (!agentLastUpdated) return false;
-  const startOfToday = new Date(now);
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  if (agentLastUpdated >= startOfToday) return false;
+  if (agentLastUpdated >= new Date(now.getTime() - NO_REPLY_AFTER_MS)) return false;
   if (agentLastUpdated < new Date(now.getTime() - FIFTY_TWO_WEEKS_MS)) return false;
   return true;
 }

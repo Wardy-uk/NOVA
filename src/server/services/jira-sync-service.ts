@@ -815,6 +815,9 @@ function extractSlaBreached(slaField: unknown): boolean {
   return false;
 }
 
+/** Grace period before a ticket with no agent update counts as no-reply. */
+const NO_REPLY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
 function computeNoReply(
   statusName: string | null,
   createdStr: string | null,
@@ -832,9 +835,7 @@ function computeNoReply(
   }
   if (!agentLastUpdated) return false;
   const lastUpdated = new Date(agentLastUpdated).getTime();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  if (lastUpdated >= todayStart.getTime()) return false;
+  if (lastUpdated >= now - NO_REPLY_AFTER_MS) return false;
   const weeksAgo52 = now - 52 * 7 * 24 * 60 * 60 * 1000;
   if (lastUpdated < weeksAgo52) return false;
   return true;

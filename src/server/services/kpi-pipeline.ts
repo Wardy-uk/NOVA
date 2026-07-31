@@ -146,6 +146,8 @@ function ccBucket(requestType: string | null): string {
 
 const EXCLUDED_STATUSES = ['done', 'closed', 'resolved', 'waiting on requestor', 'waiting on partner'];
 const SLA_ACTIONABLE_STATUSES = ['open', 'reopened', 'work in progress'];
+/** Grace period before a ticket with no agent update counts as no-reply. */
+const NO_REPLY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isActionable(status: string | null): boolean {
   const s = (status || '').toLowerCase();
@@ -169,9 +171,7 @@ function isNoReply(ticket: CacheRow, now: Date): boolean {
   if (nextUpdate && nextUpdate > now) return false;
   const lastUpdated = ticket.agent_last_updated ? new Date(ticket.agent_last_updated) : null;
   if (!lastUpdated) return false;
-  const startOfToday = new Date(now);
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  if (lastUpdated >= startOfToday) return false;
+  if (lastUpdated >= new Date(now.getTime() - NO_REPLY_AFTER_MS)) return false;
   const fiftyTwoWeeksAgo = new Date(now.getTime() - 52 * 7 * 24 * 60 * 60 * 1000);
   if (lastUpdated < fiftyTwoWeeksAgo) return false;
   return true;

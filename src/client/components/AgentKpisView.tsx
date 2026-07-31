@@ -678,7 +678,7 @@ function SingleAgentDashboard({ summary }: { summary: AgentSummary }) {
           <MetricCard label="Tickets Per Hour" value={fmt(s.ticketsPerHourAvg, 2)} subtitle="Target: ≥1.5 TPH" color={s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.5 ? C.green : s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.0 ? C.amber : C.teal} />
           <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)} subtitle="Lower is better" />
           <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} subtitle="Target: 0" color={s.openOver2hAvg > 0 ? C.red : C.green} invertTrend />
-          <MetricCard label="Avg No Update Today" value={fmt(s.openNoUpdateAvg)} subtitle="Target: 0" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} invertTrend />
+          <MetricCard label="Avg No Update (7d)" value={fmt(s.openNoUpdateAvg)} subtitle="Target: 0" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} invertTrend />
           <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
         </div>
       </div>

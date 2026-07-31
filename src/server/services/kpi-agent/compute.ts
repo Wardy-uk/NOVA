@@ -14,6 +14,8 @@ import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
 const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
 const FOUR_HOURS = 4 * 60 * 60 * 1000;
 const FIFTY_TWO_WEEKS = 52 * 7 * 24 * 60 * 60 * 1000;
+/** Grace period before a ticket with no agent update counts as no-reply. */
+const NO_REPLY_AFTER = 7 * 24 * 60 * 60 * 1000;
 
 export interface AgentKpiRow {
   accountId: string;
@@ -86,8 +88,7 @@ export function isNoReply(status: string | null, created: Date | null, lastUpd: 
   if (!created || now.getTime() - created.getTime() < FOUR_HOURS) return false;
   if (nextUpd && nextUpd > now) return false;
   if (!lastUpd) return false;
-  const startToday = new Date(now); startToday.setUTCHours(0, 0, 0, 0);
-  if (lastUpd >= startToday) return false;
+  if (lastUpd >= new Date(now.getTime() - NO_REPLY_AFTER)) return false;
   if (lastUpd < new Date(now.getTime() - FIFTY_TWO_WEEKS)) return false;
   return true;
 }
