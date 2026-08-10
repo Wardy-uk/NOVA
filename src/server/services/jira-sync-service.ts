@@ -6,6 +6,7 @@ import { logError } from './error-log.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
+import { noReplyCutoff } from './shared/no-reply.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -362,6 +363,7 @@ export class JiraSyncService {
       f.created as string | null,
       f.customfield_14081 as string | null,
       f.customfield_14185 as string | null,
+      currentTier,
     );
     const labels = Array.isArray(f.labels) ? (f.labels as string[]).join(';') : null;
     const issueLinksJson = f.issuelinks ? JSON.stringify(f.issuelinks) : null;
@@ -815,14 +817,12 @@ function extractSlaBreached(slaField: unknown): boolean {
   return false;
 }
 
-/** Grace period before a ticket with no agent update counts as no-reply. */
-const NO_REPLY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
-
 function computeNoReply(
   statusName: string | null,
   createdStr: string | null,
   agentLastUpdated: string | null,
   agentNextUpdate: string | null,
+  currentTier: string | null,
 ): boolean {
   if (!statusName || statusName.toLowerCase() === 'waiting on requestor') return false;
   if (!createdStr) return false;
@@ -835,7 +835,7 @@ function computeNoReply(
   }
   if (!agentLastUpdated) return false;
   const lastUpdated = new Date(agentLastUpdated).getTime();
-  if (lastUpdated >= now - NO_REPLY_AFTER_MS) return false;
+  if (lastUpdated >= noReplyCutoff(currentTier, new Date(now)).getTime()) return false;
   const weeksAgo52 = now - 52 * 7 * 24 * 60 * 60 * 1000;
   if (lastUpdated < weeksAgo52) return false;
   return true;

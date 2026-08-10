@@ -901,7 +901,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                     target={goalTarget('TicketsPerHour')} />
                   <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)} subtitle="Lower is better" />
                   <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} subtitle="Target: 0" color={s.openOver2hAvg > 0 ? C.red : C.green} />
-                  <MetricCard label="Avg No Update (7d)" value={fmt(s.openNoUpdateAvg)} subtitle="Target: 0" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} />
+                  <MetricCard label="Avg No Update" value={fmt(s.openNoUpdateAvg)} subtitle="Same-day; 7d for Dev/T3" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} />
                   <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
                 </div>
               </div>

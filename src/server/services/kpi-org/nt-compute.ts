@@ -5,6 +5,7 @@
 
 import type { JiraRestClient } from '../jira-client.js';
 import { query } from '../database.js';
+import { noReplyCutoff } from '../shared/no-reply.js';
 import type { OrgKpi, DayCtx } from './registry.js';
 import {
   NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF, NOVA_SOLVED_ON_DAY,
@@ -154,8 +155,6 @@ async function resolvedAgg(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedA
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const FIFTY_TWO_WEEKS_MS = 52 * 7 * 24 * 60 * 60 * 1000;
-/** Grace period before a ticket with no agent update counts as no-reply. */
-export const NO_REPLY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Port of kpi-pipeline.ts isNoReply, working off raw Jira issue fields. */
 function isNoReply(
@@ -164,12 +163,13 @@ function isNoReply(
   agentLastUpdated: Date | null,
   agentNextUpdate: Date | null,
   now: Date,
+  currentTier?: string | null,
 ): boolean {
   if ((statusName || '').toLowerCase() === 'waiting on requestor') return false;
   if (!created || now.getTime() - created.getTime() < FOUR_HOURS_MS) return false;
   if (agentNextUpdate && agentNextUpdate > now) return false;
   if (!agentLastUpdated) return false;
-  if (agentLastUpdated >= new Date(now.getTime() - NO_REPLY_AFTER_MS)) return false;
+  if (agentLastUpdated >= noReplyCutoff(currentTier, now)) return false;
   if (agentLastUpdated < new Date(now.getTime() - FIFTY_TWO_WEEKS_MS)) return false;
   return true;
 }
@@ -235,13 +235,15 @@ async function computeBreachedAsOf(jira: JiraRestClient, liveJql: string, ctx: D
 }
 
 /** Jira fields the isNoReply predicate needs — request these when fetching for a no-reply check. */
-export const NO_REPLY_FIELDS = ['status', 'created', 'customfield_14081', 'customfield_14185'];
+// customfield_12981 = Current Tier — the no-reply threshold is tier-dependent.
+export const NO_REPLY_FIELDS = ['status', 'created', 'customfield_14081', 'customfield_14185', 'customfield_12981'];
 
 /** Apply the isNoReply predicate to a single raw Jira issue (fields must include NO_REPLY_FIELDS). */
 export function isNoReplyIssue(issue: { fields?: Record<string, unknown> }, now: Date): boolean {
   const f = (issue.fields ?? {}) as Record<string, unknown>;
   const status = (f.status as { name?: string } | undefined)?.name ?? null;
-  return isNoReply(status, parseDate(f.created), parseDate(f.customfield_14081), parseDate(f.customfield_14185), now);
+  const currentTier = (f.customfield_12981 as { value?: string } | undefined)?.value ?? null;
+  return isNoReply(status, parseDate(f.created), parseDate(f.customfield_14081), parseDate(f.customfield_14185), now, currentTier);
 }
 
 /** Count open tickets matching `jql` that satisfy the isNoReply predicate. */

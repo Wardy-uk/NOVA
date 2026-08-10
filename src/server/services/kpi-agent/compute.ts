@@ -10,12 +10,11 @@ import { query } from '../database.js';
 import { getKpiPool } from '../kpi-pipeline.js';
 import { NOVA_JIRA_ACCOUNT_ID } from '../kpi-org/registry.js';
 import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
+import { noReplyCutoff } from '../shared/no-reply.js';
 
 const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
 const FOUR_HOURS = 4 * 60 * 60 * 1000;
 const FIFTY_TWO_WEEKS = 52 * 7 * 24 * 60 * 60 * 1000;
-/** Grace period before a ticket with no agent update counts as no-reply. */
-const NO_REPLY_AFTER = 7 * 24 * 60 * 60 * 1000;
 
 export interface AgentKpiRow {
   accountId: string;
@@ -83,12 +82,12 @@ function parseCsat(fieldsJson: string | null): number | null {
   } catch { return null; }
 }
 
-export function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date): boolean {
+export function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date, currentTier?: string | null): boolean {
   if ((status || '').toLowerCase() === 'waiting on requestor') return false;
   if (!created || now.getTime() - created.getTime() < FOUR_HOURS) return false;
   if (nextUpd && nextUpd > now) return false;
   if (!lastUpd) return false;
-  if (lastUpd >= new Date(now.getTime() - NO_REPLY_AFTER)) return false;
+  if (lastUpd >= noReplyCutoff(currentTier, now)) return false;
   if (lastUpd < new Date(now.getTime() - FIFTY_TWO_WEEKS)) return false;
   return true;
 }
@@ -194,7 +193,7 @@ export async function computeAgentKpis(
     if (actionable && slaBreached(t.fields_json, 'customfield_14048', true) === true) {
       s.overSla++;
     }
-    if (isNoReply(t.status_name, parseDate(t.jira_created), parseDate(t.agent_last_updated), parseDate(t.agent_next_update), now)) s.noReply++;
+    if (isNoReply(t.status_name, parseDate(t.jira_created), parseDate(t.agent_last_updated), parseDate(t.agent_next_update), now, t.current_tier)) s.noReply++;
     if (actionable && t.jira_created) {
       const days = Math.floor((now.getTime() - new Date(t.jira_created).getTime()) / 86_400_000);
       if (days > s.oldestDays) { s.oldestDays = days; s.oldestKey = t.issue_key; }
