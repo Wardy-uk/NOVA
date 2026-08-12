@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { JIRA_FIELDS } from '../../shared/jira-fields.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import type { AssignmentEngine, Pool } from '../services/assignment-engine.js';
+import { poolForTicket } from '../services/shared/ticket-pool.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from '../services/agent-availability.js';
 import type { TicketClassifier } from '../services/ticket-classifier.js';
 import type { BriefEngine } from '../services/brief-engine.js';
@@ -3368,11 +3369,30 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         return;
       }
       const projectKey = engine.resolveProjectFromTicketKey(ticketKey);
+
+      // Route by the ticket's own tier, exactly as automatic round-robin does. Defaulting
+      // to 'cc' sent Tier 2 / int_setup work at the CC pool — the wrong team, and a hard
+      // failure whenever CC happened to be at capacity.
+      let targetPool: Pool | undefined = pool;
+      if (!targetPool) {
+        const routing = await queryOne<{ current_tier: string | null; labels: string | null }>(
+          `SELECT current_tier, labels FROM jira_issue_cache WHERE issue_key = ?`,
+          [ticketKey],
+        );
+        const derived = poolForTicket(routing?.current_tier ?? null, routing?.labels ?? null, projectKey);
+        if (!derived) {
+          res.status(409).json({ ok: false, error: `${ticketKey} is Development tier — it is not round-robined to the support pools.` });
+          return;
+        }
+        targetPool = derived;
+      }
+
       // NOVA-owned tickets are freely reassignable, but pass the flag so a ticket
       // NOVA has already handed to a human is re-routed too when explicitly requested.
-      const result = await engine.assignToJira(ticketKey, pool ?? 'cc', preferredSkills, projectKey, { allowHumanReassign: true });
+      const result = await engine.assignToJira(ticketKey, targetPool, preferredSkills, projectKey, { allowHumanReassign: true });
       if (!result) {
-        res.status(404).json({ ok: false, error: 'No available agents in pool' });
+        const reason = await engine.explainAssignmentFailure(targetPool, projectKey);
+        res.status(409).json({ ok: false, error: reason });
         return;
       }
       // Leave the same Jira audit trail as an automatic round-robin assignment.

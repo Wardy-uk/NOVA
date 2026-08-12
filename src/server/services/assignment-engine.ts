@@ -243,6 +243,33 @@ export class AssignmentEngine {
     return result;
   }
 
+  /** Why did assign() return null? It has four distinct causes and callers could only
+   *  report "no available agents", which is wrong (and unactionable) for three of them.
+   *  Recomputed on the failure path only, so the hot path is untouched. */
+  async explainAssignmentFailure(pool: Pool, projectKey: string): Promise<string> {
+    this.refreshClockIfNeeded();
+    if (!this.workingDayClock.isWorkingTime(new Date())) {
+      return 'Outside working hours — round-robin only assigns during the working day.';
+    }
+
+    const validPool = this.validatePoolForProject(pool, projectKey);
+    const poolLabel = validPool.toUpperCase();
+    const available = (await this.getAvailableAgents(validPool))
+      .filter(agent => this.isAgentEligibleForProject(agent, projectKey));
+    if (available.length === 0) {
+      return `No agents available in the ${poolLabel} pool for ${projectKey} — everyone is inactive, marked unavailable today, or not eligible for this project.`;
+    }
+
+    const allBuckets = await this.getAgentLoadsBatch(available);
+    const empty: WorkloadBuckets = { total: 0, cc: 0, t2t3: 0, tpj: 0 };
+    const atCapacity = available.filter(a => !this.isEligible(a, allBuckets.get(a.jira_account_id) ?? empty, validPool));
+    if (atCapacity.length === available.length) {
+      return `All ${available.length} available ${poolLabel} agent${available.length === 1 ? ' is' : 's are'} at capacity — raise a cap on the Agent Roster or wait for one to clear a ticket.`;
+    }
+
+    return `Assignment into the ${poolLabel} pool failed — check the server log for [assignment] ${projectKey} entries.`;
+  }
+
   /**
    * Live (not cache) check for an active human owner. Round-robin must NEVER steal a
    * ticket a human is already working: the jira_issue_cache lags Jira by a sync interval,

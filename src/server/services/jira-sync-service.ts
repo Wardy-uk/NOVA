@@ -7,6 +7,7 @@ import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 import { noReplyCutoff } from './shared/no-reply.js';
+import { poolForTicket } from './shared/ticket-pool.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -17,21 +18,6 @@ const PRIORITY_NORMALIZE: Record<string, string> = {
 function normalisePriorityName(raw: string | null): string | null {
   if (!raw) return null;
   return PRIORITY_NORMALIZE[raw] ?? raw;
-}
-
-// CurrentTier values that route to the T2 round-robin pool (mirrors determinePoolFromTicket
-// in agent-loop.ts). An escalation into any of these should trigger reassignment.
-const T2_POOL_TIERS = new Set(['Tier 2', 'Tier2', 'T2', 'Tier 3', 'Tier3', 'T3', 'Production']);
-
-// Map a CurrentTier (+ labels) to its round-robin pool. Mirrors determinePoolFromTicket in
-// agent-loop.ts: int_setup → t2, T2/T3/Production → t2, Development → skip, everything else
-// (incl. Customer Care / T1 / blank) → cc. Returns null when the ticket must not be auto-assigned.
-function poolForTier(tier: string | null, labels: string | null): Pool | null {
-  if ((labels ?? '').includes('int_setup')) return 't2';
-  const t = (tier ?? '').trim();
-  if (t === 'Development') return null;
-  if (T2_POOL_TIERS.has(t)) return 't2';
-  return 'cc';
 }
 
 const ALL_FIELDS = [
@@ -610,7 +596,7 @@ export class JiraSyncService {
     const project = this.assignmentEngine.resolveProjectFromTicketKey(issueKey);
     if (project === 'NTPJ') return;
 
-    const pool = poolForTier(toTier, labels);
+    const pool = poolForTicket(toTier, labels, project);
     if (!pool) return; // Development / not auto-assignable
 
     if (!this.assignmentEngine.isWorkingTime()) return; // don't hand tickets to people out of hours
