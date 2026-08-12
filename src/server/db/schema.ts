@@ -704,6 +704,10 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_assignee ON jira_issue_cache (assignee_email)
        INCLUDE (issue_key, summary, status_name, priority_name);`,
 
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_reporter')
+     CREATE INDEX IX_jira_cache_reporter ON jira_issue_cache (reporter_email)
+       WHERE reporter_email IS NOT NULL;`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_tier')
      CREATE INDEX IX_jira_cache_tier ON jira_issue_cache (current_tier)
        INCLUDE (issue_key, summary, status_name, nurtur_product, jira_updated);`,

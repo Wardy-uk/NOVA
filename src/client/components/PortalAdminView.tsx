@@ -15,15 +15,23 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 function useFetch<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setLoading(true);
+    setError(null);
     fetch(path, { headers: authHeaders() })
       .then(r => r.json())
-      .then(d => { if (d.ok) setData(d.data); })
-      .catch(console.error)
+      .then(d => {
+        if (d.ok) setData(d.data);
+        else setError(d.error || 'Request failed');
+      })
+      .catch(err => {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'Request failed');
+      })
       .finally(() => setLoading(false));
   }, deps);
-  return { data, loading };
+  return { data, loading, error };
 }
 
 type Tab = 'overview' | 'users' | 'orgs' | 'sessions' | 'settings' | 'about';
@@ -280,7 +288,7 @@ function UsersPanel() {
     organisation_name: '',
     organisation_domain: '',
   });
-  const { data: users, loading } = useFetch<Array<{
+  const { data: users, loading, error: loadError } = useFetch<Array<{
     id: number;
     email: string;
     display_name: string;
@@ -677,7 +685,13 @@ function UsersPanel() {
             ))}
           </tbody>
         </table>
-        {(!users || users.length === 0) && (
+        {loadError && (
+          <div className="px-4 py-8 text-center text-red-400">
+            Couldn't load portal users: {loadError}
+            <button onClick={refresh} className="ml-2 underline hover:text-red-300">Retry</button>
+          </div>
+        )}
+        {!loadError && (!users || users.length === 0) && (
           <div className="px-4 py-8 text-center text-gray-500">No portal users yet</div>
         )}
       </div>

@@ -72,11 +72,18 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         include_in_setup: number;
         ticket_count: number;
       }>(
-        `SELECT pu.id, pu.email, pu.display_name, pu.org_id, po.name AS org_name, pu.last_login, pu.role,
+        `WITH ticket_counts AS (
+           SELECT LOWER(reporter_email) AS reporter_email, COUNT(*) AS ticket_count
+           FROM jira_issue_cache
+           WHERE reporter_email IS NOT NULL
+           GROUP BY LOWER(reporter_email)
+         )
+         SELECT pu.id, pu.email, pu.display_name, pu.org_id, po.name AS org_name, pu.last_login, pu.role,
                 pu.auth_type, pu.access_state, pu.include_in_setup,
-                (SELECT COUNT(*) FROM jira_issue_cache jic WHERE jic.reporter_email = pu.email) AS ticket_count
+                ISNULL(tc.ticket_count, 0) AS ticket_count
          FROM portal_users pu
-         JOIN portal_organisations po ON pu.org_id = po.id
+         LEFT JOIN portal_organisations po ON pu.org_id = po.id
+         LEFT JOIN ticket_counts tc ON tc.reporter_email = LOWER(pu.email)
          ORDER BY pu.last_login DESC`,
       );
       res.json({ ok: true, data: users });
