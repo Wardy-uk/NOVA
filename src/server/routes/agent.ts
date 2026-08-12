@@ -3304,7 +3304,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   const NOVA_AI_ACCOUNT_FALLBACK = '712020:67acd53f-75f0-4548-adfe-91bba72ad38f';
 
   // List every open ticket currently assigned to NOVA AI itself.
-  router.get('/nova-queue', async (_req, res) => {
+  router.get('/nova-queue', async (req, res) => {
     try {
       const cache = deps?.jiraCache;
       if (!cache) {
@@ -3313,6 +3313,18 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       }
       const accountId = deps?.settingsQueries?.get('nova_ai_jira_account_id') || NOVA_AI_ACCOUNT_FALLBACK;
       const projects = deps?.assignmentEngine?.getConfiguredProjects() ?? ['NT', 'NTPJ'];
+
+      // Explicit Refresh (verify=1) re-checks the cache against live Jira first, so tickets
+      // deleted in Jira actually disappear instead of sitting here until the next full sync.
+      let reconciled: { checked: number; removed: number } | null = null;
+      if (req.query.verify === '1' && deps?.jiraSyncService) {
+        try {
+          reconciled = await deps.jiraSyncService.reconcileAssigneeQueue(accountId, projects);
+        } catch (err) {
+          console.warn('[nova-queue] Reconcile failed (non-fatal):', err instanceof Error ? err.message : err);
+        }
+      }
+
       const tickets = await cache.getByAssignee(accountId, projects, 'account_id');
 
       // Join the latest AI decision per ticket so each card can explain WHY NOVA is holding it.
@@ -3336,7 +3348,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         }
       }
       const enriched = tickets.map(t => ({ ...t, ai: decisions[t.issue_key] ?? null }));
-      res.json({ ok: true, data: { accountId, projects, tickets: enriched } });
+      res.json({ ok: true, data: { accountId, projects, tickets: enriched, reconciled } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load NOVA queue' });
     }

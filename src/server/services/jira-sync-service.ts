@@ -311,6 +311,47 @@ export class JiraSyncService {
     }
   }
 
+  /** Reconcile one assignee's cached open queue against live Jira.
+   *  A ticket deleted in Jira never appears in the incremental sync (it produces no
+   *  `updated` event), so it lingers in the cache until the next full sync — i.e. a
+   *  server restart. This re-checks any cached row the live query no longer returns:
+   *  confirmed-missing issues are dropped, the rest are re-upserted with fresh state. */
+  async reconcileAssigneeQueue(accountId: string, projects: string[]): Promise<{ checked: number; removed: number }> {
+    const projectKeys = projects.map(p => p.trim()).filter(Boolean);
+    if (!accountId || projectKeys.length === 0) return { checked: 0, removed: 0 };
+
+    const placeholders = projectKeys.map(() => '?').join(', ');
+    const cached = await query<{ issue_key: string }>(
+      `SELECT issue_key FROM jira_issue_cache
+       WHERE assignee_account_id = ? AND project_key IN (${placeholders}) AND status_category != 'done'`,
+      [accountId, ...projectKeys],
+    );
+    if (cached.length === 0) return { checked: 0, removed: 0 };
+
+    const projectJql = projectKeys.length > 1 ? `project IN (${projectKeys.join(', ')})` : `project = ${projectKeys[0]}`;
+    const live = await this.jiraClient.searchJqlAll(
+      `${projectJql} AND assignee = "${accountId}" AND statusCategory != Done`,
+      ['summary'],
+      500,
+    );
+    const liveKeys = new Set(live.issues.map(i => i.key));
+
+    // Bound the per-issue re-check so a badly out-of-sync cache can't stall the request.
+    const stale = cached.filter(c => !liveKeys.has(c.issue_key)).slice(0, 50);
+    let removed = 0;
+    for (const { issue_key } of stale) {
+      const issue = await this.jiraClient.getIssue(issue_key, ALL_FIELDS);
+      if (!issue) {
+        await execute('DELETE FROM jira_issue_cache WHERE issue_key = ?', [issue_key]);
+        console.log(`[jira-sync] Reconcile: dropped deleted issue ${issue_key} from cache`);
+        removed++;
+      } else {
+        await this.upsertIssue(issue);
+      }
+    }
+    return { checked: stale.length, removed };
+  }
+
   private async upsertIssue(issue: JiraIssue): Promise<void> {
     const f = issue.fields;
     const status = f.status as any;

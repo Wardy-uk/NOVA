@@ -26,6 +26,7 @@ interface QueueData {
   accountId: string | null;
   projects: string[];
   tickets: QueueTicket[];
+  reconciled?: { checked: number; removed: number } | null;
 }
 
 const api = async (path: string, method = 'GET', body?: unknown) => {
@@ -99,20 +100,34 @@ export function NovaQueueView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const load = async () => {
+  // verify=true re-checks the cached queue against live Jira before returning, so
+  // tickets deleted in Jira are dropped rather than shown forever. Only the explicit
+  // Refresh does this — the initial load stays a fast cache read.
+  const load = async (verify = false) => {
     setLoading(true);
     setError(null);
+    if (verify) setToast(null);
     try {
-      const r = await api('/nova-queue');
-      if (r.ok) setData(r.data);
-      else setError(r.error ?? 'Failed to load NOVA queue');
+      const r = await api(`/nova-queue${verify ? '?verify=1' : ''}`);
+      if (r.ok) {
+        setData(r.data);
+        if (verify) {
+          const rec = r.data?.reconciled;
+          setToast({
+            ok: true,
+            text: rec?.removed
+              ? `Refreshed — removed ${rec.removed} ticket${rec.removed === 1 ? '' : 's'} no longer in Jira.`
+              : 'Refreshed — queue is up to date with Jira.',
+          });
+        }
+      } else setError(r.error ?? 'Failed to load NOVA queue');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
     }
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
   const reassign = async (ticketKey: string) => {
     if (busy) return;
@@ -148,7 +163,7 @@ export function NovaQueueView() {
         <div className="flex items-center gap-3">
           {data && <span className="text-sm text-gray-400">{tickets.length} open</span>}
           <button
-            onClick={load}
+            onClick={() => void load(true)}
             disabled={loading}
             className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50"
           >
