@@ -58,16 +58,11 @@ function MilestoneLine({ milestones }: { milestones: GuildMilestoneView[] }) {
   );
 }
 
-function progressPct(row: GuildOnboardingRow): number {
-  const ms = row.milestones.filter(m => m.state !== 'na');
-  if (ms.length === 0) return 0;
-  const done = ms.filter(m => m.state === 'done').length;
-  return Math.round((done / ms.length) * 100);
-}
-
 function Row({ row }: { row: GuildOnboardingRow }) {
   const [open, setOpen] = useState(false);
-  const pct = progressPct(row);
+  const pct = row.progressPct;
+  // Bar tracks the same RAG as the days-left pill: 0–7 green, 8–14 amber, 15+ red.
+  const barColor = pct === 100 || row.slaRag === 'met' ? '#16a34a' : RAG_COLOR[row.slaRag];
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50">
@@ -93,7 +88,7 @@ function Row({ row }: { row: GuildOnboardingRow }) {
       {/* Progress bar — completed milestones across the whole set-up */}
       <div className="px-4 pb-3 -mt-1 flex items-center gap-3">
         <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
-          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: pct === 100 ? '#16a34a' : '#0d9488' }} />
+          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: barColor }} />
         </div>
         <span className="text-[11px] text-gray-500 tabular-nums w-9 text-right">{pct}%</span>
       </div>

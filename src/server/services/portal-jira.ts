@@ -799,8 +799,6 @@ export class PortalJiraService {
       'LEAD GENERATION',
       line('Lead responder postcode coverage', f.leadResponderPostcodes),
       line('Lead responder contact', [f.leadContactName, f.leadContactEmail, f.leadContactPhone].filter(Boolean).join(' | ') || null),
-      line('Instant valuation tool URL', f.ivtUrl),
-      line('Instant valuation presented on', f.ivtPresentOn),
       line('Valuation notification emails', f.valuationNotificationEmails),
     ].filter(Boolean).join('\n'));
 

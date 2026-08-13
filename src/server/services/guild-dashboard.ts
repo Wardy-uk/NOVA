@@ -11,6 +11,7 @@ import type { OnboardingRecord, OnboardingRecordQueries } from '../db/queries.js
 import type { GuildMilestoneView, GuildOnboardingRow, GuildOnboardingDashboardResponse } from '../../shared/portal-types.js';
 import {
   GUILD_MILESTONES, GUILD_MANUAL_FIELDS, jiraStatusToState, computeSla, computeIntsLevel,
+  computeProgressPct,
   type GuildMilestoneState,
 } from './guild-onboarding-sla.js';
 
@@ -124,6 +125,7 @@ export class GuildDashboardService {
       slaBreached: sla.breached,
       intsEscalationLevel: intsLevel,
       intsKey,
+      progressPct: computeProgressPct(milestones, !!r.parent_key),
       milestones,
       manualFields: manual,
     };

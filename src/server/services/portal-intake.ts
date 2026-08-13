@@ -457,7 +457,6 @@ export class PortalIntakeService {
         brand: input.brand,
         branch: input.branch,
         network: input.network,
-        bymUrl: input.bymUrl,
         setupKey,
       });
       await this.portalJira.linkIssues(qaKey, setupKey);

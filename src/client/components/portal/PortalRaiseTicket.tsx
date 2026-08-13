@@ -148,14 +148,45 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
     dimSales: false, dimLettings: false, dimIncludeSoldLet: false, dimOrderBy: '', dimApprovalEmail: '',
     marketReportRegion: '',
     leadResponderPostcodes: '', leadContactName: '', leadContactEmail: '', leadContactPhone: '',
-    ivtUrl: '', ivtPresentOn: '', valuationNotificationEmails: '',
+    valuationNotificationEmails: '',
     newAgentName: '', newAgentEmail: '', newAgentPhone: '', newAgentAddress: '', micrositeUrl: '',
-    bymUrl: '', notes: '',
+    notes: '',
   });
   const setObField = (k: keyof typeof ob, v: string | boolean) => setOb(prev => ({ ...prev, [k]: v }));
+  // Valuation notifications default to the office email captured above. Only ever
+  // replaces a blank field or a value we defaulted ourselves — a typed or
+  // imported address wins.
+  const [valuationTouched, setValuationTouched] = useState(false);
+  const valuationDefault = React.useRef('');
+  React.useEffect(() => {
+    if (valuationTouched) return;
+    const officeEmail = ob.salesEmail.trim() || ob.lettingsEmail.trim();
+    if (!officeEmail || ob.valuationNotificationEmails === officeEmail) return;
+    if (ob.valuationNotificationEmails && ob.valuationNotificationEmails !== valuationDefault.current) return;
+    valuationDefault.current = officeEmail;
+    setObField('valuationNotificationEmails', officeEmail);
+  }, [ob.salesEmail, ob.lettingsEmail, ob.valuationNotificationEmails, valuationTouched]);
   const [portalsSel, setPortalsSel] = useState<Record<string, boolean>>({ Rightmove: false, Zoopla: false, 'On The Market': false });
   const [obUsers, setObUsers] = useState<OnboardingUser[]>([{ name: '', email: '', accessLevel: '', jobTitle: '' }]);
+  const [usersPrefilled, setUsersPrefilled] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+
+  // Pre-fill "Users to set up" from the org's user configuration, so the team
+  // deletes the ones that don't apply instead of typing every user by hand.
+  // Only ever fills a still-empty grid — an import or manual edit wins.
+  React.useEffect(() => {
+    if (route !== 'onboarding' || usersPrefilled) return;
+    let active = true;
+    pf('/api/portal/onboarding/setup-users')
+      .then(r => r.json())
+      .then((d: { ok: boolean; data?: OnboardingUser[] }) => {
+        if (!active || !d.ok || !d.data?.length) return;
+        setUsersPrefilled(true);
+        setObUsers(prev => (prev.every(u => !u.name.trim() && !u.email.trim()) ? d.data! : prev));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [route, usersPrefilled]);
 
   // Auto-match the setup form to an open application by Brand + Branch (works
   // especially well after Import). Manual override via the dropdown; once the
@@ -171,7 +202,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   const autoMatched = !applicationTouched && applicationId !== '';
 
   const canSubmitStandard = !!network && !!summary && !!agentNameBranch && !!detail;
-  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim();
+  const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim() && !!ob.hexCode.trim();
   const canSubmitApplication = !!app.brand.trim() && !!app.branch.trim();
 
   const uploadAttachments = async (ticketKey: string) => {
@@ -219,7 +250,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   };
 
   const submitOnboarding = async () => {
-    if (!canSubmitOnboarding) { setError('Brand, Branch and Invoice commencement date are required.'); return; }
+    if (!canSubmitOnboarding) { setError('Brand, Branch and Brand hex colour are required.'); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -231,6 +262,8 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
           brand: ob.brand,
           branch: ob.branch,
           invoiceCommencementDate: ob.invoiceCommencementDate,
+          hexCode: ob.hexCode,
+          font: ob.font || undefined,
           network: ob.network || undefined,
           registeredCompanyName: ob.registeredCompanyName || undefined,
           membershipArea: ob.membershipArea || undefined,
@@ -262,15 +295,12 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
           leadContactName: ob.leadContactName || undefined,
           leadContactEmail: ob.leadContactEmail || undefined,
           leadContactPhone: ob.leadContactPhone || undefined,
-          ivtUrl: ob.ivtUrl || undefined,
-          ivtPresentOn: ob.ivtPresentOn || undefined,
           valuationNotificationEmails: ob.valuationNotificationEmails || undefined,
           newAgentName: ob.newAgentName || undefined,
           newAgentEmail: ob.newAgentEmail || undefined,
           newAgentPhone: ob.newAgentPhone || undefined,
           newAgentAddress: ob.newAgentAddress || undefined,
           micrositeUrl: ob.micrositeUrl || undefined,
-          bymUrl: ob.bymUrl || undefined,
           notes: ob.notes || undefined,
         }),
       });
@@ -309,7 +339,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
 
   // Step 2 — Setup form (Standard / Multi). Fires the QA parent + 7 children.
   const submitSetup = async (planType: 'standard' | 'multi') => {
-    if (!canSubmitOnboarding) { setError('Brand and Branch are required.'); return; }
+    if (!canSubmitOnboarding) { setError('Brand, Branch and Brand hex colour are required.'); return; }
     setSubmitting(true); setError(null);
     try {
       const portals = Object.keys(portalsSel).filter(k => portalsSel[k]);
@@ -488,6 +518,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
                 <OnboardingForm
                   ob={ob}
                   setObField={setObField}
+                  onValuationEdit={() => setValuationTouched(true)}
                   portalsSel={portalsSel}
                   setPortalsSel={setPortalsSel}
                   users={obUsers}
@@ -502,6 +533,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
           <OnboardingForm
             ob={ob}
             setObField={setObField}
+            onValuationEdit={() => setValuationTouched(true)}
             portalsSel={portalsSel}
             setPortalsSel={setPortalsSel}
             users={obUsers}
@@ -614,10 +646,12 @@ const ACCESS_LEVELS = ['Client Admin', 'Office Admin', 'Agent'];
 const PORTAL_OPTIONS = ['Rightmove', 'Zoopla', 'On The Market'];
 
 function OnboardingForm({
-  ob, setObField, portalsSel, setPortalsSel, users, setUsers, files, setFiles,
+  ob, setObField, onValuationEdit, portalsSel, setPortalsSel, users, setUsers, files, setFiles,
 }: {
   ob: any;
   setObField: (k: any, v: string | boolean) => void;
+  /** Stops the office-email default from overwriting a hand-typed value. */
+  onValuationEdit: () => void;
   portalsSel: Record<string, boolean>;
   setPortalsSel: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   users: OnboardingUser[];
@@ -659,7 +693,7 @@ function OnboardingForm({
       <Section title="Business">
         {text('brand', 'Brand / Agent name', 'e.g. Property Cafe', true)}
         {text('branch', 'Branch', 'e.g. Bexhill', true)}
-        {text('hexCode', 'Brand hex colour', 'e.g. #0d9488 — for the Digital Design ticket')}
+        {text('hexCode', 'Brand hex colour', 'e.g. #0d9488 — for the Digital Design ticket', true)}
         {text('font', 'Brand font', 'e.g. Montserrat — for the Digital Design ticket')}
         <div>
           <label className={labelCls}>Invoice commencement date *</label>
@@ -732,7 +766,6 @@ function OnboardingForm({
       <Section title="Products & set-up">
         {text('crmAccountName', 'CRM / referral account name', 'Name as it appears on your CRM')}
         {text('leadProUser', 'Lead Pro user', 'Named person for the free Lead Pro seat')}
-        {text('magazineReminderEmails', 'Magazine reminder email(s)', 'Comma-separated')}
         {text('magazineRegion', 'Preferred magazine region')}
         <div className="flex gap-6">
           {check('dimSales', 'Digital magazine — Sales')}
@@ -754,22 +787,20 @@ function OnboardingForm({
       </Section>
 
       <Section title="Lead generation">
-        {text('leadResponderPostcodes', 'Lead responder postcode coverage', 'e.g. TN39, TN40, TN33')}
+        {text('leadResponderPostcodes', 'Lead responder postcode coverage (please separate postcode districts by commas)', 'e.g. TN39, TN40, TN33')}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {text('leadContactName', 'Lead responder contact — name')}
           {text('leadContactEmail', 'Contact email')}
           {text('leadContactPhone', 'Contact phone')}
         </div>
-        {text('ivtUrl', 'Instant valuation tool URL')}
         <div>
-          <label className={labelCls}>Instant valuation presented on</label>
-          <select value={ob.ivtPresentOn} onChange={e => setObField('ivtPresentOn', e.target.value)} className={inputCls}>
-            <option value="">—</option>
-            <option value="Main website">Your main website</option>
-            <option value="Separate mini site">A separate mini site</option>
-          </select>
+          <label className={labelCls}>Valuation lead notification email(s)</label>
+          <input type="text" value={ob.valuationNotificationEmails}
+            onChange={e => { onValuationEdit(); setObField('valuationNotificationEmails', e.target.value); }}
+            placeholder="Comma-separated" className={inputCls} />
+          <p className="mt-1 text-xs text-gray-500">Pre-filled with the office email above — change it if valuation leads go elsewhere.</p>
         </div>
-        {text('valuationNotificationEmails', 'Valuation lead notification email(s)', 'Comma-separated')}
+        {text('magazineReminderEmails', 'Magazine reminder email(s)', 'Comma-separated')}
       </Section>
 
       <Section title="New agent joining (if applicable)">
@@ -783,7 +814,6 @@ function OnboardingForm({
       </Section>
 
       <Section title="Build & QA">
-        {text('bymUrl', 'BYM URL (for QA)', 'System build URL, if known')}
         <div>
           <label className={labelCls}>Notes / special instructions</label>
           <textarea value={ob.notes} onChange={e => setObField('notes', e.target.value)} rows={3} className={`${inputCls} resize-none`} />
@@ -791,6 +821,10 @@ function OnboardingForm({
       </Section>
 
       <Section title="Attachments">
+        <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3">
+          <p className="text-sm font-bold text-red-700">Please attach the logo and any branding / compliance documents here.</p>
+          <p className="mt-1 text-xs text-red-600">The Digital Design ticket can't start without the logo.</p>
+        </div>
         <input type="file" multiple onChange={e => { addFiles(e.target.files); e.target.value = ''; }} className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200" />
         {files.length > 0 && (
           <ul className="space-y-1">
@@ -802,7 +836,7 @@ function OnboardingForm({
             ))}
           </ul>
         )}
-        <p className="text-xs text-gray-400">PDF, images, Office docs, CSV, TXT, ZIP up to 10 MB each. Attach the logo and any branding/compliance documents here.</p>
+        <p className="text-xs text-gray-400">PDF, images, Office docs, CSV, TXT, ZIP up to 10 MB each.</p>
       </Section>
     </div>
   );

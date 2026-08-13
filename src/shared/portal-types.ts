@@ -261,8 +261,9 @@ export const PortalOnboardingRequestSchema = z.object({
   // on the setup form. YYYY-MM-DD.
   invoiceCommencementDate: z.string().max(20).optional(),
   network: z.string().max(120).optional(),           // Guild / Fine & Country / other
-  // Branding for the Digital Design ticket (backlog #8).
-  hexCode: z.string().max(60).optional(),
+  // Branding for the Digital Design ticket (backlog #8). The hex is mandatory —
+  // design can't start without it (Guild feedback, Aug 2026).
+  hexCode: z.string().min(1, 'Brand hex colour is required').max(60),
   font: z.string().max(120).optional(),
   registeredCompanyName: z.string().max(300).optional(),
   membershipArea: z.string().max(200).optional(),
@@ -303,8 +304,7 @@ export const PortalOnboardingRequestSchema = z.object({
   leadContactName: z.string().max(200).optional(),
   leadContactEmail: z.string().max(200).optional(),
   leadContactPhone: z.string().max(60).optional(),
-  ivtUrl: z.string().max(500).optional(),
-  ivtPresentOn: z.string().max(60).optional(),        // Main website / Separate mini site
+  // Valuation lead notifications default to the office email on the form.
   valuationNotificationEmails: z.string().max(500).optional(),
   // New agent joining (NT-24880)
   newAgentName: z.string().max(200).optional(),
@@ -312,8 +312,6 @@ export const PortalOnboardingRequestSchema = z.object({
   newAgentPhone: z.string().max(60).optional(),
   newAgentAddress: z.string().max(400).optional(),
   micrositeUrl: z.string().max(500).optional(),
-  // For the QA ticket
-  bymUrl: z.string().max(500).optional(),
   // Free text
   notes: z.string().max(5000).optional(),
 });
@@ -856,6 +854,9 @@ export interface GuildOnboardingRow {
   slaBreached: boolean;
   intsEscalationLevel: 0 | 7 | 14 | 21 | 30;
   intsKey: string | null;
+  /** Weighted completion, 0–100. The pre-ticket admin actions are worth 1% in
+   *  total; the delivery milestones carry the other 99%. */
+  progressPct: number;
   milestones: GuildMilestoneView[];
   manualFields: Record<string, unknown>;
 }

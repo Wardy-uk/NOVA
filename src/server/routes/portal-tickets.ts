@@ -5,11 +5,19 @@ import type { PortalIntakeService } from '../services/portal-intake.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import { PortalTicketCreateSchema, PortalNetworkRequestSchema, PortalOnboardingRequestSchema, PortalMembershipApplicationSchema, PortalOnboardingSetupSchema } from '../../shared/portal-types.js';
 import { trackEvent } from '../services/portal-analytics.js';
+import { query } from '../services/database.js';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'xlsx', 'csv', 'txt', 'zip', 'log',
 ]);
+
+// Portal role → the access level the onboarding form offers.
+const ACCESS_LEVEL_BY_ROLE: Record<string, string> = {
+  admin: 'Client Admin', org_admin: 'Client Admin',
+  manager: 'Office Admin', leader: 'Office Admin',
+  requester: 'Agent',
+};
 
 export function createPortalTicketRoutes(
   portalJira: PortalJiraService,
@@ -234,6 +242,32 @@ export function createPortalTicketRoutes(
     });
     bb.on('error', () => { if (!res.headersSent) res.status(400).json({ ok: false, error: 'Upload error' }); });
     req.pipe(bb);
+  });
+
+  // The org's "include in setup" users, shaped for the onboarding form's "Users
+  // to set up" grid. Pre-filling them means the team edits/deletes rather than
+  // retypes every Guild user (customer feedback, Aug 2026).
+  router.get('/onboarding/setup-users', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    try {
+      const rows = await query<{ display_name: string; email: string; role: string }>(
+        `SELECT display_name, email, role FROM portal_users
+         WHERE org_id = ? AND include_in_setup = 1 AND access_state <> 'removed'
+         ORDER BY display_name`,
+        [req.portalUser.orgId],
+      );
+      res.json({
+        ok: true,
+        data: rows.map(u => ({
+          name: u.display_name || '',
+          email: u.email,
+          accessLevel: ACCESS_LEVEL_BY_ROLE[u.role] || 'Agent',
+          jobTitle: '',
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load users' });
+    }
   });
 
   // Application-stage records the setup form can attach to.
