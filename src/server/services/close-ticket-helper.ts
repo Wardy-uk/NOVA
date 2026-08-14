@@ -142,8 +142,50 @@ export interface CloseContext {
 }
 
 /**
+ * Assign a ticket to NOVA — but only if a human isn't already holding it.
+ *
+ * When a human agent owns the ticket they did the work, so the solve stays in
+ * their name: NOVA is recorded as the author of the comment/transition anyway,
+ * and taking the assignee hands them a solve they didn't get credit for.
+ * NT-25659: NOVA took a ticket off Luke to close it, the close then failed, and
+ * the unassigned sweep handed the orphaned ticket to a third agent 20m later.
+ *
+ * Fails safe — if the live assignee can't be read, the assignment is left alone.
+ */
+export async function claimForNovaIfUnowned(
+  jiraClient: JiraRestClient,
+  settings: SettingsQueries,
+  ticketKey: string,
+  logPrefix: string,
+): Promise<void> {
+  const accountId = settings.get('nova_ai_jira_account_id');
+  if (!accountId) {
+    console.error(`${logPrefix} CRITICAL: nova_ai_jira_account_id not configured`);
+    return;
+  }
+
+  try {
+    const issue = await jiraClient.getIssue(ticketKey, ['assignee']);
+    const currentId = (issue?.fields?.assignee as { accountId?: string } | null)?.accountId ?? null;
+    if (currentId && currentId !== accountId) {
+      console.log(`${logPrefix} Leaving ${ticketKey} with its human assignee — the solve credit stays with them`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`${logPrefix} Could not read assignee on ${ticketKey} — leaving assignment untouched:`, err instanceof Error ? err.message : err);
+    return;
+  }
+
+  try {
+    await jiraClient.updateFields(ticketKey, { assignee: { accountId } });
+  } catch (err) {
+    console.warn(`${logPrefix} Failed to assign ${ticketKey} to NOVA:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Ensures a ticket being closed/resolved by NOVA AI has:
- * 1. Assignee set to the nova-jira service account
+ * 1. Assignee set to the nova-jira service account, unless a human owns it
  * 2. Request type updated from "AI Request" to the correct type
  *
  * Call BEFORE the transition/resolve call on every close path outside Actor.
@@ -153,16 +195,7 @@ export async function prepareTicketForClose(
   settings: SettingsQueries,
   ctx: CloseContext,
 ): Promise<void> {
-  const accountId = settings.get('nova_ai_jira_account_id');
-  if (accountId) {
-    try {
-      await jiraClient.updateFields(ctx.ticketKey, { assignee: { accountId } });
-    } catch (err) {
-      console.warn(`[close-helper] Failed to assign ${ctx.ticketKey} to NOVA:`, err instanceof Error ? err.message : err);
-    }
-  } else {
-    console.error('[close-helper] CRITICAL: nova_ai_jira_account_id not configured');
-  }
+  await claimForNovaIfUnowned(jiraClient, settings, ctx.ticketKey, '[close-helper]');
 
   await setRequestType(jiraClient, settings, ctx.ticketKey, ctx.classification, ctx.requestTypeOverride);
 }

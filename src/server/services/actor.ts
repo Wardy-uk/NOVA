@@ -7,7 +7,7 @@ import type { LlmService } from './llm-service.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import { query, executeAndGetId } from './database.js';
 import { buildResolveFields, textToAdf } from '../utils/jira-resolve-fields.js';
-import { setRequestType } from './close-ticket-helper.js';
+import { setRequestType, claimForNovaIfUnowned } from './close-ticket-helper.js';
 import { reviewComment } from './comment-review.js';
 
 const CriticResultSchema = z.object({
@@ -51,16 +51,7 @@ export class Actor {
   }
 
   private async assignToNovaServiceAccount(ticketKey: string): Promise<void> {
-    const accountId = this.settings.get('nova_ai_jira_account_id');
-    if (!accountId) {
-      console.error('[actor] CRITICAL: nova_ai_jira_account_id not configured — ticket will not be assigned to NOVA');
-      return;
-    }
-    try {
-      await this.jiraClient.updateFields(ticketKey, { assignee: { accountId } });
-    } catch (err) {
-      console.warn(`[actor] Failed to assign ${ticketKey} to NOVA service account:`, err instanceof Error ? err.message : err);
-    }
+    await claimForNovaIfUnowned(this.jiraClient, this.settings, ticketKey, '[actor]');
   }
 
   async runCritic(decision: AgentDecision): Promise<{ approved: boolean; reason: string; model?: string }> {
@@ -321,10 +312,31 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
     }
   }
 
+  /** Resolve a transition id off the live workflow by (partial, case-insensitive) name. */
+  private async findTransitionIdByName(issueKey: string, targetName: string): Promise<string | null> {
+    try {
+      const result = await this.jiraClient.getTransitionsWithFields(issueKey);
+      const transitions = (result as any)?.transitions as Array<{ id: string; name: string }> | undefined;
+      if (!transitions) return null;
+      return transitions.find(t => t.name.toLowerCase().includes(targetName.toLowerCase()))?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async transitionTicket(decision: AgentDecision): Promise<ActionResult> {
-    const transitionId = decision.output.transitionId as string;
+    // The reasoner maps recommended_action 'close' → action 'transition' but never
+    // emits a transitionId, so resolve the resolve transition off the live workflow
+    // by name (as the quick-win closer does). Without this, every close routed
+    // through the Actor died on this line — after the ticket had already been
+    // claimed, leaving it open and orphaned on NOVA (NT-25659).
+    let transitionId = decision.output.transitionId as string;
     if (!transitionId) {
-      return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: 'No transitionId in decision output.' };
+      transitionId = (await this.findTransitionIdByName(decision.ticketKey, 'resolve')) ?? '';
+      if (!transitionId) {
+        return { success: false, action: 'transition', ticketKey: decision.ticketKey, detail: 'No transitionId in decision output and no resolve transition available.', error: 'TRANSITION_NOT_FOUND' };
+      }
+      console.log(`[actor] No transitionId on ${decision.ticketKey} — resolved "resolve" transition to ${transitionId}`);
     }
 
     // Validate transition is available for current ticket status
