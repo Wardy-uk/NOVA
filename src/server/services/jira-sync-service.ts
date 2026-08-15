@@ -514,6 +514,30 @@ export class JiraSyncService {
       }
     }
 
+    // An escalation closes when its ticket closes. Keyed off the ticket being done
+    // rather than off the transition edge, so it is idempotent (the WHERE clause
+    // stops matching once stamped) and it also back-stamps escalations that were
+    // logged before this existed, or on tickets that closed while sync was down.
+    // minutes_to_resolve answers "did escalating actually change anything" without
+    // a join; it is left NULL when the close predates the log row, which happens
+    // for rows inserted by backfillFromChangelog.
+    if ((status?.statusCategory?.key as string) === 'done') {
+      try {
+        const resolvedAt = f.resolutiondate ? new Date(f.resolutiondate as string) : new Date();
+        await execute(`
+          UPDATE escalation_log
+             SET resolved_at = ?,
+                 minutes_to_resolve = CASE WHEN ? >= created_at
+                                           THEN DATEDIFF(minute, created_at, ?)
+                                           ELSE NULL END
+           WHERE ticket_key = ? AND resolved_at IS NULL`,
+          [resolvedAt, resolvedAt, resolvedAt, issue.key],
+        );
+      } catch (err) {
+        console.warn(`[jira-sync] Failed to stamp escalation closure for ${issue.key}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     // Event-driven round-robin safety net: when a ticket becomes unassigned via a
     // transition — an escalation/de-escalation that clears the assignee, or a human
     // unassigning it — re-place it immediately rather than waiting on the periodic sweep.
