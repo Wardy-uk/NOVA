@@ -3604,6 +3604,45 @@ async function runMigrations(): Promise<void> {
        sent_at           DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
        CONSTRAINT UQ_standup_email_log_session_agent UNIQUE (session_id, agent_name)
      );`,
+
+    // Manual escalation: split escalation_reasons into two kinds.
+    // 'capability' = the agent cannot progress it (SOP-002 troubleshooting applies).
+    // 'urgency'    = the agent could progress it, but it needs to jump the queue.
+    // requires_troubleshooting is meaningless for urgency reasons, hence 0 on all of them.
+    `IF COL_LENGTH('escalation_reasons', 'reason_kind') IS NULL
+     ALTER TABLE escalation_reasons ADD reason_kind NVARCHAR(20) NOT NULL DEFAULT 'capability';`,
+
+    // These three predate the split and were already urgency-shaped (requires_troubleshooting = 0).
+    `UPDATE escalation_reasons SET reason_kind = 'urgency'
+      WHERE reason_code IN ('customer_request','sla_risk','security')
+        AND reason_kind <> 'urgency';`,
+
+    // NB: kept alongside customer_request and sla_risk by decision (15 Aug) rather than
+    // retiring those two, so exec_ask ~ customer_request and deadline ~ sla_risk are
+    // near-synonyms. Expect by_reason stats to split across the pairs.
+    `IF NOT EXISTS (SELECT 1 FROM escalation_reasons WHERE reason_code = 'commercial')
+     INSERT INTO escalation_reasons
+       (reason_code, label, requires_troubleshooting, troubleshooting_checklist, sort_order, reason_kind)
+     VALUES
+       ('commercial',      'Commercial — renewal, upsell or contract risk',      0, NULL,  9, 'urgency'),
+       ('customer_impact', 'Customer impact — blocking their operation',         0, NULL, 10, 'urgency'),
+       ('reputational',    'Reputational — complaint risk or visible failure',   0, NULL, 11, 'urgency'),
+       ('deadline',        'External deadline — customer or third-party date',   0, NULL, 12, 'urgency'),
+       ('exec_ask',        'Requested by SLT or an account manager',             0, NULL, 13, 'urgency');`,
+
+    // Closure tracking: jira-sync-service stamps these when it sees the ticket close,
+    // so "did escalating actually change anything" is answerable without a join.
+    `IF COL_LENGTH('escalation_log', 'resolved_at') IS NULL
+     ALTER TABLE escalation_log ADD resolved_at DATETIME2 NULL;`,
+
+    `IF COL_LENGTH('escalation_log', 'minutes_to_resolve') IS NULL
+     ALTER TABLE escalation_log ADD minutes_to_resolve INT NULL;`,
+
+    // A dispute is a row of its own (escalation_type = 'dispute') pointing back at
+    // the escalation it contests, so "which escalations get pushed back on" is a
+    // join rather than a string search through notes.
+    `IF COL_LENGTH('escalation_log', 'disputes_escalation_id') IS NULL
+     ALTER TABLE escalation_log ADD disputes_escalation_id INT NULL;`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

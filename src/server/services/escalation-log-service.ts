@@ -18,7 +18,7 @@ export interface EscalationLogEntry {
 
 export interface LogEscalationInput {
   ticket_key: string;
-  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk' | 'complaint_portal' | 'rejection';
+  escalation_type: 'manual' | 'ai_agent' | 'jira_transition' | 'sla_risk' | 'complaint_portal' | 'rejection' | 'dispute';
   from_tier?: string;
   to_tier?: string;
   reason_code?: string;
@@ -27,6 +27,8 @@ export interface LogEscalationInput {
   assigned_to?: string;
   notes?: string;
   decision_id?: number;
+  /** Set on escalation_type='dispute' rows: the escalation being contested. */
+  disputes_escalation_id?: number;
   source?: string;
   created_at?: string;
 }
@@ -85,8 +87,8 @@ export class EscalationLogService {
     return executeAndGetId(
       `INSERT INTO escalation_log
        (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
-        escalated_by, assigned_to, notes, decision_id, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        escalated_by, assigned_to, notes, decision_id, disputes_escalation_id, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.ticket_key,
         input.escalation_type,
@@ -98,6 +100,7 @@ export class EscalationLogService {
         input.assigned_to ?? null,
         input.notes ?? null,
         input.decision_id ?? null,
+        input.disputes_escalation_id ?? null,
         input.source ?? 'manual',
         input.created_at ?? new Date().toISOString(),
       ],
