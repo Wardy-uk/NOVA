@@ -123,7 +123,11 @@ export function createNeuroBridgeRoutes(
     if (!log) { res.status(503).json({ ok: false, error: 'Escalation log not available' }); return; }
     try {
       const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 365);
-      const entries = await log.getAll({ days });
+      // Callers that only want one kind say so, and it matters: 90 days holds
+      // ~1,950 rows of which ~2 are manual. A caller after urgency escalations
+      // asking for everything would be sifting 1,000:1.
+      const type = typeof req.query.type === 'string' && req.query.type ? req.query.type : undefined;
+      const entries = await log.getAll({ days, type });
 
       const latest = new Map<string, typeof entries[number]>();
       for (const e of entries) {
