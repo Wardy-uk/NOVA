@@ -1,4 +1,5 @@
 import { query, executeAndGetId, execute } from './database.js';
+import { postTeamsCard } from './teams-webhook.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type {
   AgentAlert,
@@ -116,34 +117,28 @@ export class AlertService {
     return (rows[0]?.cnt ?? 0) > 0;
   }
 
+  /**
+   * Post critical alerts to a Teams channel.
+   *
+   * Was an O365 connector `MessageCard` — an API Microsoft has retired — and it
+   * had never actually sent anything, because `agent_teams_webhook_url` has
+   * always been unset. Now a Power Automate Workflows webhook carrying an
+   * Adaptive Card, via `teams-webhook.ts`.
+   *
+   * Still returns quietly when unconfigured: that is the normal state, and it
+   * lights up on pasting a URL into settings with no code change (Q8). Alerting
+   * ships on email regardless (Q9), so this can never block or throw.
+   */
   private async sendTeamsNotification(alerts: AgentAlert[]): Promise<void> {
     const webhookUrl = this.settings.get('agent_teams_webhook_url');
     if (!webhookUrl) return;
 
-    const lines = alerts.map(a => `- **[${a.severity.toUpperCase()}]** ${a.title}`).join('\n');
-    const payload = {
-      '@type': 'MessageCard',
-      '@context': 'https://schema.org/extensions',
-      themeColor: 'FF0000',
-      summary: `NOVA Agent: ${alerts.length} critical alert(s)`,
-      sections: [{
-        activityTitle: '🤖 NOVA AI Agent — Critical Alerts',
-        text: lines,
-      }],
-    };
-
-    try {
-      const resp = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) {
-        console.warn(`[alert-service] Teams webhook failed: ${resp.status}`);
-      }
-    } catch (err) {
-      console.warn('[alert-service] Teams webhook error:', err instanceof Error ? err.message : err);
-    }
+    await postTeamsCard(
+      webhookUrl,
+      `NOVA AI Agent — ${alerts.length} critical alert${alerts.length === 1 ? '' : 's'}`,
+      alerts.map(a => ({ label: a.severity.toUpperCase(), value: a.title })),
+      'critical',
+    );
   }
 
   // ── Query methods for API ──
