@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import type { RiskScorer } from '../services/risk-scorer.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { ManualEscalationService } from '../services/manual-escalation-service.js';
+import type { EscalationLogService } from '../services/escalation-log-service.js';
 import { groupFlaggedByReason } from '../services/risk-scorer.js';
 
 // Hardcoded allowed identity — this bridge is for Nick only
@@ -45,6 +46,7 @@ export function createNeuroBridgeRoutes(
   escalationDeps?: {
     getJiraClient: () => JiraRestClient | null;
     getManualEscalation: () => ManualEscalationService | null;
+    getEscalationLog?: () => EscalationLogService | null;
   },
 ): Router {
   const router = Router();
@@ -92,6 +94,58 @@ export function createNeuroBridgeRoutes(
         }));
       } catch { comments = []; }
       res.json({ ok: true, data: { key: issue.key, ...issue.fields, comments } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  /**
+   * GET /api/neuro-bridge/escalations — who has been escalated, per ticket.
+   *
+   * An urgency escalation moves priority and the due date but deliberately
+   * leaves the tier alone, so it writes NOTHING to Jira that identifies the
+   * ticket as escalated. NOVA's escalation_log is therefore the only record
+   * that it happened, and without this route NEURO's escalations list cannot
+   * show the escalations NEURO itself raised.
+   *
+   * The log is a stream of events; NEURO wants current state, so this folds to
+   * one row per ticket carrying the most recent escalation. Rejections and
+   * disputes are excluded — they are the log recording that an escalation was
+   * pushed back, not a ticket being escalated.
+   *
+   * Deliberately does NOT filter on whether the ticket is still open: this
+   * route knows the log, not the queue, and NEURO holds Jira state already.
+   * Two half-answers agreeing is better than this route guessing.
+   */
+  router.get('/escalations', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const log = escalationDeps?.getEscalationLog?.();
+    if (!log) { res.status(503).json({ ok: false, error: 'Escalation log not available' }); return; }
+    try {
+      const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 365);
+      const entries = await log.getAll({ days });
+
+      const latest = new Map<string, typeof entries[number]>();
+      for (const e of entries) {
+        if (e.escalation_type === 'rejection' || e.escalation_type === 'dispute') continue;
+        // getAll() is created_at DESC, so the first sighting of a key is newest.
+        if (!latest.has(e.ticket_key)) latest.set(e.ticket_key, e);
+      }
+
+      res.json({
+        ok: true,
+        data: [...latest.values()].map(e => ({
+          ticket_key: e.ticket_key,
+          escalation_id: e.id,
+          escalation_type: e.escalation_type,
+          reason_code: e.reason_code,
+          reason_label: e.reason_label,
+          escalated_by: e.escalated_by,
+          to_tier: e.to_tier,
+          notes: e.notes,
+          created_at: e.created_at,
+        })),
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     }

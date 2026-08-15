@@ -990,10 +990,15 @@ async function main() {
   // is wired before the Jira client and escalation service exist.
   let bridgeJiraClient: JiraRestClient | null = null;
   let bridgeManualEscalation: ManualEscalationService | null = null;
+  let bridgeEscalationLog: EscalationLogService | null = null;
   app.use('/api/neuro-bridge', createNeuroBridgeRoutes(
     mcpManager,
     () => agentLoop?.getRiskScorer() ?? null,
-    { getJiraClient: () => bridgeJiraClient, getManualEscalation: () => bridgeManualEscalation },
+    {
+      getJiraClient: () => bridgeJiraClient,
+      getManualEscalation: () => bridgeManualEscalation,
+      getEscalationLog: () => bridgeEscalationLog,
+    },
   ));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
@@ -1293,6 +1298,7 @@ async function main() {
   // EscalationLogService is standalone; the jiraClient dep is used only by the
   // /backfill route, which already returns 503 when it is null.
   const escalationLog = new EscalationLogService();
+  bridgeEscalationLog = escalationLog;
   bridgeJiraClient = agentJiraClient;
   bridgeManualEscalation = agentJiraClient ? new ManualEscalationService(agentJiraClient, escalationLog) : null;
   app.use('/api/escalations', createEscalationRoutes({
