@@ -7,11 +7,34 @@ import { requireRole } from '../middleware/auth.js';
 interface EscalationRouteDeps {
   escalationLog: EscalationLogService;
   jiraClient: JiraRestClient | null;
+  /** Flat settings.json accessor — used for escalation_attribution. */
+  getSettings?: () => Record<string, unknown>;
+}
+
+/**
+ * Who the escalation is signed as, in the internal Jira comment the assignee reads.
+ *
+ * Service accounts act FOR someone: SARA escalates because Nick told it to, and
+ * "Escalated by sara" reads to the assignee as a robot reaching into their ticket.
+ * The mapping is a server-side setting (escalation_attribution, a JSON object of
+ * username → display name) and NEVER something the caller can pass, because a
+ * caller-supplied name would let anyone with the endpoint sign an escalation as
+ * somebody else.
+ */
+function attributionFor(username: string, getSettings?: () => Record<string, unknown>): string {
+  try {
+    const raw = getSettings?.().escalation_attribution;
+    if (!raw) return username;
+    const map = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, string>;
+    return map?.[username] || username;
+  } catch {
+    return username;   // a malformed setting must not block an escalation
+  }
 }
 
 export function createEscalationRoutes(deps: EscalationRouteDeps): Router {
   const router = Router();
-  const { escalationLog, jiraClient } = deps;
+  const { escalationLog, jiraClient, getSettings } = deps;
   const manualEscalation = jiraClient ? new ManualEscalationService(jiraClient, escalationLog) : null;
 
   router.get('/', async (req: Request, res: Response) => {
@@ -99,7 +122,8 @@ export function createEscalationRoutes(deps: EscalationRouteDeps): Router {
     try {
       const { ticket_key, reason_code, needed_by, notes } = req.body ?? {};
       const data = await manualEscalation.escalate({
-        ticket_key, reason_code, needed_by, notes, escalated_by: escalatedBy,
+        ticket_key, reason_code, needed_by, notes,
+        escalated_by: attributionFor(escalatedBy, getSettings),
       });
       res.json({ ok: true, data });
     } catch (err) {

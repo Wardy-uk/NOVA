@@ -1287,6 +1287,7 @@ async function main() {
   app.use('/api/escalations', createEscalationRoutes({
     escalationLog,
     jiraClient: agentJiraClient,
+    getSettings: () => settingsQueries.getAll() as unknown as Record<string, unknown>,
   }));
 
   // ── On-demand Golden-Rules comment review — used by comment composers to
