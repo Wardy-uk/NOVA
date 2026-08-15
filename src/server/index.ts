@@ -37,6 +37,7 @@ import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
+import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
 import { createPipelineUatRoutes } from './routes/pipeline-uat.js';
@@ -985,7 +986,15 @@ async function main() {
   });
 
   // NEURO bridge — uses its own shared-secret auth, must be registered before JWT middleware
-  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(mcpManager, () => agentLoop?.getRiskScorer() ?? null));
+  // Resolved lazily below — the bridge mounts ahead of the JWT middleware, so it
+  // is wired before the Jira client and escalation service exist.
+  let bridgeJiraClient: JiraRestClient | null = null;
+  let bridgeManualEscalation: ManualEscalationService | null = null;
+  app.use('/api/neuro-bridge', createNeuroBridgeRoutes(
+    mcpManager,
+    () => agentLoop?.getRiskScorer() ?? null,
+    { getJiraClient: () => bridgeJiraClient, getManualEscalation: () => bridgeManualEscalation },
+  ));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {
@@ -1284,6 +1293,8 @@ async function main() {
   // EscalationLogService is standalone; the jiraClient dep is used only by the
   // /backfill route, which already returns 503 when it is null.
   const escalationLog = new EscalationLogService();
+  bridgeJiraClient = agentJiraClient;
+  bridgeManualEscalation = agentJiraClient ? new ManualEscalationService(agentJiraClient, escalationLog) : null;
   app.use('/api/escalations', createEscalationRoutes({
     escalationLog,
     jiraClient: agentJiraClient,

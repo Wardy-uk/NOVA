@@ -2,11 +2,18 @@ import { Router } from 'express';
 import type { McpClientManager } from '../services/mcp-client.js';
 import type { Request, Response } from 'express';
 import type { RiskScorer } from '../services/risk-scorer.js';
+import type { JiraRestClient } from '../services/jira-client.js';
+import type { ManualEscalationService } from '../services/manual-escalation-service.js';
 import { groupFlaggedByReason } from '../services/risk-scorer.js';
 
 // Hardcoded allowed identity — this bridge is for Nick only
 const ALLOWED_USERNAME = 'nickw';
 const ALLOWED_EMAIL = 'nickw@nurtur.tech';
+
+/** Who an escalation raised over this bridge is signed as, in the internal Jira
+ *  comment the assignee reads. Safe to hardcode precisely because the bridge is
+ *  single-identity by construction — see ALLOWED_USERNAME above. */
+const BRIDGE_ATTRIBUTION = 'Nick Ward';
 
 function parseToolResult(result: unknown): unknown {
   const obj = result as { content?: Array<{ text?: string }> };
@@ -32,8 +39,81 @@ function bridgeAuth(req: Request, res: Response): boolean {
 export function createNeuroBridgeRoutes(
   mcpManager: McpClientManager,
   getRiskScorer?: () => RiskScorer | null,
+  // Lazy, because the Jira client and the escalation service are built further
+  // down index.ts than this router is mounted — the bridge has to sit in front
+  // of the JWT middleware, so it is wired early and resolves its deps per request.
+  escalationDeps?: {
+    getJiraClient: () => JiraRestClient | null;
+    getManualEscalation: () => ManualEscalationService | null;
+  },
 ): Router {
   const router = Router();
+
+  // ── Escalation over the bridge ───────────────────────────────────────────
+  //
+  // NEURO escalates through here rather than through a NOVA service account.
+  // The account route needed a password nobody had, and it signed the internal
+  // comment "Escalated by sara" — a robot reaching into someone's ticket. This
+  // bridge is already hardcoded to Nick and nobody else, so attribution is a
+  // fact about the route rather than a lookup table: anything arriving here IS
+  // from him, which is exactly what manual escalation is scoped to in v1.
+
+  router.get('/escalation-reasons', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const svc = escalationDeps?.getManualEscalation();
+    if (!svc) { res.status(503).json({ ok: false, error: 'Escalation not available' }); return; }
+    try {
+      const kind = req.query.kind === 'capability' ? 'capability' : 'urgency';
+      res.json({ ok: true, data: await svc.listReasons(kind) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // Enough of a ticket to know it is the right one before escalating it.
+  router.get('/ticket/:key', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const jira = escalationDeps?.getJiraClient();
+    if (!jira) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+    const key = String(req.params.key || '').toUpperCase();
+    try {
+      const issue = await jira.getIssue(key, ['*navigable']);
+      if (!issue) { res.status(404).json({ ok: false, error: `${key} not found` }); return; }
+      let comments: unknown[] = [];
+      try {
+        comments = (await jira.getComments(key, 10)).map((c: any) => ({
+          author: c.author?.displayName ?? 'Unknown',
+          created: c.created,
+          body: c.body,
+          // A JSM internal note must never be mistaken for something the
+          // customer has already been told.
+          jsdPublic: c.jsdPublic ?? !(c.properties?.some?.(
+            (p: any) => p.key === 'sd.public.comment' && p.value?.internal === true)),
+        }));
+      } catch { comments = []; }
+      res.json({ ok: true, data: { key: issue.key, ...issue.fields, comments } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  router.post('/escalate', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const svc = escalationDeps?.getManualEscalation();
+    if (!svc) { res.status(503).json({ ok: false, error: 'Escalation not available' }); return; }
+    try {
+      const { ticket_key, reason_code, needed_by, notes } = req.body ?? {};
+      const data = await svc.escalate({
+        ticket_key, reason_code, needed_by, notes,
+        escalated_by: BRIDGE_ATTRIBUTION,
+      });
+      res.json({ ok: true, data });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to escalate';
+      const clientError = /required|Unknown reason_code|is retired|not found|must be YYYY-MM-DD/.test(msg);
+      res.status(clientError ? 400 : 500).json({ ok: false, error: msg });
+    }
+  });
 
   // GET /api/neuro-bridge/flagged — "Nick, look at this" feed for NUERO Focus.
   // Same grouped shape NOVA's own calm board uses; NUERO pulls this on a timer.

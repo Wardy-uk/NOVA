@@ -21,25 +21,14 @@ interface EscalationRouteDeps {
  * caller-supplied name would let anyone with the endpoint sign an escalation as
  * somebody else.
  */
-const DEFAULT_ATTRIBUTION: Record<string, string> = {
-  // SARA is Nick's assistant account and manual escalation is Nick-only in v1,
-  // so this is the truth rather than a placeholder. Shipped as a default because
-  // settings.json lives on the deployed box and is not editable from the UI;
-  // the setting still wins if it is ever set.
-  sara: 'Nick Ward',
-};
-
 function attributionFor(username: string, getSettings?: () => Record<string, unknown>): string {
   try {
     const raw = getSettings?.().escalation_attribution;
-    const map = raw
-      ? { ...DEFAULT_ATTRIBUTION, ...(typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, string>) }
-      : DEFAULT_ATTRIBUTION;
-    return map[username] || username;
+    if (!raw) return username;
+    const map = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, string>;
+    return map?.[username] || username;
   } catch {
-    // A malformed setting must not block an escalation, but it must not silently
-    // lose the default either.
-    return DEFAULT_ATTRIBUTION[username] || username;
+    return username;   // a malformed setting must not block an escalation
   }
 }
 
