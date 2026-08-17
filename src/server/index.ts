@@ -37,6 +37,7 @@ import { createCrmRoutes } from './routes/crm.js';
 import { createAuthRoutes } from './routes/auth.js';
 
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
+import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -999,6 +1000,12 @@ async function main() {
       getManualEscalation: () => bridgeManualEscalation,
       getEscalationLog: () => bridgeEscalationLog,
     },
+  ));
+  // KPI half of the same bridge — read-only, same shared-secret door, so it
+  // must mount ahead of the JWT middleware alongside the router above.
+  app.use('/api/neuro-bridge', createNeuroBridgeKpiRoutes(
+    settingsQueries,
+    () => bridgeEscalationLog,
   ));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)

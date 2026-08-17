@@ -7,6 +7,7 @@ import { query } from '../services/database.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 import { TEAM_AGENTS } from './trends.js';
+import { applyTargetFallbacks } from '../services/kpi-targets.js';
 
 // Expected future KPI names in dbo.KpiSnapshot (will render automatically once data flows):
 // - "CSAT" or "Customer Satisfaction" — CSAT score, direction: higher is better
@@ -94,29 +95,6 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const env = parseEnv(req);
       const s = suffix(env);
       const p = await getPool();
-      // Fallback targets for KPIs where n8n writes 0/null as the target
-      // Keys are lowercase for case-insensitive matching
-      const TARGET_FALLBACKS: Record<string, { target: number; direction: string }> = {
-        'frt compliance % (open queue)': { target: 95, direction: 'higher is better' },
-        'frt compliance % (resolved today)': { target: 95, direction: 'higher is better' },
-        'resolution compliance % (open queue)': { target: 95, direction: 'higher is better' },
-        'resolution compliance % (resolved today)': { target: 95, direction: 'higher is better' },
-        'cc incidents over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc service requests over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc tpj over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc (tpj) over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'production over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'development over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'new tickets today': { target: 110, direction: 'lower is better' },
-      };
-      // Also match any KPI containing these patterns (catch name variants)
-      const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
-        { pattern: /frt compliance/i, target: 95, direction: 'higher is better' },
-        { pattern: /resolution compliance/i, target: 95, direction: 'higher is better' },
-        { pattern: /over sla \(actionable\)/i, target: 0, direction: 'lower is better' },
-      ];
       // Read from jira_kpi_daily (NOVA-populated) with column aliases matching frontend expectations
       const result = await p.request().query(`
         SELECT kpi AS KPI, kpiGroup AS KPIGroup, [count] AS [Count],
@@ -125,22 +103,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
         ORDER BY kpiGroup, kpi
       `);
-      // Apply target fallbacks where KPITarget is 0 or null
-      for (const row of result.recordset) {
-        if (row.KPITarget && row.KPITarget !== 0) continue;
-        const fb = TARGET_FALLBACKS[row.KPI.toLowerCase().trim()];
-        if (fb) {
-          row.KPITarget = fb.target;
-          if (!row.KPIDirection) row.KPIDirection = fb.direction;
-        } else {
-          const pf = PATTERN_FALLBACKS.find(p => p.pattern.test(row.KPI));
-          if (pf) {
-            row.KPITarget = pf.target;
-            if (!row.KPIDirection) row.KPIDirection = pf.direction;
-          }
-        }
-      }
-      res.json({ ok: true, data: result.recordset, env });
+      res.json({ ok: true, data: applyTargetFallbacks(result.recordset), env });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
@@ -181,41 +144,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         ORDER BY kpiGroup, kpi
       `);
 
-      // Apply same target fallbacks as team-snapshot
-      const TARGET_FALLBACKS: Record<string, { target: number; direction: string }> = {
-        'frt compliance % (open queue)': { target: 95, direction: 'higher is better' },
-        'frt compliance % (resolved today)': { target: 95, direction: 'higher is better' },
-        'resolution compliance % (open queue)': { target: 95, direction: 'higher is better' },
-        'resolution compliance % (resolved today)': { target: 95, direction: 'higher is better' },
-        'cc incidents over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc service requests over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc tpj over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'cc (tpj) over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'production over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'tier 2 over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'tier 3 over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'development over sla (actionable)': { target: 0, direction: 'lower is better' },
-        'new tickets today': { target: 110, direction: 'lower is better' },
-      };
-      const PATTERN_FALLBACKS: { pattern: RegExp; target: number; direction: string }[] = [
-        { pattern: /frt compliance/i, target: 95, direction: 'higher is better' },
-        { pattern: /resolution compliance/i, target: 95, direction: 'higher is better' },
-        { pattern: /over sla \(actionable\)/i, target: 0, direction: 'lower is better' },
-      ];
-      for (const row of result.recordset) {
-        if (row.KPITarget && row.KPITarget !== 0) continue;
-        const fb = TARGET_FALLBACKS[(row.KPI || '').toLowerCase().trim()];
-        if (fb) {
-          row.KPITarget = fb.target;
-          if (!row.KPIDirection) row.KPIDirection = fb.direction;
-        } else {
-          const pf = PATTERN_FALLBACKS.find(p => p.pattern.test(row.KPI || ''));
-          if (pf) {
-            row.KPITarget = pf.target;
-            if (!row.KPIDirection) row.KPIDirection = pf.direction;
-          }
-        }
-      }
+      // Same target fallbacks as team-snapshot — shared, so the two cannot drift
+      applyTargetFallbacks(result.recordset);
 
       // Also fetch available dates for the date picker
       const datesResult = await p.request().query(`

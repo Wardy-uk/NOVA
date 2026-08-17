@@ -23,7 +23,13 @@ function parseToolResult(result: unknown): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-function bridgeAuth(req: Request, res: Response): boolean {
+/**
+ * Exported so the KPI half of the bridge (neuro-bridge-kpi.ts) authenticates
+ * through this exact function rather than a second copy of it. Two bridge
+ * routers sharing one door is the point — a divergent copy is how one of them
+ * quietly stops checking.
+ */
+export function bridgeAuth(req: Request, res: Response): boolean {
   const secret = process.env.NEURO_BRIDGE_SECRET;
   if (!secret) {
     res.status(503).json({ ok: false, error: 'Bridge not configured' });
