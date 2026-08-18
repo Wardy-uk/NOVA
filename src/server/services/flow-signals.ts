@@ -42,6 +42,23 @@ export const STALE_DAYS = 14;
 /** Rows returned by any "worst offenders" list. */
 export const TOP_N = 10;
 
+/**
+ * Read `jira_issue_cache` without taking shared locks.
+ *
+ * The table is small — around 5,600 rows — so nothing here is slow on volume.
+ * What it IS, is hot: the Jira sync writes to it continuously, and a reporting
+ * SELECT that scans the clustered index queues behind those writes and dies on
+ * the 30s request timeout. That is what was killing breach-by-queue while the
+ * other signals, which have nonclustered indexes to hide behind, came back fine.
+ *
+ * A dirty read is the right trade HERE and would not be elsewhere. This is a
+ * cache being aggregated for a weekly report, the report already carries an
+ * explicit "these are a floor, not a total" caveat about that cache's freshness,
+ * and being approximately right on Monday beats being exactly absent. It must
+ * not spread to anything that writes, bills, or decides.
+ */
+const DIRTY_READ = 'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n';
+
 export interface Signal<T> {
   ok: boolean;
   error: string | null;
@@ -66,6 +83,12 @@ export interface PingPongData {
 
 export interface BreachByQueueData {
   total: number;
+  /**
+   * Rows carrying `sla_breached = 1` anywhere in the table, ignoring the window.
+   * Zero here means the flag is not populated, which is a different statement
+   * from a month with no breaches — and must never render as the same sentence.
+   */
+  everBreached: number | null;
   byTier: Array<{ tier: string; breaches: number; sharePct: number | null }>;
   coverage: { cachedTickets: number | null; lastSync: string | null };
 }
@@ -196,13 +219,27 @@ async function pingPong(days: number): Promise<PingPongData> {
  */
 async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   const rows = await query<{ tier: string | null; breaches: number }>(
-    `SELECT current_tier AS tier, COUNT(*) AS breaches
+    `${DIRTY_READ}
+     SELECT current_tier AS tier, COUNT(*) AS breaches
        FROM jira_issue_cache
       WHERE sla_breached = 1
         AND sla_breach_time >= DATEADD(day, ?, GETUTCDATE())
       GROUP BY current_tier
       ORDER BY breaches DESC`,
     [-days],
+  );
+
+  // Is the flag populated AT ALL? Without this, a `sla_breached` column that is
+  // never written reports "0 breaches" — a green tick on a number that means
+  // nothing, in the one section of the report whose headline finding is that
+  // 90.5% of breaches happen in one queue.
+  //
+  // Zero breaches in the window is a claim about a good month. Zero breached
+  // rows in the entire table is a claim about the pipeline, and the two must not
+  // render as the same sentence.
+  const ever = await query<{ cnt: number }>(
+    `${DIRTY_READ}
+     SELECT COUNT(*) AS cnt FROM jira_issue_cache WHERE sla_breached = 1`,
   );
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
@@ -217,7 +254,8 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   let coverage: BreachByQueueData['coverage'] = { cachedTickets: null, lastSync: null };
   try {
     const c = await query<{ cached: number; last_sync: string | null }>(
-      `SELECT COUNT_BIG(*) AS cached, MAX(synced_at) AS last_sync FROM jira_issue_cache`,
+      `${DIRTY_READ}
+       SELECT COUNT_BIG(*) AS cached, MAX(synced_at) AS last_sync FROM jira_issue_cache`,
     );
     coverage = { cachedTickets: Number(c[0]?.cached ?? 0) || null, lastSync: c[0]?.last_sync ?? null };
   } catch { /* the caveat is optional; the numbers it qualifies are not */ }
@@ -225,6 +263,7 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   const total = rows.reduce((s, r) => s + r.breaches, 0);
   return {
     total,
+    everBreached: ever[0]?.cnt ?? null,
     byTier: rows.map(r => ({
       tier: r.tier ?? 'Unassigned',
       breaches: r.breaches,
@@ -241,7 +280,8 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
  */
 async function unowned(): Promise<UnownedData> {
   const rows = await query<{ tier: string | null; count: number; oldest_days: number }>(
-    `SELECT current_tier AS tier,
+    `${DIRTY_READ}
+     SELECT current_tier AS tier,
             COUNT(*) AS count,
             MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS oldest_days
        FROM jira_issue_cache
@@ -262,7 +302,8 @@ async function unowned(): Promise<UnownedData> {
  */
 async function stalled(): Promise<StalledData> {
   const rows = await query<{ tier: string | null; count: number }>(
-    `SELECT current_tier AS tier, COUNT(*) AS count
+    `${DIRTY_READ}
+     SELECT current_tier AS tier, COUNT(*) AS count
        FROM jira_issue_cache
       WHERE (status_category IS NULL OR status_category <> 'Done')
         AND jira_updated < DATEADD(day, ?, GETUTCDATE())
@@ -272,7 +313,8 @@ async function stalled(): Promise<StalledData> {
   );
 
   const worst = await query<Omit<StalledData['worst'][number], 'tier'> & { tier: string | null }>(
-    `SELECT TOP (?)
+    `${DIRTY_READ}
+     SELECT TOP (?)
             issue_key,
             summary,
             current_tier AS tier,
