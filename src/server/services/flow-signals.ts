@@ -253,18 +253,26 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
   // Reading direction from the columns means this works on the existing history
   // rather than only on rows written after a fix ships. Nothing about the write
   // path has to change for the number to become true.
+  // The period CASE is computed in a derived table and grouped by its alias.
+  //
+  // Writing it in both SELECT and GROUP BY does not work here: each `?` becomes
+  // a separate parameter (@p0 vs @p3), so SQL Server sees two textually
+  // different expressions and rejects the grouping outright — "created_at is
+  // invalid in the select list". Same value, different parameter, different
+  // expression. Computing it once removes the possibility.
   const rows = await query<{ from_tier: string | null; to_tier: string | null; period: string; count: number }>(
-    `SELECT from_tier, to_tier,
-            CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END AS period,
-            COUNT(*) AS count
-       FROM escalation_log
-      WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
-        AND ${scope.clause}
-        AND from_tier IS NOT NULL AND to_tier IS NOT NULL
-        AND from_tier <> to_tier
-      GROUP BY from_tier, to_tier,
-               CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END`,
-    [-days, -prior, ...scope.params, -days],
+    `SELECT from_tier, to_tier, period, COUNT(*) AS count
+       FROM (
+         SELECT from_tier, to_tier,
+                CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END AS period
+           FROM escalation_log
+          WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+            AND ${scope.clause}
+            AND from_tier IS NOT NULL AND to_tier IS NOT NULL
+            AND from_tier <> to_tier
+       ) t
+      GROUP BY from_tier, to_tier, period`,
+    [-days, -prior, ...scope.params],
   );
 
   const routes: HandbackData['routes'] = [];
@@ -347,38 +355,35 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
   // that disagreed with the wallboard would be indefensible in front of the team,
   // so it has to be the same field, breached by the same definition: the ongoing
   // cycle breached, or any completed cycle breached.
-  const rows = await query<{ tier: string | null; breaches: number }>(
+  // ONE pass, and only the ongoing cycle.
+  //
+  // The first version parsed each row twice — a JSON_VALUE plus an OPENJSON
+  // subquery over completedCycles — and then made a second full pass to count
+  // how many tickets carried an SLA at all. Three JSON parses per row across the
+  // whole NT cache is real CPU on a DTU-limited instance, and it timed out.
+  //
+  // completedCycles is dropped deliberately rather than for speed alone. This
+  // signal counts tickets that are OPEN and over SLA; for an open ticket the
+  // ongoing cycle is the live one, and that is also what Jira's `breached()`
+  // matches — so keeping only it makes the figure agree with the wallboards
+  // rather than quietly exceeding them.
+  //
+  // The SLA-present count rides along in the same aggregate, so distinguishing
+  // "no breaches" from "no SLA data" costs nothing extra.
+  const rows = await query<{ tier: string | null; breaches: number; sla_present: number }>(
     `${DIRTY_READ}
-     SELECT c.current_tier AS tier, COUNT(*) AS breaches
+     SELECT c.current_tier AS tier,
+            SUM(CASE WHEN JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') = 'true'
+                     THEN 1 ELSE 0 END) AS breaches,
+            SUM(CASE WHEN JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') IS NOT NULL
+                     THEN 1 ELSE 0 END) AS sla_present
        FROM jira_issue_cache c
       WHERE ${scope.clause}
-        AND ISJSON(c.fields_json) = 1
         AND (c.status_category IS NULL OR c.status_category <> 'Done')
-        AND (
-              JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') = 'true'
-              OR EXISTS (
-                   SELECT 1
-                     FROM OPENJSON(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.completedCycles')
-                          WITH (breached BIT '$.breached') cyc
-                    WHERE cyc.breached = 1
-                 )
-            )
-      GROUP BY c.current_tier
-      ORDER BY breaches DESC`,
+        AND c.fields_json IS NOT NULL
+        AND ISJSON(c.fields_json) = 1
+      GROUP BY c.current_tier`,
     scope.params,
-  );
-
-  // Sanity check on the SOURCE, not on the month. If no cached ticket carries a
-  // parseable Resolution SLA at all, a zero above is a broken field mapping
-  // rather than a clean queue — which is exactly the mistake the old version of
-  // this query made by trusting the `sla_breached` column.
-  const ever = await query<{ cnt: number }>(
-    `${DIRTY_READ}
-     SELECT COUNT(*) AS cnt FROM jira_issue_cache
-      WHERE ${bare.clause}
-        AND ISJSON(fields_json) = 1
-        AND JSON_QUERY(fields_json, '$.${RESOLUTION_SLA_FIELD}') IS NOT NULL`,
-    bare.params,
   );
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
@@ -402,14 +407,15 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
   } catch { /* the caveat is optional; the numbers it qualifies are not */ }
 
   const total = rows.reduce((s, r) => s + r.breaches, 0);
+  const withBreaches = rows.filter(r => r.breaches > 0).sort((a, b) => b.breaches - a.breaches);
   return {
     total,
-    slaDataPresent: ever[0]?.cnt ?? null,
+    slaDataPresent: rows.reduce((s, r) => s + r.sla_present, 0),
     basis: 'Open tickets whose Resolution SLA (cf14048) is currently breached, '
       + 'grouped by the queue they are in NOW. Same field and definition as the '
       + 'wallboards. This is a stock, not a flow — it is NOT the Support Review\'s '
       + '"breaches by queue at time of breach", which no source in NOVA can produce.',
-    byTier: rows.map(r => ({
+    byTier: withBreaches.map(r => ({
       tier: r.tier ?? 'Unassigned',
       breaches: r.breaches,
       sharePct: total ? Math.round((r.breaches / total) * 1000) / 10 : null,

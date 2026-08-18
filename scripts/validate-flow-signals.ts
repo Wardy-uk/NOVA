@@ -100,7 +100,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18g\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18h\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
