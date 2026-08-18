@@ -82,13 +82,19 @@ async function preflight(): Promise<void> {
         + '     never creates it.\n',
       );
     }
-  } catch {
-    // A diagnostic that can break the thing it is diagnosing is worse than no
-    // diagnostic. If this cannot run, say nothing and let the signals speak.
+  } catch (err) {
+    // Says so, loudly. The first cut swallowed this, and a preflight that can
+    // fail invisibly is indistinguishable from a preflight that never ran —
+    // which cost a round trip on the box working out which had happened. The
+    // whole point of this chain is that silence never reads as success.
+    console.log(`  ⚠  Preflight could not run: ${err instanceof Error ? err.message : err}\n`);
   }
 }
 
 async function main(): Promise<void> {
+  // Stamped so it is obvious at a glance whether the box is running the version
+  // you just pushed. Two runs were spent working out that it was not.
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18c\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
