@@ -99,6 +99,43 @@ export function tierRank(tier: string | null | undefined): number | null {
   return TIER_RANK[tier.trim().toLowerCase()] ?? null;
 }
 
+/**
+ * Projects these signals cover.
+ *
+ * NT only, because every NOVA KPI and every wallboard tile is scoped
+ * `project = NT` (registry.ts NT_OPEN). The ticket cache is NOT — the sync pulls
+ * whatever `agent_jira_project` and `assignment_projects` are set to, so it
+ * carries NTPJ and others alongside. The first cut of this service filtered by
+ * nothing at all and silently mixed them, which would have put figures in front
+ * of the team that could never be reconciled against the board on the wall.
+ *
+ * Widening this is a legitimate choice — the Support Review itself counted TPJ
+ * work — but it has to be a deliberate one, and the excluded projects are
+ * reported so the decision stays visible rather than becoming a default nobody
+ * remembers making.
+ */
+export const DEFAULT_PROJECTS = ['NT'];
+
+/**
+ * `escalation_log` has no project column, only `ticket_key`. Matching on the
+ * prefix therefore has to include the hyphen: `LIKE 'NT%'` also matches every
+ * NTPJ ticket, which is exactly the conflation this scoping exists to prevent.
+ */
+function ticketKeyScope(projects: string[]): { clause: string; params: string[] } {
+  return {
+    clause: `(${projects.map(() => 'ticket_key LIKE ?').join(' OR ')})`,
+    params: projects.map(p => `${p}-%`),
+  };
+}
+
+function projectScope(projects: string[], alias = ''): { clause: string; params: string[] } {
+  const col = alias ? `${alias}.project_key` : 'project_key';
+  return {
+    clause: `${col} IN (${projects.map(() => '?').join(', ')})`,
+    params: projects,
+  };
+}
+
 export interface Signal<T> {
   ok: boolean;
   error: string | null;
@@ -161,6 +198,15 @@ export interface StalledData {
 
 export interface FlowSignals {
   window: { days: number; from: string };
+  /**
+   * Which Jira projects these numbers cover, and which are deliberately left
+   * out. Carried on every response so a figure can always be reconciled against
+   * the wallboards, which are `project = NT`.
+   */
+  scope: {
+    projects: string[];
+    excluded: Array<{ project: string; cachedTickets: number }> | null;
+  };
   handbacks: Signal<HandbackData>;
   pingPong: Signal<PingPongData>;
   breachesByQueue: Signal<BreachByQueueData>;
@@ -193,7 +239,8 @@ function delta(now: number, before: number): number | null {
  * complaint — Tier 2 rejecting without saying what is missing, Customer Care
  * escalating without enough investigation — is this number.
  */
-async function handbacks(days: number, prior: number): Promise<HandbackData> {
+async function handbacks(days: number, prior: number, projects: string[]): Promise<HandbackData> {
+  const scope = ticketKeyScope(projects);
   // Classified by DIRECTION, not by escalation_type.
   //
   // `escalation_type = 'rejection'` returns zero and always will: the only
@@ -212,11 +259,12 @@ async function handbacks(days: number, prior: number): Promise<HandbackData> {
             COUNT(*) AS count
        FROM escalation_log
       WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+        AND ${scope.clause}
         AND from_tier IS NOT NULL AND to_tier IS NOT NULL
         AND from_tier <> to_tier
       GROUP BY from_tier, to_tier,
                CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END`,
-    [-days, -prior, -days],
+    [-days, -prior, ...scope.params, -days],
   );
 
   const routes: HandbackData['routes'] = [];
@@ -251,7 +299,8 @@ async function handbacks(days: number, prior: number): Promise<HandbackData> {
  * live risk-scorer so the figure is reproducible after the fact — a number in a
  * report to a manager has to still be true when he checks it on Thursday.
  */
-async function pingPong(days: number): Promise<PingPongData> {
+async function pingPong(days: number, projects: string[]): Promise<PingPongData> {
+  const scope = ticketKeyScope(projects);
   const [worst, affected] = await Promise.all([
     query<PingPongData['worst'][number]>(
       `SELECT TOP (?)
@@ -262,20 +311,22 @@ async function pingPong(days: number): Promise<PingPongData> {
               MAX(e.created_at) AS last_move
          FROM escalation_log e
         WHERE e.created_at >= DATEADD(day, ?, GETUTCDATE())
+          AND ${scope.clause.replace(/ticket_key/g, 'e.ticket_key')}
         GROUP BY e.ticket_key
        HAVING COUNT(*) >= ?
         ORDER BY COUNT(*) DESC, SUM(CASE WHEN e.escalation_type = 'rejection' THEN 1 ELSE 0 END) DESC`,
-      [TOP_N, -days, PING_PONG_THRESHOLD],
+      [TOP_N, -days, ...scope.params, PING_PONG_THRESHOLD],
     ),
     query<{ cnt: number }>(
       `SELECT COUNT(*) AS cnt FROM (
          SELECT ticket_key
            FROM escalation_log
           WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+            AND ${scope.clause}
           GROUP BY ticket_key
          HAVING COUNT(*) >= ?
        ) t`,
-      [-days, PING_PONG_THRESHOLD],
+      [-days, ...scope.params, PING_PONG_THRESHOLD],
     ),
   ]);
 
@@ -288,7 +339,9 @@ async function pingPong(days: number): Promise<PingPongData> {
  * that Customer Care is where tickets wait for everybody else, and reading it
  * the other way would put the improvement effort in the wrong team entirely.
  */
-async function breachesByQueue(days: number): Promise<BreachByQueueData> {
+async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
+  const scope = projectScope(projects, 'c');
+  const bare = projectScope(projects);
   // Reads customfield_14048 out of `fields_json` — the same Resolution SLA field
   // the wallboards count with `cf[14048] = breached()`. A figure in this report
   // that disagreed with the wallboard would be indefensible in front of the team,
@@ -298,7 +351,8 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
     `${DIRTY_READ}
      SELECT c.current_tier AS tier, COUNT(*) AS breaches
        FROM jira_issue_cache c
-      WHERE ISJSON(c.fields_json) = 1
+      WHERE ${scope.clause}
+        AND ISJSON(c.fields_json) = 1
         AND (c.status_category IS NULL OR c.status_category <> 'Done')
         AND (
               JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') = 'true'
@@ -311,6 +365,7 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
             )
       GROUP BY c.current_tier
       ORDER BY breaches DESC`,
+    scope.params,
   );
 
   // Sanity check on the SOURCE, not on the month. If no cached ticket carries a
@@ -320,8 +375,10 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   const ever = await query<{ cnt: number }>(
     `${DIRTY_READ}
      SELECT COUNT(*) AS cnt FROM jira_issue_cache
-      WHERE ISJSON(fields_json) = 1
+      WHERE ${bare.clause}
+        AND ISJSON(fields_json) = 1
         AND JSON_QUERY(fields_json, '$.${RESOLUTION_SLA_FIELD}') IS NOT NULL`,
+    bare.params,
   );
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
@@ -337,7 +394,9 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   try {
     const c = await query<{ cached: number; last_sync: string | null }>(
       `${DIRTY_READ}
-       SELECT COUNT_BIG(*) AS cached, MAX(synced_at) AS last_sync FROM jira_issue_cache`,
+       SELECT COUNT_BIG(*) AS cached, MAX(synced_at) AS last_sync FROM jira_issue_cache
+        WHERE ${bare.clause}`,
+      bare.params,
     );
     coverage = { cachedTickets: Number(c[0]?.cached ?? 0) || null, lastSync: c[0]?.last_sync ?? null };
   } catch { /* the caveat is optional; the numbers it qualifies are not */ }
@@ -364,17 +423,20 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
  * recommendation is a named case owner for every multi-team ticket; this is the
  * count that says whether that landed.
  */
-async function unowned(): Promise<UnownedData> {
+async function unowned(projects: string[]): Promise<UnownedData> {
+  const scope = projectScope(projects);
   const rows = await query<{ tier: string | null; count: number; oldest_days: number }>(
     `${DIRTY_READ}
      SELECT current_tier AS tier,
             COUNT(*) AS count,
             MAX(DATEDIFF(day, jira_created, GETUTCDATE())) AS oldest_days
        FROM jira_issue_cache
-      WHERE (status_category IS NULL OR status_category <> 'Done')
+      WHERE ${scope.clause}
+        AND (status_category IS NULL OR status_category <> 'Done')
         AND (assignee_display IS NULL OR assignee_display = '')
       GROUP BY current_tier
       ORDER BY count DESC`,
+    scope.params,
   );
   const byTier = rows.map(r => ({ ...r, tier: r.tier ?? 'Unassigned' }));
   return { total: byTier.reduce((s, r) => s + r.count, 0), byTier };
@@ -386,16 +448,18 @@ async function unowned(): Promise<UnownedData> {
  * ticket nobody has touched in a fortnight is a forgotten one, and only the
  * second is a management failure.
  */
-async function stalled(): Promise<StalledData> {
+async function stalled(projects: string[]): Promise<StalledData> {
+  const scope = projectScope(projects);
   const rows = await query<{ tier: string | null; count: number }>(
     `${DIRTY_READ}
      SELECT current_tier AS tier, COUNT(*) AS count
        FROM jira_issue_cache
-      WHERE (status_category IS NULL OR status_category <> 'Done')
+      WHERE ${scope.clause}
+        AND (status_category IS NULL OR status_category <> 'Done')
         AND jira_updated < DATEADD(day, ?, GETUTCDATE())
       GROUP BY current_tier
       ORDER BY count DESC`,
-    [-STALE_DAYS],
+    [...scope.params, -STALE_DAYS],
   );
 
   const worst = await query<Omit<StalledData['worst'][number], 'tier'> & { tier: string | null }>(
@@ -407,10 +471,11 @@ async function stalled(): Promise<StalledData> {
             assignee_display AS assignee,
             DATEDIFF(day, jira_updated, GETUTCDATE()) AS days_untouched
        FROM jira_issue_cache
-      WHERE (status_category IS NULL OR status_category <> 'Done')
+      WHERE ${scope.clause}
+        AND (status_category IS NULL OR status_category <> 'Done')
         AND jira_updated < DATEADD(day, ?, GETUTCDATE())
       ORDER BY jira_updated ASC`,
-    [TOP_N, -STALE_DAYS],
+    [TOP_N, ...scope.params, -STALE_DAYS],
   );
 
   const byTier = rows.map(r => ({ ...r, tier: r.tier ?? 'Unassigned' }));
@@ -429,9 +494,25 @@ async function stalled(): Promise<StalledData> {
  * defaulted calls is how a report ends up comparing a fortnight of handbacks
  * against a month of breaches and nobody notices for six weeks.
  */
-export async function getFlowSignals(days = 30): Promise<FlowSignals> {
+export async function getFlowSignals(days = 30, projects = DEFAULT_PROJECTS): Promise<FlowSignals> {
   const window = Math.min(Math.max(days, 1), 365);
   const prior = window * 2;   // window start for the immediately preceding period
+
+  // What the scope leaves out, counted rather than assumed. A filter nobody can
+  // see is a filter nobody remembers, and "why doesn't this match the wallboard"
+  // is a much easier question to answer when the answer is printed next to the
+  // number. Best-effort: the scope note is not worth failing the run for.
+  let excluded: FlowSignals['scope']['excluded'] = null;
+  try {
+    const rows = await query<{ project_key: string; cnt: number }>(
+      `${DIRTY_READ}
+       SELECT project_key, COUNT(*) AS cnt FROM jira_issue_cache
+        WHERE project_key NOT IN (${projects.map(() => '?').join(', ')})
+        GROUP BY project_key ORDER BY cnt DESC`,
+      projects,
+    );
+    excluded = rows.map(r => ({ project: r.project_key, cachedTickets: r.cnt }));
+  } catch { /* the note is optional; the numbers are not */ }
 
   // SEQUENTIAL, deliberately. The first cut fired all five concurrently and the
   // two heaviest — breachesByQueue and stalled — both died on the 30s request
@@ -445,11 +526,11 @@ export async function getFlowSignals(days = 30): Promise<FlowSignals> {
   // section is a section the manager reading it cannot use.
   //
   // It also keeps the load off live NOVA, which is sharing these DTUs.
-  const h = await signal(() => handbacks(window, prior));
-  const p = await signal(() => pingPong(window));
-  const b = await signal(() => breachesByQueue(window));
-  const u = await signal(() => unowned());
-  const s = await signal(() => stalled());
+  const h = await signal(() => handbacks(window, prior, projects));
+  const p = await signal(() => pingPong(window, projects));
+  const b = await signal(() => breachesByQueue(projects));
+  const u = await signal(() => unowned(projects));
+  const s = await signal(() => stalled(projects));
 
   const named: Array<[string, Signal<unknown>]> = [
     ['handbacks', h], ['pingPong', p], ['breachesByQueue', b],
@@ -458,6 +539,7 @@ export async function getFlowSignals(days = 30): Promise<FlowSignals> {
 
   return {
     window: { days: window, from: new Date(Date.now() - window * 86_400_000).toISOString().slice(0, 10) },
+    scope: { projects, excluded },
     handbacks: h,
     pingPong: p,
     breachesByQueue: b,

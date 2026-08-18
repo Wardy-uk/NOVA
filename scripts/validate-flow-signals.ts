@@ -100,14 +100,19 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18f\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18g\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
   if (asJson) {
     console.log(JSON.stringify(flow, null, 2));
   } else {
-    console.log(`\nFlow signals — last ${flow.window.days} days (from ${flow.window.from})\n`);
+    console.log(`\nFlow signals — last ${flow.window.days} days (from ${flow.window.from})`);
+    console.log(`Scope: project ${flow.scope.projects.join(', ')}`
+      + (flow.scope.excluded?.length
+        ? ` — EXCLUDING ${flow.scope.excluded.map(e => `${e.project} (${e.cachedTickets})`).join(', ')}`
+        : '')
+      + '\n');
 
     console.log(line('handbacks', flow.handbacks, (d: { total: number; previous: number; changePct: number | null; routes: Array<{ from_tier: string; to_tier: string; count: number }>; unclassified: number }) =>
       `${d.total} returned to a lower tier (previous period ${d.previous}, change ${d.changePct === null ? 'n/a' : `${d.changePct}%`})`

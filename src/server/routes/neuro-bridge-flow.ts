@@ -17,16 +17,28 @@ export function createNeuroBridgeFlowRoutes(): Router {
   const router = Router();
 
   /**
-   * GET /flow-signals?days=30
+   * GET /flow-signals?days=30&projects=NT
    *
    * NEURO pulls this once per weekly report rather than making five round trips
    * over the Funnel.
+   *
+   * `projects` defaults to NT, matching every NOVA KPI and wallboard. Widening
+   * it is supported and deliberate — the Support Review counted TPJ work too —
+   * but the scope always travels back on the response so a number can be
+   * reconciled against the board on the wall.
    */
   router.get('/flow-signals', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     try {
       const days = parseInt(req.query.days as string, 10) || 30;
-      res.json({ ok: true, data: await getFlowSignals(days) });
+      const raw = typeof req.query.projects === 'string' ? req.query.projects : '';
+      // Uppercased and stripped to word characters: these interpolate into a
+      // LIKE prefix and an IN list, and a project key is a Jira identifier, not
+      // free text.
+      const projects = raw
+        ? raw.split(',').map(p => p.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean)
+        : undefined;
+      res.json({ ok: true, data: await getFlowSignals(days, projects?.length ? projects : undefined) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
