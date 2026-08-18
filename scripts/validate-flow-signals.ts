@@ -100,7 +100,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18e\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18f\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
@@ -109,21 +109,25 @@ async function main(): Promise<void> {
   } else {
     console.log(`\nFlow signals — last ${flow.window.days} days (from ${flow.window.from})\n`);
 
-    console.log(line('handbacks', flow.handbacks, (d: { total: number; previous: number; changePct: number | null; routes: unknown[] }) =>
-      `${d.total} returned between tiers (previous period ${d.previous}, change ${d.changePct === null ? 'n/a' : `${d.changePct}%`}), ${d.routes.length} routes`));
+    console.log(line('handbacks', flow.handbacks, (d: { total: number; previous: number; changePct: number | null; routes: Array<{ from_tier: string; to_tier: string; count: number }>; unclassified: number }) =>
+      `${d.total} returned to a lower tier (previous period ${d.previous}, change ${d.changePct === null ? 'n/a' : `${d.changePct}%`})`
+      + (d.routes[0] ? `; top ${d.routes[0].from_tier} → ${d.routes[0].to_tier} ${d.routes[0].count}` : '')
+      + (d.unclassified ? `; ${d.unclassified} moves off-ladder (Escalations/Production), direction not inferred` : '')));
 
     console.log(line('pingPong', flow.pingPong, (d: { ticketsAffected: number; threshold: number; worst: Array<{ ticket_key: string; moves: number; returns: number }> }) =>
       `${d.ticketsAffected} tickets crossed queues ${d.threshold}+ times`
       + (d.worst[0] ? `; worst ${d.worst[0].ticket_key} (${d.worst[0].moves} moves, ${d.worst[0].returns} returns)` : '')));
 
-    console.log(line('breachesByQueue', flow.breachesByQueue, (d: { total: number; everBreached: number | null; byTier: Array<{ tier: string; sharePct: number | null }>; coverage: { cachedTickets: number | null; lastSync: string | null } }) =>
-      (d.everBreached === 0
+    console.log(line('breachesByQueue', flow.breachesByQueue, (d: { total: number; slaDataPresent: number | null; byTier: Array<{ tier: string; breaches: number; sharePct: number | null }>; coverage: { cachedTickets: number | null; lastSync: string | null } }) =>
+      (d.slaDataPresent === 0
         // A green tick on a hollow zero is the exact failure this chain exists
-        // to prevent. If nothing in the table is flagged breached, the pipeline
-        // is not writing the flag — say that, do not report a quiet month.
-        ? 'NO BREACH DATA — sla_breached is not set on ANY row; this is an unpopulated field, not a clean month'
-        : `${d.total} breaches`
-          + (d.byTier[0] ? `; top ${d.byTier[0].tier} ${d.byTier[0].sharePct}%` : ''))
+        // to prevent. Zero tickets carrying a parseable SLA field is a broken
+        // mapping, not a clean queue — which is the mistake the first version of
+        // this query made by trusting the sla_breached column.
+        ? 'NO SLA DATA — no cached ticket carries a parseable cf14048; broken field mapping, not a clean month'
+        : `${d.total} open tickets currently breached`
+          + (d.byTier[0] ? `; top ${d.byTier[0].tier} ${d.byTier[0].breaches} (${d.byTier[0].sharePct}%)` : '')
+          + ` [${d.slaDataPresent} tickets carry an SLA field]`)
       + ` — cache ${d.coverage.cachedTickets ?? '?'} tickets, synced ${String(d.coverage.lastSync ?? 'unknown').slice(0, 19)}`));
 
     console.log(line('unowned', flow.unowned, (d: { total: number; byTier: Array<{ tier: string; count: number; oldest_days: number }> }) =>

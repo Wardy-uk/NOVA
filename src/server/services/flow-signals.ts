@@ -59,6 +59,46 @@ export const TOP_N = 10;
  */
 const DIRTY_READ = 'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n';
 
+/**
+ * Jira's Resolution SLA field. The wallboards count breaches with
+ * `cf[14048] = breached()`, so anything reported here has to come from the same
+ * field or the two will disagree in front of the team.
+ *
+ * Explicitly NOT `sla_breached` / `sla_breach_time` on jira_issue_cache. Those
+ * columns are populated from `customfield_10010`, which the sync does not fetch
+ * — the field list asks Jira for 14046 and 14048. The columns are therefore 0 on
+ * every one of the 5,602 cached rows and always will be. That is a real defect
+ * in jira-sync-service, tracked separately; this service routes around it by
+ * reading the JSON the sync *does* store.
+ */
+const RESOLUTION_SLA_FIELD = 'customfield_14048';
+
+/**
+ * Seniority of a queue, for deciding whether a tier move was an escalation or a
+ * handback.
+ *
+ * Two vocabularies have to be normalised here or the classification silently
+ * matches nothing. `TIER_PATTERNS` in escalation-log-service emits short forms
+ * (`T1`, `T2`, `Dev`); the live sync path writes Jira's raw `customfield_12981`
+ * values (`Customer Care`, `Tier 2`, `Development`). Both are in the table.
+ *
+ * Production and Escalations are deliberately absent. They are not rungs on this
+ * ladder — a move into Escalations is not "one level up" from Tier 3 — and
+ * guessing a rank for them would invent handbacks that never happened. Moves
+ * involving them are counted as neither direction and reported separately.
+ */
+const TIER_RANK: Record<string, number> = {
+  't1': 1, 'tier 1': 1, 'customer care': 1, 'first line': 1, 'cc': 1,
+  't2': 2, 'tier 2': 2, 'second line': 2,
+  't3': 3, 'tier 3': 3, 'third line': 3,
+  'dev': 4, 'development': 4, 'with development': 4,
+};
+
+export function tierRank(tier: string | null | undefined): number | null {
+  if (!tier) return null;
+  return TIER_RANK[tier.trim().toLowerCase()] ?? null;
+}
+
 export interface Signal<T> {
   ok: boolean;
   error: string | null;
@@ -70,6 +110,12 @@ export interface HandbackData {
   previous: number;
   changePct: number | null;
   routes: Array<{ from_tier: string; to_tier: string; count: number }>;
+  /**
+   * Moves in the window involving a queue with no place on the tier ladder —
+   * Escalations, Production. Reported rather than silently dropped, so the total
+   * cannot be read as covering every movement in the log.
+   */
+  unclassified: number;
 }
 
 export interface PingPongData {
@@ -84,11 +130,16 @@ export interface PingPongData {
 export interface BreachByQueueData {
   total: number;
   /**
-   * Rows carrying `sla_breached = 1` anywhere in the table, ignoring the window.
-   * Zero here means the flag is not populated, which is a different statement
-   * from a month with no breaches — and must never render as the same sentence.
+   * Cached tickets carrying a parseable Resolution SLA field at all. Zero means
+   * the field mapping is broken, which is a statement about the pipeline and
+   * must never render as the same sentence as a queue with no breaches.
    */
-  everBreached: number | null;
+  slaDataPresent: number | null;
+  /**
+   * What this actually measures, carried with the number so a reader cannot
+   * mistake it for the Support Review's figure. See the note on the function.
+   */
+  basis: string;
   byTier: Array<{ tier: string; breaches: number; sharePct: number | null }>;
   coverage: { cachedTickets: number | null; lastSync: string | null };
 }
@@ -143,36 +194,56 @@ function delta(now: number, before: number): number | null {
  * escalating without enough investigation — is this number.
  */
 async function handbacks(days: number, prior: number): Promise<HandbackData> {
-  const [routes, totals] = await Promise.all([
-    query<{ from_tier: string; to_tier: string; count: number }>(
-      `SELECT ISNULL(from_tier, 'Unknown') AS from_tier,
-              ISNULL(to_tier, 'Unknown')   AS to_tier,
-              COUNT(*) AS count
-         FROM escalation_log
-        WHERE escalation_type = 'rejection'
-          AND created_at >= DATEADD(day, ?, GETUTCDATE())
-        GROUP BY from_tier, to_tier
-        ORDER BY count DESC`,
-      [-days],
-    ),
-    query<{ window: string; count: number }>(
-      `SELECT 'current' AS [window], COUNT(*) AS count
-         FROM escalation_log
-        WHERE escalation_type = 'rejection'
-          AND created_at >= DATEADD(day, ?, GETUTCDATE())
-       UNION ALL
-       SELECT 'previous', COUNT(*)
-         FROM escalation_log
-        WHERE escalation_type = 'rejection'
-          AND created_at >= DATEADD(day, ?, GETUTCDATE())
-          AND created_at <  DATEADD(day, ?, GETUTCDATE())`,
-      [-days, -prior, -days],
-    ),
-  ]);
+  // Classified by DIRECTION, not by escalation_type.
+  //
+  // `escalation_type = 'rejection'` returns zero and always will: the only
+  // caller of logRejection() is an admin endpoint with no UI behind it, and the
+  // live sync at jira-sync-service.ts hardcodes 'jira_transition' for every tier
+  // move regardless of direction. But it writes from_tier and to_tier correctly,
+  // so a move from Tier 2 back to Customer Care is already sitting in the table
+  // — described accurately, just never named.
+  //
+  // Reading direction from the columns means this works on the existing history
+  // rather than only on rows written after a fix ships. Nothing about the write
+  // path has to change for the number to become true.
+  const rows = await query<{ from_tier: string | null; to_tier: string | null; period: string; count: number }>(
+    `SELECT from_tier, to_tier,
+            CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END AS period,
+            COUNT(*) AS count
+       FROM escalation_log
+      WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+        AND from_tier IS NOT NULL AND to_tier IS NOT NULL
+        AND from_tier <> to_tier
+      GROUP BY from_tier, to_tier,
+               CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END`,
+    [-days, -prior, -days],
+  );
 
-  const current = totals.find(t => t.window === 'current')?.count ?? 0;
-  const previous = totals.find(t => t.window === 'previous')?.count ?? 0;
-  return { total: current, previous, changePct: delta(current, previous), routes };
+  const routes: HandbackData['routes'] = [];
+  let total = 0;
+  let previous = 0;
+  let unclassified = 0;
+
+  for (const r of rows) {
+    const from = tierRank(r.from_tier);
+    const to = tierRank(r.to_tier);
+    // A move touching a queue outside the ladder — Escalations, Production — has
+    // no direction. Counted, and reported, but never guessed at.
+    if (from === null || to === null) {
+      if (r.period === 'current') unclassified += r.count;
+      continue;
+    }
+    if (to >= from) continue;              // escalation, or sideways
+    if (r.period === 'current') {
+      total += r.count;
+      routes.push({ from_tier: r.from_tier as string, to_tier: r.to_tier as string, count: r.count });
+    } else {
+      previous += r.count;
+    }
+  }
+
+  routes.sort((a, b) => b.count - a.count);
+  return { total, previous, changePct: delta(total, previous), routes, unclassified };
 }
 
 /**
@@ -218,28 +289,39 @@ async function pingPong(days: number): Promise<PingPongData> {
  * the other way would put the improvement effort in the wrong team entirely.
  */
 async function breachesByQueue(days: number): Promise<BreachByQueueData> {
+  // Reads customfield_14048 out of `fields_json` — the same Resolution SLA field
+  // the wallboards count with `cf[14048] = breached()`. A figure in this report
+  // that disagreed with the wallboard would be indefensible in front of the team,
+  // so it has to be the same field, breached by the same definition: the ongoing
+  // cycle breached, or any completed cycle breached.
   const rows = await query<{ tier: string | null; breaches: number }>(
     `${DIRTY_READ}
-     SELECT current_tier AS tier, COUNT(*) AS breaches
-       FROM jira_issue_cache
-      WHERE sla_breached = 1
-        AND sla_breach_time >= DATEADD(day, ?, GETUTCDATE())
-      GROUP BY current_tier
+     SELECT c.current_tier AS tier, COUNT(*) AS breaches
+       FROM jira_issue_cache c
+      WHERE ISJSON(c.fields_json) = 1
+        AND (c.status_category IS NULL OR c.status_category <> 'Done')
+        AND (
+              JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') = 'true'
+              OR EXISTS (
+                   SELECT 1
+                     FROM OPENJSON(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.completedCycles')
+                          WITH (breached BIT '$.breached') cyc
+                    WHERE cyc.breached = 1
+                 )
+            )
+      GROUP BY c.current_tier
       ORDER BY breaches DESC`,
-    [-days],
   );
 
-  // Is the flag populated AT ALL? Without this, a `sla_breached` column that is
-  // never written reports "0 breaches" — a green tick on a number that means
-  // nothing, in the one section of the report whose headline finding is that
-  // 90.5% of breaches happen in one queue.
-  //
-  // Zero breaches in the window is a claim about a good month. Zero breached
-  // rows in the entire table is a claim about the pipeline, and the two must not
-  // render as the same sentence.
+  // Sanity check on the SOURCE, not on the month. If no cached ticket carries a
+  // parseable Resolution SLA at all, a zero above is a broken field mapping
+  // rather than a clean queue — which is exactly the mistake the old version of
+  // this query made by trusting the `sla_breached` column.
   const ever = await query<{ cnt: number }>(
     `${DIRTY_READ}
-     SELECT COUNT(*) AS cnt FROM jira_issue_cache WHERE sla_breached = 1`,
+     SELECT COUNT(*) AS cnt FROM jira_issue_cache
+      WHERE ISJSON(fields_json) = 1
+        AND JSON_QUERY(fields_json, '$.${RESOLUTION_SLA_FIELD}') IS NOT NULL`,
   );
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
@@ -263,7 +345,11 @@ async function breachesByQueue(days: number): Promise<BreachByQueueData> {
   const total = rows.reduce((s, r) => s + r.breaches, 0);
   return {
     total,
-    everBreached: ever[0]?.cnt ?? null,
+    slaDataPresent: ever[0]?.cnt ?? null,
+    basis: 'Open tickets whose Resolution SLA (cf14048) is currently breached, '
+      + 'grouped by the queue they are in NOW. Same field and definition as the '
+      + 'wallboards. This is a stock, not a flow — it is NOT the Support Review\'s '
+      + '"breaches by queue at time of breach", which no source in NOVA can produce.',
     byTier: rows.map(r => ({
       tier: r.tier ?? 'Unassigned',
       breaches: r.breaches,
