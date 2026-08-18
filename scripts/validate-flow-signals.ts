@@ -23,7 +23,7 @@
 
 import dotenv from 'dotenv';
 
-import { closePool } from '../src/server/services/database.js';
+import { closePool, query } from '../src/server/services/database.js';
 import { getFlowSignals, type Signal } from '../src/server/services/flow-signals.js';
 
 // The server loads its environment in index.ts, which this script deliberately
@@ -45,7 +45,51 @@ function line(label: string, sig: Signal<unknown>, describe: (d: never) => strin
   return `  ✓ ${label.padEnd(20)} ${describe(sig.data as never)}`;
 }
 
+/**
+ * Preflight: the conditions a timeout is almost always caused by.
+ *
+ * A bare "Request failed to complete in 30000ms" tells you a query was slow and
+ * nothing about why, which sent us round the loop twice. These two facts —
+ * how big the table is and whether the index the query needs exists — turn that
+ * into an instruction.
+ *
+ * Row count comes from `sys.dm_db_partition_stats` rather than COUNT(*), because
+ * a diagnostic that has to scan the table to tell you the table is too big to
+ * scan is not a diagnostic.
+ */
+async function preflight(): Promise<void> {
+  try {
+    const [size, indexes] = await Promise.all([
+      query<{ rows: number }>(
+        `SELECT SUM(row_count) AS rows FROM sys.dm_db_partition_stats
+          WHERE object_id = OBJECT_ID('jira_issue_cache') AND index_id IN (0, 1)`,
+      ),
+      query<{ name: string }>(
+        `SELECT name FROM sys.indexes
+          WHERE object_id = OBJECT_ID('jira_issue_cache') AND name IS NOT NULL`,
+      ),
+    ]);
+
+    const names = indexes.map(i => i.name);
+    console.log(`jira_issue_cache: ${Number(size[0]?.rows ?? 0).toLocaleString()} rows, ${names.length} indexes`);
+
+    if (!names.includes('IX_jira_cache_sla_breach')) {
+      console.log(
+        '\n  ⚠  IX_jira_cache_sla_breach is MISSING.\n'
+        + '     breachesByQueue will scan the whole table and time out at 30s.\n'
+        + '     It is created by initializeDatabase() on NOVA startup — deploy and\n'
+        + '     restart the site, then re-run this. Running the validator alone\n'
+        + '     never creates it.\n',
+      );
+    }
+  } catch {
+    // A diagnostic that can break the thing it is diagnosing is worse than no
+    // diagnostic. If this cannot run, say nothing and let the signals speak.
+  }
+}
+
 async function main(): Promise<void> {
+  if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
   if (asJson) {
