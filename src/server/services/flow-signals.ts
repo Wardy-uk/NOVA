@@ -35,6 +35,19 @@ import { query } from './database.js';
  * Strictly SELECT. Nothing here writes.
  */
 
+/**
+ * Stamped into every response so a caller can tell WHICH build answered.
+ *
+ * The validator learned this the hard way — two runs were spent working out
+ * that a box was on old code — and the endpoint needed it just as badly: a
+ * deploy that silently served a stale `dist` returned a response that looked
+ * plausible, with three new fields quietly `undefined`. A missing field is
+ * indistinguishable from a field that is legitimately empty; a version is not.
+ *
+ * Bump on any change to the shape of the response.
+ */
+export const FLOW_SIGNALS_BUILD = '2026-08-18-classifier';
+
 /** Queue moves within the window before a ticket counts as ping-ponging. */
 export const PING_PONG_THRESHOLD = 3;
 /** Open and untouched for this long is a stalled ticket, not a queued one. */
@@ -211,6 +224,8 @@ export interface StalledData {
 }
 
 export interface FlowSignals {
+  /** Which build of this service answered. See FLOW_SIGNALS_BUILD. */
+  build: string;
   window: { days: number; from: string };
   /**
    * Which Jira projects these numbers cover, and which are deliberately left
@@ -650,6 +665,7 @@ export async function getFlowSignals(days = 30, projects = DEFAULT_PROJECTS): Pr
   ];
 
   return {
+    build: FLOW_SIGNALS_BUILD,
     window: { days: window, from: new Date(Date.now() - window * 86_400_000).toISOString().slice(0, 10) },
     scope: { projects, excluded },
     handbacks: h,
