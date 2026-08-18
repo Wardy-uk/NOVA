@@ -73,31 +73,12 @@ const DIRTY_READ = 'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n';
  */
 export const RESOLUTION_SLA_FIELD = 'customfield_14048';
 
-/**
- * Seniority of a queue, for deciding whether a tier move was an escalation or a
- * handback.
- *
- * Two vocabularies have to be normalised here or the classification silently
- * matches nothing. `TIER_PATTERNS` in escalation-log-service emits short forms
- * (`T1`, `T2`, `Dev`); the live sync path writes Jira's raw `customfield_12981`
- * values (`Customer Care`, `Tier 2`, `Development`). Both are in the table.
- *
- * Production and Escalations are deliberately absent. They are not rungs on this
- * ladder — a move into Escalations is not "one level up" from Tier 3 — and
- * guessing a rank for them would invent handbacks that never happened. Moves
- * involving them are counted as neither direction and reported separately.
- */
-const TIER_RANK: Record<string, number> = {
-  't1': 1, 'tier 1': 1, 'customer care': 1, 'first line': 1, 'cc': 1,
-  't2': 2, 'tier 2': 2, 'second line': 2,
-  't3': 3, 'tier 3': 3, 'third line': 3,
-  'dev': 4, 'development': 4, 'with development': 4,
-};
+// Tier seniority lives in its own module because the Jira sync classifies moves
+// as they happen and this classifies them retrospectively — if the two ever
+// disagreed, the weekly report would contradict the escalation log.
+import { tierRank } from './tier-rank.js';
 
-export function tierRank(tier: string | null | undefined): number | null {
-  if (!tier) return null;
-  return TIER_RANK[tier.trim().toLowerCase()] ?? null;
-}
+export { tierRank };
 
 /**
  * Projects these signals cover.
@@ -153,6 +134,17 @@ export interface HandbackData {
    * cannot be read as covering every movement in the log.
    */
   unclassified: number;
+  /**
+   * Why work came back, from the mandatory Rejection Reason on the transition
+   * screen (cf13216). Null when the query failed; `withoutReason` counts rows
+   * recorded before the sync started capturing it, so the reasons cannot be
+   * mistaken for complete coverage.
+   */
+  reasons: {
+    top: Array<{ reason: string; count: number }>;
+    withoutReason: number;
+    classified: number;
+  } | null;
 }
 
 export interface PingPongData {
@@ -310,7 +302,40 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
   }
 
   routes.sort((a, b) => b.count - a.count);
-  return { total, previous, changePct: delta(total, previous), routes, unclassified };
+
+  // WHY work is coming back, not just how often.
+  //
+  // Rejection Reason (cf13216) is mandatory on the "Submit for Rejection to ..."
+  // transition screen, so a genuine handback carries one. The sync snapshots it
+  // onto the log row at the moment of the move; this groups them. It is free
+  // text, so it is reported as written rather than bucketed — inventing
+  // categories over someone else's words would be a worse distortion than a
+  // slightly untidy list.
+  //
+  // Best-effort, and only populated for moves recorded AFTER the sync started
+  // capturing it. Older rows have no reason and are counted as such rather than
+  // being quietly dropped from the denominator.
+  let reasons: HandbackData['reasons'] = null;
+  try {
+    const rows = await query<{ reason: string | null; count: number }>(
+      `SELECT TOP (?) reason_label AS reason, COUNT(*) AS count
+         FROM escalation_log
+        WHERE escalation_type = 'rejection'
+          AND created_at >= DATEADD(day, ?, GETUTCDATE())
+          AND ${scope.clause}
+        GROUP BY reason_label
+        ORDER BY COUNT(*) DESC`,
+      [TOP_N, -days, ...scope.params],
+    );
+    const withReason = rows.filter(r => r.reason && r.reason.trim());
+    reasons = {
+      top: withReason.map(r => ({ reason: (r.reason as string).trim(), count: r.count })),
+      withoutReason: rows.filter(r => !r.reason || !r.reason.trim()).reduce((s, r) => s + r.count, 0),
+      classified: rows.reduce((s, r) => s + r.count, 0),
+    };
+  } catch { /* the reasons are the enrichment; the count is the signal */ }
+
+  return { total, previous, changePct: delta(total, previous), routes, unclassified, reasons };
 }
 
 /**

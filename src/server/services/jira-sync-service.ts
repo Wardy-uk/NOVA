@@ -2,6 +2,7 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
 import { query, queryOne, execute } from './database.js';
+import { isHandback } from './tier-rank.js';
 import { logError } from './error-log.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
@@ -33,6 +34,11 @@ const ALL_FIELDS = [
   'customfield_13184', // TL;DR
   'customfield_13185', // Agent Summary
   'customfield_13186', // Escalation Reason
+  // Rejection Reason — mandatory on the "Submit for Rejection to ..." transition
+  // screen, so every handback carries one. Without it the escalation log can say
+  // how often work is returned but never why, which is the half the Support
+  // Review actually complained about.
+  'customfield_13216',
   'customfield_13212', // Troubleshooting
   'customfield_13213', // Issue Environment
   'customfield_13214', // Expected Outcome
@@ -498,20 +504,47 @@ export class JiraSyncService {
 
     // Log tier changes to escalation_log for KPI pipeline
     if (oldRow && currentTier && oldRow.current_tier && currentTier !== oldRow.current_tier) {
+      // Direction decides the type. Every tier move used to be logged as
+      // 'jira_transition' regardless of which way it went, which is why
+      // `escalation_type = 'rejection'` returned zero across the whole table
+      // while 139 tickets were visibly ping-ponging. The columns held the
+      // direction all along; nothing read it.
+      //
+      // null means neither — one end of the move is off the tier ladder
+      // (Escalations, Production), and guessing would manufacture handbacks.
+      const handback = isHandback(oldRow.current_tier as string | null, currentTier);
+      const escalationType = handback === true ? 'rejection' : 'jira_transition';
+
+      // The Rejection Reason is mandatory on the transition screen, so on a
+      // genuine handback this is populated. Snapshotted here rather than read
+      // later because the field holds only the LATEST rejection — a ticket
+      // returned twice overwrites it, and the log is a point-in-time record.
+      const rejectionReason = handback === true
+        ? (typeof f.customfield_13216 === 'string' ? f.customfield_13216.trim().slice(0, 500) : null)
+        : null;
+
       try {
         await execute(`
           INSERT INTO escalation_log
-            (ticket_key, escalation_type, from_tier, to_tier, escalated_by, notes, source, created_at)
-          SELECT ?, 'jira_transition', ?, ?, ?, ?, 'jira_sync', GETUTCDATE()
+            (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
+             escalated_by, notes, source, created_at)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'jira_sync', GETUTCDATE()
           WHERE NOT EXISTS (
             SELECT 1 FROM escalation_log
             WHERE ticket_key = ? AND from_tier = ? AND to_tier = ? AND source = 'jira_sync'
               AND ABS(DATEDIFF(minute, created_at, GETUTCDATE())) < 5
           )`,
           [
-            issue.key, oldRow.current_tier, currentTier,
+            issue.key, escalationType, oldRow.current_tier, currentTier,
+            // A real code rather than leaving it NULL: 96% of the log currently
+            // reads `unknown`, and adding to that pile would make the reason-code
+            // finding in the weekly report worse rather than better.
+            handback === true ? 'jira_rejection' : null,
+            rejectionReason,
             (assignee?.displayName as string) ?? 'system',
-            `Tier change: ${oldRow.current_tier} → ${currentTier}`,
+            handback === true
+              ? `Returned: ${oldRow.current_tier} → ${currentTier}${rejectionReason ? ` — ${rejectionReason}` : ' (no reason given)'}`
+              : `Tier change: ${oldRow.current_tier} → ${currentTier}`,
             issue.key, oldRow.current_tier, currentTier,
           ],
         );

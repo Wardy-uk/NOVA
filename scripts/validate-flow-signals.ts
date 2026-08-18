@@ -135,7 +135,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18l\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18m\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
@@ -149,10 +149,16 @@ async function main(): Promise<void> {
         : '')
       + '\n');
 
-    console.log(line('handbacks', flow.handbacks, (d: { total: number; previous: number; changePct: number | null; routes: Array<{ from_tier: string; to_tier: string; count: number }>; unclassified: number }) =>
+    console.log(line('handbacks', flow.handbacks, (d: { total: number; previous: number; changePct: number | null; routes: Array<{ from_tier: string; to_tier: string; count: number }>; unclassified: number; reasons: { top: Array<{ reason: string; count: number }>; withoutReason: number; classified: number } | null }) =>
       `${d.total} returned to a lower tier (previous period ${d.previous}, change ${d.changePct === null ? 'n/a' : `${d.changePct}%`})`
       + (d.routes[0] ? `; top ${d.routes[0].from_tier} → ${d.routes[0].to_tier} ${d.routes[0].count}` : '')
-      + (d.unclassified ? `; ${d.unclassified} moves off-ladder (Escalations/Production), direction not inferred` : '')));
+      + (d.unclassified ? `; ${d.unclassified} off-ladder` : '')
+      + (d.reasons
+        ? `\n${' '.repeat(25)}reasons: ${d.reasons.top.length
+          ? d.reasons.top.slice(0, 3).map(r => `"${r.reason}" ${r.count}`).join(', ')
+          : 'none captured yet'}`
+          + (d.reasons.withoutReason ? ` (+${d.reasons.withoutReason} logged before capture started)` : '')
+        : '')));
 
     console.log(line('pingPong', flow.pingPong, (d: { ticketsAffected: number; threshold: number; worst: Array<{ ticket_key: string; moves: number; returns: number }> }) =>
       `${d.ticketsAffected} tickets crossed queues ${d.threshold}+ times`
