@@ -11,16 +11,30 @@
  *
  * Read-only. Every statement it can reach is a SELECT.
  *
- * Run on AAPP01, from the repo root, with NOVA's own environment loaded:
+ * Run on AAPP01, FROM THE REPO ROOT — it loads `.env` relative to the working
+ * directory, the same file the server reads:
  *
+ *     cd C:\nurtur\nova
  *     npx tsx scripts/validate-flow-signals.ts
  *     npx tsx scripts/validate-flow-signals.ts --days 90 --json
  *
  * Exit code 1 if any signal failed, so it can gate a deploy.
  */
 
+import dotenv from 'dotenv';
+
 import { closePool } from '../src/server/services/database.js';
 import { getFlowSignals, type Signal } from '../src/server/services/flow-signals.js';
+
+// The server loads its environment in index.ts, which this script deliberately
+// does not import — the whole point is to reach the queries without standing up
+// an Express app. So the .env has to be loaded here instead, or every signal
+// fails with "Database not configured" and the run proves nothing.
+//
+// Safe at import time because `database.ts` reads the connection settings
+// lazily, inside buildConfig() on first connect, rather than at module load.
+// Resolves against the working directory, so run this from the repo root.
+dotenv.config();
 
 const args = process.argv.slice(2);
 const days = Number(args[args.indexOf('--days') + 1]) || 30;
@@ -73,7 +87,7 @@ async function main(): Promise<void> {
 
 main().catch(async err => {
   console.error('\nValidation could not run:', err instanceof Error ? err.message : err);
-  console.error('If this is a connection error, check NOVA_SQL_CONNECTION (or NOVA_SQL_SERVER/DATABASE/USER/PASSWORD) is in the environment.\n');
+  console.error('If this is a connection error, check you are running from the repo root so `.env` is found, and that it carries NOVA_SQL_CONNECTION (or NOVA_SQL_SERVER/DATABASE/USER/PASSWORD).\n');
   await closePool().catch(() => {});
   process.exit(1);
 });
