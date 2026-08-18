@@ -74,12 +74,18 @@ async function preflight(): Promise<void> {
     console.log(`jira_issue_cache: ${Number(size[0]?.rows ?? 0).toLocaleString()} rows, ${names.length} indexes`);
 
     if (!names.includes('IX_jira_cache_sla_breach')) {
+      // Deliberately worded down from the original. The first version of this
+      // warning blamed the timeout on the missing index, which was wrong: at
+      // 5,602 rows nothing here is slow on volume. The query was BLOCKED behind
+      // the Jira sync's writes on the clustered index, and READ UNCOMMITTED is
+      // what fixed it. Leaving the alarming version in place would send the next
+      // person down the same wrong path this one already cost three rounds on.
       console.log(
-        '\n  ⚠  IX_jira_cache_sla_breach is MISSING.\n'
-        + '     breachesByQueue will scan the whole table and time out at 30s.\n'
-        + '     It is created by initializeDatabase() on NOVA startup — deploy and\n'
-        + '     restart the site, then re-run this. Running the validator alone\n'
-        + '     never creates it.\n',
+        '\n  ℹ  IX_jira_cache_sla_breach is not present yet.\n'
+        + '     Not urgent — READ UNCOMMITTED is what stops breachesByQueue\n'
+        + '     blocking behind the sync. The index only saves a clustered scan\n'
+        + '     of a small table. It is created by initializeDatabase() on NOVA\n'
+        + '     startup, so it appears after the next deploy.\n',
       );
     }
   } catch (err) {
@@ -94,7 +100,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18d\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18e\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
