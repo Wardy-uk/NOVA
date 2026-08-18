@@ -59,16 +59,19 @@ function line(label: string, sig: Signal<unknown>, describe: (d: never) => strin
  */
 async function preflight(): Promise<void> {
   try {
-    const [size, indexes] = await Promise.all([
-      query<{ rows: number }>(
+    // Sequential, not Promise.all — same lesson as the signals themselves. The
+    // pool is small and the sync is writing; three concurrent aggregates starve
+    // each other.
+    const [size, indexes] = [
+      await query<{ rows: number }>(
         `SELECT SUM(row_count) AS rows FROM sys.dm_db_partition_stats
           WHERE object_id = OBJECT_ID('jira_issue_cache') AND index_id IN (0, 1)`,
       ),
-      query<{ name: string }>(
+      await query<{ name: string }>(
         `SELECT name FROM sys.indexes
           WHERE object_id = OBJECT_ID('jira_issue_cache') AND name IS NOT NULL`,
       ),
-    ]);
+    ];
 
     const names = indexes.map(i => i.name);
     console.log(`jira_issue_cache: ${Number(size[0]?.rows ?? 0).toLocaleString()} rows, ${names.length} indexes`);
@@ -78,7 +81,12 @@ async function preflight(): Promise<void> {
     // NOVA startup, so after a deploy this is the line that says whether the
     // breach signal can be trusted yet.
     const sync = await query<{ last_sync: string | null; breached: number; timed: number }>(
-      `SELECT MAX(synced_at) AS last_sync,
+      // READ UNCOMMITTED for the same reason the signals use it: this aggregates
+      // the whole cache while the 45s sync is writing to it, and without this the
+      // preflight queues behind those writes and times out — the diagnostic
+      // failing for exactly the reason it exists to diagnose.
+      `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+       SELECT MAX(synced_at) AS last_sync,
               SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS breached,
               SUM(CASE WHEN sla_breach_time IS NOT NULL THEN 1 ELSE 0 END) AS timed
          FROM jira_issue_cache`,
@@ -127,7 +135,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18j\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18k\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
