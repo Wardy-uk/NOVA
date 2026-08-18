@@ -38,6 +38,7 @@ import { createAuthRoutes } from './routes/auth.js';
 
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
+import { createNeuroBridgeFlowRoutes } from './routes/neuro-bridge-flow.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -1007,6 +1008,11 @@ async function main() {
     settingsQueries,
     () => bridgeEscalationLog,
   ));
+  // Flow half — how tickets MOVE (handbacks, ping-pong, breach-by-queue,
+  // unowned, stalled). Reads NOVA's own MSSQL directly rather than taking a
+  // service dependency, so it has nothing to wire lazily; same shared-secret
+  // door, so it mounts here with the other two.
+  app.use('/api/neuro-bridge', createNeuroBridgeFlowRoutes());
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {
