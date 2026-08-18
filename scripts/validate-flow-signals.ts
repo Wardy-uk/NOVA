@@ -73,6 +73,33 @@ async function preflight(): Promise<void> {
     const names = indexes.map(i => i.name);
     console.log(`jira_issue_cache: ${Number(size[0]?.rows ?? 0).toLocaleString()} rows, ${names.length} indexes`);
 
+    // "How do I know the sync has caught up?" — answered here rather than left
+    // to be inferred. The SLA columns backfill on the full sync that runs at
+    // NOVA startup, so after a deploy this is the line that says whether the
+    // breach signal can be trusted yet.
+    const sync = await query<{ last_sync: string | null; breached: number; timed: number }>(
+      `SELECT MAX(synced_at) AS last_sync,
+              SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS breached,
+              SUM(CASE WHEN sla_breach_time IS NOT NULL THEN 1 ELSE 0 END) AS timed
+         FROM jira_issue_cache`,
+    );
+    const last = sync[0]?.last_sync ? new Date(sync[0].last_sync) : null;
+    const ageMin = last ? Math.round((Date.now() - last.getTime()) / 60_000) : null;
+    console.log(
+      `last sync: ${last ? last.toLocaleString('en-GB') : 'never'}`
+      + (ageMin === null ? '' : ` (${ageMin} min ago)`)
+      + ` · sla_breached set on ${Number(sync[0]?.breached ?? 0).toLocaleString()} rows`
+      + `, sla_breach_time on ${Number(sync[0]?.timed ?? 0).toLocaleString()}`,
+    );
+    if (!sync[0]?.breached && !sync[0]?.timed) {
+      console.log(
+        '\n  ℹ  The SLA columns are still empty. They backfill on the FULL sync\n'
+        + '     that runs at NOVA startup, so deploy and give it a few minutes.\n'
+        + '     The 45s incremental sync only touches tickets that changed, so it\n'
+        + '     will not backfill the cache on its own.\n',
+      );
+    }
+
     if (!names.includes('IX_jira_cache_sla_breach')) {
       // Deliberately worded down from the original. The first version of this
       // warning blamed the timeout on the missing index, which was wrong: at
@@ -100,7 +127,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18i\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18j\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
@@ -133,7 +160,7 @@ async function main(): Promise<void> {
         : `${d.total} open tickets currently breached`
           + (d.byTier[0] ? `; top ${d.byTier[0].tier} ${d.byTier[0].breaches} (${d.byTier[0].sharePct}%)` : '')
           + ` [${d.slaDataPresent} tickets carry an SLA field]`)
-      + ` — cache ${d.coverage.cachedTickets ?? '?'} tickets, synced ${String(d.coverage.lastSync ?? 'unknown').slice(0, 19)}`));
+      + ` — ${d.coverage.cachedTickets ?? '?'} tickets in scope`));
 
     console.log(line('unowned', flow.unowned, (d: { total: number; byTier: Array<{ tier: string; count: number; oldest_days: number }> }) =>
       `${d.total} open with no assignee`
