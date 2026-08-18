@@ -46,7 +46,7 @@ import { query } from './database.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const FLOW_SIGNALS_BUILD = '2026-08-18-classifier';
+export const FLOW_SIGNALS_BUILD = '2026-08-18-classifier-b';
 
 /** Queue moves within the window before a ticket counts as ping-ponging. */
 export const PING_PONG_THRESHOLD = 3;
@@ -475,31 +475,20 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
     scope.params,
   );
 
-  // How many open tickets have a Resolution SLA AT ALL — paused or running.
+  // "How many open tickets have a Resolution SLA at all, paused or running" was
+  // measured here by parsing cf14048 out of fields_json. It has been REMOVED.
   //
-  // This is the honest denominator, and it needs the JSON: `sla_breach_time` is
-  // extracted from the ongoing cycle only, so a paused SLA (waiting on
-  // requestor, partner or development) has no breach time and would vanish from
-  // any count based on the column. Using that as a denominator implied ~93% of
-  // open tickets had no SLA, which is not a credible claim about this service
-  // desk and was an artefact of the measure, not a finding.
+  // It is the honest denominator and it cannot be had cheaply: `sla_breach_time`
+  // comes from the ongoing cycle only, so a paused SLA has no breach time and
+  // vanishes from any column-based count. But the JSON scan timed out server-side
+  // every run — returning null — while still consuming most of the endpoint's
+  // budget, pushing the whole call past 107s and over the report's timeout.
   //
-  // Best-effort: it parses JSON over the open population, so it degrades to null
-  // rather than taking the breach numbers down with it.
-  let withSlaField: number | null = null;
-  try {
-    const r = await query<{ cnt: number }>(
-      `${DIRTY_READ}
-       SELECT COUNT(*) AS cnt FROM jira_issue_cache c
-        WHERE ${scope.clause}
-          AND (c.status_category IS NULL OR c.status_category <> 'Done')
-          AND c.fields_json IS NOT NULL
-          AND ISJSON(c.fields_json) = 1
-          AND JSON_QUERY(c.fields_json, '$.${RESOLUTION_SLA_FIELD}') IS NOT NULL`,
-      scope.params,
-    );
-    withSlaField = r[0]?.cnt ?? null;
-  } catch { /* the denominator is a caveat; the breach counts are the number */ }
+  // A caveat that costs the numbers it qualifies is not worth having. What is
+  // reported instead is `withLiveClock` and `openTickets`, both free, both named
+  // for exactly what they count. The share of work under SLA is a real question
+  // and needs a persisted column on the cache to answer, not a scan per request.
+  const withSlaField: number | null = null;
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
   // count above is an undercount — and an undercount presented as a total is the
