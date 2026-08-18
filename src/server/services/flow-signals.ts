@@ -124,16 +124,27 @@ export interface Signal<T> {
 }
 
 export interface HandbackData {
+  /**
+   * EVIDENCED rejections only — moves the sync could prove went through the
+   * "Submit for Rejection to ..." screen. A downward tier move is not enough:
+   * Development → Customer Care is usually a released fix returning for test.
+   */
   total: number;
   previous: number;
   changePct: number | null;
   routes: Array<{ from_tier: string; to_tier: string; count: number }>;
   /**
-   * Moves in the window involving a queue with no place on the tier ladder —
-   * Escalations, Production. Reported rather than silently dropped, so the total
-   * cannot be read as covering every movement in the log.
+   * Moves down the ladder that are NOT rejections, plus moves involving a queue
+   * with no place on it (Escalations, Production). Reported rather than silently
+   * dropped, so the rejection total cannot be read as covering every movement.
    */
   unclassified: number;
+  /**
+   * Returns evidenced as completed work coming back to be verified — a linked
+   * delivery item is Done. This is the system working. Kept apart from `total`
+   * so it can never be presented as friction.
+   */
+  returnsAfterFix: number;
   /**
    * Why work came back, from the mandatory Rejection Reason on the transition
    * screen (cf13216). Null when the query failed; `withoutReason` counts rows
@@ -263,10 +274,10 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
   // different expressions and rejects the grouping outright — "created_at is
   // invalid in the select list". Same value, different parameter, different
   // expression. Computing it once removes the possibility.
-  const rows = await query<{ from_tier: string | null; to_tier: string | null; period: string; count: number }>(
-    `SELECT from_tier, to_tier, period, COUNT(*) AS count
+  const rows = await query<{ from_tier: string | null; to_tier: string | null; escalation_type: string; reason_code: string | null; period: string; count: number }>(
+    `SELECT from_tier, to_tier, escalation_type, reason_code, period, COUNT(*) AS count
        FROM (
-         SELECT from_tier, to_tier,
+         SELECT from_tier, to_tier, escalation_type, reason_code,
                 CASE WHEN created_at >= DATEADD(day, ?, GETUTCDATE()) THEN 'current' ELSE 'previous' END AS period
            FROM escalation_log
           WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
@@ -274,9 +285,18 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
             AND from_tier IS NOT NULL AND to_tier IS NOT NULL
             AND from_tier <> to_tier
        ) t
-      GROUP BY from_tier, to_tier, period`,
+      GROUP BY from_tier, to_tier, escalation_type, reason_code, period`,
     [-days, -prior, ...scope.params],
   );
+
+  // Returns that are the system WORKING: a released fix coming back to be
+  // verified, evidenced by a closed delivery item in another project. Counted
+  // separately and never added to the rejection total — the first version of
+  // this signal folded them in and reported 217 "handbacks", of which 80 were
+  // Development → Customer Care and almost certainly completed work.
+  const returnsAfterFix = rows
+    .filter(r => r.period === 'current' && r.reason_code === 'jira_return_after_fix')
+    .reduce((s, r) => s + r.count, 0);
 
   const routes: HandbackData['routes'] = [];
   let total = 0;
@@ -293,6 +313,14 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
       continue;
     }
     if (to >= from) continue;              // escalation, or sideways
+    // A downward move is NOT automatically a rejection. Development → Customer
+    // Care is usually a released fix coming back to be tested, and only rows the
+    // sync could evidence as rejections carry escalation_type = 'rejection'.
+    // Everything else downward is counted separately below.
+    if (r.escalation_type !== 'rejection') {
+      if (r.period === 'current') unclassified += r.count;
+      continue;
+    }
     if (r.period === 'current') {
       total += r.count;
       routes.push({ from_tier: r.from_tier as string, to_tier: r.to_tier as string, count: r.count });
@@ -335,7 +363,7 @@ async function handbacks(days: number, prior: number, projects: string[]): Promi
     };
   } catch { /* the reasons are the enrichment; the count is the signal */ }
 
-  return { total, previous, changePct: delta(total, previous), routes, unclassified, reasons };
+  return { total, previous, changePct: delta(total, previous), routes, unclassified, returnsAfterFix, reasons };
 }
 
 /**

@@ -2,7 +2,7 @@ import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AssignmentEngine, Pool } from './assignment-engine.js';
 import { query, queryOne, execute } from './database.js';
-import { isHandback } from './tier-rank.js';
+import { classifyTierMove } from './tier-move-classifier.js';
 import { logError } from './error-log.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
@@ -407,10 +407,15 @@ export class JiraSyncService {
     const labels = Array.isArray(f.labels) ? (f.labels as string[]).join(';') : null;
     const issueLinksJson = f.issuelinks ? JSON.stringify(f.issuelinks) : null;
     const fieldsJson = JSON.stringify(f);
+    // Rejection Reason. Cached so the next pass can tell whether it CHANGED,
+    // which is what separates a fresh rejection from a field set weeks ago.
+    const rejectionReasonText = typeof f.customfield_13216 === 'string'
+      ? f.customfield_13216.trim().slice(0, 500) || null
+      : null;
 
     // Detect changes for portal SSE broadcast
-    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null; current_tier: string | null }>(
-      `SELECT status_name, assignee_display, reporter_email, current_tier FROM jira_issue_cache WHERE issue_key = ?`,
+    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null; current_tier: string | null; rejection_reason_text: string | null }>(
+      `SELECT status_name, assignee_display, reporter_email, current_tier, rejection_reason_text FROM jira_issue_cache WHERE issue_key = ?`,
       [issue.key],
     );
 
@@ -429,7 +434,7 @@ export class JiraSyncService {
         development_details_text = ?, resolution_type = ?,
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
-        issue_links_json = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
+        issue_links_json = ?, rejection_reason_text = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
         resolved_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
@@ -443,7 +448,7 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
-        issue_links_json, fields_json, organisation_name, bc_account_number, resolved_at
+        issue_links_json, rejection_reason_text, fields_json, organisation_name, bc_account_number, resolved_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -478,7 +483,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
+        issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
@@ -497,7 +502,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, fieldsJson, organisationName, bcAccountNumber,
+        issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
       ],
     );
@@ -512,16 +517,34 @@ export class JiraSyncService {
       //
       // null means neither — one end of the move is off the tier ladder
       // (Escalations, Production), and guessing would manufacture handbacks.
-      const handback = isHandback(oldRow.current_tier as string | null, currentTier);
-      const escalationType = handback === true ? 'rejection' : 'jira_transition';
+      // What the move MEANT, not merely which way it went.
+      //
+      // Direction alone is not enough, and getting this wrong does real damage:
+      // Development → Customer Care is usually a released fix coming back to be
+      // tested and confirmed, not a rejection. Logging those as rejections
+      // reports successful delivery as friction and aims the improvement effort
+      // at the part of the flow that is working. The classifier demands evidence
+      // and returns "unclassified" when it has none.
+      const move = classifyTierMove({
+        fromTier: oldRow.current_tier as string | null,
+        toTier: currentTier,
+        ownProject: issue.key.split('-')[0] ?? '',
+        // The reason PERSISTS once set, so its presence proves the ticket was
+        // rejected at some point in its life, not that THIS move was one. A
+        // change proves the rejection screen was used on this pass.
+        reasonChanged: (rejectionReasonText ?? null) !== ((oldRow.rejection_reason_text as string | null) ?? null),
+        currentReason: rejectionReasonText,
+        issueLinksJson,
+      });
 
-      // The Rejection Reason is mandatory on the transition screen, so on a
-      // genuine handback this is populated. Snapshotted here rather than read
-      // later because the field holds only the LATEST rejection — a ticket
-      // returned twice overwrites it, and the log is a point-in-time record.
-      const rejectionReason = handback === true
-        ? (typeof f.customfield_13216 === 'string' ? f.customfield_13216.trim().slice(0, 500) : null)
-        : null;
+      const escalationType = move.kind === 'rejection' ? 'rejection' : 'jira_transition';
+      const noteFor: Record<string, string> = {
+        rejection: `Rejected: ${oldRow.current_tier} → ${currentTier}${move.reason ? ` — ${move.reason}` : ''}`,
+        return_after_fix: `Returned after fix: ${oldRow.current_tier} → ${currentTier} (${move.evidence})`,
+        unclassified: `Tier change: ${oldRow.current_tier} → ${currentTier} (${move.evidence})`,
+        escalation: `Escalated: ${oldRow.current_tier} → ${currentTier}`,
+        lateral: `Tier change: ${oldRow.current_tier} → ${currentTier}`,
+      };
 
       try {
         await execute(`
@@ -536,15 +559,15 @@ export class JiraSyncService {
           )`,
           [
             issue.key, escalationType, oldRow.current_tier, currentTier,
-            // A real code rather than leaving it NULL: 96% of the log currently
-            // reads `unknown`, and adding to that pile would make the reason-code
-            // finding in the weekly report worse rather than better.
-            handback === true ? 'jira_rejection' : null,
-            rejectionReason,
+            // A real code rather than NULL: 96% of the log already reads
+            // `unknown`, and adding to that pile would make the reason-capture
+            // finding in the weekly report worse rather than better. The code
+            // carries the CLASSIFICATION, so a return-after-fix can never be
+            // counted as a rejection downstream.
+            move.kind === 'escalation' || move.kind === 'lateral' ? null : `jira_${move.kind}`,
+            move.reason,
             (assignee?.displayName as string) ?? 'system',
-            handback === true
-              ? `Returned: ${oldRow.current_tier} → ${currentTier}${rejectionReason ? ` — ${rejectionReason}` : ' (no reason given)'}`
-              : `Tier change: ${oldRow.current_tier} → ${currentTier}`,
+            noteFor[move.kind],
             issue.key, oldRow.current_tier, currentTier,
           ],
         );

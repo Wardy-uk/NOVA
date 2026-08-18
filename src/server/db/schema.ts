@@ -740,6 +740,17 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'resolved_at') IS NULL
      ALTER TABLE jira_issue_cache ADD resolved_at DATETIME2 NULL;`,
 
+    // Rejection Reason (customfield_13216), mandatory on the "Submit for
+    // Rejection to ..." transition screen.
+    //
+    // Cached so the sync can tell whether it CHANGED on a given pass. That is
+    // the discriminator that matters: the field persists once set, so its mere
+    // presence proves a ticket was rejected at some point, not that the move
+    // being logged right now was a rejection. A tier move accompanied by a fresh
+    // reason went through the rejection screen; one without it did not.
+    `IF COL_LENGTH('jira_issue_cache', 'rejection_reason_text') IS NULL
+     ALTER TABLE jira_issue_cache ADD rejection_reason_text NVARCHAR(500) NULL;`,
+
     // last_public_comment on jira_issue_cache — populated by jira sync from comment cache
     `IF COL_LENGTH('jira_issue_cache', 'last_public_comment') IS NULL
      ALTER TABLE jira_issue_cache ADD last_public_comment NVARCHAR(MAX) NULL;`,
