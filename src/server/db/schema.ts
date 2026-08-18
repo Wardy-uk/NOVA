@@ -722,6 +722,20 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_product ON jira_issue_cache (nurtur_product)
        WHERE nurtur_product IS NOT NULL;`,
 
+    // Breach-by-queue for the NEURO flow signals. Without this, "which queue was
+    // the ticket sitting in when it breached" — the Support Review's headline
+    // measure — is a full scan of a wide table and dies on the 30s request
+    // timeout every time. None of the eight indexes above touches sla_breached
+    // or sla_breach_time.
+    //
+    // Deliberately NOT filtered on `sla_breached = 1`, though that would be
+    // smaller: a filtered index is silently ignored when a connection's SET
+    // options do not match, and a performance cliff that reappears without an
+    // error is the exact failure this reporting chain must not have.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_sla_breach')
+     CREATE INDEX IX_jira_cache_sla_breach ON jira_issue_cache (sla_breached, sla_breach_time DESC)
+       INCLUDE (current_tier);`,
+
     // resolved_at — populated from Jira's resolutiondate field during sync
     `IF COL_LENGTH('jira_issue_cache', 'resolved_at') IS NULL
      ALTER TABLE jira_issue_cache ADD resolved_at DATETIME2 NULL;`,
