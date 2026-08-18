@@ -135,7 +135,7 @@ async function preflight(): Promise<void> {
 async function main(): Promise<void> {
   // Stamped so it is obvious at a glance whether the box is running the version
   // you just pushed. Two runs were spent working out that it was not.
-  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18k\n`);
+  if (!asJson) console.log(`\nvalidate-flow-signals — build 2026-08-18l\n`);
   if (!asJson) await preflight();
   const flow = await getFlowSignals(days);
 
@@ -158,17 +158,16 @@ async function main(): Promise<void> {
       `${d.ticketsAffected} tickets crossed queues ${d.threshold}+ times`
       + (d.worst[0] ? `; worst ${d.worst[0].ticket_key} (${d.worst[0].moves} moves, ${d.worst[0].returns} returns)` : '')));
 
-    console.log(line('breachesByQueue', flow.breachesByQueue, (d: { total: number; slaDataPresent: number | null; byTier: Array<{ tier: string; breaches: number; sharePct: number | null }>; coverage: { cachedTickets: number | null; lastSync: string | null } }) =>
-      (d.slaDataPresent === 0
+    console.log(line('breachesByQueue', flow.breachesByQueue, (d: { total: number; withLiveClock: number; withSlaField: number | null; openTickets: number; byTier: Array<{ tier: string; breaches: number; sharePct: number | null }>; coverage: { cachedTickets: number | null; lastSync: string | null } }) =>
+      (d.withSlaField === 0
         // A green tick on a hollow zero is the exact failure this chain exists
         // to prevent. Zero tickets carrying a parseable SLA field is a broken
-        // mapping, not a clean queue — which is the mistake the first version of
-        // this query made by trusting the sla_breached column.
-        ? 'NO SLA DATA — no cached ticket carries a parseable cf14048; broken field mapping, not a clean month'
+        // mapping, not a clean queue.
+        ? 'NO SLA DATA — no open ticket carries a parseable cf14048; broken field mapping, not a clean month'
         : `${d.total} open tickets currently breached`
-          + (d.byTier[0] ? `; top ${d.byTier[0].tier} ${d.byTier[0].breaches} (${d.byTier[0].sharePct}%)` : '')
-          + ` [${d.slaDataPresent} tickets carry an SLA field]`)
-      + ` — ${d.coverage.cachedTickets ?? '?'} tickets in scope`));
+          + (d.byTier[0] ? `; top ${d.byTier[0].tier} ${d.byTier[0].breaches} (${d.byTier[0].sharePct}%)` : ''))
+      + ` — ${d.withSlaField ?? '?'} of ${d.openTickets} OPEN tickets have a Resolution SLA`
+      + ` (${d.withLiveClock} with a live clock; the rest paused or completed)`));
 
     console.log(line('unowned', flow.unowned, (d: { total: number; byTier: Array<{ tier: string; count: number; oldest_days: number }> }) =>
       `${d.total} open with no assignee`

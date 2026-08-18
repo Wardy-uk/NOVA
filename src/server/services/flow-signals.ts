@@ -167,11 +167,22 @@ export interface PingPongData {
 export interface BreachByQueueData {
   total: number;
   /**
-   * Cached tickets carrying a parseable Resolution SLA field at all. Zero means
-   * the field mapping is broken, which is a statement about the pipeline and
-   * must never render as the same sentence as a queue with no breaches.
+   * Open tickets in scope with a LIVE Resolution SLA clock — an ongoing cycle
+   * carrying a breach time. Deliberately not called "tickets with an SLA": a
+   * paused SLA (waiting on requestor/partner/development) and a completed cycle
+   * both fall out of this, so it is a much smaller number than the population
+   * that has an SLA applied, and reading it as a denominator is wrong.
    */
-  slaDataPresent: number | null;
+  withLiveClock: number;
+  /**
+   * Open tickets in scope carrying a Resolution SLA field at all, paused or
+   * running. THIS is the denominator for "what share of work is under SLA".
+   * Null when the count could not be taken — it parses JSON and is best-effort,
+   * so it degrades rather than costing the breach numbers.
+   */
+  withSlaField: number | null;
+  /** Open tickets in scope — the denominator `withSlaField` is a share OF. */
+  openTickets: number;
   /**
    * What this actually measures, carried with the number so a reader cannot
    * mistake it for the Support Review's figure. See the note on the function.
@@ -383,17 +394,44 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
   // Note the column fills in on the NEXT sync pass, not retroactively. Until
   // then slaDataPresent is 0 and the signal reports itself as unreadable rather
   // than as a clean queue — which is the correct behaviour while it catches up.
-  const rows = await query<{ tier: string | null; breaches: number; sla_present: number }>(
+  const rows = await query<{ tier: string | null; breaches: number; live_clock: number; open_total: number }>(
     `${DIRTY_READ}
      SELECT c.current_tier AS tier,
             SUM(CASE WHEN c.sla_breached = 1 THEN 1 ELSE 0 END) AS breaches,
-            SUM(CASE WHEN c.sla_breached = 1 OR c.sla_breach_time IS NOT NULL THEN 1 ELSE 0 END) AS sla_present
+            SUM(CASE WHEN c.sla_breach_time IS NOT NULL THEN 1 ELSE 0 END) AS live_clock,
+            COUNT(*) AS open_total
        FROM jira_issue_cache c
       WHERE ${scope.clause}
         AND (c.status_category IS NULL OR c.status_category <> 'Done')
       GROUP BY c.current_tier`,
     scope.params,
   );
+
+  // How many open tickets have a Resolution SLA AT ALL — paused or running.
+  //
+  // This is the honest denominator, and it needs the JSON: `sla_breach_time` is
+  // extracted from the ongoing cycle only, so a paused SLA (waiting on
+  // requestor, partner or development) has no breach time and would vanish from
+  // any count based on the column. Using that as a denominator implied ~93% of
+  // open tickets had no SLA, which is not a credible claim about this service
+  // desk and was an artefact of the measure, not a finding.
+  //
+  // Best-effort: it parses JSON over the open population, so it degrades to null
+  // rather than taking the breach numbers down with it.
+  let withSlaField: number | null = null;
+  try {
+    const r = await query<{ cnt: number }>(
+      `${DIRTY_READ}
+       SELECT COUNT(*) AS cnt FROM jira_issue_cache c
+        WHERE ${scope.clause}
+          AND (c.status_category IS NULL OR c.status_category <> 'Done')
+          AND c.fields_json IS NOT NULL
+          AND ISJSON(c.fields_json) = 1
+          AND JSON_QUERY(c.fields_json, '$.${RESOLUTION_SLA_FIELD}') IS NOT NULL`,
+      scope.params,
+    );
+    withSlaField = r[0]?.cnt ?? null;
+  } catch { /* the denominator is a caveat; the breach counts are the number */ }
 
   // `jira_issue_cache` is a CACHE, not the ledger. If the sync is behind, every
   // count above is an undercount — and an undercount presented as a total is the
@@ -419,7 +457,13 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
   const withBreaches = rows.filter(r => r.breaches > 0).sort((a, b) => b.breaches - a.breaches);
   return {
     total,
-    slaDataPresent: rows.reduce((s, r) => s + r.sla_present, 0),
+    withLiveClock: rows.reduce((s, r) => s + r.live_clock, 0),
+    withSlaField,
+    // Open tickets, NOT the whole cache. `coverage.cachedTickets` counts every
+    // cached NT row including resolved ones, and pairing an open-only numerator
+    // with a total-including-Done denominator is how "7% of tickets have an
+    // SLA" got said out loud in the first place.
+    openTickets: rows.reduce((s, r) => s + r.open_total, 0),
     basis: 'Open tickets whose Resolution SLA (cf14048) is currently breached, '
       + 'grouped by the queue they are in NOW. Same field and definition as the '
       + 'wallboards. This is a stock, not a flow — it is NOT the Support Review\'s '
