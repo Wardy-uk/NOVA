@@ -383,8 +383,14 @@ export class JiraSyncService {
       if (orgs?.name) return orgs.name;
       return null;
     })();
-    const slaBreachTime = extractSlaBreachTime(f.customfield_10010);
-    const slaBreached = extractSlaBreached(f.customfield_10010);
+    // customfield_14048 = Resolution SLA. It was customfield_10010, which this
+    // sync has never fetched — the field list above asks Jira for 14046 and
+    // 14048 — so both columns were silently 0/NULL on all 5,600+ cached rows
+    // since the day they were added, and everything downstream trusting them was
+    // quietly wrong. 14048 is the same field the wallboards count with
+    // `cf[14048] = breached()`, so the column now agrees with the boards.
+    const slaBreachTime = extractSlaBreachTime(f.customfield_14048);
+    const slaBreached = extractSlaBreached(f.customfield_14048);
     const noReply = computeNoReply(
       statusName,
       f.created as string | null,
@@ -857,9 +863,22 @@ function extractSlaBreachTime(slaField: unknown): string | null {
   return null;
 }
 
+/**
+ * Has this ticket's SLA breached?
+ *
+ * Checks the ONGOING cycle first. The previous version looked only at
+ * `completedCycles`, which is the history — so a ticket sitting open and
+ * currently in breach, which is precisely the one anybody wants to know about,
+ * returned false. Combined with the field-id bug below, `sla_breached` was 0 on
+ * every row in the cache.
+ *
+ * Completed cycles are still checked, so a ticket that breached and was then
+ * resolved keeps its flag.
+ */
 function extractSlaBreached(slaField: unknown): boolean {
   if (!slaField || typeof slaField !== 'object') return false;
   try {
+    if ((slaField as any)?.ongoingCycle?.breached === true) return true;
     const completed = (slaField as any)?.completedCycles;
     if (Array.isArray(completed)) {
       return completed.some((c: any) => c.breached === true);

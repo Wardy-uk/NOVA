@@ -71,7 +71,7 @@ const DIRTY_READ = 'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n';
  * in jira-sync-service, tracked separately; this service routes around it by
  * reading the JSON the sync *does* store.
  */
-const RESOLUTION_SLA_FIELD = 'customfield_14048';
+export const RESOLUTION_SLA_FIELD = 'customfield_14048';
 
 /**
  * Seniority of a queue, for deciding whether a tier move was an escalation or a
@@ -370,18 +370,27 @@ async function breachesByQueue(projects: string[]): Promise<BreachByQueueData> {
   //
   // The SLA-present count rides along in the same aggregate, so distinguishing
   // "no breaches" from "no SLA data" costs nothing extra.
+  // Reads the COLUMN, not the JSON.
+  //
+  // Parsing cf14048 out of fields_json per row was correct but far too
+  // expensive — it timed out at 30s even scoped to NT and reduced to a single
+  // pass. The underlying reason the column could not be used was a genuine bug
+  // in jira-sync-service: it populated sla_breached from customfield_10010, a
+  // field the sync never fetches, so the column was 0 on every row. That is now
+  // fixed at source, and this reads the indexed column it should always have
+  // read (IX_jira_cache_sla_breach covers exactly this shape).
+  //
+  // Note the column fills in on the NEXT sync pass, not retroactively. Until
+  // then slaDataPresent is 0 and the signal reports itself as unreadable rather
+  // than as a clean queue — which is the correct behaviour while it catches up.
   const rows = await query<{ tier: string | null; breaches: number; sla_present: number }>(
     `${DIRTY_READ}
      SELECT c.current_tier AS tier,
-            SUM(CASE WHEN JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') = 'true'
-                     THEN 1 ELSE 0 END) AS breaches,
-            SUM(CASE WHEN JSON_VALUE(c.fields_json, '$.${RESOLUTION_SLA_FIELD}.ongoingCycle.breached') IS NOT NULL
-                     THEN 1 ELSE 0 END) AS sla_present
+            SUM(CASE WHEN c.sla_breached = 1 THEN 1 ELSE 0 END) AS breaches,
+            SUM(CASE WHEN c.sla_breached = 1 OR c.sla_breach_time IS NOT NULL THEN 1 ELSE 0 END) AS sla_present
        FROM jira_issue_cache c
       WHERE ${scope.clause}
         AND (c.status_category IS NULL OR c.status_category <> 'Done')
-        AND c.fields_json IS NOT NULL
-        AND ISJSON(c.fields_json) = 1
       GROUP BY c.current_tier`,
     scope.params,
   );
