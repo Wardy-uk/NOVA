@@ -496,7 +496,7 @@ export function AdminView() {
   };
 
   const PIPELINE_SETTING_KEYS = [
-    'agent_jira_project', 'assignment_projects',
+    'agent_jira_project', 'assignment_projects', 'nova_ai_jira_account_id',
     'agent_first_reply_confidence_threshold', 'agent_ai_conversation_timeout_hours',
     'agent_critic_enabled',
   ];
@@ -2215,6 +2215,7 @@ export function AdminView() {
           {[
             { key: 'agent_jira_project', label: 'Triage Projects', placeholder: 'NT,NTPJ', desc: 'Comma-separated Jira project keys the agent triages' },
             { key: 'assignment_projects', label: 'Assignment Projects', placeholder: 'NT,NTPJ', desc: 'Comma-separated projects for round-robin assignment sweep' },
+            { key: 'nova_ai_jira_account_id', label: 'NOVA Jira Account ID', placeholder: '712020:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', desc: 'Jira accountId of the NOVA-Jira service user. Blank means round-robin treats NOVA-held tickets as human-owned and will not reclaim them.' },
           ].map(field => (
             <div key={field.key}>
               <label className="block text-xs text-neutral-400 mb-1">{field.label}</label>
