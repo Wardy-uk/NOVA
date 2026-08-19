@@ -755,7 +755,7 @@ export class JiraSyncService {
     const link = `${this.getPublicBaseUrl()}/portal/csat/${issueKey}`;
     const template =
       this.settings.get('csat_comment_template') ||
-      "Thanks for your patience while we sorted this out.\n\nIf you've got a brief spare moment, we'd really value your feedback. It tells us where we're getting it right and where we need to do better:\n{link}";
+      "Thanks for your patience while we sorted this out.\n\nIf you've got a brief moment spare, we'd really value your feedback. It tells us where we're getting it right and where we need to do better:\n{link}";
 
     // In test mode, prefix the internal note so it's obvious it's not customer-facing yet.
     const text = internal ? `[CSAT test — internal only] ${template}` : template;
