@@ -24,6 +24,10 @@ import { isAdmin } from '../utils/role-helpers.js';
  */
 
 // Custom field IDs — documented in memory/jira-nt-field-ids.md
+/** How far behind the Jira sync may fall before the queue ignores the cache
+ *  and reads Jira live. The sync runs every 45s, so 15m is a wide margin. */
+const CACHE_MAX_AGE_MS = 15 * 60_000;
+
 const CF_CURRENT_TIER = 'customfield_12981';
 const CF_TLDR = 'customfield_13184';
 const CF_AGENT_SUMMARY = 'customfield_13185';
@@ -263,8 +267,19 @@ export function createDevReviewRoutes(
       let issues: Array<{ key: string; fields: Record<string, unknown> }> = [];
       let dataSource: 'cache' | 'api' = 'cache';
 
+      // Only trust the cache while the Jira sync is actually keeping it current.
+      // A frozen sync makes the cache lie in both directions: freshly escalated
+      // tickets never appear, and returned ones never leave (the background
+      // state sync below re-opens them from the stale T3 list).
+      const syncStatus = syncService?.getStatus();
+      const syncAgeMs = syncStatus?.lastSyncAt ? Date.now() - new Date(syncStatus.lastSyncAt).getTime() : Infinity;
+      const cacheUsable = !!cache && syncAgeMs <= CACHE_MAX_AGE_MS;
+      if (!cacheUsable && cache) {
+        console.warn(`[dev-review] Jira cache stale (last sync ${syncStatus?.lastSyncAt ?? 'never'}) — querying Jira live`);
+      }
+
       // Try cache first — even if full sync hasn't completed, partial data may exist
-      if (cache) {
+      if (cacheUsable && cache) {
         try {
           const cached = await cache.getTier3Issues();
           if (cached.length > 0) {

@@ -21,6 +21,9 @@ function normalisePriorityName(raw: string | null): string | null {
   return PRIORITY_NORMALIZE[raw] ?? raw;
 }
 
+/** A sync running longer than this is assumed dead, and its slot is reclaimed. */
+const STALL_CEILING_MS = 30 * 60_000;
+
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
@@ -59,6 +62,7 @@ export class JiraSyncService {
   private settings: SettingsQueries;
   private lastSyncAt: Date | null = null;
   private syncing = false;
+  private syncStartedAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private fullSyncDone = false;
   private consecutiveErrors = 0;
@@ -76,10 +80,31 @@ export class JiraSyncService {
     this.assignmentEngine = engine;
   }
 
+  /** Take the single-sync slot. Returns false if a sync is genuinely in flight.
+   *  If the in-flight sync has been running longer than STALL_CEILING_MS it is
+   *  treated as dead and the slot is reclaimed — otherwise one wedged request
+   *  silently stops all syncing until the next restart. */
+  private claimSyncSlot(): boolean {
+    if (this.syncing) {
+      const runningMs = this.syncStartedAt ? Date.now() - this.syncStartedAt : 0;
+      if (runningMs < STALL_CEILING_MS) return false;
+      console.warn(`[jira-sync] Previous sync stalled for ${Math.round(runningMs / 60_000)}m — reclaiming sync slot`);
+    }
+    this.syncing = true;
+    this.syncStartedAt = Date.now();
+    return true;
+  }
+
+  private releaseSyncSlot(): void {
+    this.syncing = false;
+    this.syncStartedAt = null;
+  }
+
   getStatus() {
     return {
       lastSyncAt: this.lastSyncAt?.toISOString() ?? null,
       syncing: this.syncing,
+      syncRunningMs: this.syncStartedAt ? Date.now() - this.syncStartedAt : null,
       fullSyncDone: this.fullSyncDone,
       consecutiveErrors: this.consecutiveErrors,
     };
@@ -122,8 +147,7 @@ export class JiraSyncService {
   }
 
   async fullSync(): Promise<void> {
-    if (this.syncing) return;
-    this.syncing = true;
+    if (!this.claimSyncSlot()) return;
     const start = Date.now();
     let issueCount = 0;
     let commentCount = 0;
@@ -223,18 +247,18 @@ export class JiraSyncService {
       void logError('jira-sync', err, { severity: 'critical', context: { phase: 'full' } });
       await this.recordSync('full', issueCount, commentCount, duration, err instanceof Error ? err.message : String(err));
     } finally {
-      this.syncing = false;
+      this.releaseSyncSlot();
     }
   }
 
   async incrementalSync(): Promise<void> {
-    if (this.syncing) return;
+    if (this.syncing && this.syncStartedAt && Date.now() - this.syncStartedAt < STALL_CEILING_MS) return;
     if (!this.lastSyncAt) {
       await this.fullSync();
       return;
     }
 
-    this.syncing = true;
+    if (!this.claimSyncSlot()) return;
     const start = Date.now();
     let issueCount = 0;
     let commentCount = 0;
@@ -278,7 +302,7 @@ export class JiraSyncService {
       console.error('[jira-sync] Incremental sync failed:', err instanceof Error ? err.message : err);
       void logError('jira-sync', err, { context: { phase: 'incremental' } });
     } finally {
-      this.syncing = false;
+      this.releaseSyncSlot();
     }
   }
 

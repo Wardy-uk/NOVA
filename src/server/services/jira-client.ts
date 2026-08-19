@@ -7,6 +7,9 @@
 import { normalizeStatusFields } from '../utils/jira-locale.js';
 import { extractText } from './shared/adf-utils.js';
 
+/** Per-request ceiling for every Jira REST call. */
+const REQUEST_TIMEOUT_MS = 60_000;
+
 /**
  * Resolves the real BC Account Number for a ticket that the NT "Quick Resolve"
  * validator has just blocked for a missing BC account. Injected at construction
@@ -250,6 +253,10 @@ export class JiraRestClient {
     if (body !== undefined) {
       opts.body = JSON.stringify(body);
     }
+    // Hard timeout. Without this a hung socket never settles, and any caller
+    // holding a "busy" latch (jira-sync-service) wedges permanently — which is
+    // exactly how the issue cache froze for 20h on 18 Aug 2026.
+    opts.signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
     const res = await fetch(url, opts);
 

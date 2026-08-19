@@ -49,6 +49,10 @@ export interface DevReviewOutboxEntry {
 // handling yet — can bolt on later if the count gets too noisy after Easter
 // / Christmas etc. Used for the "not picked up in 8 working hours" KPI.
 
+/** Window after an accept/return in which a poll must not re-open the ticket —
+ *  Jira and the issue cache need time to reflect the tier change NOVA just made. */
+const DECISION_GRACE_MS = 30 * 60_000;
+
 const WORK_START_HOUR = 9;
 const WORK_END_HOUR = 17;
 const WORK_DAY_HOURS = WORK_END_HOUR - WORK_START_HOUR;
@@ -143,8 +147,18 @@ export class DevReviewQueries {
   async upsertFromPoll(jiraKey: string, submittedBy: string | null): Promise<void> {
     const existing = await this.getState(jiraKey);
     if (existing) {
-      // If ticket was terminal but reappeared in T3 → reopen
-      if (existing.status === 'archived' || existing.status === 'returned' || existing.status === 'accepted') {
+      // If ticket was terminal but reappeared in T3 → reopen.
+      // Guard: a just-accepted/returned ticket is still in the T3 list until
+      // Jira and the cache catch up with the tier change NOVA just made. Without
+      // the grace window the very next poll drags it straight back into the
+      // queue, and the decision looks like it never happened.
+      const decidedAt = Math.max(
+        existing.returned_at ? new Date(existing.returned_at).getTime() : 0,
+        existing.accepted_at ? new Date(existing.accepted_at).getTime() : 0,
+      );
+      const decidedRecently = decidedAt > 0 && Date.now() - decidedAt < DECISION_GRACE_MS;
+      if ((existing.status === 'archived' || existing.status === 'returned' || existing.status === 'accepted')
+          && !decidedRecently) {
         await execute(
           `UPDATE dev_review_state
            SET status = CASE WHEN claimed_by_user_id IS NOT NULL THEN 'in_review' ELSE 'pending' END,
