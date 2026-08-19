@@ -739,42 +739,49 @@ export class JiraSyncService {
 
   /** Post the CSAT survey link as a JSM comment on the resolved ticket.
    *  Controlled by `csat_comment_mode`:
-   *    - 'internal' (default / test mode): private internal note, not seen by the customer
-   *    - 'public': customer-visible comment (go-live)
+   *    - 'public' (default, live since 2026-08-19): customer-visible comment
+   *    - 'internal': private internal note, not seen by the customer (the old test mode)
    *    - 'off': post nothing
+   *  Ran in 'internal' for two months and 13k links: the customer never saw one and
+   *  we banked 5 ratings. Public is the default now; set the key to opt back out.
    *  Comment text is configurable via `csat_comment_template` ({link} placeholder). */
   private async postCsatComment(issueKey: string, token: string): Promise<void> {
-    const mode = (this.settings.get('csat_comment_mode') || 'internal').toLowerCase();
+    const mode = (this.settings.get('csat_comment_mode') || 'public').toLowerCase();
     if (mode === 'off') return;
     const internal = mode !== 'public';
 
-    const link = `${this.getPublicBaseUrl()}/portal/csat/${token}`;
+    // Link by issue key, not the 64-char token — the route accepts both and the
+    // key is legible in a customer-facing comment. The token row still backs it.
+    const link = `${this.getPublicBaseUrl()}/portal/csat/${issueKey}`;
     const template =
       this.settings.get('csat_comment_template') ||
-      "Thanks for your patience while we worked on this. We'd love your feedback — it only takes 30 seconds to let us know how we did: {link}";
+      "Thanks for your patience while we sorted this out.\n\nIf you've got 30 seconds, we'd really value your feedback — it tells us where we're getting it right and where we need to do better:\n{link}";
 
     // In test mode, prefix the internal note so it's obvious it's not customer-facing yet.
     const text = internal ? `[CSAT test — internal only] ${template}` : template;
 
-    // Build an ADF paragraph, turning the {link} placeholder into a clickable link.
-    const parts = text.split('{link}');
-    const content: Array<Record<string, unknown>> = [];
-    parts.forEach((part, i) => {
-      if (part) content.push({ type: 'text', text: part });
-      if (i < parts.length - 1) {
-        content.push({
-          type: 'text',
-          text: link,
-          marks: [{ type: 'link', attrs: { href: link } }],
+    // Build ADF, turning {link} into a clickable link. ADF ignores raw newlines,
+    // so blank lines become separate paragraphs and single newlines hardBreaks —
+    // otherwise a multi-line template renders as one run-on wall of text.
+    const linkNode = { type: 'text', text: link, marks: [{ type: 'link', attrs: { href: link } }] };
+    const paragraphs = text.split(/\n{2,}/).map(block => {
+      const content: Array<Record<string, unknown>> = [];
+      block.split('\n').forEach((lineText, li) => {
+        if (li > 0) content.push({ type: 'hardBreak' });
+        const parts = lineText.split('{link}');
+        parts.forEach((part, i) => {
+          if (part) content.push({ type: 'text', text: part });
+          if (i < parts.length - 1) content.push({ ...linkNode });
         });
-      }
-    });
-    if (content.length === 0) content.push({ type: 'text', text: link });
+      });
+      return { type: 'paragraph', content };
+    }).filter(p => p.content.some(n => n.type !== 'hardBreak'));
+    if (paragraphs.length === 0) paragraphs.push({ type: 'paragraph', content: [{ ...linkNode }] });
 
     const body = {
       type: 'doc',
       version: 1,
-      content: [{ type: 'paragraph', content }],
+      content: paragraphs,
     };
 
     try {
