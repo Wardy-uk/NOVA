@@ -105,6 +105,11 @@ const SURVEYS = [
     template: 'support_team_satisfaction',
     category: 'team_satisfaction',
     title: 'Support Team Sentiment',
+    // NOT NULL in the schema, and it drives the recipient auto-populate: the
+    // admin UI offers members of the matching NOVA team. Where no such team
+    // exists — as for KAMs and CSMs — it is just a label and recipients are
+    // typed in, which is the situation anyway since NOVA has no roster for them.
+    teamName: 'Support',
     description: 'Monthly. Anonymous — individual responses are not stored against you, and results are only reported once at least five people have answered.',
     recurrenceDays: 30,
   },
@@ -112,6 +117,7 @@ const SURVEYS = [
     template: 'kam_satisfaction',
     category: 'kam_satisfaction',
     title: 'Key Account Manager Sentiment',
+    teamName: 'Key Account Managers',
     description: 'How well Support is serving your accounts. Anonymous, reported in aggregate only.',
     recurrenceDays: 30,
   },
@@ -119,6 +125,7 @@ const SURVEYS = [
     template: 'csm_satisfaction',
     category: 'csm_satisfaction',
     title: 'Customer Success Sentiment',
+    teamName: 'Customer Success',
     description: 'How well Support is serving your customers. Anonymous, reported in aggregate only.',
     recurrenceDays: 30,
   },
@@ -157,41 +164,48 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Each survey is attempted independently. The first run aborted the whole
+  // batch on one NOT NULL violation, which is the wrong shape for a setup
+  // script: two perfectly creatable surveys were lost to a third's problem.
   for (const s of SURVEYS) {
-    const already = await existing(s.category);
-    if (already > 0) {
-      console.log(`  – ${s.title}: ${already} open survey already in this category, skipping.`);
-      continue;
-    }
+    try {
+      const already = await existing(s.category);
+      if (already > 0) {
+        console.log(`  – ${s.title}: ${already} open survey already in this category, skipping.`);
+        continue;
+      }
 
-    const created = await query<{ id: number }>(
-      `INSERT INTO surveys (title, description, category, status, recurrence_interval_days, created_by, created_at)
-       OUTPUT INSERTED.id
-       VALUES (?, ?, ?, 'draft', ?, 'vantage-setup', GETUTCDATE())`,
-      [s.title, s.description, s.category, s.recurrenceDays],
-    );
-    const surveyId = created[0]?.id;
-    if (!surveyId) { console.log(`  ✗ ${s.title}: insert returned no id`); continue; }
-
-    // Copy the template's questions. Read from the most recent survey in the
-    // same category if one exists; otherwise the admin UI template picker is the
-    // only source and the questions are added there.
-    const source = await query<{ id: number }>(
-      `SELECT TOP (1) id FROM surveys WHERE category = ? AND id <> ? ORDER BY id DESC`,
-      [s.category, surveyId],
-    );
-    if (source[0]?.id) {
-      await execute(
-        `INSERT INTO survey_questions (survey_id, order_index, question_text, question_type, required)
-         SELECT ?, order_index, question_text, question_type, required
-           FROM survey_questions WHERE survey_id = ?`,
-        [surveyId, source[0].id],
+      const created = await query<{ id: number }>(
+        `INSERT INTO surveys (title, description, team_name, category, status, recurrence_interval_days, created_by, created_at)
+         OUTPUT INSERTED.id
+         VALUES (?, ?, ?, ?, 'draft', ?, 'vantage-setup', GETUTCDATE())`,
+        [s.title, s.description, s.teamName, s.category, s.recurrenceDays],
       );
-      console.log(`  ✓ ${s.title} (id ${surveyId}) — questions copied from survey ${source[0].id}, monthly recurrence`);
-    } else {
-      console.log(`  ✓ ${s.title} (id ${surveyId}) — created, but NO questions.`);
-      console.log(`      No previous ${s.category} survey to copy from. Open it in Team Surveys`);
-      console.log(`      and apply the "${s.template}" template before activating.`);
+      const surveyId = created[0]?.id;
+      if (!surveyId) { console.log(`  ✗ ${s.title}: insert returned no id`); continue; }
+
+      // Copy the template's questions. Read from the most recent survey in the
+      // same category if one exists; otherwise the admin UI template picker is
+      // the only source and the questions are added there.
+      const source = await query<{ id: number }>(
+        `SELECT TOP (1) id FROM surveys WHERE category = ? AND id <> ? ORDER BY id DESC`,
+        [s.category, surveyId],
+      );
+      if (source[0]?.id) {
+        await execute(
+          `INSERT INTO survey_questions (survey_id, order_index, question_text, question_type, required)
+           SELECT ?, order_index, question_text, question_type, required
+             FROM survey_questions WHERE survey_id = ?`,
+          [surveyId, source[0].id],
+        );
+        console.log(`  ✓ ${s.title} (id ${surveyId}) — questions copied from survey ${source[0].id}, monthly recurrence`);
+      } else {
+        console.log(`  ✓ ${s.title} (id ${surveyId}) — created, but NO questions.`);
+        console.log(`      No previous ${s.category} survey to copy from. Open it in Team Surveys`);
+        console.log(`      and apply the "${s.template}" template before activating.`);
+      }
+    } catch (err) {
+      console.log(`  ✗ ${s.title}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
