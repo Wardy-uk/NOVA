@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { getFlowSignals } from '../services/flow-signals.js';
+import { getSentimentSignals } from '../services/sentiment-signals.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
 /**
@@ -39,6 +40,23 @@ export function createNeuroBridgeFlowRoutes(): Router {
         ? raw.split(',').map(p => p.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean)
         : undefined;
       res.json({ ok: true, data: await getFlowSignals(days, projects?.length ? projects : undefined) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  /**
+   * GET /sentiment-signals?days=30
+   *
+   * Customer and internal sentiment, reported as four separate measures rather
+   * than one number — they have different scales, populations and biases, and
+   * averaging them would produce a figure that describes nothing.
+   */
+  router.get('/sentiment-signals', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      const days = parseInt(req.query.days as string, 10) || 30;
+      res.json({ ok: true, data: await getSentimentSignals(days) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
