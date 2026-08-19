@@ -1409,7 +1409,7 @@ export class AgentLoop {
     // older tickets. Configurable via agent_sweep_max_age_hours (default 0 = no limit).
     const maxAgeHours = options?.maxAgeHours ?? this.getNumber('agent_sweep_max_age_hours', 0);
     const limit = options?.limit ?? this.getNumber('agent_sweep_limit', 30);
-    const ageClause = maxAgeHours > 0 ? `AND c.created_at >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())` : '';
+    const ageClause = maxAgeHours > 0 ? `AND c.jira_created >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())` : '';
 
     try {
       const projects = this.assignmentEngine.getConfiguredProjects();
@@ -1428,7 +1428,7 @@ export class AgentLoop {
          WHERE (c.assignee_account_id IS NULL OR c.assignee_account_id = ?)
            AND c.status_category != 'done'
            AND (c.current_tier IS NULL OR c.current_tier != 'Development')
-           AND c.created_at < DATEADD(minute, -5, GETUTCDATE())
+           AND c.jira_created < DATEADD(minute, -5, GETUTCDATE())
            ${ageClause}
            AND c.project_key IN (${projectPlaceholders})
            AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation'))
@@ -1443,7 +1443,7 @@ export class AgentLoop {
                AND aq.status = 'pending'
                AND c.assignee_account_id = ?
            )
-         ORDER BY c.created_at ASC`,
+         ORDER BY c.jira_created ASC`,
         [novaAccountId, ...projects, novaAccountId],
       );
 
