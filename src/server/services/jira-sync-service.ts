@@ -485,7 +485,7 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?
       );`,
       [
         // Source key
