@@ -443,38 +443,17 @@ function isoWeekKey(): string {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-/** Latest survey's per-agent satisfaction scores (mirrors /roster/survey-scores). */
+/**
+ * Per-agent satisfaction scores — permanently empty, and deliberately so.
+ *
+ * This used to join survey_responses back to survey_recipients on the shared token
+ * and mail each agent their own satisfaction average, which is exactly what the
+ * survey invitation promises cannot happen. The token no longer exists on
+ * survey_responses (see routes/surveys.ts), so the score is unobtainable by design.
+ * The weekly KPI email shows "—" for satisfaction as a result.
+ */
 async function getSurveyScores(): Promise<Record<string, number>> {
-  const survey = await queryOne<{ id: number }>(
-    `SELECT TOP 1 id FROM surveys WHERE status IN ('active','closed') ORDER BY created_at DESC`);
-  if (!survey) return {};
-  const questions = await query<{ id: number }>(
-    `SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [survey.id]);
-  if (questions.length === 0) return {};
-  const qIds = new Set(questions.map((q) => q.id));
-  const rows = await query<{ display_name: string; answers: string }>(`
-    SELECT sr.display_name, resp.answers FROM survey_responses resp
-    JOIN survey_recipients sr ON sr.token = resp.token AND sr.survey_id = resp.survey_id
-    WHERE resp.survey_id = ?`, [survey.id]);
-  const acc: Record<string, { sum: number; count: number }> = {};
-  for (const row of rows) {
-    try {
-      const answers = JSON.parse(row.answers) as Array<{ question_id: number; value: string | number }>;
-      for (const a of answers) {
-        if (qIds.has(a.question_id)) {
-          const v = Number(a.value);
-          if (!isNaN(v) && v >= 1 && v <= 5) {
-            acc[row.display_name] ??= { sum: 0, count: 0 };
-            acc[row.display_name].sum += v;
-            acc[row.display_name].count++;
-          }
-        }
-      }
-    } catch { /* skip bad JSON */ }
-  }
-  const out: Record<string, number> = {};
-  for (const [name, { sum, count }] of Object.entries(acc)) out[name] = Math.round((sum / count) * 100) / 100;
-  return out;
+  return {};
 }
 
 export interface WeeklyKpiResult { sent: number; skipped: number; noEmail: string[]; noData: string[] }

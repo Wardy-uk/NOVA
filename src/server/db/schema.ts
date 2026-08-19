@@ -3405,6 +3405,49 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_survey_responses_survey' AND object_id = OBJECT_ID('survey_responses'))
      CREATE NONCLUSTERED INDEX IX_survey_responses_survey ON survey_responses(survey_id);`,
 
+    // ── Survey anonymity ──
+    // survey_responses.token used to hold the same value as survey_recipients.token,
+    // so a single join re-identified every answer. The column is dropped outright and
+    // the recipient's token is erased once they submit, so the link cannot be rebuilt
+    // by anyone holding the database. Cost: a respondent can no longer be shown their
+    // own answers back. That is the trade-off for the anonymity we promise in the invite.
+    `IF COL_LENGTH('survey_responses', 'token') IS NOT NULL
+     BEGIN
+       DECLARE @uq_resp sysname = (
+         SELECT TOP(1) kc.name FROM sys.key_constraints kc
+           JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+           JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+          WHERE kc.parent_object_id = OBJECT_ID('survey_responses') AND kc.type = 'UQ' AND c.name = 'token');
+       IF @uq_resp IS NOT NULL EXEC('ALTER TABLE survey_responses DROP CONSTRAINT [' + @uq_resp + ']');
+       EXEC('ALTER TABLE survey_responses DROP COLUMN token');
+     END`,
+
+    // Recipient tokens are erased on completion, so the column must allow NULL and the
+    // uniqueness constraint has to become a filtered index (a plain UNIQUE permits one NULL).
+    `IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('survey_recipients') AND name = 'token' AND is_nullable = 0)
+     BEGIN
+       DECLARE @uq_rcpt sysname = (
+         SELECT TOP(1) kc.name FROM sys.key_constraints kc
+           JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+           JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+          WHERE kc.parent_object_id = OBJECT_ID('survey_recipients') AND kc.type = 'UQ' AND c.name = 'token');
+       IF @uq_rcpt IS NOT NULL EXEC('ALTER TABLE survey_recipients DROP CONSTRAINT [' + @uq_rcpt + ']');
+       EXEC('ALTER TABLE survey_recipients ALTER COLUMN token NVARCHAR(200) NULL');
+     END`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_survey_recipients_token' AND object_id = OBJECT_ID('survey_recipients'))
+     CREATE UNIQUE NONCLUSTERED INDEX UX_survey_recipients_token ON survey_recipients(token) WHERE token IS NOT NULL;`,
+
+    // Erase tokens already spent on historical responses, so the promise is not
+    // "anonymous from today" with an identifiable back catalogue sitting behind it.
+    `UPDATE survey_recipients SET token = NULL WHERE completed = 1 AND token IS NOT NULL;`,
+
+    // Timing correlation re-identifies just as well as a token when a handful of people
+    // respond: both timestamps are coarsened to the day, historically and going forward.
+    `UPDATE survey_recipients SET completed_at = CAST(CAST(completed_at AS DATE) AS DATETIME2)
+      WHERE completed_at IS NOT NULL AND CAST(completed_at AS TIME) <> '00:00:00';`,
+    `UPDATE survey_responses SET submitted_at = CAST(CAST(submitted_at AS DATE) AS DATETIME2)
+      WHERE CAST(submitted_at AS TIME) <> '00:00:00';`,
+
     // ── AI Approval Queue ──
 
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'approval_queue') AND type = 'U')

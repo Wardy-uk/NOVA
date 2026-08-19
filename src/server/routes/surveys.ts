@@ -92,13 +92,32 @@ interface QuestionRow {
 
 interface RecipientRow {
   id: number; survey_id: number; display_name: string; email: string;
-  token: string; invite_sent: number; last_reminder_sent: string | null;
+  /** Erased (NULL) once the recipient submits — see the anonymity note below. */
+  token: string | null; invite_sent: number; last_reminder_sent: string | null;
   completed: number; completed_at: string | null;
 }
 
 interface ResponseRow {
-  id: number; survey_id: number; token: string;
+  id: number; survey_id: number;
   submitted_at: string; answers: string;
+}
+
+// ── Anonymity ──────────────────────────────────────────────────────────
+//
+// Responses carry no link back to the recipient who gave them. There is no token
+// on survey_responses, and survey_recipients.token is erased on submit, so nobody
+// holding the database can pair an answer with a person. `completed = 1` records
+// only that someone responded, and both timestamps are stored to the day so that
+// timing cannot stand in for the missing token.
+//
+// Because a small group's aggregate is not anonymous either, results are withheld
+// entirely below a minimum response count (settings key `survey_min_responses`).
+
+const DEFAULT_MIN_RESPONSES = 5;
+
+export function getSurveyMinResponses(settings: Record<string, unknown>): number {
+  const raw = Number(settings.survey_min_responses);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_MIN_RESPONSES;
 }
 
 // ── Email helpers ──────────────────────────────────────────────────────
@@ -123,7 +142,7 @@ function buildSurveyInviteHtml(title: string, teamName: string, description: str
       <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid #e8edf3;">
         <h3 style="color: #1a1f36; margin: 0 0 8px; font-size: 16px;">${title}</h3>
         ${description ? `<p style="color: #475569; margin: 0 0 16px; font-size: 14px;">${description}</p>` : ''}
-        <p style="color: #475569; font-size: 13px; margin: 0;">Your response is <strong>completely anonymous</strong>. No one will be able to see who gave which answers.</p>
+        <p style="color: #475569; font-size: 13px; margin: 0;">Your answers are <strong>anonymous</strong>. Once you submit, nothing stored links your answers back to you — not your name, your email, or this link. We can see <em>that</em> you responded, so we know who still needs a reminder, but not <em>what</em> you said. Results are only ever shown as a group, and are withheld entirely until enough people have replied.</p>
       </div>
       <div style="text-align: center;">
         <a href="${link}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #3eaab4, #5ec1ca); color: white; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 14px;">Complete Survey</a>
@@ -141,7 +160,7 @@ function buildReminderHtml(title: string, teamName: string, link: string): strin
       <h2 style="color: #1a1f36; margin: 0 0 8px; font-size: 20px; text-align: center;">Reminder: Survey still open</h2>
       <p style="color: #475569; text-align: center; margin: 0 0 20px; font-size: 14px;">${teamName} — ${title}</p>
       <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid #e8edf3;">
-        <p style="color: #475569; font-size: 14px; margin: 0;">We haven't received your response yet. Your feedback is valued and <strong>completely anonymous</strong>.</p>
+        <p style="color: #475569; font-size: 14px; margin: 0;">We haven't received your response yet. Your feedback is valued, and your answers are <strong>anonymous</strong> — once submitted, nothing stored links them back to you.</p>
       </div>
       <div style="text-align: center;">
         <a href="${link}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #3eaab4, #5ec1ca); color: white; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 14px;">Complete Survey</a>
@@ -161,13 +180,14 @@ async function sendInvites(surveyId: number, emailService: EmailService, baseUrl
 
   let sent = 0;
   for (const r of recipients) {
+    if (!r.token) continue; // already responded — token erased for anonymity
     const link = `${baseUrl}/survey/${r.token}`;
     const html = buildSurveyInviteHtml(survey.title, survey.team_name, survey.description, link);
     try {
       await emailService.send({
         to: r.email,
         subject: `Survey: ${survey.title}`,
-        text: `You've been invited to complete a survey: ${survey.title}. Visit ${link} to respond. Your response is anonymous.`,
+        text: `You've been invited to complete a survey: ${survey.title}. Visit ${link} to respond. Your answers are anonymous — once you submit, nothing stored links them back to you. Results are only shown as a group.`,
         html,
       });
       await execute('UPDATE survey_recipients SET invite_sent = 1 WHERE id = ?', [r.id]);
@@ -194,13 +214,14 @@ async function sendReminders(surveyId: number, emailService: EmailService, baseU
 
   let sent = 0;
   for (const r of recipients) {
+    if (!r.token) continue; // already responded — token erased for anonymity
     const link = `${baseUrl}/survey/${r.token}`;
     const html = buildReminderHtml(survey.title, survey.team_name, link);
     try {
       await emailService.send({
         to: r.email,
         subject: `Reminder: ${survey.title}`,
-        text: `Reminder: please complete the survey "${survey.title}". Visit ${link}. Your response is anonymous.`,
+        text: `Reminder: please complete the survey "${survey.title}". Visit ${link}. Your answers are anonymous — once you submit, nothing stored links them back to you.`,
         html,
       });
       await execute('UPDATE survey_recipients SET last_reminder_sent = GETUTCDATE() WHERE id = ?', [r.id]);
@@ -213,6 +234,10 @@ async function sendReminders(surveyId: number, emailService: EmailService, baseU
 }
 
 // ── Helper: aggregate results for a survey (anonymised) ────────────────
+
+async function countResponses(surveyId: number): Promise<number> {
+  return (await queryOne<{ c: number }>('SELECT COUNT(*) as c FROM survey_responses WHERE survey_id = ?', [surveyId]))?.c ?? 0;
+}
 
 async function aggregateResults(surveyId: number, questions: QuestionRow[]) {
   const responses = await query<ResponseRow>('SELECT * FROM survey_responses WHERE survey_id = ?', [surveyId]);
@@ -332,7 +357,8 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
   router.get('/satisfaction-scores', async (req, res) => {
     // Returns average scale_5 score for each category across all closed/active surveys
     const categories = ['team_satisfaction', 'kam_satisfaction', 'csm_satisfaction'];
-    const scores: Record<string, { average: number | null; response_count: number; survey_count: number }> = {};
+    const minResponses = getSurveyMinResponses(settingsQueries.getAll());
+    const scores: Record<string, { average: number | null; response_count: number; survey_count: number; suppressed?: boolean }> = {};
 
     for (const cat of categories) {
       const surveys = await query<SurveyRow>(`SELECT id FROM surveys WHERE category = ? AND status IN ('active', 'closed')`, [cat]);
@@ -345,6 +371,10 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
       if (!latest) { scores[cat] = { average: null, response_count: 0, survey_count: surveys.length }; continue; }
 
       const responses = await query<ResponseRow>('SELECT * FROM survey_responses WHERE survey_id = ?', [latest.id]);
+      if (responses.length < minResponses) {
+        scores[cat] = { average: null, response_count: responses.length, survey_count: surveys.length, suppressed: true };
+        continue;
+      }
       const questions = await query<QuestionRow>(`SELECT id FROM survey_questions WHERE survey_id = ? AND question_type = 'scale_5'`, [latest.id]);
       const qIds = new Set(questions.map(q => q.id));
 
@@ -395,30 +425,30 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
     const done = (await queryOne<{ c: number }>('SELECT COUNT(*) as c FROM survey_recipients WHERE survey_id = ? AND completed = 1', [survey.id]))?.c ?? 0;
 
     if (admin) {
-      // Admins: full recipient list + aggregated results
+      // Admins: full recipient list + aggregated results, but only once enough
+      // people have replied that the aggregate is not itself identifying.
       const recipients = await query<RecipientRow>('SELECT id, survey_id, display_name, email, invite_sent, completed, completed_at FROM survey_recipients WHERE survey_id = ?', [survey.id]);
-      const aggregated = await aggregateResults(survey.id, questions);
+      const minResponses = getSurveyMinResponses(settingsQueries.getAll());
+      const responseCount = await countResponses(survey.id);
+      const suppressed = responseCount < minResponses;
+      const aggregated = suppressed ? [] : await aggregateResults(survey.id, questions);
 
       res.json({
         ok: true,
         data: {
           ...survey, questions, recipients, results: aggregated,
           recipients_total: total, recipients_completed: done, is_admin: true,
+          results_suppressed: suppressed, min_responses: minResponses,
         },
       });
     } else {
-      // Non-admins: their own token + completed status, NO aggregated results
+      // Non-admins: their own token + completed status, NO aggregated results.
+      // Answers are deliberately not replayed — the token that would have found
+      // them is erased on submit, which is what makes the response anonymous.
       const user = await userQueries.getById(req.user.id);
       const myRecipient = await queryOne<RecipientRow>(
         'SELECT * FROM survey_recipients WHERE survey_id = ? AND email = ?', [survey.id, user!.email]
       );
-
-      // If they completed, return their own answers
-      let my_answers: Array<{ question_id: number; value: string | number }> | null = null;
-      if (myRecipient?.completed) {
-        const resp = await queryOne<ResponseRow>('SELECT * FROM survey_responses WHERE token = ?', [myRecipient.token]);
-        if (resp) my_answers = JSON.parse(resp.answers);
-      }
 
       res.json({
         ok: true,
@@ -427,7 +457,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
           recipients_total: total, recipients_completed: done, is_admin: false,
           my_token: myRecipient?.token ?? null,
           my_completed: !!myRecipient?.completed,
-          my_answers,
+          my_answers: null,
         },
       });
     }
@@ -545,6 +575,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
       );
       let sent = 0;
       for (const nr of newRecipients) {
+        if (!nr.token) continue; // already responded — token erased for anonymity
         const link = `${baseUrl}/survey/${nr.token}`;
         const html = buildSurveyInviteHtml(survey.title, survey.team_name, survey.description, link);
         try {
@@ -569,10 +600,9 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
     const recipient = await queryOne<RecipientRow>('SELECT * FROM survey_recipients WHERE id = ? AND survey_id = ?', [req.params.recipientId, survey.id]);
     if (!recipient) { res.status(404).json({ ok: false, error: 'Recipient not found' }); return; }
 
-    // Delete their response if they completed
-    if (recipient.completed) {
-      await execute('DELETE FROM survey_responses WHERE token = ?', [recipient.token]);
-    }
+    // A submitted response can no longer be traced to its recipient, so removing
+    // someone from the survey removes only the invitation. Their answers stay in
+    // the aggregate, unattributed — deleting them would require the link we removed.
     await execute('DELETE FROM survey_recipients WHERE id = ?', [recipient.id]);
 
     res.json({ ok: true });
@@ -660,6 +690,15 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
     const questions = await query<QuestionRow>('SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY order_index', [survey.id]);
     const responses = await query<ResponseRow>('SELECT * FROM survey_responses WHERE survey_id = ?', [survey.id]);
 
+    const minResponses = getSurveyMinResponses(settingsQueries.getAll());
+    if (responses.length < minResponses) {
+      res.status(409).json({
+        ok: false,
+        error: `Not enough responses to export anonymously — ${responses.length} of ${minResponses} needed.`,
+      });
+      return;
+    }
+
     // Shuffle responses to prevent ordering-based identification
     for (let i = responses.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -733,8 +772,11 @@ export function createSurveyPublicRoutes(): Router {
   router.get('/:token', async (req, res) => {
     const { token } = req.params;
 
+    // A submitted link stops resolving: the token is erased on submit so the
+    // response cannot be traced back. "Already submitted" and "never valid" are
+    // therefore indistinguishable here, and the message has to cover both.
     const recipient = await queryOne<RecipientRow>('SELECT * FROM survey_recipients WHERE token = ?', [token]);
-    if (!recipient) { res.status(404).json({ ok: false, error: 'This link is not valid or the survey is no longer open.' }); return; }
+    if (!recipient) { res.status(404).json({ ok: false, error: 'This link has already been used, is not valid, or the survey is no longer open.' }); return; }
     if (recipient.completed) { res.status(410).json({ ok: false, error: 'This survey link has already been submitted.' }); return; }
 
     const survey = await queryOne<SurveyRow>('SELECT * FROM surveys WHERE id = ?', [recipient.survey_id]);
@@ -764,8 +806,11 @@ export function createSurveyPublicRoutes(): Router {
       res.status(400).json({ ok: false, error: 'Missing answers' }); return;
     }
 
+    // A submitted link stops resolving: the token is erased on submit so the
+    // response cannot be traced back. "Already submitted" and "never valid" are
+    // therefore indistinguishable here, and the message has to cover both.
     const recipient = await queryOne<RecipientRow>('SELECT * FROM survey_recipients WHERE token = ?', [token]);
-    if (!recipient) { res.status(404).json({ ok: false, error: 'This link is not valid or the survey is no longer open.' }); return; }
+    if (!recipient) { res.status(404).json({ ok: false, error: 'This link has already been used, is not valid, or the survey is no longer open.' }); return; }
     if (recipient.completed) { res.status(410).json({ ok: false, error: 'This survey link has already been submitted.' }); return; }
 
     const survey = await queryOne<SurveyRow>('SELECT * FROM surveys WHERE id = ?', [recipient.survey_id]);
@@ -773,13 +818,17 @@ export function createSurveyPublicRoutes(): Router {
       res.status(410).json({ ok: false, error: 'This link is not valid or the survey is no longer open.' }); return;
     }
 
+    // The response is stored with no link to the recipient, and the recipient's token
+    // is erased in the same breath, so the two rows cannot be paired up afterwards.
+    // Both timestamps are coarsened to the day so that submission time cannot serve
+    // as the link instead.
     await execute(
-      `INSERT INTO survey_responses (survey_id, token, answers) VALUES (?, ?, ?)`,
-      [survey.id, token, JSON.stringify(answers)]
+      `INSERT INTO survey_responses (survey_id, submitted_at, answers) VALUES (?, CAST(GETUTCDATE() AS DATE), ?)`,
+      [survey.id, JSON.stringify(answers)]
     );
 
     await execute(
-      `UPDATE survey_recipients SET completed = 1, completed_at = GETUTCDATE() WHERE token = ?`,
+      `UPDATE survey_recipients SET completed = 1, completed_at = CAST(GETUTCDATE() AS DATE), token = NULL WHERE token = ?`,
       [token]
     );
 

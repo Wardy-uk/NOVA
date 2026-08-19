@@ -86,8 +86,11 @@ const TABLE_ORDER = [
   'problem_ticket_ignores',
 
   'survey_questions',
-  'survey_recipients',
-  'survey_responses',
+  // survey_recipients and survey_responses are deliberately NOT copied. Both carried
+  // the same token in the legacy SQLite database, which is the join that re-identified
+  // every response. MSSQL no longer has that column on survey_responses, so the copy
+  // would fail — and re-importing the pair would undo the anonymity fix. Migrate survey
+  // responses by hand, without tokens, if they are ever genuinely needed.
 
   'bc_customers',
   'contracts',

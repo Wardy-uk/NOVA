@@ -1,6 +1,8 @@
 # Handoff — survey anonymity is claimed but not delivered
 
-**Status:** not started. Raised 19 Aug 2026.
+**Status:** FIXED in v1.1.438 (19 Aug 2026). Raised 19 Aug 2026.
+Not yet deployed — the schema change has only run locally at build time, never
+against the NOVA database. See "What was done" at the bottom before deploying.
 **Scope:** `src/server/routes/surveys.ts`, `src/server/db/schema.ts`, and the survey admin UI.
 **Urgency:** blocking. A monthly team sentiment survey and CSM/KAM satisfaction
 surveys are about to be sent using this mechanism. Do not send them until this
@@ -127,3 +129,66 @@ because the survey's entire value depends on people believing it.
 
 Deploy is `.\deploy\deploy.ps1 -Branch nova-codex`, run **on** BYM-AAPP01,
 elevated.
+
+---
+
+## What was done (v1.1.438)
+
+**Decision on self-replay: removed.** The handoff asked for a conscious choice.
+Keeping it meant keeping the recipient's raw token, which means anyone with the
+server can still re-identify everyone — and the person making the anonymity
+promise is the person with the server. Showing someone their own answers back is
+worth less than the promise being true, so the token is erased and the answers
+are not replayed. Respondents are told this on submit.
+
+**1. The join is broken.**
+- `survey_responses.token` is dropped outright (`db/schema.ts`). There is no
+  column left to join on.
+- `survey_recipients.token` is set to NULL on submit, so the raw token does not
+  survive either. The column is now nullable with a filtered unique index.
+- Historical rows are purged in the same migration — completed recipients' tokens
+  are nulled, so there is no identifiable back catalogue behind the new promise.
+- Both `submitted_at` and `completed_at` are stored to the day, historically and
+  going forward, so timing cannot stand in for the missing token.
+- Consequence: removing a recipient no longer deletes their response (it can't be
+  found). A used link now 404s rather than 410s; the copy covers both.
+
+**2. Minimum-N gate.** Settings key `survey_min_responses`, default 5. Applied to
+the admin detail endpoint, CSV export (409 with a reason), `satisfaction-scores`
+and the Trends feed. The admin UI explains the suppression rather than showing
+an empty results tab.
+
+**3. Wording.** Invite and reminder (HTML + text), the public respond page and the
+in-NOVA respond panel all now say what is actually delivered: answers are
+anonymous, we can see *that* you responded but not *what* you said, results are
+group-only and withheld below the threshold.
+
+**Two live leaks the handoff did not find.** NOVA was not merely capable of
+re-identifying responses — it was doing it, in two shipped features that both ran
+exactly the join in the Evidence section:
+- `GET /api/people/roster/survey-scores` reported each named agent's own
+  satisfaction score on the Agent Roster.
+- `one21-service.ts` mailed that score to the agent in the weekly KPI email.
+
+Both now return nothing, permanently, with the reasoning recorded at the call
+site. The roster's satisfaction tile and the email's satisfaction row read as
+"no data". **Worth a look:** decide whether to remove that tile and row entirely,
+or source them from something that isn't an anonymous survey.
+
+`scripts/migrate-sqlite-to-mssql.mjs` no longer copies the two survey tables —
+re-running it would have reimported the tokens and undone this.
+
+## Not verified
+
+The runtime tests in the section above have **not** been run. Doing so means
+executing the migration (including `DROP COLUMN`) against the real NOVA database,
+which is Nick's call, not something to trigger from a dev session. TypeScript and
+the full build pass. Before trusting the fix, on a deployed instance:
+
+1. `SELECT * FROM survey_responses` — confirm no `token` column.
+2. Submit a test response; confirm `survey_recipients.token` is NULL for that row
+   and that the join in the Evidence section is no longer expressible.
+3. Confirm the scheduler still activates, reminds and closes (it skips recipients
+   whose token has been erased — that path is new).
+4. Confirm a survey under 5 responses shows the suppression message and refuses
+   CSV export.

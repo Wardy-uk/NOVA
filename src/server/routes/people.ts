@@ -500,6 +500,16 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
   });
 
   // ── Survey satisfaction scores (per agent) ──
+  //
+  // Permanently empty. This used to join survey_responses back to survey_recipients
+  // on the shared token and report each named agent's own satisfaction score — which
+  // is precisely what the survey invitation promises will never happen. The token was
+  // removed from survey_responses to make that join impossible (see routes/surveys.ts),
+  // so there is no per-agent figure to return and there must not be one. Survey results
+  // are only available in aggregate, above a minimum response count.
+  //
+  // The endpoint is kept so the roster keeps rendering; satisfaction simply reads as
+  // "no data" there.
 
   router.get('/roster/survey-scores', async (req: Request, res: Response) => {
     try {
@@ -508,64 +518,7 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
 
-      // Get the most recent closed or active survey
-      const latestSurvey = await queryOne<any>(`
-        SELECT TOP 1 id FROM surveys
-        WHERE status IN ('active', 'closed')
-        ORDER BY created_at DESC
-      `);
-
-      if (!latestSurvey) {
-        res.json({ ok: true, data: {} });
-        return;
-      }
-
-      // Get scale_5 question IDs for this survey
-      const questions = await query<any>(`
-        SELECT id FROM survey_questions
-        WHERE survey_id = ? AND question_type = 'scale_5'
-      `, [latestSurvey.id]);
-
-      if (questions.length === 0) {
-        res.json({ ok: true, data: {} });
-        return;
-      }
-
-      // Join responses → recipients to get display_name per response
-      const rows = await query<any>(`
-        SELECT sr.display_name, resp.answers
-        FROM survey_responses resp
-        JOIN survey_recipients sr ON sr.token = resp.token AND sr.survey_id = resp.survey_id
-        WHERE resp.survey_id = ?
-      `, [latestSurvey.id]);
-
-      // Aggregate per-agent: average all scale_5 answers
-      const qIds = new Set(questions.map((q: any) => q.id));
-      const agentScores: Record<string, { sum: number; count: number }> = {};
-
-      for (const row of rows) {
-        const name = row.display_name;
-        try {
-          const answers = JSON.parse(row.answers) as Array<{ question_id: number; value: string | number }>;
-          for (const a of answers) {
-            if (qIds.has(a.question_id)) {
-              const val = Number(a.value);
-              if (!isNaN(val) && val >= 1 && val <= 5) {
-                if (!agentScores[name]) agentScores[name] = { sum: 0, count: 0 };
-                agentScores[name].sum += val;
-                agentScores[name].count++;
-              }
-            }
-          }
-        } catch { /* skip bad JSON */ }
-      }
-
-      const result: Record<string, number> = {};
-      for (const [name, { sum, count }] of Object.entries(agentScores)) {
-        result[name] = Math.round((sum / count) * 100) / 100;
-      }
-
-      res.json({ ok: true, data: result });
+      res.json({ ok: true, data: {} });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }

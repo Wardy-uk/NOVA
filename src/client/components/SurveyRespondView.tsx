@@ -91,7 +91,10 @@ export function SurveyRespondView({ token }: { token: string }) {
             <i className="fa-solid fa-check text-2xl text-emerald-600" />
           </div>
           <h2 className="text-xl font-bold text-slate-800 mb-2">Thank you</h2>
-          <p className="text-sm text-slate-500">Your response has been recorded. You can close this page.</p>
+          <p className="text-sm text-slate-500">
+            Your response has been recorded anonymously — it is no longer linked to you, so it
+            can't be shown back to you or withdrawn. You can close this page.
+          </p>
         </div>
       </div>
     );
@@ -144,7 +147,7 @@ export function SurveyRespondView({ token }: { token: string }) {
           {survey.description && <p className="text-sm text-slate-500 mt-2 max-w-lg mx-auto">{survey.description}</p>}
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
             <i className="fa-solid fa-shield-halved text-emerald-500" />
-            <span>Your response is completely anonymous</span>
+            <span>Your answers are anonymous — nothing stored links them back to you</span>
           </div>
         </div>
 

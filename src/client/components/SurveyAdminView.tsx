@@ -41,9 +41,11 @@ interface SurveyDetail extends Survey {
   recipients: Recipient[];
   results: AggResult[];
   is_admin: boolean;
+  /** Results are withheld until this many people have replied — see the anonymity note in routes/surveys.ts. */
+  results_suppressed?: boolean;
+  min_responses?: number;
   my_token?: string | null;
   my_completed?: boolean;
-  my_answers?: Array<{ question_id: number; value: string | number }> | null;
 }
 
 interface DraftQuestion {
@@ -164,8 +166,24 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
     setActionLoading(false);
   };
 
-  const handleExport = (id: number) => {
-    window.open(`/api/surveys/${id}/export`, '_blank');
+  const handleExport = async (id: number) => {
+    try {
+      const res = await fetch(`/api/surveys/${id}/export`);
+      // Refused below the minimum response count — surface the reason rather than
+      // dumping the JSON error into a download.
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        setError(json?.error || 'Failed to export');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `survey-${id}-results.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { setError('Network error'); }
   };
 
   // ── Survey List ──
@@ -437,7 +455,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
           {!isDetailAdmin && (
             <button onClick={() => setDetailTab('results')}
               className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider rounded-t transition-colors ${detailTab === 'results' ? 'text-[#5ec1ca] border-b-2 border-[#5ec1ca]' : 'text-neutral-500 hover:text-neutral-300'}`}>
-              {detail.my_completed ? 'My Response' : 'Respond'}
+              {detail.my_completed ? 'Completed' : 'Respond'}
             </button>
           )}
           <button onClick={() => setDetailTab('questions')}
@@ -455,7 +473,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                 <th className="py-2 px-3">Email</th>
                 <th className="py-2 px-3">Invited</th>
                 <th className="py-2 px-3">Completed</th>
-                <th className="py-2 px-3">Completed At</th>
+                <th className="py-2 px-3">Completed On</th>
                 <th className="py-2 px-3 w-8"></th>
               </tr>
             </thead>
@@ -470,7 +488,7 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
                   <td className="py-2 px-3">
                     {r.completed ? <i className="fa-solid fa-circle-check text-green-400" /> : <i className="fa-solid fa-circle-xmark text-neutral-600" />}
                   </td>
-                  <td className="py-2 px-3 text-neutral-600 text-[10px]">{fmtDateTime(r.completed_at)}</td>
+                  <td className="py-2 px-3 text-neutral-600 text-[10px]">{fmtDate(r.completed_at)}</td>
                   <td className="py-2 px-3">
                     <button
                       disabled={actionLoading}
@@ -500,7 +518,16 @@ export function SurveyAdminView({ userRole }: { userRole?: string }) {
         {/* Results tab — admin: aggregated results, non-admin: respond/view own */}
         {detailTab === 'results' && isDetailAdmin && (
           <div className="space-y-4">
-            {detail.results.length === 0 || detail.recipients_completed === 0 ? (
+            {detail.results_suppressed ? (
+              <div className="py-8 text-center">
+                <i className="fa-solid fa-user-shield text-neutral-600 text-2xl mb-2" />
+                <p className="text-xs text-neutral-400">Not enough responses to report anonymously.</p>
+                <p className="text-[10px] text-neutral-600 mt-1">
+                  {detail.recipients_completed} of {detail.min_responses ?? 5} needed. Results and open
+                  text stay hidden until then, because a handful of answers can identify who gave them.
+                </p>
+              </div>
+            ) : detail.results.length === 0 || detail.recipients_completed === 0 ? (
               <p className="text-xs text-neutral-500 py-8 text-center">No responses yet.</p>
             ) : (
               detail.results.map((r, i) => (
@@ -1006,15 +1033,6 @@ function InlineSurveyResponse({ detail, onSubmitted }: { detail: SurveyDetail; o
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Pre-fill if already completed
-  useEffect(() => {
-    if (detail.my_completed && detail.my_answers) {
-      const filled: Record<number, string | number> = {};
-      for (const a of detail.my_answers) filled[a.question_id] = a.value;
-      setAnswers(filled);
-    }
-  }, [detail.my_completed, detail.my_answers]);
-
   const readOnly = detail.my_completed || submitted;
   const isActive = detail.status === 'active';
 
@@ -1051,37 +1069,19 @@ function InlineSurveyResponse({ detail, onSubmitted }: { detail: SurveyDetail; o
     setSubmitting(false);
   };
 
+  // Answers are not replayed back: the link between a response and the person who
+  // gave it is destroyed on submit, which is what makes the survey anonymous.
   if (readOnly) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 mb-2">
-          <i className="fa-solid fa-circle-check text-green-400" />
-          <span className="text-[11px] text-green-400 font-semibold">
-            {submitted ? 'Response submitted successfully' : 'You have already completed this survey'}
-          </span>
-        </div>
-        {detail.questions.map((q, i) => {
-          const a = answers[q.id];
-          return (
-            <div key={q.id} className="bg-[#272C33] rounded-lg border border-[#3a424d]/50 p-3">
-              <div className="flex items-start gap-2 mb-2">
-                <span className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full bg-[#5ec1ca]/20 text-[#5ec1ca] text-[9px] font-bold">{i + 1}</span>
-                <p className="text-[11px] text-neutral-200">{q.question_text}</p>
-              </div>
-              {q.question_type === 'scale_5' ? (
-                <div className="flex gap-1.5 ml-7">
-                  {[1, 2, 3, 4, 5].map(n => (
-                    <div key={n} className={`px-2.5 py-1 rounded text-[10px] font-semibold border ${a === n ? 'bg-[#5ec1ca]/20 text-[#5ec1ca] border-[#5ec1ca]/40' : 'bg-[#2f353d] text-neutral-600 border-[#3a424d]/30'}`}>
-                      {n}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="ml-7 text-[11px] text-neutral-400 bg-[#2f353d] rounded px-2.5 py-1.5 border border-[#3a424d]/30">{a || '—'}</p>
-              )}
-            </div>
-          );
-        })}
+      <div className="text-center py-8">
+        <i className="fa-solid fa-circle-check text-green-400 text-2xl mb-2" />
+        <p className="text-[12px] text-green-400 font-semibold">
+          {submitted ? 'Response submitted' : 'You have already completed this survey'}
+        </p>
+        <p className="text-[10px] text-neutral-500 mt-2 max-w-sm mx-auto">
+          Your answers were recorded anonymously — they are no longer linked to you, so they
+          can't be shown back to you or withdrawn.
+        </p>
       </div>
     );
   }
@@ -1099,7 +1099,7 @@ function InlineSurveyResponse({ detail, onSubmitted }: { detail: SurveyDetail; o
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-2">
         <i className="fa-solid fa-shield-halved text-green-400 text-xs" />
-        <span className="text-[10px] text-neutral-500">Your response is completely anonymous</span>
+        <span className="text-[10px] text-neutral-500">Your answers are anonymous — once submitted, nothing stored links them back to you</span>
       </div>
 
       {detail.questions.map((q, i) => (

@@ -3,6 +3,7 @@ import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { UserQueries } from '../db/queries.js';
 import { query as novaQuery } from '../services/database.js';
+import { getSurveyMinResponses } from './surveys.js';
 
 const VALID_ENVS = ['live', 'uat'] as const;
 type Env = (typeof VALID_ENVS)[number];
@@ -725,7 +726,10 @@ export function createTrendsRoutes(settingsQueries: SettingsQueries, _userQuerie
                 if (qIds.has(a.question_id)) { const v = Number(a.value); if (!isNaN(v) && v >= 1 && v <= 5) { total += v; count++; } }
               }
             }
-            const avg = count > 0 ? Math.round((total / count) * 100) / 100 : null;
+            // Withhold the score until enough people have replied — a handful of
+            // responses is not an anonymous aggregate.
+            const enough = responses.length >= getSurveyMinResponses(settingsQueries.getAll());
+            const avg = enough && count > 0 ? Math.round((total / count) * 100) / 100 : null;
             for (const col of columns) { row.checkpoints[col.label] = avg; }
           } else {
             for (const col of columns) { row.checkpoints[col.label] = null; }
