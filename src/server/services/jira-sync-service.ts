@@ -175,6 +175,13 @@ export class JiraSyncService {
         }
       }
 
+      // Every upsert failing is not a partial sync, it's a broken one (a bad
+      // MERGE froze the cache for 20h on 18 Aug while lastSyncAt kept advancing,
+      // so everything downstream still believed the cache was current).
+      if (issueCount === 0 && upsertErrors > 0) {
+        throw new Error(`All ${upsertErrors} issue upserts failed — cache not updated`);
+      }
+
       // Mark cache as active even if some issues failed — partial data is better than no data
       this.lastSyncAt = new Date();
       this.fullSyncDone = true;
