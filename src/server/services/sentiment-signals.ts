@@ -27,7 +27,7 @@ import { query } from './database.js';
 
 const DIRTY_READ = 'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n';
 
-export const SENTIMENT_BUILD = '2026-08-19-sentiment-a';
+export const SENTIMENT_BUILD = '2026-08-19-sentiment-b';
 
 /** Below this an aggregate says more about who answered than about anything else. */
 export const THIN_SAMPLE = 10;
@@ -120,6 +120,48 @@ async function portalCsat(days: number) {
   };
 }
 
+/**
+ * Jira's native Satisfaction field — the one the KPI and the wallboards read.
+ *
+ * A SECOND, unrelated CSAT dataset. It shares no table and no code with the
+ * portal survey above, and the two are not views of one number: they are
+ * different surveys reaching different people. Reporting only one of them was
+ * how this service first shipped, and it produced a figure that contradicted the
+ * board on the wall.
+ *
+ * `customfield_12802.rating`, on tickets resolved in the window. Scoped to NT
+ * and to resolved-only, which keeps the JSON scan small enough to survive — the
+ * unscoped version of this query timed out repeatedly in the flow signals.
+ */
+async function jiraCsat(days: number) {
+  const rows = await query<{ resolved: number; rated: number; avg_rating: number | null }>(
+    `${DIRTY_READ}
+     SELECT COUNT(*) AS resolved,
+            SUM(CASE WHEN JSON_VALUE(fields_json, '$.customfield_12802.rating') IS NOT NULL THEN 1 ELSE 0 END) AS rated,
+            AVG(TRY_CAST(JSON_VALUE(fields_json, '$.customfield_12802.rating') AS FLOAT)) AS avg_rating
+       FROM jira_issue_cache
+      WHERE project_key = 'NT'
+        AND resolved_at >= DATEADD(day, ?, GETUTCDATE())
+        AND ISJSON(fields_json) = 1`,
+    [-days],
+  );
+
+  const r = rows[0];
+  const rated = Number(r?.rated ?? 0);
+  return {
+    basis: "Jira's native Satisfaction field (cf12802) on resolved tickets — the source the "
+      + 'CSAT KPI and the wallboards read. A different dataset from the portal survey above; '
+      + 'the two do not combine.',
+    resolved: Number(r?.resolved ?? 0),
+    rated,
+    ratedPct: r?.resolved ? Math.round((rated / Number(r.resolved)) * 1000) / 10 : null,
+    thin: rated < THIN_SAMPLE,
+    avgRating: rated >= THIN_SAMPLE && r?.avg_rating !== null && r?.avg_rating !== undefined
+      ? Math.round(Number(r.avg_rating) * 100) / 100
+      : null,
+  };
+}
+
 /** Free-text CSAT comments — the part people actually read. */
 async function csatComments(days: number) {
   return query<{ jira_issue_key: string; csat_score: number; comment: string; responded_at: string }>(
@@ -186,6 +228,7 @@ export async function getSentimentSignals(days = 30) {
   // aggregates starve each other on this instance.
   const ai = await block(() => aiSentiment(window));
   const portal = await block(() => portalCsat(window));
+  const jira = await block(() => jiraCsat(window));
   const surveys = await block(() => surveySentiment());
 
   if (portal.ok && portal.data) {
@@ -199,13 +242,14 @@ export async function getSentimentSignals(days = 30) {
     } catch { /* comments are the enrichment; the rates are the signal */ }
   }
 
-  const named: Array<[string, Block<unknown>]> = [['ai', ai], ['portalCsat', portal], ['surveys', surveys]];
+  const named: Array<[string, Block<unknown>]> = [['ai', ai], ['portalCsat', portal], ['jiraCsat', jira], ['surveys', surveys]];
 
   return {
     build: SENTIMENT_BUILD,
     window: { days: window },
     ai,
     portalCsat: portal,
+    jiraCsat: jira,
     surveys,
     unavailable: named.filter(([, v]) => !v.ok).map(([name, v]) => ({ name, error: v.error })),
   };
