@@ -45,7 +45,7 @@ export interface StandupCommitment {
   created_at: string;
 }
 
-export interface SessionSummary extends StandupSession {
+export interface SessionSummary extends Pick<StandupSession, 'id' | 'date' | 'status'> {
   submission_count: number;
 }
 
@@ -74,9 +74,13 @@ export class TeamStandupQueries {
     return created;
   }
 
+  /** History picker only — never `SELECT *` here. The row carries brief_json and
+   *  the Plaud transcript, so 60 sessions came to ~3MB of JSON that the standup
+   *  view had to download and parse before it could render anything. */
   async listSessions(limit = 60): Promise<SessionSummary[]> {
     return query<SessionSummary>(
-      `SELECT s.*, (SELECT COUNT(*) FROM standup_submissions sub WHERE sub.session_id = s.id) AS submission_count
+      `SELECT s.id, s.date, s.status,
+              (SELECT COUNT(*) FROM standup_submissions sub WHERE sub.session_id = s.id) AS submission_count
        FROM standup_sessions s
        ORDER BY s.date DESC
        OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY`,
