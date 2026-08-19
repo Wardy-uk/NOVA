@@ -1802,7 +1802,6 @@ async function main() {
     setTimeout(() => kpiPipeline.collectJiraSnapshot().catch(() => {}), 90_000);
     setTimeout(() => { if (agentJiraClient) syncAgentRosterStats(settingsQueries, agentJiraClient).catch(() => {}); }, 100_000);
     setTimeout(() => {
-      kpiPipeline.captureEodSnapshot().catch(() => {});
       kpiPipeline.collectDerivedKpis().catch(err => console.error('[kpi-pipeline] Derived KPIs startup failed:', err instanceof Error ? err.message : err));
     }, 120_000);
 
@@ -1828,17 +1827,14 @@ async function main() {
       }
     }, 10 * 60 * 1000);
 
-    // Daily digest at 17:30, weekly digest Monday 09:00, EOD snapshot 17:25, derived KPIs 17:30
-    jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + EOD + derived', async () => {
+    // Daily digest at 17:30, weekly digest Monday 09:00, derived KPIs 17:30
+    jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + derived', async () => {
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
       const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
       const ukDay = now.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short' });
       const isWeekday = !['Sat', 'Sun'].includes(ukDay);
 
-      if (isWeekday && ukHour === 17 && ukMin >= 25 && ukMin < 30) {
-        await kpiPipeline.captureEodSnapshot();
-      }
       if (isWeekday && ukHour === 17 && ukMin >= 30 && ukMin < 40) {
         await kpiPipeline.collectDerivedKpis();
         await kpiPipeline.generateDailyDigest();

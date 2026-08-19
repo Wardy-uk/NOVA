@@ -907,85 +907,14 @@ export class KpiPipeline {
     }
   }
 
-  async captureEodSnapshot(): Promise<void> {
-    const started = new Date();
-    try {
-      const p = await getKpiPool(this.settings);
-      const s = this.s;
-      const today = new Date().toISOString().slice(0, 10);
-
-      // Ensure target table exists
-      await p.request().query(`
-        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.JiraEodTicketStatusSnapshot${s}') AND type = 'U')
-        CREATE TABLE dbo.JiraEodTicketStatusSnapshot${s} (
-          Id INT IDENTITY(1,1) PRIMARY KEY,
-          SnapshotDate DATE NOT NULL,
-          ProjectKey NVARCHAR(10) NOT NULL,
-          ProjectName NVARCHAR(100) NULL,
-          CurrentTier NVARCHAR(100) NULL,
-          RequestTypeName NVARCHAR(200) NULL,
-          StatusName NVARCHAR(100) NULL,
-          StatusCategory NVARCHAR(50) NULL,
-          TicketCount INT NOT NULL,
-          SnapshotAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
-        );
-      `).catch(() => {});
-
-      // Query all open tickets across all projects
-      const rows = await localQuery<{
-        project_key: string;
-        current_tier: string | null;
-        request_type: string | null;
-        status_name: string | null;
-        status_category: string | null;
-        cnt: number;
-      }>(`
-        SELECT project_key, current_tier, request_type, status_name, status_category, COUNT(*) AS cnt
-        FROM jira_issue_cache
-        WHERE status_category != 'Done'
-        GROUP BY project_key, current_tier, request_type, status_name, status_category
-      `);
-
-      // Delete today's rows first
-      const delReq = p.request();
-      delReq.input('snapDate', sql.Date, today);
-      await delReq.query(`DELETE FROM dbo.JiraEodTicketStatusSnapshot${s} WHERE SnapshotDate = @snapDate`);
-
-      // Insert per group
-      for (const r of rows) {
-        const req = p.request();
-        req.input('snapDate', sql.Date, today);
-        req.input('projectKey', sql.NVarChar(10), r.project_key);
-        req.input('projectName', sql.NVarChar(100), r.project_key);
-        req.input('currentTier', sql.NVarChar(100), r.current_tier);
-        req.input('requestType', sql.NVarChar(200), r.request_type);
-        req.input('statusName', sql.NVarChar(100), r.status_name);
-        req.input('statusCategory', sql.NVarChar(50), r.status_category);
-        req.input('ticketCount', sql.Int, r.cnt);
-        await req.query(`
-          INSERT INTO dbo.JiraEodTicketStatusSnapshot${s}
-            (SnapshotDate, ProjectKey, ProjectName, CurrentTier, RequestTypeName, StatusName, StatusCategory, TicketCount)
-          VALUES (@snapDate, @projectKey, @projectName, @currentTier, @requestType, @statusName, @statusCategory, @ticketCount)
-        `);
-      }
-
-      console.log(`[kpi-pipeline] EOD snapshot captured: ${rows.length} groups for ${today}`);
-
-      await this.monitor?.logRun({
-        pipeline_name: 'kpi-eod-snapshot', started_at: started, completed_at: new Date(),
-        status: 'success', rows_affected: rows.length, error_message: null,
-        duration_ms: Date.now() - started.getTime(),
-      });
-    } catch (err) {
-      console.error('[kpi-pipeline] EOD snapshot failed:', err instanceof Error ? err.message : err);
-      void logError('kpi-pipeline', err, { severity: 'critical', context: { phase: 'eod-snapshot' } });
-      await this.monitor?.logRun({
-        pipeline_name: 'kpi-eod-snapshot', started_at: started, completed_at: new Date(),
-        status: 'error', rows_affected: 0, error_message: err instanceof Error ? err.message : String(err),
-        duration_ms: Date.now() - started.getTime(),
-      });
-    }
-  }
+  // dbo.JiraEodTicketStatusSnapshot is owned by n8n, which writes every project
+  // nightly at 17:00 with RequestTypeId set. NOVA used to write it too, and could
+  // not: the PK ends in RequestTypeKey = ISNULL(RequestTypeId, '__NULL__') and NOVA
+  // only had the request type NAME, so every row keyed to __NULL__ and the second
+  // request type sharing a (date, project, tier, status) tuple threw a PK violation.
+  // Worse, the run DELETEd the whole SnapshotDate first — across ALL projects — so a
+  // restart after 17:00 replaced n8n's full snapshot with a handful of NT rows.
+  // captureEodSnapshot removed 19 Aug 2026; n8n is the sole writer.
 
   async refreshAllAgentMetrics(): Promise<void> {
     try {

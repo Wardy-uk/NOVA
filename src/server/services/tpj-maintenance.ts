@@ -4,7 +4,7 @@
 // data is read LIVE from Jira REST (the local jira_issue_cache purges tickets
 // resolved >7 days ago, so it can't back month-long charts). The daily
 // backlog-by-status chart reads the existing dbo.JiraEodTicketStatusSnapshot
-// (populated nightly by kpi-pipeline.captureEodSnapshot for all projects).
+// (populated nightly at 17:00 by n8n for all projects — NOVA never writes it).
 //
 // Field reference (discovered against NTPJ, cloudId 9357a1ba-…):
 //   customfield_13413  TPJ PSP          select, option value is a Fibonacci number ("1".."55")
