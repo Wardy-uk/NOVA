@@ -379,9 +379,9 @@ export function StandupView({ token }: { token: string }) {
               </button>
 
               {open && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 lg:divide-x divide-[#3a424d]/70">
+              <div className="grid grid-cols-1 lg:grid-cols-12 lg:divide-x divide-[#3a424d]/70">
                 {/* Submission */}
-                <div className="p-4 space-y-2">
+                <div className="p-4 space-y-2 lg:col-span-2">
                   <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Submission</h4>
                   {submitted ? (
                     <div className="text-xs space-y-2">
@@ -403,7 +403,7 @@ export function StandupView({ token }: { token: string }) {
                 </div>
 
                 {/* Jira brief */}
-                <div className="p-4 space-y-2">
+                <div className="p-4 space-y-2 lg:col-span-6">
                   <div className="flex items-center gap-2">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Jira brief</h4>
                     {briefAgent && briefAgent.over5_count > 0 && <span className="w-2 h-2 rounded-full bg-red-500" title={`${briefAgent.over5_count} over 5 days`} />}
@@ -430,7 +430,7 @@ export function StandupView({ token }: { token: string }) {
                 </div>
 
                 {/* Accountability */}
-                <div className="p-4 space-y-2">
+                <div className="p-4 space-y-2 lg:col-span-4">
                   <div className="flex items-center gap-2">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Accountability</h4>
                     {commits.some((c) => c.status === 'pending') && (
