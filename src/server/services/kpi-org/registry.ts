@@ -311,9 +311,12 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   },
   {
     key: 'nt_csat', label: 'CSAT %', team: 'Support', colA: 'Quality', jiraSpace: 'NT',
-    unit: 'percent', direction: 'higher-better', dailyTarget: 80, monthlyTarget: null, rollup: 'average',
-    rag: { greenMin: 80, amberMin: 64 },
+    unit: 'percent', direction: 'higher-better', dailyTarget: 95, monthlyTarget: null, rollup: 'average',
+    rag: { greenMin: 95, amberMin: 76 },
     compute: { kind: 'resolved_outcome', metric: 'csat' },
+    note: 'Average customer rating on tickets solved that day, as a percentage of 5 '
+      + '(rating × 20). The 95% target is an average of 4.75 out of 5. A day with no '
+      + 'ratings is blank, not 0 — it is excluded from the weekly and monthly averages.',
   },
   {
     key: 'nt_fcr', label: 'FCR Rate %', team: 'Support', colA: 'Quality', jiraSpace: 'NT',

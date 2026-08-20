@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 // can be copied straight into the sheet. Rows 17 / 39 / 40 come back blank by design.
 // Data: /api/kpi-org/support/tracker-export?from&to (today's column is live-overlaid).
 
-interface ExportRow { label: string; values: (number | null)[] }
+interface ExportRow { label: string; values: (number | null)[]; extra?: boolean }
 interface ExportData { dates: string[]; rows: ExportRow[] }
 
 const ddmm = (iso: string) => { const [, m, d] = iso.split('-'); return `${d}/${m}`; };
@@ -46,7 +46,10 @@ export function KpiTrackerExport() {
 
   function copy(withLabels: boolean) {
     if (!data) return;
+    // `extra` rows sit below the sheet's last row — copying them would paste into
+    // cells the tracker doesn't have, so they stay on screen only.
     const tsv = data.rows
+      .filter(row => !row.extra)
       .map(row => {
         const nums = row.values.map(cell).join('\t');
         return withLabels ? `${row.label}\t${nums}` : nums;
@@ -75,6 +78,7 @@ export function KpiTrackerExport() {
       <p className="text-xs text-slate-500 mb-4">
         Weekday columns only, exact spreadsheet row order. <b>Copy numbers</b> puts just the value grid (tab-separated) on your clipboard —
         click the first date cell for this month in the sheet and paste. Rows 17 / 39 / 40 (TPJ-in-Dev, Failed Jobs, CI) are intentionally blank. Today's column is live.
+        The italic <b>CSAT %</b> row below the rule has no row in the sheet — it is shown for reference and is <b>not</b> included when you copy.
       </p>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
@@ -91,8 +95,10 @@ export function KpiTrackerExport() {
             </thead>
             <tbody>
               {data.rows.map((row, i) => (
-                <tr key={i} className="border-t border-white/5">
-                  <td className="px-3 py-1.5 sticky left-0 bg-[#1a1f26] whitespace-nowrap text-slate-300">{row.label}</td>
+                <tr key={i} className={row.extra ? 'border-t-2 border-white/20 text-slate-400' : 'border-t border-white/5'}>
+                  <td className={`px-3 py-1.5 sticky left-0 bg-[#1a1f26] whitespace-nowrap ${row.extra ? 'text-slate-400 italic' : 'text-slate-300'}`}>
+                    {row.label}
+                  </td>
                   {row.values.map((v, j) => (
                     <td key={j} className="px-3 py-1.5 text-center tabular-nums text-slate-200">{cell(v)}</td>
                   ))}

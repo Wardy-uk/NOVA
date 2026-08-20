@@ -24,6 +24,8 @@ const mondayOf = (d: Date) => { const x = new Date(d); const dow = (x.getDay() +
 const KPI_ORDER: string[] = [
   'New Tickets Today',
   'Tickets Solved Today',
+  'Solved by NOVA',
+  'CSAT %',
   'Number of Tickets in Customer Care',
   'Number of Tickets in CC (Incidents)',
   'Number of Tickets in CC (Service Requests)',
@@ -110,6 +112,14 @@ const REPORTABLE_KPIS = new Set([
   'Oldest actionable ticket (days) in Tier 3',
 ].map(k => k.toLowerCase()));
 
+// Rows are grouped by the KPI's registry category, so these two would otherwise be
+// filed under Support / Quality further down the page. They belong at the top with
+// the daily volume numbers, so pull them into the Legacy block.
+const GROUP_OVERRIDE: Record<string, string> = {
+  'Solved by NOVA': 'Legacy',
+  'CSAT %': 'Legacy',
+};
+
 function Dot({ rag }: { rag: number | null }) {
   if (rag == null || !RAG[rag]) return null;
   return <span className="inline-block w-2 h-2 rounded-full ml-1.5 align-middle" style={{ background: RAG[rag] }} />;
@@ -150,7 +160,7 @@ export function KpiRebuildLegacy() {
   const cellMap = new Map<string, DailyKpi>();
   rows.forEach(d => cellMap.set(`${d.kpi}|${d.CreatedAt.slice(0, 10)}`, d));
   const groupMap = new Map<string, string>();
-  rows.forEach(d => groupMap.set(d.kpi, d.kpiGroup));
+  rows.forEach(d => groupMap.set(d.kpi, GROUP_OVERRIDE[d.kpi] ?? d.kpiGroup));
   const allKpiNames = [...new Set(rows.map(d => d.kpi))];
   const allOrdered = [
     ...KPI_ORDER.filter(k => allKpiNames.includes(k)),

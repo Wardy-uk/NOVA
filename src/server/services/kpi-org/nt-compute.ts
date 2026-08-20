@@ -359,7 +359,10 @@ export async function computeNtKpi(
     case 'resolved_outcome': {
       const agg = await resolvedAgg(jira, ctx);
       if (c.metric === 'csat') {
-        return { value: agg.csatCount > 0 ? Math.round((agg.csatSum / agg.csatCount) * 20) : 0, failed: false };
+        // No ratings today is NO DATA, not zero satisfaction. Storing 0 painted the
+        // day red and dragged the weekly/monthly average down; null is skipped by
+        // the rollups and shows as blank.
+        return { value: agg.csatCount > 0 ? Math.round((agg.csatSum / agg.csatCount) * 20) : null, failed: false };
       }
       if (c.metric === 'frt') {
         return { value: agg.frtTotal > 0 ? Math.round(((agg.frtTotal - agg.frtBreached) / agg.frtTotal) * 100) : 100, failed: false };

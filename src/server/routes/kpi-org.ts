@@ -44,7 +44,7 @@ function enrich(row: OrgKpiDailyRow) {
 // registry KPI keys. kpiKey === null → rendered as a blank row (kept so the block
 // pastes into the sheet in exact row alignment). Column metadata (Daily/Monthly KPI,
 // People, Individual Responsible) is intentionally excluded — it lives in the sheet.
-const TRACKER_ROWS: { label: string; kpiKey: string | null }[] = [
+const TRACKER_ROWS: { label: string; kpiKey: string | null; extra?: boolean }[] = [
   { label: 'New Tickets', kpiKey: 'nt_legacy_new_tickets' },
   { label: 'Total Solved', kpiKey: 'nt_legacy_solved_today' },
   { label: 'Solved by NOVA', kpiKey: 'nt_solved_nova' },
@@ -79,6 +79,9 @@ const TRACKER_ROWS: { label: string; kpiKey: string | null }[] = [
   { label: 'Oldest actionable ticket (days) in Tier 3', kpiKey: 'nt_lg_oldest_tier_3_over_sla_actionable' },
   { label: 'Failed Jobs remaining on Board', kpiKey: null },                        // row 39 — blank per spec
   { label: 'No. of CI In Progress (unmitigated)', kpiKey: null },                    // row 40 — blank per spec
+  // Beyond the sheet: no row 41 exists in the tracker, so this is flagged `extra`
+  // and left out of the copy payload — pasting it would land in the wrong cell.
+  { label: 'CSAT % (avg rating × 20)', kpiKey: 'nt_csat', extra: true },
 ];
 
 export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
@@ -187,6 +190,7 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
       }
       const rows = TRACKER_ROWS.map(row => ({
         label: row.label,
+        extra: row.extra === true,
         values: dates.map(dt => (row.kpiKey ? (byKey.get(row.kpiKey)?.get(dt) ?? null) : null)),
       }));
       res.json({ ok: true, data: { dates, rows } });
