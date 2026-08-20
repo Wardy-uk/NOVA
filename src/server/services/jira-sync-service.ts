@@ -686,7 +686,9 @@ export class JiraSyncService {
 
       // CSAT trigger: if status changed to a resolved state, generate survey
       // and (if enabled) post the survey link as a public JSM comment.
-      if (oldRow && oldRow.status_name !== statusName) {
+      // Scoped to NT only — the comment is customer-facing, and YO/NTPJ reporters
+      // should not be surveyed. Widen via `csat_projects` (comma-separated keys).
+      if (oldRow && oldRow.status_name !== statusName && this.csatAppliesTo(issue.key)) {
         const resolvedStates = ['Closed', 'Resolved', 'Done'];
         if (statusName && resolvedStates.includes(statusName)) {
           const reporterEmail = reporter?.emailAddress as string | null;
@@ -735,6 +737,15 @@ export class JiraSyncService {
     // Prod settings are typically blank; fall back to the stable live host rather
     // than localhost so survey links work even before app_base_url is configured.
     return 'https://nova.nurtur.tech';
+  }
+
+  /** Is this ticket in a project we survey? Default NT only; `csat_projects` can
+   *  widen it (e.g. "NT,NTPJ"). Matches the exact key prefix, so NT never matches NTPJ. */
+  private csatAppliesTo(issueKey: string): boolean {
+    const configured = (this.settings.get('csat_projects') || 'NT')
+      .split(',').map(p => p.trim().toUpperCase()).filter(Boolean);
+    const project = issueKey.split('-')[0]?.toUpperCase() ?? '';
+    return configured.includes(project);
   }
 
   /** Post the CSAT survey link as a JSM comment on the resolved ticket.
