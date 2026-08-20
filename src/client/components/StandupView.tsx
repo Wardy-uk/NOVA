@@ -17,6 +17,7 @@ interface CarriedCommitment extends Commitment { session_date: string; }
 interface BriefTicket {
   key: string; summary: string; assignee: string; tier: string; category: BriefCategory;
   status: string; ageDays: number | null; over5: boolean;
+  updated?: string | null; updatedDays?: number | null;
 }
 interface BriefAgent {
   agent_name: string; tickets: BriefTicket[]; total: number; over5_count: number;
@@ -55,6 +56,17 @@ function todayUk(): string {
 function niceDate(d: string): string {
   try { return new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
   catch { return d; }
+}
+/** "3h" / "2d" since the ticket was last touched in Jira. */
+function sinceUpdate(updated: string | null | undefined, updatedDays: number | null | undefined): string | null {
+  if (updated) {
+    const ms = Date.now() - new Date(updated).getTime();
+    if (!Number.isNaN(ms)) {
+      const hours = Math.max(0, Math.floor(ms / 3_600_000));
+      return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+    }
+  }
+  return updatedDays != null ? `${updatedDays}d` : null;
 }
 function shuffleArr<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -403,7 +415,7 @@ export function StandupView({ token }: { token: string }) {
                 </div>
 
                 {/* Jira brief */}
-                <div className="p-4 space-y-2 lg:col-span-6">
+                <div className="p-4 space-y-2 lg:col-span-7">
                   <div className="flex items-center gap-2">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Jira brief</h4>
                     {briefAgent && briefAgent.over5_count > 0 && <span className="w-2 h-2 rounded-full bg-red-500" title={`${briefAgent.over5_count} over 5 days`} />}
@@ -420,7 +432,17 @@ export function StandupView({ token }: { token: string }) {
                           <span className="text-neutral-300 flex-1 truncate">{t.summary}</span>
                           {t.tier && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-400 shrink-0" title="Current Tier">{t.tier}</span>}
                           {t.status && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2f353d] border border-[#3a424d] text-neutral-400 shrink-0" title="Status">{t.status}</span>}
-                          <span className="text-neutral-500 shrink-0">{t.ageDays != null ? `${t.ageDays}d` : ''}</span>
+                          <span className="text-neutral-500 shrink-0" title="Age since logged">{t.ageDays != null ? `${t.ageDays}d` : ''}</span>
+                          {(() => {
+                            const since = sinceUpdate(t.updated, t.updatedDays);
+                            if (!since) return null;
+                            const stale = (t.updatedDays ?? 0) >= 3;
+                            return (
+                              <span className={`shrink-0 text-[10px] ${stale ? 'text-amber-400' : 'text-neutral-500'}`} title="Time since last update">
+                                upd {since}
+                              </span>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -430,7 +452,7 @@ export function StandupView({ token }: { token: string }) {
                 </div>
 
                 {/* Accountability */}
-                <div className="p-4 space-y-2 lg:col-span-4">
+                <div className="p-4 space-y-2 lg:col-span-3">
                   <div className="flex items-center gap-2">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Accountability</h4>
                     {commits.some((c) => c.status === 'pending') && (

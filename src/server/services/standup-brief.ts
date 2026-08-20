@@ -26,6 +26,9 @@ export interface BriefTicket {
   created: string | null;
   ageDays: number | null;
   over5: boolean;
+  updated: string | null;
+  /** Whole days since the ticket was last updated in Jira. */
+  updatedDays: number | null;
 }
 
 export interface BriefAgent {
@@ -68,7 +71,7 @@ function categorise(tier: string, isDesignAgent: boolean): BriefCategory {
 export async function buildStandupBrief(client: JiraRestClient, design?: DesignIdentity): Promise<StandupBrief> {
   const result = await client.searchJqlAll(
     STANDUP_BRIEF_JQL,
-    ['summary', 'status', 'created', 'assignee', 'customfield_12981'],
+    ['summary', 'status', 'created', 'updated', 'assignee', 'customfield_12981'],
     500,
   );
 
@@ -84,6 +87,7 @@ export async function buildStandupBrief(client: JiraRestClient, design?: DesignI
     );
     const created = f.created ?? null;
     const ageDays = ageInDays(created);
+    const updated = f.updated ?? null;
     const ticket: BriefTicket = {
       key: issue.key,
       summary: (f.summary ?? '').toString(),
@@ -94,6 +98,8 @@ export async function buildStandupBrief(client: JiraRestClient, design?: DesignI
       created,
       ageDays,
       over5: ageDays != null && ageDays > 5,
+      updated,
+      updatedDays: ageInDays(updated),
     };
     const list = byAgent.get(assignee) ?? [];
     list.push(ticket);
