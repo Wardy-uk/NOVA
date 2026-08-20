@@ -6,7 +6,7 @@ import { Router } from 'express';
 import type { JiraRestClient } from '../services/jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import {
-  captureSupportNt, getDay, getLatest, getRange, getTeamRange, setManualValue,
+  captureSupportNt, recaptureSupportLateData, getDay, getLatest, getRange, getTeamRange, setManualValue,
   ORG_KPIS, getKpi, getOrgPeriod, getOrgHistoryGrid, startOrgBackfill, getLegacyEarliest, orgBackfillState,
 } from '../services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from '../services/kpi-org/live.js';
@@ -309,6 +309,24 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     try {
       const earliest = await getLegacyEarliest(deps.settings).catch(() => ({ org: null, agent: null }));
       res.json({ ok: true, data: { ...orgBackfillState, earliest } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
+  // Recompute the late-data KPIs (CSAT) over a trailing window. The backfill above
+  // deliberately skips the 'average' outcome family, and the daily capture freezes at
+  // 18:00 — so a rating that arrives after the freeze has no other way in until the
+  // evening job runs. /recapture-late?days=7&to=YYYY-MM-DD
+  router.post('/recapture-late', async (req, res) => {
+    const jira = deps.getJiraClient();
+    if (!jira) { res.status(503).json({ ok: false, error: 'Jira client not configured' }); return; }
+    try {
+      const { days, to } = req.body as { days?: number; to?: string };
+      const endDay = to || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const window = Math.min(Math.max(Number(days) || 7, 1), 60);
+      const r = await recaptureSupportLateData(jira, endDay, window);
+      res.json({ ok: true, data: { ...r, to: endDay, days: window } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

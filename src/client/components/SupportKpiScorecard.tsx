@@ -70,6 +70,25 @@ export function SupportKpiScorecard() {
     }
   }
 
+  // CSAT is the one KPI neither Backfill nor a mid-day capture will correct: ratings
+  // land after the 18:00 freeze, and the backfill skips the 'average' family.
+  async function runRecaptureLate() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/kpi-org/recapture-late', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 7 }),
+      });
+      const j = await r.json();
+      if (!j.ok) setError(j.error ?? 'CSAT refresh failed');
+      else setBackfillMsg(`CSAT refreshed: ${j.data.computed} day-values recomputed over ${j.data.days} days${j.data.failed ? ` (${j.data.failed} failed)` : ''}.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'CSAT refresh failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function pollBackfill() {
     const tick = async () => {
       try {
@@ -139,6 +158,11 @@ export function SupportKpiScorecard() {
           <button onClick={runBackfill}
             className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1]">
             Backfill all
+          </button>
+          <button onClick={runRecaptureLate} disabled={busy}
+            title="Recompute CSAT for the last 7 days. Ratings often arrive after the 18:00 freeze, and Backfill skips CSAT by design."
+            className="px-3 py-1.5 text-sm rounded-lg bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50">
+            Refresh CSAT (7d)
           </button>
         </div>
       </div>
