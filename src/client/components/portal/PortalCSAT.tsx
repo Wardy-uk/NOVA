@@ -21,6 +21,7 @@ export default function PortalCSAT({ token }: Props) {
   const [comment, setComment] = useState('');
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentDone, setCommentDone] = useState(false);
+  const [changed, setChanged] = useState(false); // rating was revised on this visit
 
   useEffect(() => {
     fetch(`/api/portal/csat/${encodeURIComponent(token)}`)
@@ -29,9 +30,17 @@ export default function PortalCSAT({ token }: Props) {
         if (data.ok) {
           setTicketKey(data.data.ticketKey);
           setSummary(data.data.summary);
+          // Already rated: land on the thank-you with their rating shown, still changeable.
+          if (data.data.existingRating) {
+            setRating(data.data.existingRating);
+            setBanked(true);
+            if (data.data.existingComment) {
+              setComment(data.data.existingComment);
+              setCommentDone(true);
+            }
+          }
         } else {
           setError(
-            data.error === 'already_responded' ? 'Thanks — you have already rated this ticket.' :
             data.error === 'expired' ? 'This feedback link has expired.' :
             data.error === 'rate_limited' ? 'Too many requests — please try again in a minute.' :
             'We could not find this feedback request.',
@@ -42,9 +51,11 @@ export default function PortalCSAT({ token }: Props) {
       .finally(() => setLoading(false));
   }, [token]);
 
-  // Rating is banked the instant it is chosen — no separate submit step.
+  // Rating is banked the instant it is chosen — no separate submit step. Tapping a
+  // different star later revises it: opinions change, and mis-taps need fixing.
   const pickRating = async (n: number) => {
-    if (banked || banking) return;
+    if (banking || n === rating) return;
+    const previous = rating;
     setRating(n);
     setBanking(true);
     try {
@@ -56,15 +67,14 @@ export default function PortalCSAT({ token }: Props) {
       const data = await res.json();
       if (data.ok) {
         setBanked(true);
-      } else if (data.error === 'already_responded') {
-        setBanked(true); // already recorded elsewhere — still show the thank-you
+        if (previous) setChanged(true);
       } else {
         setError('We could not record your rating. Please try again.');
-        setRating(0);
+        setRating(previous);
       }
     } catch {
       setError('We could not record your rating. Please try again.');
-      setRating(0);
+      setRating(previous);
     }
     setBanking(false);
   };
@@ -157,16 +167,32 @@ export default function PortalCSAT({ token }: Props) {
             width: '56px', height: '56px', borderRadius: '50%', background: '#d1fae5',
             display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '26px',
           }}>✓</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginBottom: '4px' }}>Thank you!</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginBottom: '4px' }}>
+            {changed ? 'Rating updated' : 'Thank you!'}
+          </div>
           <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '18px' }}>
             You rated your experience <strong style={{ color: '#0f172a' }}>{rating}/5</strong>{RATING_LABELS[rating] ? ` — ${RATING_LABELS[rating]}` : ''}.
           </div>
-          <div style={{ pointerEvents: 'none' }}><Stars interactive={false} /></div>
+          <Stars interactive={true} />
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
+            {banking ? 'Saving…' : 'Changed your mind? Tap a different star to update it.'}
+          </div>
         </div>
 
         {commentDone ? (
           <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#64748b' }}>
             Your comment has been shared with the team. You can close this page.
+            <div>
+              <button
+                onClick={() => setCommentDone(false)}
+                style={{
+                  background: 'none', border: 'none', padding: '6px 0', marginTop: '2px',
+                  color: TEAL, fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                Change your comment
+              </button>
+            </div>
           </div>
         ) : (
           <div style={{ marginTop: '22px', borderTop: '1px solid #eef2f6', paddingTop: '18px' }}>

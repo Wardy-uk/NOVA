@@ -110,15 +110,12 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
       if (isIssueKey(param)) {
         const issueKey = param.toUpperCase();
 
-        // Already rated? First-write-wins — surface the completed state.
-        const existing = await queryOne<{ responded_at: string | null }>(
-          `SELECT responded_at FROM portal_csat_surveys WHERE jira_issue_key = ?`,
+        // Already rated? Hand back the current rating so the page can prefill it —
+        // opinions change and mis-taps happen, so re-rating is allowed.
+        const existing = await queryOne<{ csat_score: number | null; comment: string | null; responded_at: string | null }>(
+          `SELECT csat_score, comment, responded_at FROM portal_csat_surveys WHERE jira_issue_key = ?`,
           [issueKey],
         );
-        if (existing?.responded_at) {
-          res.json({ ok: false, error: 'already_responded' });
-          return;
-        }
 
         // Only gate: the ticket must exist in cache. Rating is accepted at any state.
         const ctx = await loadTicketContext(issueKey);
@@ -129,7 +126,12 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
 
         res.json({
           ok: true,
-          data: { ticketKey: issueKey, summary: ctx.ticket?.summary || issueKey },
+          data: {
+            ticketKey: issueKey,
+            summary: ctx.ticket?.summary || issueKey,
+            existingRating: existing?.responded_at ? existing.csat_score : null,
+            existingComment: existing?.responded_at ? existing.comment : null,
+          },
         });
         return;
       }
@@ -138,20 +140,18 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
       const row = await queryOne<{
         id: number;
         jira_issue_key: string;
+        csat_score: number | null;
+        comment: string | null;
         responded_at: string | null;
         expires_at: string;
       }>(
-        `SELECT cs.id, cs.jira_issue_key, cs.responded_at, cs.expires_at
+        `SELECT cs.id, cs.jira_issue_key, cs.csat_score, cs.comment, cs.responded_at, cs.expires_at
          FROM portal_csat_surveys cs WHERE cs.token = ?`,
         [param],
       );
 
       if (!row) {
         res.status(404).json({ ok: false, error: 'Survey not found' });
-        return;
-      }
-      if (row.responded_at) {
-        res.json({ ok: false, error: 'already_responded' });
         return;
       }
       if (new Date(row.expires_at) < new Date()) {
@@ -165,7 +165,12 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
       );
       res.json({
         ok: true,
-        data: { ticketKey: row.jira_issue_key, summary: ticket?.summary || row.jira_issue_key },
+        data: {
+          ticketKey: row.jira_issue_key,
+          summary: ticket?.summary || row.jira_issue_key,
+          existingRating: row.responded_at ? row.csat_score : null,
+          existingComment: row.responded_at ? row.comment : null,
+        },
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load survey' });
@@ -213,27 +218,32 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
           return;
         }
 
-        // First-write-wins per ticket. Log (don't overwrite) subsequent attempts.
-        const existing = await queryOne<{ id: number; responded_at: string | null }>(
-          `SELECT id, responded_at FROM portal_csat_surveys WHERE jira_issue_key = ?`,
+        // Latest-rating-wins per ticket: people change their mind, and a mis-tapped
+        // star should be fixable. The original is preserved in first_* on re-rate.
+        const existing = await queryOne<{ id: number; csat_score: number | null; responded_at: string | null }>(
+          `SELECT id, csat_score, responded_at FROM portal_csat_surveys WHERE jira_issue_key = ?`,
           [issueKey],
         );
-        if (existing?.responded_at) {
-          console.log(`[csat] Duplicate rating attempt for ${issueKey} from ${ip} — ignored (first-write-wins)`);
-          res.json({ ok: false, error: 'already_responded' });
-          return;
-        }
 
         if (existing) {
           surveyId = existing.id;
+          const isRerate = !!existing.responded_at;
           await execute(
             `UPDATE portal_csat_surveys
-             SET csat_score = ?, ease_score = ?, effort_score = ?, comment = ?, responded_at = GETUTCDATE(),
+             SET first_csat_score = COALESCE(first_csat_score, csat_score),
+                 first_responded_at = COALESCE(first_responded_at, responded_at),
+                 revision_count = revision_count + CASE WHEN responded_at IS NULL THEN 0 ELSE 1 END,
+                 csat_score = ?,
+                 ease_score = COALESCE(?, ease_score), effort_score = COALESCE(?, effort_score),
+                 comment = COALESCE(?, comment), responded_at = GETUTCDATE(),
                  ticket_status = ?, ticket_status_category = ?, ticket_resolved = ?, ticket_created = ?, ticket_resolved_at = ?, ticket_age_hours = ?
              WHERE id = ?`,
             [csatScore, easeScore || null, effortScore || null, comment || null,
              ctx.status, ctx.statusCategory, ctx.resolved ? 1 : 0, ctx.created, ctx.resolvedAt, ctx.ageHours, surveyId],
           );
+          if (isRerate) {
+            console.log(`[csat] Re-rated ${issueKey}: ${existing.csat_score} → ${csatScore} (from ${ip})`);
+          }
         } else {
           // Lazy row: agent-macro links have no pre-generated survey.
           const token = crypto.randomBytes(32).toString('hex');
@@ -267,19 +277,21 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
           res.status(404).json({ ok: false, error: 'Survey not found' });
           return;
         }
-        if (row.responded_at) {
-          res.json({ ok: false, error: 'already_responded' });
-          return;
-        }
         if (new Date(row.expires_at) < new Date()) {
           res.json({ ok: false, error: 'expired' });
           return;
         }
         surveyId = row.id;
         issueKey = row.jira_issue_key;
+        // Latest-rating-wins here too — same reasoning as the issue-key flow.
         await execute(
           `UPDATE portal_csat_surveys
-           SET csat_score = ?, ease_score = ?, effort_score = ?, comment = ?, responded_at = GETUTCDATE()
+           SET first_csat_score = COALESCE(first_csat_score, csat_score),
+               first_responded_at = COALESCE(first_responded_at, responded_at),
+               revision_count = revision_count + CASE WHEN responded_at IS NULL THEN 0 ELSE 1 END,
+               csat_score = ?,
+               ease_score = COALESCE(?, ease_score), effort_score = COALESCE(?, effort_score),
+               comment = COALESCE(?, comment), responded_at = GETUTCDATE()
            WHERE id = ?`,
           [csatScore, easeScore || null, effortScore || null, comment || null, surveyId],
         );
@@ -301,7 +313,8 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
 
   // ── Public — append an optional comment AFTER the rating has been banked ──
   // The page captures the rating on tap (first POST), then offers a comment box.
-  // First-comment-wins, and only within a short grace window after responding.
+  // A later comment replaces the earlier one, within a grace window after rating.
+  // Grace runs from the latest rating, so a re-rate reopens the comment box.
   const COMMENT_GRACE_MS = 30 * 60_000;
   router.post('/:token/comment', async (req: Request, res: Response) => {
     const param = String(req.params.token);
@@ -326,10 +339,8 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
         res.json({ ok: false, error: 'no_rating' });
         return;
       }
-      if (row.comment) {
-        res.json({ ok: false, error: 'already_commented' });
-        return;
-      }
+      // A revised comment replaces the previous one — the grace window below is
+      // measured from the LATEST rating, so re-rating reopens it.
       if (Date.now() - new Date(row.responded_at).getTime() > COMMENT_GRACE_MS) {
         res.json({ ok: false, error: 'expired' });
         return;

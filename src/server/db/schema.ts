@@ -2306,6 +2306,16 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('portal_csat_surveys', 'ticket_age_hours') IS NULL
      ALTER TABLE portal_csat_surveys ADD ticket_age_hours INT NULL;`,
 
+    // Re-rating: a customer may change their mind or fix a mis-tap. The live
+    // columns hold the CURRENT rating; these keep the original so a change of
+    // heart is visible rather than silently overwritten.
+    `IF COL_LENGTH('portal_csat_surveys', 'first_csat_score') IS NULL
+     ALTER TABLE portal_csat_surveys ADD first_csat_score INT NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'first_responded_at') IS NULL
+     ALTER TABLE portal_csat_surveys ADD first_responded_at DATETIME2 NULL;`,
+    `IF COL_LENGTH('portal_csat_surveys', 'revision_count') IS NULL
+     ALTER TABLE portal_csat_surveys ADD revision_count INT NOT NULL DEFAULT 0;`,
+
     // ── Multi-org membership ──
     // portal_users.org_id remains the user's HOME org (the one they land in, and the
     // one they can write to). This table adds any *additional* orgs they may switch
