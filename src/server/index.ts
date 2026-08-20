@@ -220,7 +220,7 @@ import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 */
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
-import { captureSupportNt, recaptureSupportFlows, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
+import { captureSupportNt, recaptureSupportFlows, recaptureSupportLateData, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
@@ -1824,6 +1824,8 @@ async function main() {
         // Solved) so their columns reflect the whole day, not the 18:00-partial freeze.
         const y = new Date(); y.setUTCDate(y.getUTCDate() - 1);
         await recaptureSupportFlows(agentJiraClient, y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }));
+        // Ratings keep arriving days after the solve, so re-run CSAT over the last week.
+        await recaptureSupportLateData(agentJiraClient, todayUk, 7);
       }
     }, 10 * 60 * 1000);
 

@@ -83,6 +83,10 @@ export interface OrgKpi {
   compute: ComputeSpec;
   /** Provisional flags / build TODOs carried from the BA spec. */
   note?: string;
+  /** The inputs keep arriving after the day ends (e.g. a customer rates a ticket
+   *  days after it was solved), so the 18:00 freeze is always an undercount.
+   *  These are recomputed over a trailing window each evening. */
+  lateData?: boolean;
 }
 
 // ── Canonical NT JQL fragments (agreed in BA) ──
@@ -314,9 +318,12 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'percent', direction: 'higher-better', dailyTarget: 95, monthlyTarget: null, rollup: 'average',
     rag: { greenMin: 95, amberMin: 76 },
     compute: { kind: 'resolved_outcome', metric: 'csat' },
+    lateData: true,
     note: 'Average customer rating on tickets solved that day, as a percentage of 5 '
-      + '(rating × 20). The 95% target is an average of 4.75 out of 5. A day with no '
-      + 'ratings is blank, not 0 — it is excluded from the weekly and monthly averages.',
+      + '(rating × 20). The 95% target is an average of 4.75 out of 5. Pools both rating '
+      + 'sources — Jira Satisfaction (cf12802) and NOVA\'s portal survey; a ticket rated in '
+      + 'both counts once, portal score winning. A day with no ratings is blank, not 0 — '
+      + 'it is excluded from the weekly and monthly averages.',
   },
   {
     key: 'nt_fcr', label: 'FCR Rate %', team: 'Support', colA: 'Quality', jiraSpace: 'NT',

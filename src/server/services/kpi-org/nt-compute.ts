@@ -134,20 +134,49 @@ async function getResolvedSlaIssues(jira: JiraRestClient, ctx: DayCtx): Promise<
 
 interface ResolvedAgg { frtTotal: number; frtBreached: number; resTotal: number; resBreached: number; csatSum: number; csatCount: number; }
 
+/** NOVA's own portal ratings for a set of tickets. Keyed by issue key, current
+ *  score only (a re-rate overwrites csat_score, so this follows the latest view). */
+async function portalRatings(issueKeys: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!issueKeys.length) return out;
+  // Chunked to stay well inside the parameter limit on a heavy solve day.
+  for (let i = 0; i < issueKeys.length; i += 500) {
+    const chunk = issueKeys.slice(i, i + 500);
+    const rows = await query<{ jira_issue_key: string; csat_score: number }>(
+      `SELECT jira_issue_key, csat_score FROM portal_csat_surveys
+       WHERE responded_at IS NOT NULL AND csat_score IS NOT NULL
+         AND jira_issue_key IN (${chunk.map(() => '?').join(',')})`,
+      chunk,
+    );
+    for (const r of rows) out.set(r.jira_issue_key, r.csat_score);
+  }
+  return out;
+}
+
 /** Aggregate FRT/Resolution breaches + CSAT ratings over tickets solved during the
  *  day (status transitioned to a Done status that day). Mirrors the legacy
- *  resolved-today snapshot: cf14046 (FRT), cf14048 (Resolution), cf12802.rating (CSAT). */
+ *  resolved-today snapshot: cf14046 (FRT), cf14048 (Resolution), cf12802.rating (CSAT).
+ *
+ *  CSAT pools BOTH rating sources over that same population of solved tickets:
+ *  Jira's native Satisfaction field and NOVA's portal survey. A ticket rated in
+ *  both counts once — the portal score wins, since that is the survey we now ask
+ *  for and the only one a customer can correct. */
 async function resolvedAgg(jira: JiraRestClient, ctx: DayCtx): Promise<ResolvedAgg> {
   const jql = RESOLVED_DURING_DAY(ctx);
   const res = await jira.searchJqlAll(jql, ['customfield_14046', 'customfield_14048', 'customfield_12802'], 2000);
   const agg: ResolvedAgg = { frtTotal: 0, frtBreached: 0, resTotal: 0, resBreached: 0, csatSum: 0, csatCount: 0 };
+
+  const portal = await portalRatings(res.issues.map(i => i.key).filter(Boolean));
+
   for (const iss of res.issues) {
     const f = (iss.fields ?? {}) as Record<string, unknown>;
     const frt = slaBreached(f.customfield_14046);
     if (frt !== null) { agg.frtTotal++; if (frt) agg.frtBreached++; }
     const r = slaBreached(f.customfield_14048);
     if (r !== null) { agg.resTotal++; if (r) agg.resBreached++; }
-    const rating = (f.customfield_12802 as { rating?: number } | undefined)?.rating;
+
+    const jiraRating = (f.customfield_12802 as { rating?: number } | undefined)?.rating;
+    const rating = portal.get(iss.key) ?? jiraRating;
     if (typeof rating === 'number' && rating >= 1 && rating <= 5) { agg.csatSum += rating; agg.csatCount++; }
   }
   return agg;

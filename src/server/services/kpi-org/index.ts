@@ -98,6 +98,39 @@ export async function recaptureSupportFlows(jira: JiraRestClient, day: string): 
 }
 
 /**
+ * Recompute the late-data KPIs (currently CSAT) across a trailing window of days.
+ * A customer can rate a ticket long after it was solved, so the 18:00 freeze always
+ * undercounts and a single yesterday-re-capture isn't enough — a rating that lands
+ * three days later would never be counted at all. Never throws.
+ */
+export async function recaptureSupportLateData(
+  jira: JiraRestClient, endDay: string, days = 7,
+): Promise<{ computed: number; failed: number }> {
+  await ensureOrgKpiTable();
+  const kpis = SUPPORT_NT_KPIS.filter(k => k.lateData && k.compute.kind !== 'manual');
+  let computed = 0, failed = 0;
+  for (let back = 0; back < days; back++) {
+    const d = new Date(`${endDay}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - back);
+    const day = d.toISOString().slice(0, 10);
+    const ctx: DayCtx = { day, nextDay: addDay(day) };
+    for (const kpi of kpis) {
+      try {
+        const r = await computeNtKpi(kpi, jira, ctx, new Date(`${day}T18:00:00Z`));
+        if (r.failed) { failed++; continue; }
+        await saveComputed(kpi, day, r.value, 'jira');
+        computed++;
+      } catch (err) {
+        failed++;
+        console.warn(`[kpi-org] late-data re-capture failed for ${kpi.key} on ${day}:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+  console.log(`[kpi-org] late-data re-capture ending ${endDay} (${days}d): ${computed} computed, ${failed} failed`);
+  return { computed, failed };
+}
+
+/**
  * Startup tasks for the org engine — run fire-and-forget from the server bootstrap
  * so the Legacy KPIs view populates after a deploy without anyone POSTing:
  *   1. Initial history backfill — once (settings flag), capped to the last 90 days.
