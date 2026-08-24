@@ -700,6 +700,17 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_status_updated ON jira_issue_cache (status_category, jira_updated DESC)
        INCLUDE (issue_key, project_key, summary);`,
 
+    // Covering variant of the index above, adding assignee_display. Any "resolved
+    // in a window, grouped by agent" query (CSAT adoption is the live one) matched
+    // IX_jira_cache_status_updated on the keys and then paid a key lookup PER ROW
+    // into the clustered index — which is 395MB for 6,954 rows, because every row
+    // carries fields_json + the ADF bodies. ~1,700 random lookups into that is more
+    // I/O than the database has to give: measured 24 Aug 2026 with data IO pinned
+    // at 100% on an S0, the adoption query did not finish in 120s.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_status_updated_agent')
+     CREATE INDEX IX_jira_cache_status_updated_agent ON jira_issue_cache (status_category, jira_updated DESC)
+       INCLUDE (issue_key, assignee_display, summary, status_name);`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_assignee')
      CREATE INDEX IX_jira_cache_assignee ON jira_issue_cache (assignee_email)
        INCLUDE (issue_key, summary, status_name, priority_name);`,
@@ -2309,6 +2320,13 @@ async function runMigrations(): Promise<void> {
     // Re-rating: a customer may change their mind or fix a mis-tap. The live
     // columns hold the CURRENT rating; these keep the original so a change of
     // heart is visible rather than silently overwritten.
+    // Every CSAT read joins surveys to tickets by issue key, and the table had no
+    // index on it — only the PK on id and the unique token. Small (3MB) but the
+    // join sits inside queries that are already fighting for I/O.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_portal_csat_surveys_issue')
+     CREATE INDEX IX_portal_csat_surveys_issue ON portal_csat_surveys (jira_issue_key)
+       INCLUDE (csat_score, responded_at);`,
+
     `IF COL_LENGTH('portal_csat_surveys', 'first_csat_score') IS NULL
      ALTER TABLE portal_csat_surveys ADD first_csat_score INT NULL;`,
     `IF COL_LENGTH('portal_csat_surveys', 'first_responded_at') IS NULL

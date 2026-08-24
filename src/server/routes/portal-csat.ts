@@ -315,7 +315,10 @@ export function createPortalCsatRoutes(deps: CsatRouteDeps): Router {
   // The page captures the rating on tap (first POST), then offers a comment box.
   // A later comment replaces the earlier one, within a grace window after rating.
   // Grace runs from the latest rating, so a re-rate reopens the comment box.
-  const COMMENT_GRACE_MS = 30 * 60_000;
+  // 24h, not 30 minutes: people tap a star, get pulled away, and come back to the
+  // open tab later — a comment is the whole reason to keep the page open, and the
+  // rating is already banked, so refusing it loses the only qualitative signal we get.
+  const COMMENT_GRACE_MS = 24 * 60 * 60_000;
   router.post('/:token/comment', async (req: Request, res: Response) => {
     const param = String(req.params.token);
     if (rateLimited(clientIp(req))) {

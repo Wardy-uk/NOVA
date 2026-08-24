@@ -12,10 +12,41 @@ import { query } from '../services/database.js';
  *  window uses `jira_updated` on Done tickets as a proxy. Good enough for a weekly
  *  adoption snapshot; not a precise resolved-in-range count.
  */
+/** 60s response cache, keyed on the query string.
+ *
+ *  The NOVA database runs at or near 100% data IO for long stretches (the Jira
+ *  sync MERGEs into a 1GB comment cache), so a query that costs milliseconds on
+ *  an idle server can miss a 30s request timeout entirely. Adoption numbers move
+ *  on a sync cadence, not per second — re-running this per tab switch buys
+ *  nothing and competes with the sync for the I/O it is starved of.
+ */
+const cache = new Map<string, { at: number; body: unknown }>();
+const CACHE_MS = 60_000;
+
+/** Timeouts here are a busy database, not a bug in the request — say so, rather
+ *  than showing the customer-facing screen a raw driver message. */
+function failed(res: Response, err: unknown): void {
+  const msg = err instanceof Error ? err.message : 'Failed to load CSAT metrics';
+  const busy = /timeout/i.test(msg);
+  res.status(busy ? 503 : 500).json({
+    ok: false,
+    error: busy
+      ? 'The NOVA database is saturated right now (Jira sync I/O) and this query timed out. Try again in a minute.'
+      : msg,
+    busy,
+  });
+}
+
 export function createCsatMetricsRoutes(): Router {
   const router = Router();
 
   router.get('/', async (req: Request, res: Response) => {
+    const cacheKey = `metrics:${req.originalUrl}`;
+    const hit = cache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CACHE_MS) {
+      res.json(hit.body);
+      return;
+    }
     try {
       // Default window: last 7 days.
       const now = new Date();
@@ -79,7 +110,7 @@ export function createCsatMetricsRoutes(): Router {
       // Exact team average = Σ(agentAvg × ratings) / Σ(ratings).
       const weighted = rows.reduce((a, r) => a + (r.avg_rating != null ? r.avg_rating * r.ratings_received : 0), 0);
 
-      res.json({
+      const body = {
         ok: true,
         data: {
           from: from.toISOString().slice(0, 10),
@@ -94,9 +125,113 @@ export function createCsatMetricsRoutes(): Router {
           },
           agents,
         },
-      });
+      };
+      cache.set(cacheKey, { at: Date.now(), body });
+      res.json(body);
     } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to load CSAT metrics' });
+      failed(res, err);
+    }
+  });
+
+  /** Individual ratings behind the tiles — one row per rated ticket.
+   *
+   *  Two windows, and they answer different questions, so the mode is explicit
+   *  rather than guessed:
+   *    mode=resolved (default) — ratings on tickets RESOLVED in the window. Same
+   *      population as the tiles above, so the row count matches the Ratings tile.
+   *    mode=rated — ratings RECEIVED in the window, whenever the ticket closed.
+   *      A rating that lands three weeks after resolution is invisible in the
+   *      first mode; it is real feedback and must be reachable somewhere.
+   */
+  router.get('/responses', async (req: Request, res: Response) => {
+    const cacheKey = `responses:${req.originalUrl}`;
+    const hit = cache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CACHE_MS) {
+      res.json(hit.body);
+      return;
+    }
+    try {
+      const now = new Date();
+      const to = req.query.to ? new Date(String(req.query.to)) : now;
+      const from = req.query.from
+        ? new Date(String(req.query.from))
+        : new Date(now.getTime() - 7 * 86_400_000);
+      const toExclusive = new Date(to.getTime() + 86_400_000);
+      const mode = String(req.query.mode || 'resolved') === 'rated' ? 'rated' : 'resolved';
+      const agent = req.query.agent ? String(req.query.agent) : null;
+      // Bounded, and the bound is reported so a truncated list never reads as the whole population.
+      const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+
+      const params: unknown[] = [];
+      const where: string[] = ['s.responded_at IS NOT NULL'];
+      if (mode === 'rated') {
+        where.push('s.responded_at >= ? AND s.responded_at < ?');
+        params.push(from, toExclusive);
+      } else {
+        where.push("c.status_category = 'Done' AND c.jira_updated >= ? AND c.jira_updated < ?");
+        params.push(from, toExclusive);
+      }
+      if (agent) {
+        where.push("COALESCE(c.assignee_display, 'Unassigned') = ?");
+        params.push(agent);
+      }
+
+      const rows = await query<{
+        issue_key: string;
+        summary: string | null;
+        agent: string;
+        csat_score: number | null;
+        first_csat_score: number | null;
+        revision_count: number;
+        comment: string | null;
+        responded_at: string;
+        ticket_status: string | null;
+        ticket_resolved: boolean | number | null;
+        ticket_age_hours: number | null;
+      }>(
+        `SELECT TOP (${limit})
+                s.jira_issue_key AS issue_key,
+                c.summary,
+                COALESCE(c.assignee_display, 'Unassigned') AS agent,
+                s.csat_score, s.first_csat_score, s.revision_count, s.comment,
+                s.responded_at, s.ticket_status, s.ticket_resolved, s.ticket_age_hours
+         FROM portal_csat_surveys s
+         LEFT JOIN jira_issue_cache c ON c.issue_key = s.jira_issue_key
+         WHERE ${where.join(' AND ')}
+         ORDER BY s.responded_at DESC`,
+        params,
+      );
+
+      const body = {
+        ok: true,
+        data: {
+          from: from.toISOString().slice(0, 10),
+          to: to.toISOString().slice(0, 10),
+          mode,
+          agent,
+          limit,
+          truncated: rows.length === limit,
+          responses: rows.map(r => ({
+            issueKey: r.issue_key,
+            summary: r.summary || r.issue_key,
+            agent: r.agent,
+            score: r.csat_score,
+            // Only meaningful when the customer actually changed their mind.
+            firstScore: r.revision_count > 0 ? r.first_csat_score : null,
+            revisionCount: r.revision_count,
+            comment: r.comment,
+            respondedAt: r.responded_at,
+            ticketStatus: r.ticket_status,
+            // Rated before the ticket closed — signal, not noise.
+            ratedUnresolved: r.ticket_resolved === false || r.ticket_resolved === 0,
+            ticketAgeHours: r.ticket_age_hours,
+          })),
+        },
+      };
+      cache.set(cacheKey, { at: Date.now(), body });
+      res.json(body);
+    } catch (err) {
+      failed(res, err);
     }
   });
 
