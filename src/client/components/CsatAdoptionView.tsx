@@ -28,6 +28,7 @@ interface Metrics {
   agents: AgentRow[];
 }
 interface ResponseRow {
+  source: 'portal' | 'jira';
   issueKey: string;
   summary: string;
   agent: string;
@@ -35,7 +36,8 @@ interface ResponseRow {
   firstScore: number | null;
   revisionCount: number;
   comment: string | null;
-  respondedAt: string;
+  respondedAt: string | null;
+  dateBasis: string;
   ticketStatus: string | null;
   ratedUnresolved: boolean;
   ticketAgeHours: number | null;
@@ -45,6 +47,8 @@ interface Detail {
   agent: string | null;
   limit: number;
   truncated: boolean;
+  sources: { portal: number; jira: number };
+  jiraError: string | null;
   responses: ResponseRow[];
 }
 
@@ -57,7 +61,8 @@ const ragColor = (v: number | null, good: number, ok: number) =>
 const scoreColor = (n: number | null) =>
   n == null ? '#64748b' : n >= 4 ? '#10b981' : n >= 3 ? '#eab308' : '#ef4444';
 
-const when = (s: string) => {
+const when = (s: string | null) => {
+  if (!s) return '—';
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
@@ -179,6 +184,22 @@ export function CsatAdoptionView() {
         <Tile label="Avg rating" value={t.avgRating != null ? `${t.avgRating}/5` : '—'} sub="weighted by ratings" color={ragColor(t.avgRating, 4, 3)} />
       </div>
 
+      {/* The tiles measure the macro experiment only. Customers still answer Jira's
+          own survey, the KPI report counts both, and a screen that silently showed
+          one of the two is how the discrepancy went unnoticed. */}
+      {detail && detail.sources.jira > 0 && (
+        <div className="-mt-3 mb-6 text-xs text-slate-400">
+          Plus <span className="text-slate-200 font-semibold">{detail.sources.jira}</span> rated via Jira’s own
+          survey in this window — listed below, but not counted in Adoption or Response, which measure the macro
+          (there is no link sent to divide by). The KPI report pools both.
+        </div>
+      )}
+      {detail?.jiraError && (
+        <div className="-mt-3 mb-6 text-xs text-amber-400">
+          Jira-survey ratings unavailable: {detail.jiraError} — the list below is NOVA portal ratings only.
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-white/10 mb-8">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-white/[0.03]">
@@ -257,7 +278,7 @@ export function CsatAdoptionView() {
           </div>
         )}
         {!detailLoading && rows.map(r => (
-          <div key={r.issueKey} className="border-t border-white/5 first:border-t-0 px-4 py-3 hover:bg-white/[0.02]">
+          <div key={`${r.source}:${r.issueKey}`} className="border-t border-white/5 first:border-t-0 px-4 py-3 hover:bg-white/[0.02]">
             <div className="flex items-baseline gap-3 flex-wrap">
               <span className="text-lg leading-none"><Stars n={r.score} /></span>
               <span className="text-sm font-semibold" style={{ color: scoreColor(r.score) }}>{r.score ?? '—'}/5</span>
@@ -270,9 +291,25 @@ export function CsatAdoptionView() {
                 {r.issueKey} →
               </a>
               <span className="text-sm text-slate-300 truncate max-w-xl">{r.summary}</span>
-              <span className="ml-auto text-[11px] text-slate-500 whitespace-nowrap">{r.agent} · {when(r.respondedAt)}</span>
+              <span className="ml-auto text-[11px] text-slate-500 whitespace-nowrap">
+                {r.agent} · {when(r.respondedAt)}
+                {r.dateBasis !== 'responded' && (
+                  // A native rating carries no timestamp of its own — say which date
+                  // this is, rather than presenting a ticket date as a rating time.
+                  <span className="text-slate-600"> ({r.dateBasis})</span>
+                )}
+              </span>
             </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                  r.source === 'portal'
+                    ? 'bg-teal-500/15 text-teal-300 border-teal-500/30'
+                    : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                }`}
+              >
+                {r.source === 'portal' ? 'NOVA portal' : 'Jira survey'}
+              </span>
               {r.revisionCount > 0 && r.firstScore != null && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
                   revised from {r.firstScore}/5
@@ -290,7 +327,14 @@ export function CsatAdoptionView() {
             <div className="mt-1.5 text-sm">
               {r.comment
                 ? <span className="text-slate-200 italic">“{r.comment}”</span>
-                : <span className="text-slate-600 text-xs">No comment left</span>}
+                : (
+                  <span className="text-slate-600 text-xs">
+                    {r.source === 'jira'
+                      // Not "left no comment" — Jira's survey never offers one.
+                      ? 'Jira’s survey collects a score only — no comment is captured'
+                      : 'No comment left'}
+                  </span>
+                )}
             </div>
           </div>
         ))}

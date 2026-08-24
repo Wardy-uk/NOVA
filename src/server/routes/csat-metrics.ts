@@ -1,5 +1,15 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../services/database.js';
+import type { JiraRestClient } from '../services/jira-client.js';
+
+interface CsatMetricsDeps {
+  getJiraClient: () => JiraRestClient | null;
+}
+
+/** Jira's own JSM satisfaction field. Its value is `{ rating }` and nothing else —
+ *  no comment, and crucially NO rating timestamp, so a native rating can only ever
+ *  be dated by the ticket it sits on. */
+const NATIVE_SATISFACTION_FIELD = 'customfield_12802';
 
 /** CSAT adoption + response instrumentation.
  *
@@ -37,7 +47,84 @@ function failed(res: Response, err: unknown): void {
   });
 }
 
-export function createCsatMetricsRoutes(): Router {
+/** Native JSM ratings for the window.
+ *
+ *  Customers still answer Jira's own survey — measured 24 Aug 2026, it out-rates the
+ *  NOVA macro 7 to 3 over a fortnight, against the go-live doc's expectation that it
+ *  would fall to zero at cutover. The KPI engine has always pooled both sources
+ *  (`kpi-org/nt-compute.resolvedAgg`), so a ratings screen that showed only the portal
+ *  disagreed with the KPI report by construction — which is exactly how it was found.
+ *
+ *  Two honest limits, both surfaced rather than papered over: there is no rating
+ *  timestamp, so these rows are dated by the ticket (`dateBasis` says which), and
+ *  there is no comment — the native survey does not collect one that this field
+ *  exposes. Never throws: a Jira outage must degrade this to "portal only, and here
+ *  is why", not take the whole screen down.
+ */
+async function fetchNativeRatings(
+  client: JiraRestClient,
+  from: Date,
+  toExclusive: Date,
+  mode: 'resolved' | 'rated',
+): Promise<{ rows: NativeRow[]; dateBasis: 'resolutiondate' | 'updated' }> {
+  const d = (x: Date) => x.toISOString().slice(0, 10);
+  // No rating timestamp exists, so "rated in window" falls back to last-updated and
+  // says so; it is a proxy, not the same claim as the portal's responded_at.
+  const basis = mode === 'resolved' ? 'resolutiondate' : 'updated';
+  const jql =
+    `project in (NT, NTPJ) AND cf[12802] is not EMPTY ` +
+    `AND ${basis} >= "${d(from)}" AND ${basis} < "${d(toExclusive)}" ORDER BY ${basis} DESC`;
+
+  const res = await client.searchJqlAll(
+    jql,
+    [NATIVE_SATISFACTION_FIELD, 'summary', 'assignee', 'resolutiondate', 'updated', 'status'],
+    200,
+  );
+
+  const rows: NativeRow[] = [];
+  for (const iss of res.issues ?? []) {
+    const f = (iss.fields ?? {}) as Record<string, unknown>;
+    const rating = (f[NATIVE_SATISFACTION_FIELD] as { rating?: number } | null)?.rating;
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) continue;
+    rows.push({
+      issueKey: iss.key,
+      summary: (f.summary as string) || iss.key,
+      agent: (f.assignee as { displayName?: string } | null)?.displayName || 'Unassigned',
+      score: rating,
+      dateFor: (basis === 'resolutiondate' ? f.resolutiondate : f.updated) as string | null,
+      ticketStatus: (f.status as { name?: string } | null)?.name ?? null,
+    });
+  }
+  return { rows, dateBasis: basis };
+}
+
+/** One rating as the screen renders it, whichever survey it came from. */
+interface CsatResponseRow {
+  source: 'portal' | 'jira';
+  issueKey: string;
+  summary: string;
+  agent: string;
+  score: number | null;
+  firstScore: number | null;
+  revisionCount: number;
+  comment: string | null;
+  respondedAt: string | null;
+  dateBasis: string;
+  ticketStatus: string | null;
+  ratedUnresolved: boolean;
+  ticketAgeHours: number | null;
+}
+
+interface NativeRow {
+  issueKey: string;
+  summary: string;
+  agent: string;
+  score: number;
+  dateFor: string | null;
+  ticketStatus: string | null;
+}
+
+export function createCsatMetricsRoutes(deps: CsatMetricsDeps): Router {
   const router = Router();
 
   router.get('/', async (req: Request, res: Response) => {
@@ -202,6 +289,65 @@ export function createCsatMetricsRoutes(): Router {
         params,
       );
 
+      const portalResponses: CsatResponseRow[] = rows.map(r => ({
+        source: 'portal' as const,
+        issueKey: r.issue_key,
+        summary: r.summary || r.issue_key,
+        agent: r.agent,
+        score: r.csat_score,
+        // Only meaningful when the customer actually changed their mind.
+        firstScore: r.revision_count > 0 ? r.first_csat_score : null,
+        revisionCount: r.revision_count,
+        comment: r.comment,
+        respondedAt: r.responded_at,
+        dateBasis: 'responded',
+        ticketStatus: r.ticket_status,
+        // Rated before the ticket closed — signal, not noise.
+        ratedUnresolved: r.ticket_resolved === false || r.ticket_resolved === 0,
+        ticketAgeHours: r.ticket_age_hours,
+      }));
+
+      // ── Jira's own survey, pooled in the same order the KPI engine pools it ──
+      // A ticket rated in both counts ONCE, portal winning: it is the survey NOVA
+      // now asks for and the only one the customer can go back and correct.
+      const seen = new Set(portalResponses.map(r => r.issueKey));
+      let nativeResponses: CsatResponseRow[] = [];
+      let jiraError: string | null = null;
+      const client = deps.getJiraClient();
+      if (!client) {
+        jiraError = 'No Jira client configured, so Jira-survey ratings are not included.';
+      } else {
+        try {
+          const native = await fetchNativeRatings(client, from, toExclusive, mode);
+          nativeResponses = native.rows
+            .filter(n => !seen.has(n.issueKey))
+            .filter(n => !agent || n.agent === agent)
+            .map(n => ({
+              source: 'jira' as const,
+              issueKey: n.issueKey,
+              summary: n.summary,
+              agent: n.agent,
+              score: n.score,
+              firstScore: null,
+              revisionCount: 0,
+              // The native field exposes a rating and nothing else.
+              comment: null,
+              respondedAt: n.dateFor,
+              dateBasis: native.dateBasis,
+              ticketStatus: n.ticketStatus,
+              ratedUnresolved: false,
+              ticketAgeHours: null,
+            }));
+        } catch (err) {
+          // A Jira outage degrades this to portal-only WITH a reason on screen —
+          // silently showing half the ratings is the bug this whole change fixes.
+          jiraError = err instanceof Error ? err.message : 'Jira lookup failed';
+        }
+      }
+
+      const responses = [...portalResponses, ...nativeResponses].sort((a, b) =>
+        String(b.respondedAt ?? '').localeCompare(String(a.respondedAt ?? '')));
+
       const body = {
         ok: true,
         data: {
@@ -211,21 +357,9 @@ export function createCsatMetricsRoutes(): Router {
           agent,
           limit,
           truncated: rows.length === limit,
-          responses: rows.map(r => ({
-            issueKey: r.issue_key,
-            summary: r.summary || r.issue_key,
-            agent: r.agent,
-            score: r.csat_score,
-            // Only meaningful when the customer actually changed their mind.
-            firstScore: r.revision_count > 0 ? r.first_csat_score : null,
-            revisionCount: r.revision_count,
-            comment: r.comment,
-            respondedAt: r.responded_at,
-            ticketStatus: r.ticket_status,
-            // Rated before the ticket closed — signal, not noise.
-            ratedUnresolved: r.ticket_resolved === false || r.ticket_resolved === 0,
-            ticketAgeHours: r.ticket_age_hours,
-          })),
+          sources: { portal: portalResponses.length, jira: nativeResponses.length },
+          jiraError,
+          responses,
         },
       };
       cache.set(cacheKey, { at: Date.now(), body });

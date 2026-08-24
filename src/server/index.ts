@@ -1336,7 +1336,8 @@ async function main() {
     createKpiAgentRoutes({ getJiraClient: () => agentJiraClient, settings: settingsQueries }));
 
   // ── CSAT adoption + response instrumentation (agent-macro experiment) ──
-  app.use('/api/csat-metrics', requireAreaAccess(['kpis', 'qa'], 'view'), createCsatMetricsRoutes());
+  app.use('/api/csat-metrics', requireAreaAccess(['kpis', 'qa'], 'view'),
+    createCsatMetricsRoutes({ getJiraClient: () => agentJiraClient }));
 
   // ── TPJ Maintenance (NTPJ) dashboard — Lucy's team, scoped to the NTPJ project ──
   // Access: super_admin, OR the KPI role AND membership of the TPJ team.
