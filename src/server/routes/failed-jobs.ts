@@ -39,7 +39,7 @@ export function createFailedJobsRoutes(deps: {
         ok: true,
         data: {
           date,
-          enabled: deps.settings.get('failed_jobs_ticket_enabled') === 'true',
+          enabled: deps.settings.get('failed_jobs_ticket_enabled') !== 'false',
           isTicketDay: isTicketDay(deps.settings),
           dueTime: `${String(Math.floor(due / 60)).padStart(2, '0')}:${String(due % 60).padStart(2, '0')}`,
           owner,

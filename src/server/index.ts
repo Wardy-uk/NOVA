@@ -1864,9 +1864,10 @@ async function main() {
     // "Daily Agent Selection" flow at 08:00 and shown on the Grafana board). Fires on
     // the first tick at/after the configured time rather than in a narrow window, so a
     // late start still raises it; the unique date in failed_jobs_ticket_log stops
-    // double-raising. Off until failed_jobs_ticket_enabled is set.
+    // double-raising. On by default — set failed_jobs_ticket_enabled='false' (or untick
+    // it in Admin → Failed Jobs Rota) to stop it.
     jobRegistry.register('failed-jobs-ticket', 'Daily failed-jobs ticket (Mon–Fri)', async () => {
-      if (settingsQueries.get('failed_jobs_ticket_enabled') !== 'true') return;
+      if (settingsQueries.get('failed_jobs_ticket_enabled') === 'false') return;
       if (!isTicketDay(settingsQueries)) return;
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);

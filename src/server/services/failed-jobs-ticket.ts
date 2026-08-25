@@ -13,7 +13,8 @@ import type { JiraRestClient } from './jira-client.js';
  * 08:00 by flagging dbo.Agent.isCurrentFailedJob = 'Y', which is what the Grafana
  * board displays. This job raises the Jira ticket for that work and assigns it
  * straight to whoever holds the flag, so the duty has a tracked, SLA'd home
- * instead of living only on a wallboard.
+ * instead of living only on a wallboard. On by default; `failed_jobs_ticket_enabled`
+ * = 'false' turns it off.
  *
  * n8n's selection reads dbo.Agent.isAvailable, a flag only ever set by hand in the
  * Agent Roster admin — it knows nothing about People HR leave. So before raising the

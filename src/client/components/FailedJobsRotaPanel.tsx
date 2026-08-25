@@ -136,7 +136,8 @@ export function FailedJobsRotaPanel() {
     setSaved(false);
   };
 
-  const enabled = values.failed_jobs_ticket_enabled === 'true';
+  // On unless explicitly turned off, matching the job's own guard.
+  const enabled = values.failed_jobs_ticket_enabled !== 'false';
   const respectAvailability = values.failed_jobs_respect_availability !== 'false';
 
   if (loading) return <div className="text-neutral-400 text-sm p-4">Loading…</div>;
