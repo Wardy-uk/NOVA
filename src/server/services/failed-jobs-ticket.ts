@@ -51,6 +51,8 @@ export interface FailedJobsRunResult {
   agentId?: number;
   /** True when the n8n-flagged agent was unavailable and we moved the flag. */
   reassigned?: boolean;
+  /** Earlier failed-jobs tickets still open, now linked to this one. */
+  linked?: string[];
   skipped?: string;
   error?: string;
 }
@@ -244,6 +246,56 @@ async function createTicket(
 }
 
 /**
+ * Link the new ticket to any earlier failed-jobs tickets still unresolved, so a day's
+ * carry-over is visible from either end rather than being two unconnected tickets.
+ * Candidates come from our own log (labels can be dropped by a fussy create screen,
+ * the log row can't), and one JQL tells us which of them are still open. 'Link' is
+ * the symmetric generic link type on this Jira — there is no 'Relates'.
+ */
+async function linkOpenPredecessors(
+  jira: JiraRestClient,
+  newKey: string,
+  date: string,
+): Promise<string[]> {
+  try {
+    const rows = await query<{ issue_key: string }>(
+      `SELECT TOP 30 issue_key FROM failed_jobs_ticket_log
+        WHERE issue_key IS NOT NULL AND ticket_date < ?
+        ORDER BY ticket_date DESC`,
+      [date],
+    );
+    const keys = rows.map(r => r.issue_key).filter(k => k && k !== newKey);
+    if (keys.length === 0) return [];
+
+    const result = await jira.searchJql(
+      `key in (${keys.join(', ')}) AND resolution IS EMPTY ORDER BY created DESC`,
+      ['status'], 50,
+    );
+    const open = (result?.issues ?? []).map(i => i.key).filter(k => k && k !== newKey);
+
+    const linked: string[] = [];
+    for (const key of open) {
+      try {
+        await jira.createIssueLink({
+          type: { name: 'Link' },
+          inwardIssue: { key: newKey },
+          outwardIssue: { key },
+        });
+        linked.push(key);
+      } catch (err) {
+        console.warn(`[failed-jobs] Could not link ${newKey} to ${key}:`,
+          err instanceof Error ? err.message : err);
+      }
+    }
+    return linked;
+  } catch (err) {
+    console.warn('[failed-jobs] Could not link previous tickets:',
+      err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
  * Raise today's failed-jobs ticket. Idempotent per UK day via the unique index on
  * failed_jobs_ticket_log.ticket_date — a restart or a second tick can't double-raise.
  */
@@ -328,12 +380,18 @@ export async function runFailedJobsTicket(
     }
   }
 
-  const note = dropped.length ? `created without: ${dropped.join(', ')}` : null;
+  const linked = await linkOpenPredecessors(jira, issueKey, date);
+
+  const notes: string[] = [];
+  if (dropped.length) notes.push(`created without: ${dropped.join(', ')}`);
+  if (linked.length) notes.push(`linked to ${linked.join(', ')}`);
+  const note = notes.length ? notes.join('; ') : null;
+
   await logRun(date, issueKey, agent, reassigned, note);
   console.log(`[failed-jobs] ${issueKey} raised for ${date} → ${agent.displayName}` +
     (reassigned ? ' (reassigned — flagged agent unavailable)' : '') + (note ? ` [${note}]` : ''));
 
-  return { ok: true, date, issueKey, agent: agent.displayName, agentId: agent.agentId, reassigned };
+  return { ok: true, date, issueKey, agent: agent.displayName, agentId: agent.agentId, reassigned, linked };
 }
 
 async function logRun(

@@ -115,7 +115,7 @@ export function FailedJobsRotaPanel() {
       const json = await r.json();
       const d = json.data ?? {};
       setRunMessage(
-        json.ok && d.issueKey ? `Raised ${d.issueKey} → ${d.agent}${d.reassigned ? ' (reassigned — rota agent was off)' : ''}`
+        json.ok && d.issueKey ? `Raised ${d.issueKey} → ${d.agent}${d.reassigned ? ' (reassigned — rota agent was off)' : ''}${d.linked?.length ? `, linked to ${d.linked.join(', ')}` : ''}`
           : d.skipped === 'already-raised' ? `Already raised today (${d.issueKey})`
           : d.skipped === 'no-available-agent' ? 'No available T2 Support agent to assign it to'
           : d.skipped === 'no-jira-client' ? 'Jira is not configured'
