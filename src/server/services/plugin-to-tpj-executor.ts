@@ -17,7 +17,12 @@ export class PluginToTpjExecutor {
     this.settings = settings;
   }
 
-  async execute(match: HybridActionMatch, opts?: { alwaysCreate?: boolean }): Promise<HybridActionResult> {
+  /**
+   * @param opts.alwaysCreate  Create the TPJ ticket even on a non-business day.
+   * @param opts.keepOriginalOpen  Link the two tickets and leave the original open instead of
+   *   cloning-and-closing. The caller owns what happens next on the original (assignment, status).
+   */
+  async execute(match: HybridActionMatch, opts?: { alwaysCreate?: boolean; keepOriginalOpen?: boolean }): Promise<HybridActionResult> {
     const { ticketKey, summary, description } = match;
 
     // On weekends and bank holidays, only close the original — don't create TPJ ticket.
@@ -111,7 +116,35 @@ export class PluginToTpjExecutor {
         console.warn(`[plugin-to-tpj] Failed to copy comments from ${ticketKey}:`, err);
       }
 
-      // 4. Post public comment on original
+      // 4. Link the two tickets — the original stays the customer's ticket when kept open.
+      if (opts?.keepOriginalOpen) {
+        try {
+          await this.jiraClient.createIssueLink({
+            type: { name: 'Relates' },
+            inwardIssue: { key: ticketKey },
+            outwardIssue: { key: newKey },
+          });
+        } catch (err) {
+          console.warn(`[plugin-to-tpj] Failed to link ${ticketKey} → ${newKey}:`, err instanceof Error ? err.message : err);
+        }
+
+        await this.jiraClient.addComment(
+          ticketKey,
+          `We've escalated your request to our Web Maintenance team, who will make the changes for you. We'll keep this ticket open and update you here as soon as we hear back.`,
+          { internal: false },
+        );
+
+        const detail = `Escalated to ${newKey}, comments copied, original linked and left open`;
+        await executeAndGetId(
+          `INSERT INTO hybrid_action_log (action_id, source_ticket_key, created_ticket_key, status, detail)
+           VALUES ('plugin_to_tpj', ?, ?, 'completed', ?)`,
+          [ticketKey, newKey, detail],
+        );
+
+        return { success: true, actionId: 'plugin_to_tpj', ticketKey, detail, createdTicketKey: newKey };
+      }
+
+      // 4b. Post public comment on original
       await this.jiraClient.addComment(
         ticketKey,
         `We've moved your request into The Property Jungle Support. You'll now receive updates on your new ticket: ${newKey}.`,

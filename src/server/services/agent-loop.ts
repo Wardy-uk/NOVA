@@ -1847,9 +1847,12 @@ export class AgentLoop {
       return;
     }
 
-    // ── Website amend → TPJ Maintenance (NTPJ): AI-judged, routes the same way as plugin tickets ──
+    // ── Website amend → TPJ Maintenance (NTPJ): AI-judged escalation, NOT a hand-off ──
     // When triage flags a ticket as an unambiguous website-amend request with high confidence,
-    // clone it into the TPJ project and close the original — reusing the plugin_to_tpj mechanism.
+    // raise a linked NTPJ ticket for the Web Maintenance team but KEEP the NT ticket open — it
+    // stays the customer's ticket. The NT ticket is round-robined to Customer Care and parked on
+    // Waiting On Partner until the NTPJ side comes back. (The three deterministic Smart Plugin
+    // Manager rules still clone-and-close via the same executor without keepOriginalOpen.)
     if (
       decision.eventType === 'ticket_created'
       && project === 'NT'
@@ -1859,10 +1862,10 @@ export class AgentLoop {
       const threshold = parseFloat(this.settings.get('agent_website_amend_tpj_confidence') || '0.9');
       if (wa?.is_website_amend && (wa.confidence ?? 0) >= threshold) {
         if (this.getShadowMode() === 'full_shadow') {
-          console.log(`[agent] [SHADOW] Would route ${decision.ticketKey} to TPJ — unambiguous website amend (conf ${(wa.confidence ?? 0).toFixed(2)}): ${wa.reasoning ?? ''}`);
+          console.log(`[agent] [SHADOW] Would escalate ${decision.ticketKey} to TPJ and park it on Waiting On Partner — unambiguous website amend (conf ${(wa.confidence ?? 0).toFixed(2)}): ${wa.reasoning ?? ''}`);
           await this.observer.logOutcome(decisionId, {
             success: true, action: 'transition', ticketKey: decision.ticketKey,
-            detail: `[SHADOW] Would route to TPJ — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}).`,
+            detail: `[SHADOW] Would escalate to TPJ, keep original open (CC round-robin, Waiting On Partner) — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}).`,
           });
           this.ticketsProcessed++;
           return;
@@ -1876,12 +1879,30 @@ export class AgentLoop {
             description: (decision.inputs.description as string) ?? '',
             parsedData: { source: 'website_amend_triage', confidence: wa.confidence, reasoning: wa.reasoning },
             requiresApproval: false,
-          }, { alwaysCreate: true });
+          }, { alwaysCreate: true, keepOriginalOpen: true });
           if (!result.success) throw new Error(result.error ? `${result.detail}: ${result.error}` : result.detail);
-          console.log(`[agent] Routed ${decision.ticketKey} to TPJ — unambiguous website amend (conf ${(wa.confidence ?? 0).toFixed(2)})`);
+
+          // The NT ticket stays open, so it needs a human owner and a parked status.
+          let assigneeName: string | null = null;
+          if (this.assignmentEngine) {
+            try {
+              const assignment = await this.assignmentEngine.assignWithFallback(decision.ticketKey, 'cc', 'NT');
+              if (assignment) {
+                await this.assignmentEngine.postAssignmentComment(decision.ticketKey, assignment);
+                assigneeName = assignment.agent.display_name;
+              } else {
+                console.log(`[agent] Website amend ${decision.ticketKey}: no CC agent available, will retry on sweep`);
+              }
+            } catch (err) {
+              console.error(`[agent] Website-amend round-robin failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
+            }
+          }
+          await this.setWaitingStatus(decision.ticketKey, 'Waiting On Partner', decision.inputs.status as string | undefined);
+
+          console.log(`[agent] Escalated ${decision.ticketKey} → ${result.createdTicketKey} (TPJ) — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}), kept open with ${assigneeName ?? 'no assignee'}`);
           await this.observer.logOutcome(decisionId, {
             success: true, action: 'transition', ticketKey: decision.ticketKey,
-            detail: `Routed to TPJ Maintenance — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}). ${result.detail}`,
+            detail: `Escalated to TPJ Maintenance — website amend (conf ${(wa.confidence ?? 0).toFixed(2)}). Original kept open, assigned to ${assigneeName ?? 'nobody (retry queued)'}, Waiting On Partner. ${result.detail}`,
           });
           this.ticketsProcessed++;
           return;
@@ -2271,7 +2292,12 @@ export class AgentLoop {
    * workflow), so this stays correct if the workflow is re-numbered.
    */
   private async setWaitingOnRequestor(ticketKey: string, currentStatus?: string): Promise<void> {
-    const TARGET = 'waiting on requestor';
+    return this.setWaitingStatus(ticketKey, 'Waiting On Requestor', currentStatus);
+  }
+
+  /** Generic form of the above — resolves the transition by target status name. */
+  private async setWaitingStatus(ticketKey: string, targetStatus: string, currentStatus?: string): Promise<void> {
+    const TARGET = targetStatus.toLowerCase();
     const INTERMEDIATE = 'work in progress';
     if ((currentStatus ?? '').toLowerCase() === TARGET) return;
 
@@ -2289,7 +2315,7 @@ export class AgentLoop {
         const wip = findTo(transitions, INTERMEDIATE);
         if (wip) {
           await this.jiraClient.transitionIssue(ticketKey, wip.id);
-          console.log(`[agent] ${ticketKey}: transitioned to Work In Progress en route to Waiting On Requestor`);
+          console.log(`[agent] ${ticketKey}: transitioned to Work In Progress en route to ${targetStatus}`);
           res = await this.jiraClient.getTransitionsWithFields(ticketKey);
           transitions = ((res as { transitions?: Trans[] })?.transitions ?? []);
           target = findTo(transitions, TARGET);
@@ -2298,14 +2324,14 @@ export class AgentLoop {
 
       if (!target) {
         const names = transitions.map(t => `${t.to?.name ?? '?'} (${t.id})`).join(', ');
-        console.warn(`[agent] ${ticketKey}: no transition to Waiting On Requestor available. Transitions: ${names}`);
+        console.warn(`[agent] ${ticketKey}: no transition to ${targetStatus} available. Transitions: ${names}`);
         return;
       }
 
       await this.jiraClient.transitionIssue(ticketKey, target.id);
-      console.log(`[agent] ${ticketKey}: set status to Waiting On Requestor`);
+      console.log(`[agent] ${ticketKey}: set status to ${targetStatus}`);
     } catch (err) {
-      console.warn(`[agent] Failed to set Waiting On Requestor on ${ticketKey}:`, err instanceof Error ? err.message : err);
+      console.warn(`[agent] Failed to set ${targetStatus} on ${ticketKey}:`, err instanceof Error ? err.message : err);
     }
   }
 
