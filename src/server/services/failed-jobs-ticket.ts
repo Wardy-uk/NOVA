@@ -170,17 +170,24 @@ function buildDescription(agentName: string, date: string) {
         type: 'paragraph',
         content: [{
           type: 'text',
-          text: `${agentName} owns failed automated jobs for ${date}. Work the Grafana failed jobs board through the day:`,
+          text: `${agentName} owns the failed jobs board for ${date}.`,
         }],
       },
       {
         type: 'bulletList',
         content: [
-          bullet('Monitor the board for new failures as they appear.'),
-          bullet('Reprocess anything that can safely be re-run.'),
-          bullet('Investigate and fix the ones that fail again — raise a linked ticket for anything needing dev.'),
-          bullet('Leave a comment here with the closing count and anything handed over.'),
+          bullet('Investigate all failed jobs on the board.'),
+          bullet('Log every action you take here as you go, quoting the job IDs.'),
+          bullet('At 17:30, record the number of failed jobs still unresolved, so you can pick them back up tomorrow.'),
         ],
+      },
+      {
+        type: 'paragraph',
+        content: [{
+          type: 'text',
+          text: "Today's failed jobs remain your responsibility until every one of them is fully resolved and reprocessed — including any you carry into tomorrow.",
+          marks: [{ type: 'strong' }],
+        }],
       },
       {
         type: 'paragraph',
@@ -246,7 +253,7 @@ export async function runFailedJobsTicket(
 
   const project = s(settings, 'failed_jobs_ticket_project', DEFAULTS.project);
   const summaryTemplate = s(settings, 'failed_jobs_ticket_summary',
-    'Failed Jobs — monitor, reprocess and fix ({date})');
+    'Failed Jobs — investigate, resolve and reprocess ({date})');
   const summary = summaryTemplate.replace('{date}', date).replace('{agent}', agent.displayName);
 
   const base: Record<string, unknown> = {

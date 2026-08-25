@@ -24,7 +24,7 @@ const SETTING_KEYS = [
 // empty box reads as "using the default" rather than "unset".
 const PLACEHOLDERS: Record<string, string> = {
   failed_jobs_ticket_project: 'NT',
-  failed_jobs_ticket_summary: 'Failed Jobs — monitor, reprocess and fix ({date})',
+  failed_jobs_ticket_summary: 'Failed Jobs — investigate, resolve and reprocess ({date})',
   failed_jobs_ticket_issue_type_id: '10706 (Support)',
   failed_jobs_ticket_request_type_id: '598 (Service Request)',
   failed_jobs_ticket_tier_id: '13062 (Tier 2)',
@@ -148,7 +148,7 @@ export function FailedJobsRotaPanel() {
   return (
     <div className="space-y-4">
       <p className="text-[11px] text-neutral-500">
-        Raises one Tier 2 ticket each weekday to monitor, reprocess and fix failed automated jobs,
+        Raises one Tier 2 ticket each weekday to investigate, resolve and reprocess failed jobs,
         assigned to whoever holds the failed-jobs rota on the Grafana board.
       </p>
 
