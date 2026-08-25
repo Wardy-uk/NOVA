@@ -157,10 +157,24 @@ export async function resolveFailedJobsAgent(
   };
 }
 
+const KB_ARTICLE_URL = 'https://nurturtech.atlassian.net/wiki/x/A4DIr';
+
 function buildDescription(agentName: string, date: string) {
   const bullet = (text: string) => ({
     type: 'listItem',
     content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  });
+  /** A bullet whose middle chunk is a hyperlink. */
+  const linkBullet = (before: string, linkText: string, href: string, after: string) => ({
+    type: 'listItem',
+    content: [{
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: before },
+        { type: 'text', text: linkText, marks: [{ type: 'link', attrs: { href } }] },
+        { type: 'text', text: after },
+      ],
+    }],
   });
   return {
     type: 'doc',
@@ -176,9 +190,10 @@ function buildDescription(agentName: string, date: string) {
       {
         type: 'bulletList',
         content: [
-          bullet('Investigate all failed jobs on the board.'),
+          bullet('Investigate all failed jobs on the board throughout the day.'),
           bullet('Log every action you take here as you go, quoting the job IDs.'),
           bullet('At 17:30, record the number of failed jobs still unresolved, so you can pick them back up tomorrow.'),
+          linkBullet('Update the ', 'failed jobs Confluence article', KB_ARTICLE_URL, ' with any fixes not already documented.'),
         ],
       },
       {
