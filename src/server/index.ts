@@ -106,6 +106,7 @@ import { createPredictionRoutes } from './routes/predictions.js';
 import { createIncidentRoutes } from './routes/incidents.js';
 import { createSlaManagementRoutes } from './routes/sla-management.js';
 import { createAdminJobRoutes } from './routes/admin-jobs.js';
+import { createFailedJobsRoutes } from './routes/failed-jobs.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 import { AzDoClient } from './services/azdo-client.js';
 import { BymClient } from './services/bym-client.js';
@@ -1211,6 +1212,10 @@ async function main() {
 
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
   app.use('/api/admin/jobs', createAdminJobRoutes(jobRegistry));
+  app.use('/api/admin/failed-jobs', createFailedJobsRoutes({
+    settings: settingsQueries,
+    getJiraClient: () => buildOnboardingJiraClient(),
+  }));
 
   // Wallboard diagnostics log endpoints (admin-only)
   app.get('/api/admin/wallboard-logs', (req, res) => {

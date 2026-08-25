@@ -97,7 +97,9 @@ interface AgentRow {
 export async function resolveFailedJobsAgent(
   settings: SettingsQueries,
   date: string,
+  opts: { applyFlag?: boolean } = {},
 ): Promise<{ agent: FailedJobsAgent | null; reassigned: boolean }> {
+  const applyFlag = opts.applyFlag !== false;
   const pool = await getKpiPool(settings);
   const respectAvailability = settings.get('failed_jobs_respect_availability') !== 'false';
 
@@ -133,15 +135,18 @@ export async function resolveFailedJobsAgent(
   }
 
   // Move the flag so the Grafana board shows the same person as the ticket.
-  const req = pool.request();
-  req.input('agentId', sql.Int, next.AgentId);
-  await req.query(`
-    UPDATE dbo.Agent SET isCurrentFailedJob = 'N' WHERE isCurrentFailedJob = 'Y';
-    UPDATE dbo.Agent SET isCurrentFailedJob = 'Y', lastFailedJobDate = CAST(GETDATE() AS DATE)
-     WHERE AgentId = @agentId;
-  `);
+  // Skipped for the read-only status peek, which must not change the board.
+  if (applyFlag) {
+    const req = pool.request();
+    req.input('agentId', sql.Int, next.AgentId);
+    await req.query(`
+      UPDATE dbo.Agent SET isCurrentFailedJob = 'N' WHERE isCurrentFailedJob = 'Y';
+      UPDATE dbo.Agent SET isCurrentFailedJob = 'Y', lastFailedJobDate = CAST(GETDATE() AS DATE)
+       WHERE AgentId = @agentId;
+    `);
+  }
 
-  if (flagged) {
+  if (flagged && applyFlag) {
     console.log(`[failed-jobs] ${fullName(flagged)} is unavailable — failed jobs moved to ${fullName(next)}`);
   }
 

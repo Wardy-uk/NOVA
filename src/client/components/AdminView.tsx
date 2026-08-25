@@ -5,6 +5,7 @@ import { SsoLogPanel } from './SsoLogPanel.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { AgentAdminView } from './AgentAdminView.js';
 import { BackgroundJobsPanel } from './BackgroundJobsPanel.js';
+import { FailedJobsRotaPanel } from './FailedJobsRotaPanel.js';
 import { WallboardLogPanel } from './WallboardLogPanel.js';
 
 
@@ -1270,6 +1271,10 @@ export function AdminView() {
 
       <CollapsibleSection title="Background Jobs">
         <BackgroundJobsPanel />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Failed Jobs Rota">
+        <FailedJobsRotaPanel />
       </CollapsibleSection>
 
       <CollapsibleSection title="Teams">
