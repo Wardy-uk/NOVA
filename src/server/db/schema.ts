@@ -3739,6 +3739,22 @@ async function runMigrations(): Promise<void> {
     // join rather than a string search through notes.
     `IF COL_LENGTH('escalation_log', 'disputes_escalation_id') IS NULL
      ALTER TABLE escalation_log ADD disputes_escalation_id INT NULL;`,
+
+    // Daily failed-jobs ticket. One row per UK day — the unique constraint on
+    // ticket_date is what makes the job idempotent, so a restart or an overlapping
+    // tick can't raise a second ticket for the same day.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'failed_jobs_ticket_log') AND type = 'U')
+     CREATE TABLE failed_jobs_ticket_log (
+       id           INT IDENTITY(1,1) PRIMARY KEY,
+       ticket_date  DATE          NOT NULL,
+       issue_key    NVARCHAR(30)  NULL,
+       agent_id     INT           NULL,
+       agent_name   NVARCHAR(200) NULL,
+       reassigned   BIT           NOT NULL DEFAULT 0,
+       note         NVARCHAR(400) NULL,
+       created_at   DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+       CONSTRAINT UQ_failed_jobs_ticket_log_date UNIQUE (ticket_date)
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

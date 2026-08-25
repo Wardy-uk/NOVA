@@ -228,6 +228,7 @@ import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
 import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
 import { sendAllKpiEmails } from './services/kpi-email-digest.js';
+import { runFailedJobsTicket, isTicketDay, dueMinuteOfDay } from './services/failed-jobs-ticket.js';
 import cookieParser from 'cookie-parser';
 
 dotenv.config();
@@ -1851,6 +1852,22 @@ async function main() {
       if (ukDay === 'Mon' && ukHour === 9 && ukMin < 10) {
         await kpiPipeline.generateWeeklyDigest();
       }
+    }, 10 * 60 * 1000);
+
+    // Daily failed-jobs ticket — one T2 Support ticket each weekday, assigned to the
+    // agent holding the failed-jobs rota (dbo.Agent.isCurrentFailedJob, set by the n8n
+    // "Daily Agent Selection" flow at 08:00 and shown on the Grafana board). Fires on
+    // the first tick at/after the configured time rather than in a narrow window, so a
+    // late start still raises it; the unique date in failed_jobs_ticket_log stops
+    // double-raising. Off until failed_jobs_ticket_enabled is set.
+    jobRegistry.register('failed-jobs-ticket', 'Daily failed-jobs ticket (Mon–Fri)', async () => {
+      if (settingsQueries.get('failed_jobs_ticket_enabled') !== 'true') return;
+      if (!isTicketDay(settingsQueries)) return;
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+      if (ukHour * 60 + ukMin < dueMinuteOfDay(settingsQueries)) return;
+      await runFailedJobsTicket(settingsQueries, agentJiraClient);
     }, 10 * 60 * 1000);
 
     // SharePoint delivery sheet — auto-pull daily at 02:00
