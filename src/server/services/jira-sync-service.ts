@@ -30,6 +30,10 @@ const STALL_CEILING_MS = 30 * 60_000;
  *  agents' queues for as long as the process stayed up. */
 const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60_000;
 
+/** Orphan checking costs one Jira GET per suspect row. Past this many, the full sync's
+ *  fetch is the thing that's wrong, so checking them all would be a waste. */
+const ORPHAN_CHECK_MAX = 400;
+
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
@@ -199,38 +203,7 @@ export class JiraSyncService {
       const issueDuration = Date.now() - start;
       console.log(`[jira-sync] Issue sync complete: ${issueCount} issues in ${issueDuration}ms${upsertErrors > 0 ? ` (${upsertErrors} failed)` : ''} — cache now active`);
 
-      // Reconciliation sweep: remove rows not touched by this full sync.
-      // Safety guard: only sweep if we upserted a credible number of issues (≥50)
-      // to avoid wiping the cache on a partial/failed Jira fetch.
-      const RECONCILIATION_MIN_ISSUES = 50;
-      if (issueCount >= RECONCILIATION_MIN_ISSUES) {
-        try {
-          const syncStartIso = new Date(start).toISOString();
-          const projects = this.buildProjectFilter();
-          const projectKeys = projects.split(',').map(p => p.trim()).filter(Boolean);
-          const placeholders = projectKeys.map(() => '?').join(', ');
-
-          // Batch delete to avoid Azure SQL request timeout on large stale sets
-          let totalSwept = 0;
-          const BATCH_SIZE = 100;
-          let batchAffected: number;
-          do {
-            const batchResult = await execute(
-              `DELETE TOP (${BATCH_SIZE}) FROM jira_issue_cache WHERE project_key IN (${placeholders}) AND synced_at < ?`,
-              [...projectKeys, syncStartIso]
-            );
-            batchAffected = batchResult.rowsAffected;
-            totalSwept += batchAffected;
-            if (batchAffected === BATCH_SIZE) await new Promise(r => setTimeout(r, 200));
-          } while (batchAffected === BATCH_SIZE);
-
-          console.log(`[jira-sync] Reconciliation sweep: removed ${totalSwept} stale rows (synced before ${syncStartIso})`);
-        } catch (err) {
-          console.warn('[jira-sync] Reconciliation sweep failed (non-fatal):', err instanceof Error ? err.message : err);
-        }
-      } else {
-        console.log(`[jira-sync] Reconciliation sweep skipped: only ${issueCount} issues upserted (minimum ${RECONCILIATION_MIN_ISSUES})`);
-      }
+      await this.removeOrphanedRows(new Set(result.issues.map(i => i.key)));
 
       // Backfill comments for open issues in background (non-blocking)
       const openIssues = result.issues.filter(i =>
@@ -264,6 +237,62 @@ export class JiraSyncService {
       await this.recordSync('full', issueCount, commentCount, duration, err instanceof Error ? err.message : String(err));
     } finally {
       this.releaseSyncSlot();
+    }
+  }
+
+  /** Remove cache rows for issues that have left the cache's scope entirely — deleted,
+   *  or moved to another project and re-keyed. Incremental sync only ever upserts, so
+   *  nothing else can remove them, and they sit in agents' queues indefinitely.
+   *
+   *  This replaced a blunt "delete every row this sync did not touch" sweep that was
+   *  both unsafe and inert. Unsafe because `searchJqlAll` caps at 2000 issues, so a
+   *  truncated fetch would have deleted thousands of live tickets. Inert because there
+   *  is no index on `synced_at`, so the DELETE timed out at 30s on every single run and
+   *  had not swept one row since May — which is how NT-23803 stayed in Nick's queue for
+   *  months after it stopped existing in Jira.
+   *
+   *  So: ask Jira instead of inferring. Only non-done rows can show in a queue, only
+   *  rows this sync did not return are suspect, and only keys Jira confirms are gone get
+   *  deleted — by primary key, so the delete stays cheap regardless of table size. */
+  private async removeOrphanedRows(fetchedKeys: Set<string>): Promise<void> {
+    try {
+      const projectKeys = this.buildProjectFilter().split(',').map(p => p.trim()).filter(Boolean);
+      const placeholders = projectKeys.map(() => '?').join(', ');
+
+      const rows = await query<{ issue_key: string }>(
+        `SELECT issue_key FROM jira_issue_cache
+         WHERE project_key IN (${placeholders}) AND status_category <> 'done'`,
+        projectKeys,
+      );
+      const suspects = rows.map(r => r.issue_key).filter(k => !fetchedKeys.has(k));
+      if (suspects.length === 0) {
+        console.log('[jira-sync] Orphan check: no untouched open rows');
+        return;
+      }
+
+      // A pathological suspect list means the fetch went wrong, not that Jira lost a
+      // thousand tickets. Bail rather than hammer the API on a bad premise.
+      if (suspects.length > ORPHAN_CHECK_MAX) {
+        console.warn(`[jira-sync] Orphan check skipped: ${suspects.length} untouched open rows exceeds the ${ORPHAN_CHECK_MAX} cap — fetch likely incomplete`);
+        return;
+      }
+
+      const orphans: string[] = [];
+      for (const key of suspects) {
+        // getIssue returns null on 404. A moved issue resolves under its new key, so a
+        // mismatch means this row's key is dead too.
+        const issue = await this.jiraClient.getIssue(key, ['status']);
+        if (!issue || issue.key !== key) orphans.push(key);
+      }
+
+      for (const key of orphans) {
+        await execute(`DELETE FROM jira_issue_cache WHERE issue_key = ?`, [key]);
+        await execute(`DELETE FROM jira_comment_cache WHERE issue_key = ?`, [key]);
+      }
+
+      console.log(`[jira-sync] Orphan check: ${suspects.length} untouched open rows, removed ${orphans.length}${orphans.length ? ` (${orphans.slice(0, 10).join(', ')})` : ''}`);
+    } catch (err) {
+      console.warn('[jira-sync] Orphan check failed (non-fatal):', err instanceof Error ? err.message : err);
     }
   }
 
