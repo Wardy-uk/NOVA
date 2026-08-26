@@ -161,9 +161,18 @@ export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: numb
   'anthropic/claude-haiku-4.5':        { inputPerM: 1.00,  outputPerM: 5.00  },
 };
 
-export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+/**
+ * USD cost of a call, or `null` when the model has no MODEL_PRICING entry.
+ * null (stored as NULL in estimated_cost) so an unpriced call is distinguishable
+ * from a genuinely free one — returning 0 made unpriced models vanish from every
+ * SUM() rollup instead of showing up as a gap.
+ */
+export function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
   const pricing = MODEL_PRICING[model];
-  if (!pricing) return 0;
+  if (!pricing) {
+    console.warn(`[llm] No MODEL_PRICING entry for "${model}" — call logged with NULL cost`);
+    return null;
+  }
   return (inputTokens * pricing.inputPerM + outputTokens * pricing.outputPerM) / 1_000_000;
 }
 

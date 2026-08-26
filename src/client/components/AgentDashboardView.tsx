@@ -74,8 +74,9 @@ interface ProviderStat {
 interface CostSummary {
   totalCost: number;
   totalCalls: number;
+  unpricedCalls?: number;
   byProvider: Array<{ provider: string; cost: number; calls: number }>;
-  byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>;
+  byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number; unpriced?: number }>;
   byCallType: Array<{ call_type: string; cost: number; calls: number }>;
   dailyTrend: Array<{ day: string; cost: number; calls: number }>;
   avgCostPerDecision: number;
@@ -3360,10 +3361,13 @@ const MODEL_COLORS: Record<string, string> = {
   'gpt-4.1-mini': '#a8d8f0',
 };
 
+// MODEL_PRICING (llm-service.ts) is USD per million tokens and estimated_cost is
+// stored in USD, so everything on this tab is USD. No FX conversion anywhere —
+// showing £ would need a dated rate from a real source, not a hardcoded constant.
 function fmtCost(n: number): string {
-  if (n >= 1) return `£${n.toFixed(2)}`;
-  if (n >= 0.01) return `£${n.toFixed(3)}`;
-  return `£${n.toFixed(4)}`;
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.01) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(4)}`;
 }
 
 function fmtTokens(n: number): string {
@@ -3452,7 +3456,7 @@ function SpendChart() {
       },
       {
         type: 'line' as const,
-        label: 'Spend (£)',
+        label: 'Spend (USD)',
         data: costValues,
         borderColor: '#5ec1ca',
         backgroundColor: 'rgba(94, 193, 202, 0.1)',
@@ -3488,7 +3492,7 @@ function SpendChart() {
       tooltip: {
         callbacks: {
           label: (ctx: any) =>
-            ctx.dataset.label === 'Spend (£)' ? `${ctx.dataset.label}: ${fmtCost(ctx.parsed.y ?? 0)}` : `${ctx.dataset.label}: ${ctx.parsed.y ?? 0}`,
+            ctx.dataset.label === 'Spend (USD)' ? `${ctx.dataset.label}: ${fmtCost(ctx.parsed.y ?? 0)}` : `${ctx.dataset.label}: ${ctx.parsed.y ?? 0}`,
         },
       },
     },
@@ -3496,7 +3500,7 @@ function SpendChart() {
       x: { ticks: { color: '#6b7280', font: { size: 9 }, maxRotation: 0 }, grid: { color: '#2f353d' } },
       y: {
         type: 'linear' as const, position: 'left' as const,
-        ticks: { color: '#5ec1ca', font: { size: 9 }, callback: (v: number | string) => `£${Number(v).toFixed(2)}` },
+        ticks: { color: '#5ec1ca', font: { size: 9 }, callback: (v: number | string) => `$${Number(v).toFixed(2)}` },
         grid: { color: '#2f353d' },
         title: { display: false },
       },
@@ -3789,6 +3793,19 @@ function CostsTab({ data, error, onPeriodChange }: { data: CostSummary | null; e
         <CostCard label={`All ${days}d`} value={fmtCost(data.totalCost)} sub={`${data.totalCalls} calls`} />
         <CostCard label="Projected /mo" value={fmtCost(projectedMonthly)} sub={`${fmtCost(dailyRate)}/day`} />
       </div>
+
+      {/* Unpriced calls: models with no MODEL_PRICING entry log a NULL cost, so their
+          spend is missing from every figure above — say so rather than imply it's zero. */}
+      {(data.unpricedCalls ?? 0) > 0 && (
+        <div className="border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2 text-xs text-amber-300">
+          {data.unpricedCalls} of {data.totalCalls} calls used a model with no price entry — their cost is unknown and excluded from the totals above.
+          {data.byModel.filter(m => (m.unpriced ?? 0) > 0).length > 0 && (
+            <span className="text-amber-400/80">
+              {' '}Unpriced: {data.byModel.filter(m => (m.unpriced ?? 0) > 0).map(m => `${m.model} (${m.unpriced})`).join(', ')}.
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Working hours vs out-of-hours split */}
       {modeCosts && (modeCosts.working.calls > 0 || modeCosts.outOfHours.calls > 0) && (

@@ -230,8 +230,11 @@ Produce JSON with:
       query<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM agent_approvals WHERE status = 'pending'`
       ),
-      query<{ cost: number; calls: number }>(
-        `SELECT ISNULL(SUM(cost_usd * 0.79), 0) as cost, COUNT(*) as calls
+      // estimated_cost is USD (see MODEL_PRICING in llm-service.ts). NULL means the
+      // model had no price entry — counted separately, never folded in as zero.
+      query<{ cost: number; calls: number; unpriced: number }>(
+        `SELECT ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls,
+                SUM(CASE WHEN estimated_cost IS NULL THEN 1 ELSE 0 END) as unpriced
          FROM agent_llm_calls WHERE created_at >= DATEADD(day, -1, GETUTCDATE())`
       ),
     ]);
@@ -290,7 +293,7 @@ Produce JSON with:
       ``,
       `AI AGENT:`,
       `Decisions yesterday: ${totalAiDecisions} | Pending approvals: ${pendingApprovals[0]?.cnt ?? 0}`,
-      `Cost yesterday: £${(costYesterday[0]?.cost ?? 0).toFixed(2)} (${costYesterday[0]?.calls ?? 0} LLM calls)`,
+      `Cost yesterday: $${(costYesterday[0]?.cost ?? 0).toFixed(2)} USD (${costYesterday[0]?.calls ?? 0} LLM calls)${(costYesterday[0]?.unpriced ?? 0) > 0 ? ` — ${costYesterday[0].unpriced} call(s) from unpriced models, cost unknown` : ''}`,
     ].join('\n');
 
     const systemPrompt = `You are a daily briefing assistant for a service desk manager. Generate a concise strategic morning briefing. Address the manager by first name. Use plain text — no markdown. Be high-level but flag anything that needs immediate attention. If there are breaches or staffing concerns, lead with those. Include specific ticket references where relevant. Keep it under 400 words.

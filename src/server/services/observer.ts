@@ -228,8 +228,11 @@ export class Observer {
   async getCostSummary(days = 30): Promise<{
     totalCost: number;
     totalCalls: number;
+    /** Calls whose model has no MODEL_PRICING entry (estimated_cost IS NULL) —
+     *  their spend is missing from totalCost, so surface it rather than imply £0. */
+    unpricedCalls: number;
     byProvider: Array<{ provider: string; cost: number; calls: number }>;
-    byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>;
+    byModel: Array<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number; unpriced: number }>;
     byCallType: Array<{ call_type: string; cost: number; calls: number }>;
     dailyTrend: Array<{ day: string; cost: number; calls: number }>;
     avgCostPerDecision: number;
@@ -241,8 +244,9 @@ export class Observer {
       : `created_at >= DATEADD(day, -${days}, GETUTCDATE())`;
 
     const [totalRows, byProviderRows, byModelRows, byCallTypeRows, dailyRows, decisionCount, topTicketRows] = await Promise.all([
-      query<{ total_cost: number; total_calls: number }>(
-        `SELECT ISNULL(SUM(estimated_cost), 0) as total_cost, COUNT(*) as total_calls
+      query<{ total_cost: number; total_calls: number; unpriced_calls: number }>(
+        `SELECT ISNULL(SUM(estimated_cost), 0) as total_cost, COUNT(*) as total_calls,
+                SUM(CASE WHEN estimated_cost IS NULL THEN 1 ELSE 0 END) as unpriced_calls
          FROM agent_llm_calls WHERE ${dateFilter}`,
       ),
       query<{ provider: string; cost: number; calls: number }>(
@@ -250,9 +254,10 @@ export class Observer {
          FROM agent_llm_calls WHERE ${dateFilter}
          GROUP BY provider ORDER BY cost DESC`,
       ),
-      query<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number }>(
+      query<{ model: string; provider: string; cost: number; calls: number; input_tokens: number; output_tokens: number; unpriced: number }>(
         `SELECT model, provider, ISNULL(SUM(estimated_cost), 0) as cost, COUNT(*) as calls,
-                ISNULL(SUM(input_tokens), 0) as input_tokens, ISNULL(SUM(output_tokens), 0) as output_tokens
+                ISNULL(SUM(input_tokens), 0) as input_tokens, ISNULL(SUM(output_tokens), 0) as output_tokens,
+                SUM(CASE WHEN estimated_cost IS NULL THEN 1 ELSE 0 END) as unpriced
          FROM agent_llm_calls WHERE ${dateFilter}
          GROUP BY model, provider ORDER BY cost DESC`,
       ),
@@ -286,6 +291,7 @@ export class Observer {
     return {
       totalCost,
       totalCalls,
+      unpricedCalls: totalRows[0]?.unpriced_calls ?? 0,
       byProvider: byProviderRows,
       byModel: byModelRows,
       byCallType: byCallTypeRows,
