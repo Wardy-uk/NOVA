@@ -437,11 +437,13 @@ export function createAuthRoutes(
       });
 
       // ── Group-based access control ──
-      // When sso_group_roles_enabled is off, roles are managed entirely in NOVA
-      // (Admin → Users): existing users keep whatever role they already have and
-      // new SSO users land as viewer. The mapping table below is left intact so
-      // group-driven roles can be switched back on without re-entering it.
-      const groupRolesEnabled = (settingsQueries.get('sso_group_roles_enabled') ?? 'true') !== 'false';
+      // Off by default: roles are managed entirely in NOVA (Admin → Users) unless
+      // sso_group_roles_enabled is explicitly turned on. Existing users keep whatever
+      // role they already have and new SSO users land as viewer. The mapping table
+      // below is left intact so group-driven roles can be switched back on without
+      // re-entering it. Defaulting to on silently overwrote manually-assigned roles
+      // on every login for anyone whose Azure groups didn't grant them.
+      const groupRolesEnabled = (settingsQueries.get('sso_group_roles_enabled') ?? 'false') === 'true';
       const groupRolesRaw = settingsQueries.get('sso_group_roles');
       let groupMappings: Array<{ groupId: string; groupName: string; novaRole: string }> = [];
       try { if (groupRolesRaw) groupMappings = JSON.parse(groupRolesRaw); } catch { /* ignore */ }
