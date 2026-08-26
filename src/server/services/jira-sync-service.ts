@@ -24,6 +24,12 @@ function normalisePriorityName(raw: string | null): string | null {
 /** A sync running longer than this is assumed dead, and its slot is reclaimed. */
 const STALL_CEILING_MS = 30 * 60_000;
 
+/** Incremental sync only ever upserts, so a ticket that leaves the cache's scope
+ *  (deleted, or moved to another project and given a new key) is orphaned until the
+ *  next full sync's reconciliation sweep. Boot-only full syncs left ghosts sitting in
+ *  agents' queues for as long as the process stayed up. */
+const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60_000;
+
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
@@ -65,6 +71,7 @@ export class JiraSyncService {
   private syncStartedAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private fullSyncDone = false;
+  private lastFullSyncAt: Date | null = null;
   private consecutiveErrors = 0;
   private assignmentEngine: AssignmentEngine | null = null;
 
@@ -103,6 +110,7 @@ export class JiraSyncService {
   getStatus() {
     return {
       lastSyncAt: this.lastSyncAt?.toISOString() ?? null,
+      lastFullSyncAt: this.lastFullSyncAt?.toISOString() ?? null,
       syncing: this.syncing,
       syncRunningMs: this.syncStartedAt ? Date.now() - this.syncStartedAt : null,
       fullSyncDone: this.fullSyncDone,
@@ -184,6 +192,7 @@ export class JiraSyncService {
 
       // Mark cache as active even if some issues failed — partial data is better than no data
       this.lastSyncAt = new Date();
+      this.lastFullSyncAt = this.lastSyncAt;
       this.fullSyncDone = true;
       this.consecutiveErrors = 0;
 
@@ -261,6 +270,14 @@ export class JiraSyncService {
   async incrementalSync(): Promise<void> {
     if (this.syncing && this.syncStartedAt && Date.now() - this.syncStartedAt < STALL_CEILING_MS) return;
     if (!this.lastSyncAt) {
+      await this.fullSync();
+      return;
+    }
+
+    // Periodically re-run the full sync so the reconciliation sweep clears rows for
+    // issues that no longer exist in scope — incremental sync can never notice those.
+    if (!this.lastFullSyncAt || Date.now() - this.lastFullSyncAt.getTime() >= FULL_SYNC_INTERVAL_MS) {
+      console.log('[jira-sync] Full sync due — running reconciliation pass');
       await this.fullSync();
       return;
     }
