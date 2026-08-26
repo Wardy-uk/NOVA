@@ -4598,9 +4598,11 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // CSAT survey routes (public, no auth). MUST be mounted before the authenticated
   // `/api/portal` mounts below — otherwise portalAuth intercepts `/api/portal/csat/*`
   // and 401s ("Missing portal authentication token") before this route is reached.
+  // Writes (CSAT note + mirror field) go through the NOVA service account, not the
+  // seeded personal creds — otherwise customer feedback lands on the ticket as Nick.
   app.use('/api/portal/csat', portalGate, createPortalCsatRoutes({
     settings: settingsQueries,
-    getJiraClient: buildServiceDeskJiraClient,
+    getJiraClient: buildOnboardingJiraClient,
   }));
 
   // Authenticated portal routes. portalReadOnly must sit after portalAuth (it reads
