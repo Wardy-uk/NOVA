@@ -576,6 +576,13 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       `, [agentName]);
 
       if (existing) {
+        // `important_context` is the one field a caller is allowed to CLEAR, so it can't
+        // be COALESCE'd like the rest — but writing `?` unconditionally meant every
+        // partial update wiped it. The roster grid's status chip sends `{manager_status}`
+        // alone, so changing someone's status silently destroyed whatever context had
+        // been written on their profile. Presence in the body is what decides now:
+        // send the key to change it (null clears), omit it to leave it alone.
+        const clearsContext = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'important_context');
         await execute(`
           UPDATE agent_development_plans SET
             role_title = COALESCE(?, role_title),
@@ -583,14 +590,15 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
             plan_period = COALESCE(?, plan_period),
             role_clarity = COALESCE(?, role_clarity),
             strengths = COALESCE(?, strengths),
-            important_context = ?,
+            important_context = CASE WHEN ? = 1 THEN ? ELSE important_context END,
             status = COALESCE(?, status),
             manager_status = COALESCE(?, manager_status),
             updated_at = GETUTCDATE()
           WHERE id = ?
         `, [role_title, function_name, plan_period, role_clarity,
             strengths ? JSON.stringify(strengths) : null,
-            important_context ?? null, status, manager_status ?? null, existing.id]);
+            clearsContext ? 1 : 0, important_context ?? null,
+            status, manager_status ?? null, existing.id]);
         res.json({ ok: true, data: { id: existing.id } });
       } else {
         const id = await executeAndGetId(`

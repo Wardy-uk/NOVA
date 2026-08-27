@@ -37,6 +37,7 @@ export function OneToOneOverviewView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [editing, setEditing] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   const load = (keepLoading = false) => {
     if (!keepLoading) setLoading(true);
@@ -50,6 +51,25 @@ export function OneToOneOverviewView() {
   const toggleSort = (key: 'next' | 'last') => {
     if (sortBy === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortBy(key); setSortDir('asc'); }
+  };
+
+  /**
+   * Close someone's development plan. Their sessions, actions and history stay exactly
+   * where they are — every 1-2-1 query filters on `status IN ('active','deferred')`, so
+   * archiving simply stops them counting. Nothing is deleted.
+   */
+  const archivePlan = async (agentName: string) => {
+    if (!window.confirm(`Archive ${agentName}'s development plan?\n\nThey stop counting towards 1-2-1 health. All their history is kept, and you can reinstate them by setting the plan active again.`)) return;
+    setArchiving(agentName);
+    try {
+      await fetch(`/api/people/agent/${encodeURIComponent(agentName)}/plan`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'archived' }),
+      });
+      load(true);
+    } catch { /* the panel re-renders from the reload either way */ }
+    setArchiving(null);
   };
 
   const saveNext = async (agentName: string, date: string) => {
@@ -123,15 +143,28 @@ export function OneToOneOverviewView() {
           <div style={{ fontSize: 12, fontWeight: 700, color: C.amber, marginBottom: 8 }}>Roster drift</div>
           {drift.notOnRoster.length > 0 && (
             <div style={{ fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
-              <strong style={{ color: C.text1 }}>Has a 1-2-1 plan but is not an active agent:</strong>{' '}
-              {drift.notOnRoster.map((x, i) => (
-                <span key={x.agentName}>
-                  {i > 0 && ', '}{x.agentName}
-                  {x.nearMatch && <span style={{ color: C.text3 }}> (did you mean “{x.nearMatch}”?)</span>}
-                </span>
-              ))}
+              <strong style={{ color: C.text1 }}>Has a 1-2-1 plan but is not an active agent:</strong>
+              <div style={{ marginTop: 6 }}>
+                {drift.notOnRoster.map((x) => (
+                  <div key={x.agentName} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <span style={{ color: C.text1 }}>{x.agentName}</span>
+                    {x.nearMatch && <span style={{ color: C.text3, fontSize: 11.5 }}>did you mean “{x.nearMatch}”?</span>}
+                    <button
+                      onClick={() => archivePlan(x.agentName)}
+                      disabled={archiving === x.agentName}
+                      title="Close their development plan — keeps all history, stops them counting towards 1-2-1 health"
+                      style={{
+                        padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                        border: `1px solid ${C.border}`, background: 'transparent',
+                        color: archiving === x.agentName ? C.text3 : C.amber, cursor: 'pointer',
+                      }}
+                    >{archiving === x.agentName ? 'Archiving…' : 'Archive plan'}</button>
+                  </div>
+                ))}
+              </div>
               <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>
-                They still appear in every count above. Left the business, moved team, or a name that no longer matches.
+                They still appear in every count above. Archiving keeps their history and past 1-2-1s —
+                it only takes them off the roster. Don't archive a near-match: fix the name instead.
               </div>
             </div>
           )}
