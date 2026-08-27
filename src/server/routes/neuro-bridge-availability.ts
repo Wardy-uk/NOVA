@@ -64,39 +64,47 @@ export function createNeuroBridgeAvailabilityRoutes(settingsQueries: SettingsQue
       const today = new Date().toISOString().slice(0, 10);
       const to = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
+      // ⚠ The payload MUST be nested under `data`. Every other bridge route does
+      // this and NEURO's `novaBridgeFetch` returns `json.data` — so a top-level
+      // payload arrives as `undefined` and the caller reads it as a failed
+      // fetch. Shipped that way once: the route answered 200 with correct
+      // content and NEURO reported "never fetched", which looked like the
+      // deploy had not landed.
       res.json({
         ok: true,
-        source: 'peoplehr',
-        // Named so NEURO can say WHICH source answered rather than asserting a
-        // bare "you are off today".
-        from: today,
-        to,
-        days,
-        // The roster is returned alongside so NEURO can resolve itself by id or
-        // by name without a second call, and so an empty roster is visible as
-        // an empty roster rather than as a quiet all-clear.
-        rosterCount: roster.length,
-        roster: roster.map(a => ({
-          rosterId: a.AgentId,
-          name: a.display_name,
-          pool: a.pool,
-          // Whether People HR can be asked about this person at all. Without an
-          // id they never sync and simply always look available — an absence of
-          // evidence that reads exactly like evidence of presence.
-          syncable: Boolean(a.PeopleHrId),
-        })),
-        absences: absences.map(a => ({
-          rosterId: a.roster_id,
-          name: a.display_name ?? null,
-          date: typeof a.available_date === 'string'
-            ? a.available_date.slice(0, 10)
-            : new Date(a.available_date as unknown as string).toISOString().slice(0, 10),
-          status: a.status,
-          reason: a.reason ?? null,
-          // 'manual' rows are a human overriding the sync in NOVA's UI and win
-          // for that date; passing it through means NEURO can say so too.
-          setBy: a.source ?? 'peoplehr',
-        })),
+        data: {
+          source: 'peoplehr',
+          // Named so NEURO can say WHICH source answered rather than asserting a
+          // bare "you are off today".
+          from: today,
+          to,
+          days,
+          // The roster is returned alongside so NEURO can resolve itself by id or
+          // by name without a second call, and so an empty roster is visible as
+          // an empty roster rather than as a quiet all-clear.
+          rosterCount: roster.length,
+          roster: roster.map(a => ({
+            rosterId: a.AgentId,
+            name: a.display_name,
+            pool: a.pool,
+            // Whether People HR can be asked about this person at all. Without an
+            // id they never sync and simply always look available — an absence of
+            // evidence that reads exactly like evidence of presence.
+            syncable: Boolean(a.PeopleHrId),
+          })),
+          absences: absences.map(a => ({
+            rosterId: a.roster_id,
+            name: a.display_name ?? null,
+            date: typeof a.available_date === 'string'
+              ? a.available_date.slice(0, 10)
+              : new Date(a.available_date as unknown as string).toISOString().slice(0, 10),
+            status: a.status,
+            reason: a.reason ?? null,
+            // 'manual' rows are a human overriding the sync in NOVA's UI and win
+            // for that date; passing it through means NEURO can say so too.
+            setBy: a.source ?? 'peoplehr',
+          })),
+        },
       });
     } catch (err) {
       // Loud and explicit. A caller deciding whether to stay silent must never
