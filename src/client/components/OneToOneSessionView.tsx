@@ -44,6 +44,10 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
   const [nextDate, setNextDate] = useState('');
   const [completing, setCompleting] = useState(false);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const [doneKind, setDoneKind] = useState<'complete' | 'abandoned'>('complete');
+  // Whether this 1-2-1 has been marked underway. Opening the wizard deliberately does
+  // NOT do that — see ensureBegun.
+  const [begun, setBegun] = useState(false);
 
   const loadDetail = useCallback(async (id: number) => {
     const res = await fetch(`/api/121/session/${id}`);
@@ -62,14 +66,18 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
     (async () => {
       setLoading(true); setError(null);
       try {
-        const res = await fetch('/api/121/session/start', {
+        // Resolve only — this must not change the session's status. Opening the wizard
+        // used to force it to 'in_progress', which stopped the day-before prep job from
+        // ever picking it up again and left the loop dead until someone completed it.
+        const res = await fetch('/api/121/session/resolve', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent: agentName }),
         });
         const json = await res.json();
         if (cancelled) return;
-        if (!json.ok) { setError(json.error || 'Could not start the session.'); setLoading(false); return; }
+        if (!json.ok) { setError(json.error || 'Could not open the session.'); setLoading(false); return; }
         setSessionId(json.data.sessionId);
+        setBegun(json.data.status === 'in_progress');
         await loadDetail(json.data.sessionId);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Network error.');
@@ -79,7 +87,19 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
     return () => { cancelled = true; };
   }, [agentName, loadDetail]);
 
+  /**
+   * Mark the 1-2-1 underway, once, on the first thing that WRITES — reviewing an action,
+   * saving notes, adding a commitment. Reading is never enough: paging through the stages
+   * to look at someone's KPIs and closing again leaves the session exactly as it was.
+   */
+  const ensureBegun = useCallback(async () => {
+    if (begun || !sessionId) return;
+    setBegun(true);
+    await fetch(`/api/121/session/${sessionId}/begin`, { method: 'POST' });
+  }, [begun, sessionId]);
+
   const reviewAction = async (actionId: number, status: string) => {
+    await ensureBegun();
     await fetch(`/api/121/action/${actionId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
@@ -89,21 +109,42 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
 
   const saveNotes = useCallback(async () => {
     if (!sessionId) return;
+    await ensureBegun();
     await fetch(`/api/121/session/${sessionId}/notes`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notes_text: notes }),
     });
     setNotesSaved(true);
-  }, [sessionId, notes]);
+  }, [sessionId, notes, ensureBegun]);
 
   const addAction = async () => {
     if (!sessionId || !draftDesc.trim()) return;
+    await ensureBegun();
     await fetch(`/api/121/session/${sessionId}/action`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent: agentName, description: draftDesc.trim(), owner: draftOwner.trim() || null, due_date: draftDue || null }),
     });
     setDraftDesc(''); setDraftOwner(''); setDraftDue('');
     if (sessionId) await loadDetail(sessionId);
+  };
+
+  const abandon = async () => {
+    if (!sessionId) return;
+    if (!window.confirm(`Close this 1-2-1 without completing it?\n\nIt won't count as held, and ${agentName.split(' ')[0]}'s next 1-2-1 will be booked as normal.`)) return;
+    const res = await fetch(`/api/121/session/${sessionId}/abandon`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ next_date: nextDate || undefined }),
+    });
+    const json = await res.json();
+    if (json.ok) {
+      setDoneKind('abandoned');
+      setDoneMsg(json.data.nextDate
+        ? `It won't count as held. Next 1-2-1 set for ${new Date(json.data.nextDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}.`
+        : "It won't count as held.");
+      onCompleted?.();
+    } else {
+      setError(json.error || 'Could not close the session.');
+    }
   };
 
   const complete = async () => {
@@ -151,7 +192,8 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
             <div>
               <div style={{ fontSize: 16, fontWeight: 700, color: C.text1 }}>1-2-1 — {agentName}</div>
               {detail && <div style={{ fontSize: 11, color: C.text3 }}>
-                {detail.lastDate ? `Last: ${new Date(detail.lastDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'First 1-2-1'} · monthly cadence {detail.cadenceDays}d
+                {detail.lastDate ? `Last: ${new Date(detail.lastDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'First 1-2-1'} · cadence {detail.cadenceDays}d
+                {begun && <span style={{ color: C.amber }}> · underway since {new Date(detail.session.scheduled_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} — complete it to book the next one</span>}
               </div>}
             </div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.text3, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
@@ -177,8 +219,10 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
             <div style={{ color: C.red, fontSize: 13 }}>{error}</div>
           ) : doneMsg ? (
             <div style={{ textAlign: 'center', padding: 30 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: C.text1, marginBottom: 6 }}>1-2-1 complete</div>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>{doneKind === 'complete' ? '✅' : '↩️'}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: C.text1, marginBottom: 6 }}>
+                {doneKind === 'complete' ? '1-2-1 complete' : '1-2-1 closed'}
+              </div>
               <div style={{ fontSize: 13, color: C.text2 }}>{doneMsg}</div>
             </div>
           ) : detail && (
@@ -303,8 +347,16 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
 
         {/* Footer nav */}
         {!doneMsg && !loading && !error && (
-          <div style={{ padding: '14px 24px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between' }}>
-            {stage > 0 ? btn('Back', () => setStage(stage - 1)) : <span />}
+          <div style={{ padding: '14px 24px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              {stage > 0 && btn('Back', () => setStage(stage - 1))}
+              {begun && (
+                <button onClick={abandon} style={{
+                  background: 'none', border: 'none', color: C.text3, fontSize: 12,
+                  cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                }}>Close without completing</button>
+              )}
+            </div>
             {stage < STAGES.length - 1
               ? btn('Next', () => setStage(stage + 1), 'primary')
               : btn(completing ? 'Saving…' : 'Complete 1-2-1', complete, 'primary')}

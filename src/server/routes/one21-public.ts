@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
-  startSession, getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
+  resolveOpenSession, beginSession, abandonSession,
+  getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
   dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
@@ -174,13 +175,38 @@ export function createOne21Routes(deps: One21Deps): Router {
 
   // ── Click-through session (Phase 3) ──
 
-  // Start (or resume) the click-through for an agent → marks the session in_progress.
-  router.post('/session/start', async (req, res) => {
+  // Open the click-through for an agent. Resolves (or creates) their session WITHOUT
+  // changing its status — opening the wizard to look must not consume the 1-2-1.
+  // `POST /session/:id/begin` is what marks it underway.
+  router.post('/session/resolve', async (req, res) => {
     try {
       const agent = String(req.body?.agent ?? '').trim();
       if (!agent) { res.status(400).json({ ok: false, error: 'agent required' }); return; }
-      const sessionId = await startSession(deps.settingsQueries, agent);
-      res.json({ ok: true, data: { sessionId } });
+      res.json({ ok: true, data: await resolveOpenSession(agent) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Mark the 1-2-1 as underway. Fired by the first real interaction in the wizard.
+  router.post('/session/:id/begin', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      await beginSession(id);
+      res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Close a session that was opened but never run, and book the next one.
+  router.post('/session/:id/abandon', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const nextDate = typeof req.body?.next_date === 'string' && DATE_RE.test(req.body.next_date) ? req.body.next_date : undefined;
+      res.json({ ok: true, data: await abandonSession(id, nextDate) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

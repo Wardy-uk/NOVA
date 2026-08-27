@@ -127,26 +127,49 @@ const OPEN_STATUSES = ['scheduled', 'prep_sent', 'awaiting_agent', 'ready', 'in_
 // Actions still owed (shown in stage 1 for review).
 const OUTSTANDING_ACTION_STATUSES = ['pending', 'open', 'in_progress', 'carried_over'];
 
-/** Get the agent's open session (or create one for today), and mark it in_progress. */
-export async function startSession(settings: FileSettingsQueries, agentName: string): Promise<number> {
-  const open = await queryOne<{ id: number }>(`
-    SELECT TOP 1 id FROM agent_121_sessions
+/**
+ * Find the agent's open session, creating a `scheduled` one for today if there is none.
+ *
+ * READ-SHAPED ON PURPOSE — it never changes the status of a session that already exists.
+ * This used to be `startSession`, which forced `in_progress` and was called from the
+ * wizard's mount effect, so merely *opening* the click-through to glance at someone's
+ * KPIs consumed their session for good: the day-before prep job only ever matches
+ * `status = 'scheduled'`, so a session left in `in_progress` could never be prepped
+ * again, and only `completeSession` moved it on. Seven of eleven open sessions were
+ * wedged that way by 2026-08-27, and the prep email had never once been sent.
+ *
+ * Advancing a stage or editing anything calls `beginSession` — see the wizard.
+ */
+export async function resolveOpenSession(agentName: string): Promise<{ sessionId: number; status: string }> {
+  const open = await queryOne<{ id: number; status: string }>(`
+    SELECT TOP 1 id, status FROM agent_121_sessions
     WHERE agent_name = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
     ORDER BY scheduled_date ASC
   `, [agentName, ...OPEN_STATUSES]);
+  if (open) return { sessionId: open.id, status: open.status };
 
-  let sessionId: number;
-  if (open) {
-    sessionId = open.id;
-  } else {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-    sessionId = await executeAndGetId(`
-      INSERT INTO agent_121_sessions (agent_name, scheduled_date, status)
-      VALUES (?, ?, 'in_progress')
-    `, [agentName, today]);
-  }
-  await execute(`UPDATE agent_121_sessions SET status = 'in_progress' WHERE id = ?`, [sessionId]);
-  return sessionId;
+  // An ad-hoc 1-2-1 with nothing booked. 'scheduled' rather than 'in_progress' so that
+  // closing the wizard again leaves a session the rest of the loop can still use.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const sessionId = await executeAndGetId(`
+    INSERT INTO agent_121_sessions (agent_name, scheduled_date, status)
+    VALUES (?, ?, 'scheduled')
+  `, [agentName, today]);
+  return { sessionId, status: 'scheduled' };
+}
+
+/**
+ * Mark the 1-2-1 as actually underway. Idempotent, and deliberately one-way: it will not
+ * reopen a session that has already been completed or abandoned.
+ *
+ * Note this also freezes the agent's prep answers (`isSubmissionEditable`), which is the
+ * other reason it must not fire on mere page load.
+ */
+export async function beginSession(sessionId: number): Promise<void> {
+  await execute(`
+    UPDATE agent_121_sessions SET status = 'in_progress'
+    WHERE id = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+  `, [sessionId, ...OPEN_STATUSES]);
 }
 
 async function getAgentKpis(settings: FileSettingsQueries, agentName: string): Promise<{
@@ -284,13 +307,32 @@ export async function completeSession(sessionId: number, nextDate?: string): Pro
   if (!session) return { nextSessionId: null, nextDate: null };
 
   await execute(`UPDATE agent_121_sessions SET status = 'complete', completed_at = GETUTCDATE() WHERE id = ?`, [sessionId]);
+  return scheduleNextSession(session.agent_name, nextDate);
+}
 
-  // Determine next date.
+/**
+ * Close a session that was opened but never run, and schedule the next one.
+ *
+ * The cycle only advances on `completeSession`, so before this existed a session opened
+ * by mistake — or one whose meeting was moved — stopped that agent's loop dead with no
+ * way out that wasn't a lie about the 1-2-1 having happened. `abandoned` is terminal and
+ * carries no `completed_at`, so it never counts as a held 1-2-1 anywhere.
+ */
+export async function abandonSession(sessionId: number, nextDate?: string): Promise<{ nextSessionId: number | null; nextDate: string | null }> {
+  const session = await queryOne<{ agent_name: string }>(`SELECT agent_name FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+  if (!session) return { nextSessionId: null, nextDate: null };
+
+  await execute(`UPDATE agent_121_sessions SET status = 'abandoned' WHERE id = ?`, [sessionId]);
+  return scheduleNextSession(session.agent_name, nextDate);
+}
+
+/** Book the agent's next session — `nextDate` wins, else their cadence (default 28d). */
+async function scheduleNextSession(agentName: string, nextDate?: string): Promise<{ nextSessionId: number | null; nextDate: string | null }> {
   let resolvedNext = nextDate && /^\d{4}-\d{2}-\d{2}$/.test(nextDate) ? nextDate : null;
   if (!resolvedNext) {
     const plan = await queryOne<{ one21_cadence_days: number | null }>(
       `SELECT TOP 1 one21_cadence_days FROM agent_development_plans WHERE agent_name = ? AND status IN ('active','deferred')`,
-      [session.agent_name]);
+      [agentName]);
     const cadence = plan?.one21_cadence_days ?? 28;
     const d = new Date(Date.now() + cadence * 86_400_000);
     resolvedNext = d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
@@ -300,13 +342,13 @@ export async function completeSession(sessionId: number, nextDate?: string): Pro
   const existingOpen = await queryOne<{ id: number }>(`
     SELECT TOP 1 id FROM agent_121_sessions
     WHERE agent_name = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
-  `, [session.agent_name, ...OPEN_STATUSES]);
+  `, [agentName, ...OPEN_STATUSES]);
   if (existingOpen) return { nextSessionId: existingOpen.id, nextDate: null };
 
   const nextSessionId = await executeAndGetId(`
     INSERT INTO agent_121_sessions (agent_name, scheduled_date, status)
     VALUES (?, ?, 'scheduled')
-  `, [session.agent_name, resolvedNext]);
+  `, [agentName, resolvedNext]);
   return { nextSessionId, nextDate: resolvedNext };
 }
 
@@ -318,6 +360,10 @@ export interface One21OverviewAgent {
   nextStatus: string | null;
   overdue: boolean;
   dueThisWeek: boolean;
+  /** Opened in the click-through, well past its date, never completed or abandoned.
+   *  Distinct from `overdue` (never opened) — a stalled session blocks the whole loop:
+   *  no prep can fire for it and the next 1-2-1 is never booked. */
+  stalled: boolean;
   awaitingPrep: boolean;     // emailed prep questions, agent hasn't submitted yet
   prepSubmitted: boolean;    // agent has submitted for the open session
   lastDate: string | null;
@@ -330,15 +376,21 @@ export interface One21OverviewAgent {
 export interface One21Overview {
   agents: One21OverviewAgent[];
   summary: {
-    total: number; scheduled: number; overdue: number; dueThisWeek: number;
+    total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number;
     awaitingPrep: number; neverScheduled: number; deliveryRate: number | null;
   };
 }
+
+/** How far past its date a session must be before "still open" reads as stalled rather
+ *  than as a 1-2-1 Nick simply hasn't written up yet. */
+const STALLED_AFTER_DAYS = 2;
 
 /** Whole-team 1-2-1 health for the manager overview dashboard. */
 export async function getOne21Overview(): Promise<One21Overview> {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   const weekAhead = new Date(Date.now() + 7 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const stalledBefore = new Date(Date.now() - STALLED_AFTER_DAYS * 86_400_000)
+    .toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
   const plans = await query<{ agent_name: string }>(
     `SELECT agent_name FROM agent_development_plans WHERE status IN ('active','deferred') ORDER BY agent_name`);
@@ -381,6 +433,7 @@ export async function getOne21Overview(): Promise<One21Overview> {
       nextStatus: open?.status ?? null,
       overdue: !!open && open.scheduled_date < today,
       dueThisWeek: !!open && open.scheduled_date >= today && open.scheduled_date <= weekAhead,
+      stalled: open?.status === 'in_progress' && open.scheduled_date < stalledBefore,
       awaitingPrep: open?.status === 'awaiting_agent' && !submitted,
       prepSubmitted: submitted,
       lastDate: lastByAgent.get(p.agent_name) ?? null,
@@ -401,6 +454,7 @@ export async function getOne21Overview(): Promise<One21Overview> {
       scheduled: agents.filter((x) => x.nextDate && !x.overdue).length,
       overdue: agents.filter((x) => x.overdue).length,
       dueThisWeek: agents.filter((x) => x.dueThisWeek).length,
+      stalled: agents.filter((x) => x.stalled).length,
       awaitingPrep: agents.filter((x) => x.awaitingPrep).length,
       neverScheduled: agents.filter((x) => !x.nextDate && !x.lastDate).length,
       deliveryRate: totalReviewed > 0 ? Math.round((totalDelivered / totalReviewed) * 100) : null,

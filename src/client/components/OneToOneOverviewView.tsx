@@ -12,12 +12,12 @@ const C = {
 
 interface OverviewAgent {
   agent_name: string; nextDate: string | null; nextStatus: string | null;
-  overdue: boolean; dueThisWeek: boolean; awaitingPrep: boolean; prepSubmitted: boolean;
+  overdue: boolean; dueThisWeek: boolean; stalled: boolean; awaitingPrep: boolean; prepSubmitted: boolean;
   lastDate: string | null; outstandingActions: number; delivered: number; missed: number; deliveryRate: number | null;
 }
 interface Overview {
   agents: OverviewAgent[];
-  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; awaitingPrep: number; neverScheduled: number; deliveryRate: number | null };
+  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; neverScheduled: number; deliveryRate: number | null };
 }
 
 const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
@@ -71,7 +71,7 @@ export function OneToOneOverviewView() {
       if (!bv) return -1;
       return av.localeCompare(bv) * dir;
     }
-    const rank = (x: OverviewAgent) => x.overdue ? 0 : x.awaitingPrep ? 1 : x.dueThisWeek ? 2 : x.nextDate ? 3 : 4;
+    const rank = (x: OverviewAgent) => x.stalled ? 0 : x.overdue ? 1 : x.awaitingPrep ? 2 : x.dueThisWeek ? 3 : x.nextDate ? 4 : 5;
     const r = rank(a) - rank(b);
     if (r !== 0) return r;
     return (a.nextDate ?? '9999').localeCompare(b.nextDate ?? '9999');
@@ -96,6 +96,8 @@ export function OneToOneOverviewView() {
       {/* Summary tiles */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
         <Tile label="Overdue" value={data.summary.overdue} color={data.summary.overdue > 0 ? C.red : C.text2} />
+        <Tile label="Stalled" value={data.summary.stalled} color={data.summary.stalled > 0 ? C.red : C.text2}
+          hint="Opened but never completed — blocks prep and the next booking" />
         <Tile label="Awaiting prep" value={data.summary.awaitingPrep} color={data.summary.awaitingPrep > 0 ? C.amber : C.text2} />
         <Tile label="Due this week" value={data.summary.dueThisWeek} color={C.teal} />
         <Tile label="Scheduled" value={data.summary.scheduled} color={C.text2} />
@@ -152,7 +154,10 @@ function ratePctColor(r: number | null): string {
 
 function statusChip(a: OverviewAgent) {
   let label: string, color: string;
-  if (a.overdue) { label = 'Overdue'; color = C.red; }
+  // Stalled first — a stalled session is also technically overdue, but "you opened it and
+  // never finished it" is the actionable half and it blocks everything downstream.
+  if (a.stalled) { label = 'Stalled'; color = C.red; }
+  else if (a.overdue) { label = 'Overdue'; color = C.red; }
   else if (a.awaitingPrep) { label = 'Awaiting prep'; color = C.amber; }
   else if (a.prepSubmitted) { label = 'Prep in'; color = C.green; }
   else if (a.dueThisWeek) { label = 'Due this week'; color = C.teal; }
@@ -163,9 +168,9 @@ function statusChip(a: OverviewAgent) {
   );
 }
 
-function Tile({ label, value, color }: { label: string; value: number | string; color: string }) {
+function Tile({ label, value, color, hint }: { label: string; value: number | string; color: string; hint?: string }) {
   return (
-    <div style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px' }}>
+    <div title={hint} style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px' }}>
       <div style={{ fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color, marginTop: 4 }}>{value}</div>
     </div>

@@ -1175,9 +1175,10 @@ async function main() {
     const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
     if (ukHour === 7 && ukMin < 5) {
       const r = await runOne21Prep(one21Deps, one21UkTomorrow());
-      if (r.processed > 0) {
-        console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
-      }
+      // Always log, including the no-op. This job silently returned "processed 0" every
+      // morning for two months while every session sat in 'in_progress' and no prep email
+      // was ever sent — a quiet zero is exactly what hid it.
+      console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
     }
   }, 5 * 60 * 1000);
 
