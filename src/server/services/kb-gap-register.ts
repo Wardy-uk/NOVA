@@ -18,7 +18,14 @@ import { flexString, flexNullableString } from './shared/flex-schemas.js';
 //      producing what a person actually needs: why the article is needed, who it's for,
 //      and the sections it must contain.
 
-const DEFAULT_THRESHOLD = 0.86;
+// Cosine distributions differ sharply between embedding models, so one number is not
+// portable: 0.86 on bge-base and 0.70 on text-embedding-3-small produce comparable
+// clusterings, and using either value on the other model is badly wrong. Both were
+// swept against the full open backlog — below these, distinct articles merge (the
+// "Property of the Week editor" folds into "property images not displaying"); above
+// them, one topic splits across several rows again.
+const THRESHOLD_BGE = 0.86;
+const THRESHOLD_OPENAI = 0.70;
 const EMBED_BATCH = 200;
 
 const BriefSchema = z.object({
@@ -58,7 +65,8 @@ export class KbGapRegisterService {
 
   private threshold(): number {
     const raw = parseFloat(this.settings.get('kb_gap_cluster_threshold') || '');
-    return Number.isFinite(raw) && raw > 0 && raw < 1 ? raw : DEFAULT_THRESHOLD;
+    if (Number.isFinite(raw) && raw > 0 && raw < 1) return raw;
+    return /bge|gte|minilm|e5/i.test(this.embedder.activeModel()) ? THRESHOLD_BGE : THRESHOLD_OPENAI;
   }
 
   /** Text we cluster on. The reason carries the substance — two tickets phrased

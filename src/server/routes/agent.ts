@@ -880,7 +880,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       if (!gap) { res.status(404).json({ ok: false, error: 'KB gap not found' }); return; }
       if (gap.jira_ticket_key) { res.json({ ok: true, data: { ticket_key: gap.jira_ticket_key, already_exists: true } }); return; }
 
-      const jiraClient = agentLoop.getJiraClient();
+      const { client: jiraClient } = await jiraClientForUserOrNova(req);
       const project = deps?.settingsQueries?.get('kb_jira_project') || deps?.settingsQueries?.get('agent_jira_project')?.split(',')[0]?.trim() || 'NT';
       const issueType = deps?.settingsQueries?.get('kb_jira_issue_type') || 'Task';
 
@@ -928,6 +928,22 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
   // ── KB Gap Register (clustered topics) ──
   //
   // The register is what people work from; kb-gaps above stays the raw log behind it.
+
+  /** The user's own Jira connection when they have one configured in My Settings, so
+   *  the KB ticket is raised as them; NOVA's service account otherwise. Unlike
+   *  requireJiraForUser this never blocks — an unconnected user still gets a ticket. */
+  async function jiraClientForUserOrNova(req: any) {
+    const userId = req.user?.id as number | undefined;
+    if (userId && deps?.jiraUserClientFactory) {
+      try {
+        const client = await deps.jiraUserClientFactory.getClientForUser(userId);
+        if (client) return { client, asUser: true };
+      } catch (err) {
+        console.warn('[agent] user Jira client unavailable, falling back to NOVA:', err instanceof Error ? err.message : err);
+      }
+    }
+    return { client: agentLoop.getJiraClient(), asUser: false };
+  }
 
   function requireRegister(res: any): KbGapRegisterService | null {
     if (!deps?.kbGapRegister) {
@@ -1026,7 +1042,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         ticketKeys ? `\n*Source tickets:* ${ticketKeys}` : '',
       ].filter(Boolean).join('\n');
 
-      const jiraClient = agentLoop.getJiraClient();
+      const { client: jiraClient, asUser } = await jiraClientForUserOrNova(req);
       const project = deps?.settingsQueries?.get('kb_jira_project') || deps?.settingsQueries?.get('agent_jira_project')?.split(',')[0]?.trim() || 'NT';
       const issueType = deps?.settingsQueries?.get('kb_jira_issue_type') || 'Task';
 
@@ -1052,7 +1068,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const created = await jiraClient.createIssue({ fields });
       await reg.setJiraKey(id, created.key);
 
-      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `${JIRA_BROWSE_BASE}${created.key}` } });
+      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `${JIRA_BROWSE_BASE}${created.key}`, raised_as_user: asUser } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create Jira ticket' });
     }
