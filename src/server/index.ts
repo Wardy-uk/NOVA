@@ -41,6 +41,7 @@ import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
 import { createNeuroBridgeFlowRoutes } from './routes/neuro-bridge-flow.js';
 import { createNeuroBridgeAvailabilityRoutes } from './routes/neuro-bridge-availability.js';
 import { createNeuroBridge121Routes } from './routes/neuro-bridge-121.js';
+import { runTranscriptExtraction as runOne21Extraction } from './services/one21-transcript.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -1184,6 +1185,17 @@ async function main() {
       console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
     }
   }, 5 * 60 * 1000);
+
+  // Read the 1-2-1 recordings. The transcript is the record of what was agreed, so this
+  // is what turns a conversation into actions — hourly, because Plaud transcribes
+  // asynchronously and a recording attached straight after the meeting is not ready yet.
+  jobRegistry.register('one21-transcript-extract', '1-2-1 transcript → actions (hourly)', async () => {
+    const r = await runOne21Extraction(one21Deps);
+    if (r.processed > 0 || r.skipped.length > 0) {
+      console.log(`[121] transcript extraction: ${r.processed} read, ${r.claimed} completion(s) claimed, ${r.created} new action(s)` +
+        (r.skipped.length ? `, skipped ${r.skipped.length} (${r.skipped.join('; ')})` : ''));
+    }
+  }, 60 * 60 * 1000);
 
   jobRegistry.register('one21-weekly-kpi', '1-2-1 weekly KPI email to agents (Fri 16:00)', async () => {
     const now = new Date();

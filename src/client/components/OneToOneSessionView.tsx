@@ -14,11 +14,16 @@ const C = {
 const STAGES = ['Outstanding actions', 'KPI review', 'Their prep', 'Discussion', 'Next month'];
 
 interface Action { id: number; description: string; owner: string | null; due_date: string | null; status: string; }
+/** An action the last 1-2-1's transcript said was finished, awaiting confirmation. */
+interface ClaimedAction {
+  id: number; description: string; owner: string | null; due_date: string | null;
+  claim_evidence: string | null; claimed_on: string | null;
+}
 interface SessionDetail {
   session: { id: number; agent_name: string; scheduled_date: string; status: string; notes_text: string | null };
   prep: any; metrics: any;
   prepAnswers: Array<{ question: string; answer: string }>;
-  outstandingActions: Action[]; newActions: Action[];
+  outstandingActions: Action[]; claimedActions: ClaimedAction[]; newActions: Action[];
   kpis: { summary: Record<string, number | null>; trend: Array<Record<string, any>> } | null;
   lastDate: string | null; cadenceDays: number;
 }
@@ -97,6 +102,16 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
     setBegun(true);
     await fetch(`/api/121/session/${sessionId}/begin`, { method: 'POST' });
   }, [begun, sessionId]);
+
+  /** Confirm a transcript-claimed completion → delivered, or reject it → carried over. */
+  const resolveClaim = async (actionId: number, confirmed: boolean) => {
+    await ensureBegun();
+    await fetch(`/api/121/action/${actionId}/claim`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed }),
+    });
+    if (sessionId) await loadDetail(sessionId);
+  };
 
   const reviewAction = async (actionId: number, status: string) => {
     await ensureBegun();
@@ -230,7 +245,39 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
               {/* Stage 1 — Outstanding actions */}
               {stage === 0 && (
                 <div>
-                  <StageTitle n={1} title="Outstanding actions from last time" hint="Mark each as delivered, missed, or carried over to this month." />
+                  {/* Closed according to the last 1-2-1's transcript. The transcript is
+                      never allowed to write "delivered" on its own — this is where that
+                      becomes true, with the person in the room to disagree. */}
+                  {detail.claimedActions.length > 0 && (
+                    <div style={{ marginBottom: 22 }}>
+                      <StageTitle
+                        n={1}
+                        title="Closed at the last 1-2-1 — happy with these?"
+                        hint="Picked up from the recording. They don't count as delivered until you confirm."
+                      />
+                      {detail.claimedActions.map((a) => (
+                        <div key={a.id} style={{ ...rowStyle, borderColor: `${C.green}35` }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, color: C.text1 }}>{a.description}</div>
+                            {a.claim_evidence && (
+                              <div style={{ fontSize: 11.5, color: C.text3, marginTop: 3, fontStyle: 'italic' }}>
+                                “{a.claim_evidence}”
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>
+                              {a.claimed_on ? `from the 1-2-1 on ${a.claimed_on}` : 'from the recording'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <Pill label="Yes, done" active={false} color={C.green} onClick={() => resolveClaim(a.id, true)} />
+                            <Pill label="Not done" active={false} color={C.amber} onClick={() => resolveClaim(a.id, false)} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <StageTitle n={1} title="Still open" hint="Mark each as delivered, missed, or carried over to this month." />
                   {detail.outstandingActions.length === 0 ? (
                     <Empty text="No outstanding actions — clean slate." />
                   ) : detail.outstandingActions.map((a) => (

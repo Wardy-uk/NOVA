@@ -628,6 +628,30 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_121_actions', 'session_id') IS NULL
      ALTER TABLE agent_121_actions ADD session_id INT NULL;`,
 
+    // ── Transcript-claimed completions ──
+    //
+    // The Plaud transcript is the source of what a 1-2-1 agreed, including which actions
+    // were closed. But a model hearing "yeah I got that done" must NOT be able to write
+    // `delivered` on its own: that number feeds the delivery rate, and a mishearing would
+    // inflate it while silently dropping a real commitment, with nothing to surface it.
+    //
+    // So the transcript writes status 'claimed', which sits OUTSIDE the delivery rate,
+    // and stage 1 of the NEXT 1-2-1 asks Nick to confirm it with the person in the room.
+    // Confirm → 'delivered'. Reject → back to 'carried_over'.
+    `IF COL_LENGTH('agent_121_actions', 'claim_evidence') IS NULL
+     ALTER TABLE agent_121_actions ADD claim_evidence NVARCHAR(1000) NULL;`,
+    // Which session's transcript made the claim — so the question can be asked as
+    // "closed per the 1-2-1 on <date>" rather than a bare assertion.
+    `IF COL_LENGTH('agent_121_actions', 'claim_session_id') IS NULL
+     ALTER TABLE agent_121_actions ADD claim_session_id INT NULL;`,
+    `IF COL_LENGTH('agent_121_actions', 'claimed_at') IS NULL
+     ALTER TABLE agent_121_actions ADD claimed_at DATETIME2 NULL;`,
+
+    // When the session's transcript was read. Marks the sweep's work done so it does not
+    // re-run an LLM call over every historic 1-2-1 every hour.
+    `IF COL_LENGTH('agent_121_sessions', 'extracted_at') IS NULL
+     ALTER TABLE agent_121_sessions ADD extracted_at DATETIME2 NULL;`,
+
     // Per-agent 1-2-1 cadence in days (default monthly). Override per agent in §B2.
     `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL
      ALTER TABLE agent_development_plans ADD one21_cadence_days INT NULL;`,

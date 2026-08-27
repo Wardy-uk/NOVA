@@ -7,6 +7,7 @@ import {
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
   dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
+import { extractSessionOutcomes, resolveClaim } from '../services/one21-transcript.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -245,6 +246,36 @@ export function createOne21Routes(deps: One21Deps): Router {
       }
       await updateActionStatus(id, status);
       res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Stage 1a — confirm (or reject) a completion the last transcript claimed.
+  // Confirm is the ONLY route to 'delivered' for a transcript-claimed action; the
+  // extractor is not allowed to write it.
+  router.patch('/action/:id/claim', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const confirmed = req.body?.confirmed;
+      if (!Number.isInteger(id) || typeof confirmed !== 'boolean') {
+        res.status(400).json({ ok: false, error: 'id and confirmed (boolean) required' });
+        return;
+      }
+      await resolveClaim(id, confirmed);
+      res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Read the attached Plaud transcript and apply what it establishes.
+  router.post('/session/:id/extract', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const result = await extractSessionOutcomes(deps, id);
+      res.json({ ok: result.ok, data: result, error: result.ok ? undefined : result.error });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

@@ -246,6 +246,18 @@ export async function getSessionDetail(settings: FileSettingsQueries, sessionId:
     ORDER BY created_at ASC
   `, [session.agent_name, ...OUTSTANDING_ACTION_STATUSES]);
 
+  // Stage 1a — closed according to the LAST 1-2-1's transcript, not yet confirmed.
+  // Deliberately a separate list from the outstanding one: the question asked of these
+  // is "happy with that?", not "how did it go?".
+  const claimedActions = await query(`
+    SELECT a.id, a.description, a.owner, a.due_date, a.claim_evidence,
+           CONVERT(varchar(10), s.scheduled_date, 23) AS claimed_on
+    FROM agent_121_actions a
+    LEFT JOIN agent_121_sessions s ON s.id = a.claim_session_id
+    WHERE a.agent_name = ? AND a.status = 'claimed'
+    ORDER BY a.claimed_at ASC
+  `, [session.agent_name]);
+
   // Stage 5 — actions already created in THIS session.
   const newActions = await query(`
     SELECT id, description, owner, due_date, status, created_at
@@ -271,7 +283,7 @@ export async function getSessionDetail(settings: FileSettingsQueries, sessionId:
       status: session.status, notes_text: session.notes_text, completed_at: session.completed_at,
       agent_submitted_at: session.agent_submitted_at,
     },
-    prep, metrics, prepAnswers, outstandingActions, newActions, kpis,
+    prep, metrics, prepAnswers, outstandingActions, claimedActions, newActions, kpis,
     lastDate: last?.last_date ?? null, cadenceDays,
   };
 }
@@ -581,6 +593,9 @@ export interface One21OverviewAgent {
   prepSubmitted: boolean;    // agent has submitted for the open session
   lastDate: string | null;
   outstandingActions: number;
+  /** Closed per a transcript, still waiting for Nick to confirm at the next 1-2-1.
+   *  Surfaced so they cannot sit unseen when a 1-2-1 slips. */
+  awaitingConfirmation: number;
   delivered: number;
   missed: number;
   deliveryRate: number | null;
@@ -590,7 +605,7 @@ export interface One21Overview {
   agents: One21OverviewAgent[];
   summary: {
     total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number;
-    awaitingPrep: number; neverScheduled: number; deliveryRate: number | null;
+    awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null;
   };
 }
 
@@ -648,6 +663,9 @@ export async function getOne21Overview(): Promise<One21Overview> {
     const open = openByAgent.get(p.agent_name) ?? null;
     const a = actionsByAgent.get(p.agent_name) ?? {};
     const outstanding = (a['pending'] ?? 0) + (a['open'] ?? 0) + (a['in_progress'] ?? 0) + (a['carried_over'] ?? 0);
+    // 'claimed' is deliberately in NEITHER the outstanding count nor the delivery rate:
+    // a transcript's word is not a delivery, and it is no longer an open commitment.
+    const awaitingConfirmation = a['claimed'] ?? 0;
     const delivered = a['delivered'] ?? 0;
     const missed = a['missed'] ?? 0;
     const reviewed = delivered + missed;
@@ -663,6 +681,7 @@ export async function getOne21Overview(): Promise<One21Overview> {
       prepSubmitted: submitted,
       lastDate: lastByAgent.get(p.agent_name) ?? null,
       outstandingActions: outstanding,
+      awaitingConfirmation,
       delivered, missed,
       deliveryRate: reviewed > 0 ? Math.round((delivered / reviewed) * 100) : null,
     };
@@ -680,6 +699,7 @@ export async function getOne21Overview(): Promise<One21Overview> {
       overdue: agents.filter((x) => x.overdue).length,
       dueThisWeek: agents.filter((x) => x.dueThisWeek).length,
       stalled: agents.filter((x) => x.stalled).length,
+      awaitingConfirmation: agents.reduce((n, x) => n + x.awaitingConfirmation, 0),
       awaitingPrep: agents.filter((x) => x.awaitingPrep).length,
       neverScheduled: agents.filter((x) => !x.nextDate && !x.lastDate).length,
       deliveryRate: totalReviewed > 0 ? Math.round((totalDelivered / totalReviewed) * 100) : null,

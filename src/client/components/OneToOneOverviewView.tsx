@@ -13,11 +13,12 @@ const C = {
 interface OverviewAgent {
   agent_name: string; nextDate: string | null; nextStatus: string | null;
   overdue: boolean; dueThisWeek: boolean; stalled: boolean; awaitingPrep: boolean; prepSubmitted: boolean;
-  lastDate: string | null; outstandingActions: number; delivered: number; missed: number; deliveryRate: number | null;
+  lastDate: string | null; outstandingActions: number; awaitingConfirmation: number;
+  delivered: number; missed: number; deliveryRate: number | null;
 }
 interface Overview {
   agents: OverviewAgent[];
-  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; neverScheduled: number; deliveryRate: number | null };
+  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null };
 }
 
 interface Drift {
@@ -131,6 +132,8 @@ export function OneToOneOverviewView() {
         <Tile label="Stalled" value={data.summary.stalled} color={data.summary.stalled > 0 ? C.red : C.text2}
           hint="Opened but never completed — blocks prep and the next booking" />
         <Tile label="Awaiting prep" value={data.summary.awaitingPrep} color={data.summary.awaitingPrep > 0 ? C.amber : C.text2} />
+        <Tile label="To confirm" value={data.summary.awaitingConfirmation} color={data.summary.awaitingConfirmation > 0 ? C.teal : C.text2}
+          hint="Closed per a 1-2-1 recording — confirmed at the next 1-2-1. Not counted as delivered until then." />
         <Tile label="Due this week" value={data.summary.dueThisWeek} color={C.teal} />
         <Tile label="Scheduled" value={data.summary.scheduled} color={C.text2} />
         <Tile label="Never scheduled" value={data.summary.neverScheduled} color={data.summary.neverScheduled > 0 ? C.amber : C.text2} />
