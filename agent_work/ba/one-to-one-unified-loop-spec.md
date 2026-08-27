@@ -4,11 +4,11 @@
 source) and **§9 phase 6** (Outlook mirror). Everything else in v1 stands and is still
 the reference for the shipped loop.
 
-Status: written 2026-08-27 from a live prod audit (§1). **Everything except WP6.2 is built
-and pushed, and NONE OF IT IS DEPLOYED** — NOVA v1.1.473 on `nova-codex`, NEURO on `main`.
+Status: written 2026-08-27 from a live prod audit (§1). **All nine work packages are built
+and pushed, and NONE OF IT IS DEPLOYED** — NOVA v1.1.474 on `nova-codex`, NEURO on `main`.
 Prod still runs the old code, so the stalled sessions in §1 are still stalled and the
 07:00 prep job still no-ops every morning. Deploying is Nick's to do; the two go out
-together. Outstanding: WP6.2 (needs a decision, §6) and the deliberate omissions in §7.
+together. Outstanding: only the deliberate omissions in §7 and the data remediation in §6.
 
 ⚠ **WP6.1 makes the two deploys a matched pair.** NOVA no longer writes an Outlook event,
 so NOVA shipped without NEURO on the Pi means setting a date in NOVA books nothing.
@@ -370,21 +370,32 @@ turns them into a state.
 | 6 | WP5 vault write-back | **built** | People card + actions + tracker; nightly, off the rollup |
 | 7 | WP4 roster drift | **built** | panel on the overview (`GET /api/121/roster-drift`), plus the vault half in NEURO's 06:20 sweep |
 | 8 | WP7 absence-aware booking | **built elsewhere** | delivered by a separate session in `one-to-one-booking.js` (`personOff` / `awayCheck`) |
-| 9 | WP6.2 collapse prep generators | **needs a decision** | see below |
+| 9 | WP6.2 collapse prep generators | **built** | merged into `generatePrepForAgent`; see below |
 
-**WP6.2 is not a cleanup — it removes a screen.** `Briefing121Service` backs a live
-**AI Agent → 1-2-1 Prep** tab ([Briefing121View.tsx](../../src/client/components/Briefing121View.tsx),
-`view: 'agent-121'` in App.tsx) with its own table and its own LLM brief, richer in places
-than the prep snapshot (escalation analysis, QA best/worst, autonomy interaction). Folding
-it in means deciding what of that survives into `generatePrepForAgent`, and dropping it
-means deleting a working tab. Nick's call, not a refactor to be done quietly.
+**WP6.2 turned out not to be a merge of two working things.** `Briefing121Service` had
+**never run** — `agent_121_briefings` held zero rows on 2026-08-27, and it would have been
+mostly empty if it had: App.tsx passed the agent's *display name* as `agentId`, while its
+queries match `jira_issue_cache.assignee_account_id` and `agent_training_signals.agent_id`,
+both Jira account ids. Ticket performance, escalations, coaching signals, autonomy
+interaction and every trend derived from them returned nothing, silently. Only the QA half
+worked, because it happened to key on the name.
+
+The ideas were sound and the wiring never was. [one21-prep-signals.ts](../../src/server/services/one21-prep-signals.ts)
+is that content keyed properly (via `dbo.Agent.AccountId` — the lookup whose absence made
+it a no-op) and folded into the prep that actually sends: escalations and their
+appropriateness, AI-agent approve/reject, outstanding coaching signals, best/worst QA
+tickets **by key**, and volume/time-to-resolve against the previous window. Rendered as an
+**Evidence** block in the manager email and at stage 2, from the same numbers the model
+reasoned over. Every gatherer fails soft and names what it could not get; the LLM is told
+explicitly not to read a gap as a zero. Service, routes, view and tab deleted; the empty
+table is left in place with a comment.
 
 **Remediation still to do, once deployed** (data, not code — Nick has confirmed he is up
 to date on the physical 1-2-1s, so these are real meetings that need *completing*, not
 abandoning): the six stalled August sessions, Kayleigh's 01-Jul row, and deleting the
 "Nick Ward" session and plan row.
 
-**Test coverage.** 37 new tests — `one21-service.test.ts` (NOVA) plus
+**Test coverage.** 48 new tests — `one21-service.test.ts` (NOVA) plus
 `nova-121-sync.test.js` and `nova-121-writeback.test.js` (NEURO) — pinning the rules that
 would otherwise fail silently: stalled means `in_progress` and past rather than a
 `scheduled` date that has simply gone by, prep stays editable until the manager opens the
