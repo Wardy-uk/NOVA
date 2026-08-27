@@ -21,6 +21,12 @@ interface Overview {
   summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null };
 }
 
+interface Candidate {
+  id: number; plaud_id: string; agent_name: string | null; meeting_date: string | null;
+  title: string | null; note_path: string | null; attribution: string | null;
+  preview?: string; transcript_chars?: number;
+}
+
 interface Drift {
   checked: boolean; error?: string;
   notOnRoster: Array<{ agentName: string; nearMatch: string | null }>;
@@ -32,6 +38,10 @@ const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateStrin
 export function OneToOneOverviewView() {
   const [data, setData] = useState<Overview | null>(null);
   const [drift, setDrift] = useState<Drift | null>(null);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [busyCandidate, setBusyCandidate] = useState<number | null>(null);
+  const [candidateAgent, setCandidateAgent] = useState<Record<number, string>>({});
+  const [candidateError, setCandidateError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanOpen, setScanOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'urgency' | 'next' | 'last'>('urgency');
@@ -46,6 +56,7 @@ export function OneToOneOverviewView() {
     // Separate and non-blocking: drift reads the KPI pool, which is slower and flakier
     // than NOVA's own DB, and the overview must still render when it is down.
     fetch('/api/121/roster-drift').then((r) => r.json()).then((j) => { if (j.ok) setDrift(j.data); }).catch(() => {});
+    fetch('/api/121/transcript-candidates').then((r) => r.json()).then((j) => { if (j.ok) setCandidates(j.data); }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -71,6 +82,29 @@ export function OneToOneOverviewView() {
       load(true);
     } catch { /* the panel re-renders from the reload either way */ }
     setArchiving(null);
+  };
+
+  /**
+   * Approve a detected transcript — binds it to that person's 1-2-1 and lets the
+   * extractor read it. `agentName` is whatever the dropdown says, so NEURO's guess can be
+   * corrected here; that correction is the reason this step is manual at all.
+   */
+  const resolveCandidate = async (c: Candidate, approve: boolean) => {
+    const agent = candidateAgent[c.id] ?? c.agent_name ?? '';
+    if (approve && !agent) { setCandidateError('Pick who this 1-2-1 was with first.'); return; }
+    setBusyCandidate(c.id);
+    setCandidateError(null);
+    try {
+      const res = await fetch(`/api/121/transcript-candidate/${c.id}/${approve ? 'approve' : 'reject'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(approve ? { agentName: agent } : {}),
+      });
+      const json = await res.json();
+      if (!json.ok) setCandidateError(json.error || 'Could not save that.');
+      else setCandidates((prev) => prev.filter((x) => x.id !== c.id));
+      if (json.ok) load(true);
+    } catch { setCandidateError('Network error.'); }
+    setBusyCandidate(null);
   };
 
   const saveNext = async (agentName: string, date: string) => {
@@ -139,6 +173,55 @@ export function OneToOneOverviewView() {
         <Tile label="Never scheduled" value={data.summary.neverScheduled} color={data.summary.neverScheduled > 0 ? C.amber : C.text2} />
         <Tile label="Action delivery" value={data.summary.deliveryRate === null ? '—' : `${data.summary.deliveryRate}%`} color={ratePctColor(data.summary.deliveryRate)} />
       </div>
+
+      {/* Detected Plaud transcripts — proposed, never applied. Attribution is a guess,
+          and a wrong bind writes one person's conversation onto another's record. */}
+      {candidates.length > 0 && (
+        <div style={{ background: `${C.teal}0e`, border: `1px solid ${C.teal}45`, borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.teal, marginBottom: 2 }}>
+            🎙 {candidates.length} Plaud transcript{candidates.length === 1 ? '' : 's'} detected
+          </div>
+          <div style={{ fontSize: 11, color: C.text3, marginBottom: 10 }}>
+            Nothing is attached until you approve it. Check who it was with — the name is NEURO's best guess, not a fact.
+          </div>
+          {candidateError && <div style={{ fontSize: 12, color: C.red, marginBottom: 8 }}>{candidateError}</div>}
+          {candidates.map((c) => (
+            <div key={c.id} style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+              <div style={{ fontSize: 13, color: C.text1, fontWeight: 600 }}>{c.title || '(untitled recording)'}</div>
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>
+                {c.meeting_date ? d(c.meeting_date) : 'no date'}
+                {c.transcript_chars ? ` · ${Math.round(c.transcript_chars / 1000)}k chars` : ' · no transcript text'}
+                {c.attribution ? ` · matched by ${c.attribution}` : ''}
+              </div>
+              {c.preview && (
+                <div style={{ fontSize: 11.5, color: C.text2, marginTop: 6, fontStyle: 'italic', maxHeight: 54, overflow: 'hidden' }}>
+                  {c.preview}…
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
+                <select
+                  value={candidateAgent[c.id] ?? c.agent_name ?? ''}
+                  onChange={(e) => setCandidateAgent((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 12 }}
+                >
+                  <option value="">— who was this with? —</option>
+                  {data.agents.map((a) => <option key={a.agent_name} value={a.agent_name}>{a.agent_name}</option>)}
+                </select>
+                <button
+                  onClick={() => resolveCandidate(c, true)}
+                  disabled={busyCandidate === c.id}
+                  style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: `1px solid ${C.green}`, background: `${C.green}20`, color: C.green, cursor: 'pointer' }}
+                >{busyCandidate === c.id ? 'Working…' : 'Attach to 1-2-1'}</button>
+                <button
+                  onClick={() => resolveCandidate(c, false)}
+                  disabled={busyCandidate === c.id}
+                  style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.border}`, background: 'transparent', color: C.text3, cursor: 'pointer' }}
+                >Not a 1-2-1</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Roster drift — only when there is something to say */}
       {drift && (drift.notOnRoster.length > 0 || drift.noPlan.length > 0) && (

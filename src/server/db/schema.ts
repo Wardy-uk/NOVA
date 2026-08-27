@@ -652,6 +652,44 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_121_sessions', 'extracted_at') IS NULL
      ALTER TABLE agent_121_sessions ADD extracted_at DATETIME2 NULL;`,
 
+    // The transcript itself, once approved. NOVA's own Plaud MCP connection has never
+    // been authorised in prod, and NEURO already syncs every Plaud note into the vault
+    // reliably — so the transcript arrives over the NEURO bridge instead, and is stored
+    // here rather than re-fetched. Keyed on the same `plaud_id` the vault note carries,
+    // so both systems still identify a recording the same way.
+    `IF COL_LENGTH('agent_121_sessions', 'transcript_text') IS NULL
+     ALTER TABLE agent_121_sessions ADD transcript_text NVARCHAR(MAX) NULL;`,
+
+    // ── Transcript candidates: detected, NOT applied ──
+    //
+    // A transcript landing in the vault must never bind itself to a 1-2-1. Attribution is
+    // a guess — Plaud names recordings by timestamp, and a three-hander mentions people
+    // who were not the subject — so a wrong auto-bind writes one person's conversation
+    // onto another person's permanent record, and the extractor would then close THEIR
+    // actions from it. Detection is cheap and reversible; binding is neither. So NEURO
+    // proposes, this table holds the proposal, and nothing touches a session until Nick
+    // approves it.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_transcript_candidates') AND type = 'U')
+     CREATE TABLE agent_121_transcript_candidates (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       plaud_id NVARCHAR(100) NOT NULL,
+       agent_name NVARCHAR(200) NULL,
+       meeting_date NVARCHAR(20) NULL,
+       title NVARCHAR(500) NULL,
+       note_path NVARCHAR(500) NULL,
+       transcript_text NVARCHAR(MAX) NULL,
+       -- How NEURO decided who this belongs to, shown to Nick so he can judge the
+       -- proposal rather than take it on trust.
+       attribution NVARCHAR(200) NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'pending',
+       session_id INT NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       resolved_at DATETIME2 NULL
+     );`,
+    // One row per recording, so a re-push of the same note updates rather than piles up.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_121_transcript_candidate_plaud')
+     CREATE UNIQUE INDEX UX_121_transcript_candidate_plaud ON agent_121_transcript_candidates (plaud_id);`,
+
     // Per-agent 1-2-1 cadence in days (default monthly). Override per agent in §B2.
     `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL
      ALTER TABLE agent_development_plans ADD one21_cadence_days INT NULL;`,

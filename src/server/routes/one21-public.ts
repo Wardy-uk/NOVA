@@ -8,6 +8,7 @@ import {
   dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { extractSessionOutcomes, resolveClaim } from '../services/one21-transcript.js';
+import { listPendingCandidates, approveCandidate, rejectCandidate } from '../services/one21-candidates.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -245,6 +246,42 @@ export function createOne21Routes(deps: One21Deps): Router {
         return;
       }
       await updateActionStatus(id, status);
+      res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // ── Transcript candidates: detected in the vault, awaiting Nick's approval ──
+
+  router.get('/transcript-candidates', async (_req, res) => {
+    try {
+      res.json({ ok: true, data: await listPendingCandidates() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Approve — binds the transcript to the agent's 1-2-1 and lets the extractor read it.
+  // `agentName` overrides NEURO's guess, which is the main reason this step exists.
+  router.post('/transcript-candidate/:id/approve', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      const agent = req.body?.agentName ? String(req.body.agentName).trim() : undefined;
+      const result = await approveCandidate(id, agent);
+      if (!result.ok) { res.status(409).json({ ok: false, error: result.error }); return; }
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  router.post('/transcript-candidate/:id/reject', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      await rejectCandidate(id);
       res.json({ ok: true, data: {} });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });

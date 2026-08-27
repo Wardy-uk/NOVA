@@ -101,23 +101,29 @@ export async function extractSessionOutcomes(
   const base: ExtractionResult = { ok: false, sessionId, claimed: 0, created: 0, goalNotes: 0 };
 
   const session = await queryOne<{
-    agent_name: string; scheduled_date: string; plaud_recording_id: string | null; notes_text: string | null;
+    agent_name: string; scheduled_date: string; plaud_recording_id: string | null;
+    notes_text: string | null; transcript_text: string | null;
   }>(`
-    SELECT agent_name, scheduled_date, plaud_recording_id, notes_text
+    SELECT agent_name, scheduled_date, plaud_recording_id, notes_text, transcript_text
     FROM agent_121_sessions WHERE id = ?
   `, [sessionId]);
   if (!session) return { ...base, error: 'Session not found' };
-  if (!session.plaud_recording_id) {
-    // Not an error. Most sessions simply have no recording attached yet, and the job
-    // sweeps every completed one.
-    return { ...base, ok: true, error: 'No Plaud recording attached' };
-  }
 
-  let transcript = '';
-  try {
-    transcript = await deps.plaudService.getTranscript(session.plaud_recording_id);
-  } catch (err) {
-    return { ...base, error: `Could not read the transcript: ${err instanceof Error ? err.message : err}` };
+  // The transcript that arrived over the NEURO bridge wins. It is the one Nick actually
+  // approved, and NOVA's own Plaud MCP connection has never been authorised in prod — so
+  // the direct fetch is the fallback, not the primary path.
+  let transcript = (session.transcript_text ?? '').trim();
+  if (!transcript) {
+    if (!session.plaud_recording_id) {
+      // Not an error. Most sessions simply have no recording attached yet, and the job
+      // sweeps every completed one.
+      return { ...base, ok: true, error: 'No transcript attached' };
+    }
+    try {
+      transcript = await deps.plaudService.getTranscript(session.plaud_recording_id);
+    } catch (err) {
+      return { ...base, error: `Could not read the transcript: ${err instanceof Error ? err.message : err}` };
+    }
   }
   if (!transcript.trim()) return { ...base, ok: true, error: 'Transcript not ready yet' };
 
@@ -220,11 +226,14 @@ export async function runTranscriptExtraction(
   limit = 10,
 ): Promise<{ processed: number; claimed: number; created: number; skipped: string[] }> {
   const out = { processed: 0, claimed: 0, created: 0, skipped: [] as string[] };
-  if (!deps.plaudService.isConfigured()) return out;
+  // Deliberately NOT gated on Plaud MCP being configured. Transcripts approved over the
+  // NEURO bridge are already stored on the session, and in prod the MCP connection has
+  // never been authorised — gating here would make the whole feature a no-op forever.
 
   const pending = await query<{ id: number; agent_name: string }>(`
     SELECT TOP (?) id, agent_name FROM agent_121_sessions
-    WHERE plaud_recording_id IS NOT NULL AND extracted_at IS NULL
+    WHERE (transcript_text IS NOT NULL OR plaud_recording_id IS NOT NULL)
+      AND extracted_at IS NULL
       AND status IN ('complete', 'in_progress')
     ORDER BY scheduled_date DESC
   `, [limit]);

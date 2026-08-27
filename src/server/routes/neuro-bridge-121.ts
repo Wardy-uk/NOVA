@@ -4,6 +4,7 @@ import { query } from '../services/database.js';
 import {
   upsertBooking, cancelOpenSessions, isKnownAgent, setAgentCadenceDays,
 } from '../services/one21-service.js';
+import { recordCandidate, getKnownPlaudIds } from '../services/one21-candidates.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
 /**
@@ -275,6 +276,65 @@ export function createNeuroBridge121Routes(): Router {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[121-bridge] completed failed:', message);
       res.status(503).json({ ok: false, error: message, sessions: null });
+    }
+  });
+
+  /**
+   * POST /121/transcript-candidate — NEURO found a 1-2-1 recording in the vault.
+   *
+   * PROPOSES, never attaches. Attribution is a guess: Plaud names recordings by
+   * timestamp, and a note mentioning three people says nothing about which one the 1-2-1
+   * was *with*. A wrong bind writes one person's conversation onto another's permanent
+   * record, and the extractor then closes THAT person's actions from words they never
+   * said. So this lands in `agent_121_transcript_candidates` and waits for Nick.
+   *
+   * Idempotent on `plaud_id`, which is the same identifier NOVA stores in
+   * `plaud_recording_id` — so the two systems never disagree about which recording this is.
+   */
+  router.post('/121/transcript-candidate', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+
+    const plaudId = String(req.body?.plaudId ?? '').trim();
+    if (!plaudId) { res.status(400).json({ ok: false, error: 'plaudId is required' }); return; }
+
+    const meetingDate = String(req.body?.meetingDate ?? '').slice(0, 10);
+    const transcript = typeof req.body?.transcript === 'string' ? req.body.transcript : null;
+
+    try {
+      const result = await recordCandidate({
+        plaudId,
+        agentName: req.body?.agentName ? String(req.body.agentName).trim() : null,
+        meetingDate: DATE_RE.test(meetingDate) ? meetingDate : null,
+        title: req.body?.title ? String(req.body.title).slice(0, 500) : null,
+        notePath: req.body?.notePath ? String(req.body.notePath).slice(0, 500) : null,
+        transcript,
+        attribution: req.body?.attribution ? String(req.body.attribution).slice(0, 200) : null,
+      });
+      if (result.created) {
+        console.log(`[121-bridge] transcript candidate for ${req.body?.agentName ?? 'unknown'} (${meetingDate || 'no date'})`);
+      }
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[121-bridge] transcript-candidate failed:', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  /**
+   * GET /121/known-recordings — plaud ids NOVA has already resolved.
+   *
+   * Lets NEURO stop re-offering the same recording every sweep. Returns only RESOLVED
+   * ones: a still-pending candidate is deliberately re-pushable, so an improved
+   * attribution or a re-synced transcript can update it before Nick looks.
+   */
+  router.get('/121/known-recordings', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      res.json({ ok: true, data: { plaudIds: await getKnownPlaudIds() } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({ ok: false, error: message, plaudIds: null });
     }
   });
 
