@@ -4,7 +4,13 @@
 source) and **§9 phase 6** (Outlook mirror). Everything else in v1 stands and is still
 the reference for the shipped loop.
 
-Status: **SPEC — not started.** Written 2026-08-27 from a live prod audit (§1).
+Status: written 2026-08-27 from a live prod audit (§1). **WP1, WP2, WP3, WP5, WP6.1 and
+WP6.3 are built and pushed but NOT YET DEPLOYED** — NOVA v1.1.472 on `nova-codex`, NEURO
+on `main`. Prod still runs the old code, so the stalled sessions in §1 are still stalled.
+Outstanding: WP4, WP6.2, WP7, and the deliberate omissions in §7.
+
+⚠ **WP6.1 makes the two deploys a matched pair.** NOVA no longer writes an Outlook event,
+so NOVA shipped without NEURO on the Pi means setting a date in NOVA books nothing.
 
 ---
 
@@ -353,30 +359,46 @@ turns them into a state.
 
 ## 6. Sequencing
 
-| # | WP | Ships | Depends on |
+| # | WP | State | Notes |
 |---|---|---|---|
-| 1 | WP1 state machine | alone, immediately | — |
-| 2 | WP6.3 log the no-op | with WP1 | — |
-| 3 | WP2 booking push | after WP1 | WP1 |
-| 4 | WP6.1 kill the Outlook mirror | same deploy as WP2 | WP2 live |
-| 5 | WP3 cadence | after WP2 | WP2 reconciliation job |
-| 6 | WP4 roster drift panel | after WP2 | WP2 `/121/state` |
-| 7 | WP5 vault write-back | last | WP1, WP2 |
-| 8 | WP6.2 collapse prep generators | any time | — |
-| 9 | WP7 absence-aware booking | optional | — |
+| 1 | WP1 state machine | **built** | `resolveOpenSession` / `beginSession` / `abandonSession`; `stalled` on the overview |
+| 2 | WP6.3 log the no-op | **built** | prep job logs every run |
+| 3 | WP2 booking push | **built** | `/api/neuro-bridge/121/*`; NEURO inline push + 06:20 sweep |
+| 4 | WP6.1 kill the Outlook mirror | **built** | must deploy WITH WP2 — see the status note |
+| 5 | WP3 cadence | **built** | vault `cadence:` → `one21_cadence_days` |
+| 6 | WP5 vault write-back | **built** | People card + actions + tracker; nightly, off the rollup |
+| 7 | WP4 roster drift panel | outstanding | drift is computed and logged by the 06:20 sweep and returned by `POST /api/1to1/nova-sync`; the NOVA-side panel is not built |
+| 8 | WP6.2 collapse prep generators | outstanding | `Briefing121Service` still parallel to `generatePrepForAgent` |
+| 9 | WP7 absence-aware booking | outstanding | optional |
 
-WP1 alone unwedges the seven stalled agents and gets prep firing for the three already
-scheduled. Everything after that is closing the loop rather than repairing it.
+**Remediation still to do, once deployed** (data, not code — Nick has confirmed he is up
+to date on the physical 1-2-1s, so these are real meetings that need *completing*, not
+abandoning): the six stalled August sessions, Kayleigh's 01-Jul row, and deleting the
+"Nick Ward" session and plan row.
+
+**Test coverage.** 23 new tests across `nova-121-sync.test.js` and
+`nova-121-writeback.test.js`, pinning the rules that would otherwise fail silently: an
+unchanged re-push is a no-op, a spent booking is not resurrected, `next-1-2-1-due` is
+never pushed as a booking, a blank `cadence:` is unknown rather than off-the-rota, an
+unreadable NOVA state aborts rather than re-pushing everyone, the actions block appends
+rather than regenerates, and a tick Nick has made is never rewritten. Full NEURO suite:
+1001 passing.
 
 ---
 
 ## 7. Open for Nick
 
+Both of the first two were **deliberately left unbuilt** in WP5 rather than guessed at —
+each would put speculative writes into the vault, and neither blocks the loop closing.
+
 1. **Goal progress vs action** (WP5.3) — is a stage-5 checkbox the right way to mark
    "this one belongs on the development plan", or should every action just land as an
-   action and goals stay hand-curated?
+   action and goals stay hand-curated? **Not built.** Every action currently lands as an
+   action on the People card; `Documents/HR/<name> - Development Plan.md` is untouched.
 2. **Meeting-note stubs** (WP5.4) — worth writing when there is no Plaud recording, or is
-   an unrecorded 1-2-1 better left showing as `unwritten` in the tracker?
+   an unrecorded 1-2-1 better left showing as `unwritten` in the tracker? **Not built** —
+   Nick writes the meeting notes himself, and a stub carrying `type: meeting` without a
+   `plaud_id` would corrupt the dominance detector and the meetings-held ledger.
 3. **`Areas/1-2-1 Tracker.md`** — now that NOVA has a real overview screen, does the
    generated tracker still earn its place, or does it retire?
 4. **Weekly KPI email** — unchanged by any of this, but note per-agent satisfaction is
