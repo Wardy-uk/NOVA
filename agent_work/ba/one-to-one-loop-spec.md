@@ -1,5 +1,11 @@
 # 1-2-1 Closed Loop — BA Spec
 
+> ⚠ **§3 D1 (scheduling source) and §9 phase 6 (Outlook mirror) are SUPERSEDED** by
+> [one-to-one-unified-loop-spec.md](one-to-one-unified-loop-spec.md) (2026-08-27). NEURO
+> now owns booking and the calendar; NOVA takes the date over the bridge. A 2026-08-27
+> prod audit found the day-before prep job had never sent a single email — see that spec
+> §1 for why. The rest of this document still describes the shipped loop accurately.
+
 Bring the **Standup** feature's closed-loop principles to the **1-2-1** feature
 (People → My Team). Schedule → auto-prep → two-way email → click-through session →
 Plaud auto-import → action tracking → weekly KPI nudge.
