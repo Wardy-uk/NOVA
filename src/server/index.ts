@@ -1687,7 +1687,17 @@ async function main() {
       }
     }, 60 * 60 * 1000);
 
-    const kbGapRegister = new KbGapRegisterService(kbEmbedder, llmService, settingsQueries);
+    // Its own embedder: the gap vectors are a separate space from kb_chunks, so the
+    // register can run on the local model without forcing a re-embed of the KB index.
+    // Defaults to local — clustering a few thousand gaps needs no API budget, and this
+    // keeps the register working when the OpenAI account is out of credit.
+    const kbGapEmbedder = new KbEmbedder(settingsQueries, {
+      provider: 'kb_gap_embedding_provider',
+      model: 'kb_gap_embedding_model',
+      localModel: 'kb_gap_embedding_local_model',
+      defaultProvider: 'local',
+    });
+    const kbGapRegister = new KbGapRegisterService(kbGapEmbedder, llmService, settingsQueries);
 
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,

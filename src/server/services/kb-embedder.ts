@@ -11,25 +11,53 @@ const DEFAULT_LOCAL_MODEL = 'Xenova/bge-base-en-v1.5';
 // switching provider/model requires a full re-embed. Default 'openai' keeps
 // existing behaviour; 'local' runs an in-process transformers.js model — no
 // external API, no quota — at the cost of some CPU and a lower-but-fine accuracy.
+/** Setting keys an embedder reads. An index with no compatibility requirement to the
+ *  main KB index (the gap register, for one) passes its own keys so it can run on a
+ *  different provider without forcing a re-embed of kb_chunks. Each key falls back to
+ *  the kb_embedding_* default when unset. */
+export interface EmbedderSettingKeys {
+  provider?: string;
+  model?: string;
+  localModel?: string;
+  /** Provider when neither this embedder's key nor the shared one is set. */
+  defaultProvider?: 'openai' | 'local';
+}
+
 export class KbEmbedder {
   private settings: SettingsQueries;
+  private keys: Required<Omit<EmbedderSettingKeys, 'defaultProvider'>>;
+  private defaultProvider: 'openai' | 'local';
   private localPipe: unknown = null;
   private localModelLoaded: string | null = null;
 
-  constructor(settings: SettingsQueries) {
+  constructor(settings: SettingsQueries, keys: EmbedderSettingKeys = {}) {
     this.settings = settings;
+    this.defaultProvider = keys.defaultProvider ?? 'openai';
+    this.keys = {
+      provider: keys.provider ?? 'kb_embedding_provider',
+      model: keys.model ?? 'kb_embedding_model',
+      localModel: keys.localModel ?? 'kb_embedding_local_model',
+    };
+  }
+
+  /** Own key first, then the shared kb_embedding_* default. */
+  private setting(key: string, fallbackKey: string): string | undefined {
+    return this.settings.get(key)?.trim() || this.settings.get(fallbackKey)?.trim() || undefined;
   }
 
   private provider(): 'openai' | 'local' {
-    return this.settings.get('kb_embedding_provider')?.trim().toLowerCase() === 'local' ? 'local' : 'openai';
+    const configured = this.setting(this.keys.provider, 'kb_embedding_provider')?.toLowerCase();
+    if (configured === 'local') return 'local';
+    if (configured === 'openai') return 'openai';
+    return this.defaultProvider;
   }
 
   private getOpenAiModel(): string {
-    return this.settings.get('kb_embedding_model')?.trim() || 'text-embedding-3-small';
+    return this.setting(this.keys.model, 'kb_embedding_model') || 'text-embedding-3-small';
   }
 
   private getLocalModel(): string {
-    return this.settings.get('kb_embedding_local_model')?.trim() || DEFAULT_LOCAL_MODEL;
+    return this.setting(this.keys.localModel, 'kb_embedding_local_model') || DEFAULT_LOCAL_MODEL;
   }
 
   /** The active model id — useful for logging / detecting a model change that
