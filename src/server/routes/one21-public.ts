@@ -3,7 +3,7 @@ import {
   getSessionByToken, isSubmissionEditable, saveAgentSubmission, displayDate, runDayBeforePrep,
   resolveOpenSession, beginSession, abandonSession,
   getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
-  completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview,
+  completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview, getRosterDrift,
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
   dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
@@ -158,6 +158,15 @@ export function createOne21Routes(deps: One21Deps): Router {
   router.get('/overview', async (_req, res) => {
     try {
       res.json({ ok: true, data: await getOne21Overview() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  // Roster drift — plans for people who have left, and team members with no plan.
+  router.get('/roster-drift', async (_req, res) => {
+    try {
+      res.json({ ok: true, data: await getRosterDrift(deps.settingsQueries) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

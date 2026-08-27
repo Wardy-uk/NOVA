@@ -20,10 +20,17 @@ interface Overview {
   summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; neverScheduled: number; deliveryRate: number | null };
 }
 
+interface Drift {
+  checked: boolean; error?: string;
+  notOnRoster: Array<{ agentName: string; nearMatch: string | null }>;
+  noPlan: string[];
+}
+
 const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
 
 export function OneToOneOverviewView() {
   const [data, setData] = useState<Overview | null>(null);
+  const [drift, setDrift] = useState<Drift | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanOpen, setScanOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'urgency' | 'next' | 'last'>('urgency');
@@ -34,6 +41,9 @@ export function OneToOneOverviewView() {
   const load = (keepLoading = false) => {
     if (!keepLoading) setLoading(true);
     fetch('/api/121/overview').then((r) => r.json()).then((j) => { if (j.ok) setData(j.data); }).finally(() => setLoading(false));
+    // Separate and non-blocking: drift reads the KPI pool, which is slower and flakier
+    // than NOVA's own DB, and the overview must still render when it is down.
+    fetch('/api/121/roster-drift').then((r) => r.json()).then((j) => { if (j.ok) setDrift(j.data); }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -87,7 +97,9 @@ export function OneToOneOverviewView() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={() => setScanOpen(true)} style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${C.teal}`, background: `${C.teal}18`, color: C.teal, cursor: 'pointer', fontSize: 12, fontWeight: 600 }} title="Scan all of Plaud for 1-2-1 recordings">🎙 Scan Plaud</button>
-          <button onClick={load} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.glass, color: C.text2, cursor: 'pointer', fontSize: 15 }} title="Refresh">↻</button>
+          {/* `onClick={load}` handed React's click event straight to `keepLoading`, which
+              is truthy — so the refresh button never actually showed a loading state. */}
+          <button onClick={() => load()} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.glass, color: C.text2, cursor: 'pointer', fontSize: 15 }} title="Refresh">↻</button>
         </div>
       </div>
 
@@ -104,6 +116,41 @@ export function OneToOneOverviewView() {
         <Tile label="Never scheduled" value={data.summary.neverScheduled} color={data.summary.neverScheduled > 0 ? C.amber : C.text2} />
         <Tile label="Action delivery" value={data.summary.deliveryRate === null ? '—' : `${data.summary.deliveryRate}%`} color={ratePctColor(data.summary.deliveryRate)} />
       </div>
+
+      {/* Roster drift — only when there is something to say */}
+      {drift && (drift.notOnRoster.length > 0 || drift.noPlan.length > 0) && (
+        <div style={{ background: C.glass, border: `1px solid ${C.amber}40`, borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.amber, marginBottom: 8 }}>Roster drift</div>
+          {drift.notOnRoster.length > 0 && (
+            <div style={{ fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
+              <strong style={{ color: C.text1 }}>Has a 1-2-1 plan but is not an active agent:</strong>{' '}
+              {drift.notOnRoster.map((x, i) => (
+                <span key={x.agentName}>
+                  {i > 0 && ', '}{x.agentName}
+                  {x.nearMatch && <span style={{ color: C.text3 }}> (did you mean “{x.nearMatch}”?)</span>}
+                </span>
+              ))}
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>
+                They still appear in every count above. Left the business, moved team, or a name that no longer matches.
+              </div>
+            </div>
+          )}
+          {drift.noPlan.length > 0 && (
+            <div style={{ fontSize: 12.5, color: C.text2 }}>
+              <strong style={{ color: C.text1 }}>On the team but has no 1-2-1 plan:</strong> {drift.noPlan.join(', ')}
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>
+                Invisible to the 1-2-1 loop entirely — they will never be scheduled or prepped.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {drift && !drift.checked && (
+        <div style={{ fontSize: 11.5, color: C.text3, marginBottom: 16 }}>
+          {/* Absence of evidence, said out loud — a silent panel here would read as "no drift". */}
+          Roster drift not checked: {drift.error || 'the KPI roster could not be read'}.
+        </div>
+      )}
 
       {/* Per-agent table */}
       <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>

@@ -12,6 +12,7 @@ import { generatePrepForAgent } from '../routes/people.js';
 import { getPrepQuestions, prepEmailIntro, managerSummaryIntro } from '../config/one21-config.js';
 import { one21PrepAgentHtml, one21PrepManagerHtml, one21WeeklyKpiHtml } from './email-templates.js';
 import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
+import { getStandupRoster } from './standup-roster.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { EmailService } from './email.js';
@@ -463,6 +464,107 @@ export async function isKnownAgent(agentName: string): Promise<boolean> {
   return (row?.n ?? 0) > 0;
 }
 
+// ── Roster drift ──
+
+export interface RosterDrift {
+  /** False when the KPI roster could not be read. NEVER means "no drift". */
+  checked: boolean;
+  error?: string;
+  /** Has a 1-2-1 plan, but is not an active agent on the KPI roster — a leaver, or a
+   *  name that no longer matches. `nearMatch` is filled when a spelling differs only by
+   *  case or whitespace, which is the difference between "gone" and "typo". */
+  notOnRoster: Array<{ agentName: string; nearMatch: string | null }>;
+  /** On the team, but has no 1-2-1 plan — so they are invisible to the whole loop and
+   *  would never be scheduled at all. */
+  noPlan: string[];
+}
+
+/** Compare NOVA's 1-2-1 roster against who is actually on the team.
+ *
+ *  The vault is the canonical name source, but NOVA cannot read it (it runs on
+ *  BYM-AAPP01; the vault is on Nick's machine and the Pi). It CAN read `dbo.Agent`,
+ *  which is the same source the round-robin and the standup roster treat as
+ *  authoritative for who is employed and active — enough to catch leavers still holding
+ *  a plan, and new starters holding none. NEURO's morning sweep reports the vault half.
+ */
+export async function getRosterDrift(settings: FileSettingsQueries): Promise<RosterDrift> {
+  const plans = await query<{ agent_name: string }>(
+    `SELECT agent_name FROM agent_development_plans WHERE status IN ('active','deferred') ORDER BY agent_name`);
+
+  let roster: Array<{ name: string; email: string | null }>;
+  try {
+    roster = await getStandupRoster(settings);
+  } catch (err) {
+    // Could not look. Reporting every plan as drifted here would be worse than useless —
+    // it would read as "your whole team has left" every time the KPI pool hiccups.
+    return {
+      checked: false,
+      error: err instanceof Error ? err.message : String(err),
+      notOnRoster: [], noPlan: [],
+    };
+  }
+  if (roster.length === 0) {
+    return { checked: false, error: 'The KPI roster named no active agents', notOnRoster: [], noPlan: [] };
+  }
+
+  // Who runs the 1-2-1s — they don't hold one with themselves, and they ARE on the
+  // roster, so nothing else catches it. Derived rather than hardcoded: the manager's
+  // address is already configured (standup-config's nickEmail), and dbo.Agent carries
+  // the matching email, so the name falls out of data that exists. `one21_manager_name`
+  // overrides it if the roster spells them differently.
+  const managerEmail = nickEmail().toLowerCase();
+  const managerName = settings.getAll().one21_manager_name
+    || roster.find((a) => a.email?.toLowerCase() === managerEmail)?.name
+    || null;
+
+  return {
+    checked: true,
+    ...compareRosters(plans.map((p) => p.agent_name), roster.map((a) => a.name), managerName),
+  };
+}
+
+/**
+ * The comparison itself, pure so the matching rules can be pinned without a database.
+ *
+ * Two normalisations, doing different jobs: `norm` decides whether two names ARE the
+ * same person (case and internal spacing don't matter); `loose` is only used to suggest
+ * a near match on something already judged absent, which is how "Nathan  Rutland" reads
+ * as a typo rather than as a leaver.
+ */
+export function compareRosters(
+  planNames: string[],
+  rosterNames: string[],
+  managerName: string | null,
+): { notOnRoster: Array<{ agentName: string; nearMatch: string | null }>; noPlan: string[] } {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const loose = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+
+  const rosterByNorm = new Map(rosterNames.map((n) => [norm(n), n]));
+  const rosterByLoose = new Map(rosterNames.map((n) => [loose(n), n]));
+  const planNorms = new Set(planNames.map(norm));
+  const managerNorm = managerName ? norm(managerName) : null;
+
+  const notOnRoster: Array<{ agentName: string; nearMatch: string | null }> = [];
+  for (const name of planNames) {
+    const n = norm(name);
+    if (managerNorm && n === managerNorm) {
+      // A 1-2-1 with yourself. Reported without a near match — the name is right, the
+      // row shouldn't exist.
+      notOnRoster.push({ agentName: name, nearMatch: null });
+      continue;
+    }
+    if (rosterByNorm.has(n)) continue;
+    const near = rosterByLoose.get(loose(name)) ?? null;
+    notOnRoster.push({ agentName: name, nearMatch: near });
+  }
+
+  const noPlan = rosterNames
+    .filter((name) => !planNorms.has(norm(name)) && (!managerNorm || norm(name) !== managerNorm))
+    .sort();
+
+  return { notOnRoster, noPlan };
+}
+
 // ── Manager overview ──
 
 export interface One21OverviewAgent {
@@ -494,7 +596,19 @@ export interface One21Overview {
 
 /** How far past its date a session must be before "still open" reads as stalled rather
  *  than as a 1-2-1 Nick simply hasn't written up yet. */
-const STALLED_AFTER_DAYS = 2;
+export const STALLED_AFTER_DAYS = 2;
+
+/**
+ * Stalled = opened in the click-through, well past its date, never finished.
+ *
+ * Only `in_progress` qualifies. A session still sitting at `scheduled` on a past date is
+ * `overdue` — a meeting that hasn't happened — which is a different problem with a
+ * different fix. Conflating them would hide the one that blocks the loop: a stalled
+ * session can never be prepped again and never books the next 1-2-1.
+ */
+export function isStalled(status: string, scheduledDate: string, stalledBefore: string): boolean {
+  return status === 'in_progress' && String(scheduledDate).slice(0, 10) < stalledBefore;
+}
 
 /** Whole-team 1-2-1 health for the manager overview dashboard. */
 export async function getOne21Overview(): Promise<One21Overview> {
@@ -544,7 +658,7 @@ export async function getOne21Overview(): Promise<One21Overview> {
       nextStatus: open?.status ?? null,
       overdue: !!open && open.scheduled_date < today,
       dueThisWeek: !!open && open.scheduled_date >= today && open.scheduled_date <= weekAhead,
-      stalled: open?.status === 'in_progress' && open.scheduled_date < stalledBefore,
+      stalled: !!open && isStalled(open.status, open.scheduled_date, stalledBefore),
       awaitingPrep: open?.status === 'awaiting_agent' && !submitted,
       prepSubmitted: submitted,
       lastDate: lastByAgent.get(p.agent_name) ?? null,
