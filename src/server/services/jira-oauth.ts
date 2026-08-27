@@ -53,7 +53,12 @@ export class JiraOAuthService {
     const params = new URLSearchParams({
       audience: 'api.atlassian.com',
       client_id: clientId,
-      scope: 'read:jira-work write:jira-work offline_access',
+      // Confluence scopes let a user publish a KB article under their own name. Classic
+      // scopes throughout — Atlassian warns against mixing classic and granular sets, and
+      // the Jira ones here are classic. Connections made before these were added keep
+      // working for Jira and are simply refused on Confluence routes, which the caller
+      // handles by falling back to the service account.
+      scope: 'read:jira-work write:jira-work read:confluence-space.summary write:confluence-content offline_access',
       redirect_uri: redirectUri,
       state,
       response_type: 'code',

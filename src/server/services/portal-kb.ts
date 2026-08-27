@@ -131,24 +131,19 @@ export class PortalKbService {
     return { fetched: pages.length, added, updated, skipped: skipped.length };
   }
 
-  private getConfluenceAuth(): { url: string; auth: string } {
+  private getConfluenceAuth(): { url: string; headers: Record<string, string> } {
     const auth = resolveConfluenceAuth(this.settings);
-    return {
-      url: auth.baseUrl,
-      auth: Buffer.from(`${auth.email}:${auth.token}`).toString('base64'),
-    };
+    return { url: auth.baseUrl, headers: auth.headers };
   }
 
   private async fetchChildPagesViaRest(
     spaceKey: string,
     parentPageId: string,
   ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
-    const { url: confluenceUrl, auth } = this.getConfluenceAuth();
+    const { url: confluenceUrl, headers } = this.getConfluenceAuth();
     const url = `${confluenceUrl}/wiki/rest/api/content/${parentPageId}/child/page?expand=body.storage,metadata.labels,version&limit=100`;
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    });
+    const res = await fetch(url, { headers });
 
     if (!res.ok) throw new Error(`Confluence API ${res.status}: ${await res.text()}`);
     const data = await res.json();
@@ -158,8 +153,7 @@ export class PortalKbService {
   private async fetchAllSpacePagesViaRest(
     spaceKey: string,
   ): Promise<Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }>> {
-    const { url: confluenceUrl, auth } = this.getConfluenceAuth();
-    const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json' };
+    const { url: confluenceUrl, headers } = this.getConfluenceAuth();
 
     const cql = `space = "${spaceKey}" AND type = "page"`;
     const allPages: Array<{ id: string; title: string; body: { storage: { value: string } }; metadata?: { labels?: { results?: Array<{ name: string }> } }; version?: { when: string } }> = [];

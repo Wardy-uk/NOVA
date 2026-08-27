@@ -33,6 +33,8 @@ import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries
 import type { JiraUserClientFactory } from '../services/jira-user-client.js';
 import type { KbGapRegisterService } from '../services/kb-gap-register.js';
 import type { KbArticleService } from '../services/kb-article-service.js';
+import type { UserSettingsQueries } from '../db/queries.js';
+import { resolveConfluenceCandidates } from '../services/confluence-auth.js';
 import { HygieneChecker } from '../services/hygiene-checker.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
@@ -59,6 +61,7 @@ interface AgentRouteDeps {
   jiraUserClientFactory: JiraUserClientFactory | null;
   kbGapRegister: KbGapRegisterService | null;
   kbArticleService: KbArticleService | null;
+  userSettingsQueries: UserSettingsQueries | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
@@ -1106,7 +1109,12 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       if (!cluster) { res.status(404).json({ ok: false, error: 'Cluster not found' }); return; }
       if (!cluster.draft_id) { res.status(400).json({ ok: false, error: 'No draft to publish — generate the article first' }); return; }
 
-      const result = await deps.kbArticleService.publishToConfluence(cluster.draft_id);
+      // Publish as the person who clicked, falling back to the nova-jira service
+      // account when they have no Confluence-capable connection of their own.
+      const candidates = await resolveConfluenceCandidates(
+        deps.settingsQueries!, deps.userSettingsQueries ?? null, req.user?.id,
+      );
+      const result = await deps.kbArticleService.publishToConfluence(cluster.draft_id, candidates);
       await reg.setPublished(id, result.url);
       res.json({ ok: true, data: result });
     } catch (err) {

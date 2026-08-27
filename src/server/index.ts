@@ -1719,6 +1719,7 @@ async function main() {
       jiraUserClientFactory,
       kbGapRegister,
       kbArticleService,
+      userSettingsQueries,
     }));
 
     const bankHolidaysPath = path.join(__dirname, '../../config/bank-holidays.json');

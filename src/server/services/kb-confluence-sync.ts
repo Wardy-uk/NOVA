@@ -37,12 +37,9 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
 
     const auth = this.getAuth();
     const spaceKeys = this.getSpaceKeys();
-    const headers = {
-      'Authorization': 'Basic ' + Buffer.from(`${auth.email}:${auth.token}`).toString('base64'),
-      'Accept': 'application/json',
-    };
+    const headers = auth.headers;
 
-    this.diag(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, email: ${auth.email}, spaces: ${spaceKeys.join(',')}`);
+    this.diag(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, as: ${auth.label}, spaces: ${spaceKeys.join(',')}`);
 
     for (const spaceKey of spaceKeys) {
       try {
@@ -56,7 +53,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
           continue;
         }
         if (!spaceBody.trim()) {
-          this.diag(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Email: ${auth.email}`);
+          this.diag(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Authenticated as: ${auth.label}`);
           continue;
         }
         let spaceData: { results: Array<{ id: string }> };

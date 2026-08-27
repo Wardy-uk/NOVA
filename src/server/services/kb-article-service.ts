@@ -3,7 +3,7 @@ import { query, execute, executeAndGetId } from './database.js';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { McpClientManager } from './mcp-client.js';
-import { resolveConfluenceAuth } from './confluence-auth.js';
+import { resolveServiceConfluenceAuth, type ConfluenceAuth } from './confluence-auth.js';
 
 // ── Types ──
 
@@ -250,7 +250,15 @@ Generate:
     await execute(`DELETE FROM kb_article_drafts WHERE id = ?`, [id]);
   }
 
-  async publishToConfluence(id: number): Promise<{ pageId: string; url: string }> {
+  /** Publishes over Confluence REST — previously the 'jira' MCP server, which failed
+   *  whenever that connection was down and left the result dependent on whatever shape
+   *  the tool returned.
+   *
+   *  `candidates` are tried in order and are normally [the acting user, the service
+   *  account], so the page is authored by whoever clicked publish. A credential that is
+   *  refused (401/403) falls through to the next — an OAuth connection made before the
+   *  Confluence scopes were added authenticates fine but is refused on these routes. */
+  async publishToConfluence(id: number, candidates?: ConfluenceAuth[]): Promise<{ pageId: string; url: string; publishedBy: string }> {
     const draft = await this.getById(id);
     if (!draft) throw new Error('Draft not found');
     if (draft.status === 'published') throw new Error('Already published');
@@ -258,45 +266,75 @@ Generate:
     const spaceKey = this.settings.get('kb_confluence_space') || this.settings.get('agent_kb_confluence_space') || 'NT';
     const parentPageId = this.settings.get('kb_confluence_parent_page_id') || this.settings.get('agent_kb_parent_page_id') || '2798027072';
 
-    // Publishes over Confluence REST with the global Jira credentials — the same
-    // token and code path the KB sync already uses. It previously went through the
-    // 'jira' MCP server, which meant publishing failed whenever that connection was
-    // down and left the outcome dependent on whatever shape the tool returned.
-    const auth = resolveConfluenceAuth(this.settings);
-    const headers = { ...auth.headers, 'Content-Type': 'application/json' };
+    const chain = candidates?.length ? candidates : [resolveServiceConfluenceAuth(this.settings)];
+    const refusals: string[] = [];
+    let published: { pageId: string; url: string; publishedBy: string } | null = null;
 
-    const spaceRes = await fetch(`${auth.baseUrl}/wiki/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { headers });
-    if (!spaceRes.ok) {
-      throw new Error(`Could not resolve Confluence space "${spaceKey}": ${spaceRes.status} ${(await spaceRes.text()).slice(0, 200)}`);
+    for (const auth of chain) {
+      const headers = { ...auth.headers, 'Content-Type': 'application/json' };
+      try {
+        const spaceRes = await fetch(`${auth.baseUrl}/wiki/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { headers });
+        if (spaceRes.status === 401 || spaceRes.status === 403) {
+          refusals.push(`${auth.label}: ${spaceRes.status} on space lookup`);
+          continue;
+        }
+        if (!spaceRes.ok) {
+          throw new Error(`Could not resolve Confluence space "${spaceKey}": ${spaceRes.status} ${(await spaceRes.text()).slice(0, 200)}`);
+        }
+        const spaceData = await spaceRes.json() as { results?: Array<{ id: string }> };
+        const spaceId = spaceData.results?.[0]?.id;
+        if (!spaceId) {
+          throw new Error(`Confluence space "${spaceKey}" not found — check the key and that ${auth.label} has access to it`);
+        }
+
+        const payload: Record<string, unknown> = {
+          spaceId,
+          status: 'current',
+          title: draft.title,
+          body: { representation: 'storage', value: draft.body },
+        };
+        if (parentPageId) payload.parentId = parentPageId;
+
+        const createRes = await fetch(`${auth.baseUrl}/wiki/api/v2/pages`, {
+          method: 'POST', headers, body: JSON.stringify(payload),
+        });
+        const createText = await createRes.text();
+        if (createRes.status === 401 || createRes.status === 403) {
+          refusals.push(`${auth.label}: ${createRes.status} on create`);
+          continue;
+        }
+        if (!createRes.ok) {
+          throw new Error(`Confluence publish failed: ${createRes.status} ${createText.slice(0, 300)}`);
+        }
+
+        const created = JSON.parse(createText) as { id?: string; _links?: { webui?: string; base?: string } };
+        const newPageId = created.id || '';
+        const webui = created._links?.webui || '';
+        published = {
+          pageId: newPageId,
+          url: webui
+            ? `${created._links?.base || `${auth.baseUrl}/wiki`}${webui}`
+            : `${auth.baseUrl}/wiki/spaces/${spaceKey}/pages/${newPageId}`,
+          publishedBy: auth.label,
+        };
+        if (auth.actor !== 'user') {
+          console.log(`[kb-article] Published "${draft.title}" as ${auth.label} (${auth.actor})`);
+        }
+        break;
+      } catch (err) {
+        // A real failure (bad space, malformed body) shouldn't silently retry as someone
+        // else — only refusals fall through, and those `continue` above.
+        throw err;
+      }
     }
-    const spaceData = await spaceRes.json() as { results?: Array<{ id: string }> };
-    const spaceId = spaceData.results?.[0]?.id;
-    if (!spaceId) {
-      throw new Error(`Confluence space "${spaceKey}" not found — check the key and that the Jira service account has Confluence access`);
+
+    if (!published) {
+      throw new Error(
+        `Confluence rejected every available credential — ${refusals.join('; ')}. `
+        + 'Connect your Jira account in My Settings, or grant the nova-jira service account access to Confluence.',
+      );
     }
-
-    const payload: Record<string, unknown> = {
-      spaceId,
-      status: 'current',
-      title: draft.title,
-      body: { representation: 'storage', value: draft.body },
-    };
-    if (parentPageId) payload.parentId = parentPageId;
-
-    const createRes = await fetch(`${auth.baseUrl}/wiki/api/v2/pages`, {
-      method: 'POST', headers, body: JSON.stringify(payload),
-    });
-    const createText = await createRes.text();
-    if (!createRes.ok) {
-      throw new Error(`Confluence publish failed: ${createRes.status} ${createText.slice(0, 300)}`);
-    }
-
-    const created = JSON.parse(createText) as { id?: string; _links?: { webui?: string; base?: string } };
-    const pageId = created.id || '';
-    const webui = created._links?.webui || '';
-    const url = webui
-      ? `${created._links?.base || `${auth.baseUrl}/wiki`}${webui}`
-      : `${auth.baseUrl}/wiki/spaces/${spaceKey}/pages/${pageId}`;
+    const { pageId, url } = published;
 
     await execute(
       `UPDATE kb_article_drafts
@@ -312,6 +350,6 @@ Generate:
       );
     }
 
-    return { pageId, url };
+    return published;
   }
 }
