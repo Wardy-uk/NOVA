@@ -61,9 +61,19 @@ export class FlagAutoDismissService {
 
     try {
       const autoRows = await query<FlagRow>(
+        // agent_auto_rule_log was never created by any migration and never
+        // written to, so this branch threw "Invalid object name" on every sweep
+        // (328 in a week) and no flag was ever auto-dismissed. Auto-rule matches
+        // have always lived in agent_decisions as action 'auto_rule_<id>' —
+        // the same source wasAlreadyActioned() reads. Shadow-mode matches are
+        // excluded: nothing actually happened to the ticket.
         `SELECT f.id, f.ticket_key FROM agent_flagged_tickets f
          WHERE f.status = 'open' AND EXISTS (
-           SELECT 1 FROM agent_auto_rule_log a WHERE a.ticket_key = f.ticket_key AND a.created_at > f.flagged_at
+           SELECT 1 FROM agent_decisions a
+           WHERE a.ticket_id = f.ticket_key
+             AND a.action LIKE 'auto_rule_%'
+             AND a.created_at > f.flagged_at
+             AND ISNULL(CASE WHEN ISJSON(a.output) = 1 THEN JSON_VALUE(a.output, '$.shadow') END, 'false') <> 'true'
          )`
       );
       for (const row of autoRows) {

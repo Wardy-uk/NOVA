@@ -4716,12 +4716,17 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       try { disabled = JSON.parse(disabledRaw); } catch {}
 
       const stats = await query<{ rule_id: string; match_count: number; shadow_count: number }>(
-        `SELECT rule_id,
-                SUM(CASE WHEN shadowed = 0 THEN 1 ELSE 0 END) as match_count,
-                SUM(CASE WHEN shadowed = 1 THEN 1 ELSE 0 END) as shadow_count
-         FROM agent_auto_rule_log
-         WHERE created_at >= DATEADD(DAY, -7, GETUTCDATE())
-         GROUP BY rule_id`,
+        // Sourced from agent_decisions, not the phantom agent_auto_rule_log
+        // (never created, never written — this query always threw and the page
+        // showed no counts). 'auto_rule_' is 10 chars, so the rule id starts at
+        // 11; shadow matches carry "shadow": true in the output JSON.
+        `SELECT SUBSTRING(action, 11, 100) as rule_id,
+                SUM(CASE WHEN ISNULL(CASE WHEN ISJSON(output) = 1 THEN JSON_VALUE(output, '$.shadow') END, 'false') = 'true' THEN 0 ELSE 1 END) as match_count,
+                SUM(CASE WHEN ISNULL(CASE WHEN ISJSON(output) = 1 THEN JSON_VALUE(output, '$.shadow') END, 'false') = 'true' THEN 1 ELSE 0 END) as shadow_count
+         FROM agent_decisions
+         WHERE action LIKE 'auto_rule_%'
+           AND created_at >= DATEADD(DAY, -7, GETUTCDATE())
+         GROUP BY SUBSTRING(action, 11, 100)`,
       );
       const statsMap = new Map(stats.map(s => [s.rule_id, s]));
 

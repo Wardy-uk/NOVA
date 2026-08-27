@@ -22,9 +22,13 @@ export interface TrainingSignal {
   generated_at: string;
 }
 
+// `severity` is advisory only — nothing reads it. It stays in the schema because
+// the prompt asks for it, but it is optional: a model omitting one unused field
+// must never fail the call, which is exactly what happened for a month when it
+// was required and undocumented. Same shape of fix as the triage `kb_gap` one.
 const RecommendationSchema = z.object({
   recommendation: z.string(),
-  severity: z.enum(['low', 'medium', 'high']),
+  severity: z.enum(['low', 'medium', 'high']).optional().default('medium'),
 });
 
 let pool: sql.ConnectionPool | null = null;
@@ -268,7 +272,11 @@ export class TrainingSignalGenerator {
   private async generateRecommendation(agentName: string, signalType: string, requestType: string | null, context: string): Promise<string> {
     try {
       const result = await this.llm.call(
-        `You are a support team training advisor. Generate a concise, actionable training recommendation for an agent.`,
+        `You are a support team training advisor. Generate a concise, actionable training recommendation for an agent.
+
+Return a JSON object with exactly these two fields:
+  "recommendation": string — the advice itself, 1-2 sentences
+  "severity": one of "low", "medium" or "high" — how urgently this needs addressing`,
         `Agent: ${agentName}
 Signal: ${signalType}${requestType ? ` for request type "${requestType}"` : ''}
 Context: ${context}
@@ -278,7 +286,13 @@ Provide a specific, actionable recommendation in 1-2 sentences. Focus on what th
         { callType: 'training_signal', tier: 'cheap', temperature: 0.3 },
       );
       return result.data.recommendation;
-    } catch {
+    } catch (err) {
+      // The schema was previously undocumented in the prompt, so every model on
+      // every leg returned prose or a bare {recommendation} and failed zod —
+      // 822 of 826 calls since 31 Jul, invisible because this fallback reads
+      // like a real recommendation. Log it so a silent regression can't repeat.
+      console.warn(`[training-signals] Recommendation LLM call failed for ${agentName}/${signalType}, using fallback:`,
+        err instanceof Error ? err.message : err);
       return `Review ${signalType} patterns${requestType ? ` for ${requestType} tickets` : ''} with team lead.`;
     }
   }

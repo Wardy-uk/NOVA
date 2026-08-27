@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import type { SettingsQueries } from '../db/settings-store.js';
-import type { LlmService } from './llm-service.js';
+import { TokenBudgetExceededError, type LlmService } from './llm-service.js';
 import type { JiraRestClient } from './jira-client.js';
 import { QaTicketResultSchema, qaOverallOf, qaGradeOf, type QaTicketResult } from './qa-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
@@ -105,6 +105,7 @@ export class QaPipeline {
       }
 
       const results: QaTicketResult[] = [];
+      let budgetStopped = false;
 
       for (const issue of toScore) {
         try {
@@ -123,19 +124,38 @@ export class QaPipeline {
             await logError('qa-pipeline', new Error('scoreSingle returned no result'), { entityRef: issue.key });
           }
         } catch (err) {
+          // The daily token budget is spent — every remaining ticket in this run
+          // would throw the same error before reaching a provider. Stop here
+          // rather than walking the rest of the list: that turned one budget cap
+          // into ~3,400 identical error_log rows a week and buried real failures.
+          if (err instanceof TokenBudgetExceededError) {
+            budgetStopped = true;
+            break;
+          }
           // Was a console.warn only, so silent gaps in coverage looked like full coverage.
           failed++;
           await logError('qa-pipeline', err, { entityRef: issue.key, context: { stage: 'scoreSingle' } });
         }
       }
 
+      const unscored = budgetStopped ? toScore.length - results.length : 0;
       const coveragePct = toScore.length > 0 ? Math.round(results.length / toScore.length * 100) : 100;
-      console.log(`[qa-pipeline] Scored ${results.length}/${toScore.length} (${coveragePct}% coverage, ${failed} failed) → ${this.s || 'live'}`);
+      console.log(`[qa-pipeline] Scored ${results.length}/${toScore.length} (${coveragePct}% coverage, ${failed} failed)${budgetStopped ? `, STOPPED on daily token budget — ${unscored} ticket(s) left unscored` : ''} → ${this.s || 'live'}`);
+
+      // One row per run when the budget stops us, not one per ticket. Without it
+      // the cap is invisible: a short run looks identical to full coverage.
+      if (budgetStopped) {
+        await logError('qa-pipeline', new Error(`Daily token budget spent — ${unscored} ticket(s) left unscored this run`), {
+          context: { stage: 'budget', scored: results.length, unscored, toScore: toScore.length },
+        });
+      }
 
       await this.monitor?.logRun({
         pipeline_name: 'qa-scoring', started_at: started, completed_at: new Date(),
-        status: failed > 0 ? 'error' : 'success', rows_affected: rowsAffected,
-        error_message: failed > 0 ? `${failed} ticket(s) failed to score` : null,
+        status: failed > 0 || budgetStopped ? 'error' : 'success', rows_affected: rowsAffected,
+        error_message: budgetStopped
+          ? `Daily token budget spent — ${unscored} ticket(s) unscored${failed > 0 ? `, ${failed} failed` : ''}`
+          : failed > 0 ? `${failed} ticket(s) failed to score` : null,
         duration_ms: Date.now() - started.getTime(),
       });
       return results;

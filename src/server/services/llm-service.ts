@@ -104,29 +104,42 @@ const DEFAULT_MODELS: Record<LlmProvider, Record<LlmTier, string>> = {
 };
 
 // Chain per tier: direct Anthropic → OpenRouter (same-family Claude, routes
-// around direct-Anthropic API issues) → OpenAI (last-resort, different provider
-// for a global Anthropic outage). Models resolve from DEFAULT_MODELS[provider].
+// around direct-Anthropic API issues) → OpenRouter (different vendor, cover for
+// a global Anthropic outage). Models resolve from DEFAULT_MODELS[provider]
+// unless the leg names one explicitly.
+//
+// Direct OpenAI is deliberately absent: that account has had no credits since
+// July, so every chain terminated at a leg that could only 429 — 44 guaranteed
+// failures a week and no real failover. Cross-vendor cover now comes through
+// OpenRouter instead, which needs one billing relationship rather than two.
+// The `openai` provider is still wired up, so `agent_model_routing` can name it
+// again if the account is ever funded.
 const DEFAULT_TIER_CONFIG: Record<LlmTier, TierConfig> = {
   reasoning: {
     primary: { provider: 'anthropic' },
     failover: { provider: 'openrouter' },
-    failover2: { provider: 'openai' },
+    failover2: { provider: 'openrouter', model: 'google/gemini-2.5-pro' },
   },
   standard: {
     primary: { provider: 'anthropic' },
     failover: { provider: 'openrouter' },
-    failover2: { provider: 'openai' },
+    failover2: { provider: 'openrouter', model: 'google/gemini-2.5-flash' },
   },
   cheap: {
     primary: { provider: 'anthropic' },
     failover: { provider: 'openrouter' },
-    failover2: { provider: 'openai' },
+    failover2: { provider: 'openrouter', model: 'google/gemini-2.5-flash' },
   },
 };
 
 // Different-vendor fallback. Only worth reaching once every Claude leg across
-// every tier has been tried, so it is sorted to the end of the chain.
-const LAST_RESORT_PROVIDER: LlmProvider = 'openai';
+// every tier has been tried, so it is sorted to the end of the chain. Keyed on
+// the MODEL, not the provider: OpenRouter now serves both the same-family Claude
+// failover and the cross-vendor last resort, so "is this leg a different vendor"
+// can only be answered by the model id.
+function isLastResortLeg(model: string): boolean {
+  return !/claude/i.test(model);
+}
 
 const CALL_TYPE_TIER_MAP: Record<string, LlmTier> = {
   triage: 'standard',
@@ -159,6 +172,9 @@ export const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: numb
   // OpenRouter models (pass-through pricing, same as direct)
   'anthropic/claude-sonnet-5':         { inputPerM: 2.00,  outputPerM: 10.00 },
   'anthropic/claude-haiku-4.5':        { inputPerM: 1.00,  outputPerM: 5.00  },
+  // Cross-vendor last-resort legs, priced from OpenRouter's live model list.
+  'google/gemini-2.5-pro':             { inputPerM: 1.25,  outputPerM: 10.00 },
+  'google/gemini-2.5-flash':           { inputPerM: 0.30,  outputPerM: 2.50  },
 };
 
 /**
@@ -184,7 +200,12 @@ const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
   chase: 50_000,
   classification: 50_000,
   coaching: 500_000,
-  qa_scoring: 300_000,
+  // 200 NT tickets a day. Measured cost is ~5,700 tokens per ticket (3,963 in +
+  // 1,736 out, 30-day average), so 200 × 5,700 = 1.14M, rounded up for headroom.
+  // The old 300k stopped the pipeline at ~52 tickets every single day for a
+  // month while 85-180 were closing, which is what made per-agent QA a
+  // non-comparable sample. QA is NT-only (see the QaPipeline construction).
+  qa_scoring: 1_200_000,
   kpi_daily_digest: 25_000,
 };
 
@@ -581,7 +602,14 @@ export class LlmService {
     await this.checkTokenBudget(options.callType);
 
     const tier = options.tier ?? CALL_TYPE_TIER_MAP[options.callType] ?? 'standard';
-    const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens')?.trim() || '4096', 10);
+    // 8192, not 4096: at 4096 the cap was binding. Triage alone stopped at
+    // exactly 4096 output tokens 53 times in 30 days, and `respond` /
+    // `coaching_synthesis` failures were dominated by "Unterminated string" /
+    // "Unexpected end of JSON input" — a reply cut off mid-string is
+    // unparseable, so the whole call burned its chain and produced nothing.
+    // Output is billed on tokens produced, not on the cap, so a higher ceiling
+    // costs nothing for the calls that already fit.
+    const maxTokens = options.maxTokens ?? parseInt(this.settings.get('llm_max_tokens')?.trim() || '8192', 10);
     const temperature = options.temperature ?? parseFloat(this.settings.get('llm_temperature')?.trim() || '0.3');
     const ticketId = options.ticketId ?? null;
 
@@ -605,14 +633,14 @@ export class LlmService {
     }
 
     // Push the cross-vendor last resort to the back of the chain. The tier
-    // fall-up otherwise interleaves it: a `standard` call tried OpenAI's weakest
-    // model at position 3, before Claude's reasoning tier at position 4, so a
-    // blip on Haiku produced gpt-4.1-mini output when Sonnet 5 was still
+    // fall-up otherwise interleaves it: a `standard` call tried the weakest
+    // non-Claude model at position 3, before Claude's reasoning tier at position
+    // 4, so a blip on Haiku produced Gemini Flash output when Sonnet 5 was still
     // untried. Stable sort — order within each group (tier, then primary →
     // failover → failover2) is unchanged, and the reasoning tier is unaffected
-    // because OpenAI already sits last there.
+    // because its cross-vendor leg already sits last.
     configs.sort((a, b) =>
-      Number(a.provider === LAST_RESORT_PROVIDER) - Number(b.provider === LAST_RESORT_PROVIDER));
+      Number(isLastResortLeg(a.model)) - Number(isLastResortLeg(b.model)));
 
     // Filter by circuit breaker, but keep circuit-broken ones as last resort
     const available = configs.filter(c => !isCircuitOpen(c.provider));
