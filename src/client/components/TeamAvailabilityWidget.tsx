@@ -46,8 +46,13 @@ function absenceColor(type: string): string {
   }
 }
 
+function nextDay(date: string): string {
+  return new Date(new Date(`${date}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+}
+
 export function TeamAvailabilityWidget() {
   const [data, setData] = useState<AvailabilityData | null>(null);
+  const [tomorrow, setTomorrow] = useState<AvailabilityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [menuFor, setMenuFor] = useState<number | null>(null);
@@ -56,9 +61,14 @@ export function TeamAvailabilityWidget() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`/api/agent/availability/snapshot?date=${date}`);
+      const [res, resNext] = await Promise.all([
+        fetch(`/api/agent/availability/snapshot?date=${date}`),
+        fetch(`/api/agent/availability/snapshot?date=${nextDay(date)}`),
+      ]);
       const json = await res.json();
+      const jsonNext = await resNext.json();
       if (json.ok) setData(json.data);
+      setTomorrow(jsonNext.ok ? jsonNext.data : null);
     } catch { /* ignore */ }
     setLoading(false);
   }, [date]);
@@ -190,6 +200,27 @@ export function TeamAvailabilityWidget() {
                   title="Clear this absence"
                 >&times;</button>
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tomorrow && (
+        <div className="space-y-1.5 mb-3">
+          <div className="text-xs text-neutral-500 font-medium">
+            {date === new Date().toISOString().slice(0, 10)
+              ? 'Away Tomorrow'
+              : `Away ${new Date(`${nextDay(date)}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
+            <span className="ml-1 text-neutral-600">({tomorrow.unavailable.length})</span>
+          </div>
+          {tomorrow.unavailable.length === 0 ? (
+            <div className="text-xs text-neutral-600">Nobody booked off</div>
+          ) : tomorrow.unavailable.map(a => (
+            <div key={a.roster_id} className="flex items-center justify-between text-xs">
+              <span className="text-neutral-400">{a.display_name}</span>
+              <span className={`px-1.5 py-0.5 text-xs border rounded ${absenceColor(a.status)}`}>
+                {absenceLabel(a.status)}
+              </span>
             </div>
           ))}
         </div>
