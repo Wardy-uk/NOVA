@@ -40,6 +40,7 @@ import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
 import { createNeuroBridgeFlowRoutes } from './routes/neuro-bridge-flow.js';
 import { createNeuroBridgeAvailabilityRoutes } from './routes/neuro-bridge-availability.js';
+import { createNeuroBridge121Routes } from './routes/neuro-bridge-121.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -1021,6 +1022,10 @@ async function main() {
   // shared-secret door, so it mounts here with the others, ahead of the JWT
   // middleware that makes /api/agent/availability/* unreachable to the bridge.
   app.use('/api/neuro-bridge', createNeuroBridgeAvailabilityRoutes(settingsQueries));
+  // 1-2-1 half — NEURO books the meeting, NOVA runs it. This is the only thing that
+  // creates the 'scheduled' session the day-before prep job fires on; without it the
+  // prep email cannot be sent at all, which is precisely what happened until 2026-08-27.
+  app.use('/api/neuro-bridge', createNeuroBridge121Routes());
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {

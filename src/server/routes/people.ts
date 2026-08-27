@@ -7,6 +7,7 @@ import type { NotificationQueries } from '../db/notifications.js';
 import type { McpClientManager } from '../services/mcp-client.js';
 import { LlmService } from '../services/llm-service.js';
 import { isAdmin } from '../utils/role-helpers.js';
+import { upsertBooking, cancelOpenSessions } from '../services/one21-service.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
 let kpiPool: sql.ConnectionPool | null = null;
@@ -334,37 +335,13 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
     }
   });
 
-  // ── 1-2-1 scheduling (NOVA-authoritative next/last date) ──
-  // Source of truth for the cycle. Manually set here; calendar is only a mirror (Phase 6).
+  // ── 1-2-1 scheduling ──
+  //
+  // NOVA holds the session; NEURO holds the calendar. The date can be set here or pushed
+  // over the NEURO bridge, and both go through `upsertBooking` so they cannot disagree
+  // about what a reschedule does to prep state. NOVA writes no Outlook event — see the
+  // note on POST /agent/:name/next-121 below.
   const OPEN_121_STATUSES = "('scheduled','prep_sent','awaiting_agent','ready','in_progress')";
-
-  // Phase 6 — best-effort Outlook mirror. NOVA's date is authoritative; this never
-  // blocks or overrides it. On reschedule we delete the old event and create a fresh
-  // one (avoids guessing the update tool's body-merge semantics). Returns the new
-  // event id (or null). All failures are swallowed and logged.
-  async function mirrorNext121ToOutlook(agentName: string, isoDate: string, existingEventId: string | null): Promise<string | null> {
-    try {
-      const tools = mcpManager.getServerTools('msgraph');
-      if (!tools.includes('create-calendar-event')) return existingEventId;
-
-      if (existingEventId && tools.includes('delete-calendar-event')) {
-        await mcpManager.callTool('msgraph', 'delete-calendar-event', { eventId: existingEventId }).catch(() => {});
-      }
-
-      const result = await mcpManager.callTool('msgraph', 'create-calendar-event', {
-        subject: `1-2-1 — ${agentName}`,
-        start: { dateTime: `${isoDate}T10:00:00`, timeZone: 'GMT Standard Time' },
-        end: { dateTime: `${isoDate}T10:30:00`, timeZone: 'GMT Standard Time' },
-        body: { contentType: 'text', content: `Monthly 1-2-1 with ${agentName}. Scheduled via N.O.V.A.` },
-      });
-      const text = (result as any)?.content?.[0]?.text;
-      if (text) { try { const ev = JSON.parse(text); if (ev?.id) return String(ev.id); } catch { /* ignore */ } }
-      return null;
-    } catch (err: any) {
-      console.warn(`[people] Outlook 1-2-1 mirror failed for ${agentName}:`, err?.message ?? err);
-      return existingEventId;
-    }
-  }
 
   // Batch: per-agent next (open) + last (completed) 1-2-1 dates for the My Team grid.
   router.get('/roster/sessions', async (req: Request, res: Response) => {
@@ -436,33 +413,17 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
 
-      const existing = await queryOne<{ id: number; outlook_event_id: string | null }>(`
-        SELECT TOP 1 id, outlook_event_id FROM agent_121_sessions
-        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
-        ORDER BY scheduled_date ASC
-      `, [agentName]);
+      // Shares one implementation with the NEURO bridge, so a date set here and a date
+      // booked in NEURO cannot drift apart in how they reset prep state.
+      //
+      // NOTE: this no longer writes an Outlook event. NEURO owns the calendar — it picks
+      // a free slot, checks clashes and actually invites the person, none of which the old
+      // mirror here did (it hardcoded 10:00-10:30 with no attendee). Two writers meant two
+      // events in the diary. Setting a date here books nothing: use NEURO for that, or
+      // put it in the diary yourself.
+      const result = await upsertBooking(agentName, date);
 
-      let id: number;
-      if (existing) {
-        // Reschedule: NOVA value always wins. Reset to 'scheduled' so day-before prep re-fires.
-        await execute(`
-          UPDATE agent_121_sessions
-          SET scheduled_date = ?, status = 'scheduled'
-          WHERE id = ?
-        `, [date, existing.id]);
-        id = existing.id;
-      } else {
-        id = await executeAndGetId(`
-          INSERT INTO agent_121_sessions (agent_name, scheduled_date, status)
-          VALUES (?, ?, 'scheduled')
-        `, [agentName, date]);
-      }
-
-      // Best-effort Outlook mirror — never blocks the NOVA-authoritative date.
-      const eventId = await mirrorNext121ToOutlook(agentName, date, existing?.outlook_event_id ?? null);
-      await execute(`UPDATE agent_121_sessions SET outlook_event_id = ? WHERE id = ?`, [eventId, id]).catch(() => {});
-
-      res.json({ ok: true, data: { id, scheduled_date: date } });
+      res.json({ ok: true, data: { id: result.sessionId, scheduled_date: date } });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -476,24 +437,12 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
       const agentName = decodeURIComponent(String(req.params.agentName));
-      // Remove any mirrored Outlook events for the open session(s) being cancelled.
-      const openWithEvents = await query<{ outlook_event_id: string | null }>(`
-        SELECT outlook_event_id FROM agent_121_sessions
-        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES} AND outlook_event_id IS NOT NULL
-      `, [agentName]);
-      const tools = mcpManager.getServerTools('msgraph');
-      if (tools.includes('delete-calendar-event')) {
-        for (const row of openWithEvents) {
-          if (row.outlook_event_id) {
-            await mcpManager.callTool('msgraph', 'delete-calendar-event', { eventId: row.outlook_event_id }).catch(() => {});
-          }
-        }
-      }
-      await execute(`
-        UPDATE agent_121_sessions SET status = 'cancelled'
-        WHERE agent_name = ? AND status IN ${OPEN_121_STATUSES}
-      `, [agentName]);
-      res.json({ ok: true, data: {} });
+      // The Outlook event is NEURO's now, so this cancels NOVA's session and reports the
+      // event ids rather than deleting them — the invitee has already accepted, and
+      // pulling the meeting out of their diary is a decision for the side that put it
+      // there. Cancel it in NEURO to remove the event itself.
+      const result = await cancelOpenSessions(agentName);
+      res.json({ ok: true, data: result });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }

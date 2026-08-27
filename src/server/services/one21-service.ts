@@ -352,6 +352,117 @@ async function scheduleNextSession(agentName: string, nextDate?: string): Promis
   return { nextSessionId, nextDate: resolvedNext };
 }
 
+// ── Booking (shared by the manager UI and the NEURO bridge) ──
+
+export interface UpsertBookingResult {
+  sessionId: number;
+  created: boolean;
+  rescheduled: boolean;
+  /** True when the incoming date matched what NOVA already had and nothing was touched.
+   *  NEURO's reconciliation job re-pushes every booking daily, so this is the common case. */
+  unchanged: boolean;
+  previousDate: string | null;
+}
+
+/**
+ * Set or move an agent's next 1-2-1.
+ *
+ * Idempotent by design: re-pushing a date NOVA already holds is a no-op. That matters
+ * because the reconciliation sweep replays every booking each morning, and a naive
+ * "reset to scheduled" would re-arm the prep emails every single day.
+ *
+ * A genuine reschedule DOES reset status to 'scheduled' and clears this session's prep
+ * rows from `agent_121_email_log`. Without the clear, the dedup key (the bare session id)
+ * would suppress prep for the new date — the agent would silently get nothing.
+ */
+export async function upsertBooking(
+  agentName: string,
+  date: string,
+  opts: { outlookEventId?: string | null } = {},
+): Promise<UpsertBookingResult> {
+  const open = await queryOne<{ id: number; scheduled_date: string; status: string }>(`
+    SELECT TOP 1 id, scheduled_date, status FROM agent_121_sessions
+    WHERE agent_name = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+    ORDER BY scheduled_date ASC
+  `, [agentName, ...OPEN_STATUSES]);
+
+  if (!open) {
+    const sessionId = await executeAndGetId(`
+      INSERT INTO agent_121_sessions (agent_name, scheduled_date, status, outlook_event_id)
+      VALUES (?, ?, 'scheduled', ?)
+    `, [agentName, date, opts.outlookEventId ?? null]);
+    return { sessionId, created: true, rescheduled: false, unchanged: false, previousDate: null };
+  }
+
+  const existingDate = String(open.scheduled_date).slice(0, 10);
+  if (existingDate === date) {
+    // Same meeting. Only ever adopt an event id we didn't have — never reset status.
+    if (opts.outlookEventId) {
+      await execute(
+        `UPDATE agent_121_sessions SET outlook_event_id = ? WHERE id = ? AND outlook_event_id IS NULL`,
+        [opts.outlookEventId, open.id]);
+    }
+    return { sessionId: open.id, created: false, rescheduled: false, unchanged: true, previousDate: existingDate };
+  }
+
+  await execute(`
+    UPDATE agent_121_sessions
+    SET scheduled_date = ?, status = 'scheduled', outlook_event_id = COALESCE(?, outlook_event_id)
+    WHERE id = ?
+  `, [date, opts.outlookEventId ?? null, open.id]);
+  await execute(
+    `DELETE FROM agent_121_email_log WHERE session_id = ? AND kind IN ('prep_agent','prep_manager')`,
+    [open.id]).catch(() => { /* log table is a convenience, never block a reschedule */ });
+
+  return { sessionId: open.id, created: false, rescheduled: true, unchanged: false, previousDate: existingDate };
+}
+
+/** Cancel the agent's open session(s). Returns the Outlook ids the caller may want to
+ *  clean up — NOVA no longer owns the calendar, so it does not delete them itself. */
+export async function cancelOpenSessions(agentName: string): Promise<{ cancelled: number; outlookEventIds: string[] }> {
+  const open = await query<{ id: number; outlook_event_id: string | null }>(`
+    SELECT id, outlook_event_id FROM agent_121_sessions
+    WHERE agent_name = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+  `, [agentName, ...OPEN_STATUSES]);
+  if (open.length === 0) return { cancelled: 0, outlookEventIds: [] };
+
+  await execute(`
+    UPDATE agent_121_sessions SET status = 'cancelled'
+    WHERE agent_name = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+  `, [agentName, ...OPEN_STATUSES]);
+  return {
+    cancelled: open.length,
+    outlookEventIds: open.map((r) => r.outlook_event_id).filter((x): x is string => !!x),
+  };
+}
+
+/**
+ * Set an agent's 1-2-1 cadence from their People card.
+ *
+ * `null` means the vault says `cadence: n/a` — they keep their plan, their card and their
+ * history, but are never auto-scheduled. That mirrors NEURO's `bookable` rule exactly
+ * rather than inventing a second way to take someone off the rota; the plan moves to
+ * 'deferred' and back rather than being deactivated, so nothing is lost either way.
+ */
+export async function setAgentCadenceDays(agentName: string, cadenceDays: number | null): Promise<{ cadenceDays: number | null; planStatus: string }> {
+  const planStatus = cadenceDays === null ? 'deferred' : 'active';
+  await execute(`
+    UPDATE agent_development_plans
+    SET one21_cadence_days = ?, status = ?
+    WHERE agent_name = ? AND status IN ('active','deferred')
+  `, [cadenceDays, planStatus, agentName]);
+  return { cadenceDays, planStatus };
+}
+
+/** Is this a name NOVA runs 1-2-1s for? The bridge refuses anything else rather than
+ *  guessing — a near-miss name is roster drift to be reported, not matched. */
+export async function isKnownAgent(agentName: string): Promise<boolean> {
+  const row = await queryOne<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM agent_development_plans WHERE agent_name = ? AND status IN ('active','deferred')`,
+    [agentName]);
+  return (row?.n ?? 0) > 0;
+}
+
 // ── Manager overview ──
 
 export interface One21OverviewAgent {
