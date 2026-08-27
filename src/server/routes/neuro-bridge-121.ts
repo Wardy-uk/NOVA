@@ -189,5 +189,94 @@ export function createNeuroBridge121Routes(): Router {
     }
   });
 
+  /**
+   * GET /121/completed?since=YYYY-MM-DD — 1-2-1s NOVA has finished running.
+   *
+   * The read half of the loop. NOVA holds what was agreed; the vault is where Nick and
+   * everyone else actually reads it, and until this existed the loop dead-ended in
+   * `agent_121_actions` — the People card, the development plan and the tracker never
+   * learned a 1-2-1 had happened at all.
+   *
+   * NEURO does the writing. NOVA prod cannot see the vault (it runs on BYM-AAPP01; the
+   * vault lives on Nick's machine and the Pi over Syncthing), and NEURO already owns
+   * every vault-mutation path plus the nightly tracker regeneration. A second writer to
+   * files NEURO rewrites each night is a race with no upside.
+   *
+   * `completed_at` is the proof the meeting happened — the same standard the vault's own
+   * detector applies to a written-up note — so it is what NEURO stamps `last-1-2-1` from.
+   */
+  router.get('/121/completed', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+
+    const since = String(req.query.since ?? '').slice(0, 10);
+    if (!DATE_RE.test(since)) {
+      res.status(400).json({ ok: false, error: 'since (YYYY-MM-DD) is required' });
+      return;
+    }
+
+    try {
+      const sessions = await query<{
+        id: number; agent_name: string; scheduled_date: string; completed_at: string;
+        plaud_recording_id: string | null; notes_text: string | null;
+      }>(`
+        SELECT id, agent_name, scheduled_date, completed_at, plaud_recording_id, notes_text
+        FROM agent_121_sessions
+        WHERE status = 'complete' AND completed_at IS NOT NULL AND completed_at >= ?
+        ORDER BY completed_at ASC
+      `, [since]);
+
+      if (sessions.length === 0) { res.json({ ok: true, data: { since, sessions: [] } }); return; }
+
+      // One query for every session's actions rather than one per session — this runs on
+      // a DTU-limited instance and the caller is a nightly batch, not a screen.
+      const ids = sessions.map((s) => s.id);
+      const actions = await query<{
+        id: number; session_id: number; description: string; owner: string | null;
+        due_date: string | null; status: string;
+      }>(`
+        SELECT id, session_id, description, owner, due_date, status
+        FROM agent_121_actions
+        WHERE session_id IN (${ids.map(() => '?').join(',')})
+        ORDER BY id ASC
+      `, ids);
+      const bySession = new Map<number, typeof actions>();
+      for (const a of actions) {
+        const list = bySession.get(a.session_id) ?? [];
+        list.push(a);
+        bySession.set(a.session_id, list);
+      }
+
+      const iso = (v: string | null) => (v ? String(v).slice(0, 10) : null);
+
+      res.json({
+        ok: true,
+        data: {
+          since,
+          sessions: sessions.map((s) => {
+            const list = bySession.get(s.id) ?? [];
+            return {
+              sessionId: s.id,
+              agentName: s.agent_name,
+              scheduledDate: iso(s.scheduled_date),
+              completedAt: iso(s.completed_at),
+              plaudRecordingId: s.plaud_recording_id,
+              notesText: s.notes_text,
+              // Split by what the vault does with them: commitments become checkboxes,
+              // reviewed items are already-closed history and must not reappear as open.
+              actions: list.filter((a) => ['pending', 'open', 'in_progress', 'carried_over'].includes(a.status))
+                .map((a) => ({ id: a.id, description: a.description, owner: a.owner, dueDate: iso(a.due_date), status: a.status })),
+              reviewedActions: list.filter((a) => ['delivered', 'missed'].includes(a.status))
+                .map((a) => ({ id: a.id, description: a.description, status: a.status })),
+            };
+          }),
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[121-bridge] completed failed:', message);
+      res.status(503).json({ ok: false, error: message, sessions: null });
+    }
+  });
+
   return router;
 }
