@@ -21,6 +21,7 @@ export default function PortalCSAT({ token }: Props) {
   const [comment, setComment] = useState('');
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentDone, setCommentDone] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
   const [changed, setChanged] = useState(false); // rating was revised on this visit
 
   useEffect(() => {
@@ -83,15 +84,24 @@ export default function PortalCSAT({ token }: Props) {
     const text = comment.trim();
     if (!text) return;
     setCommentSaving(true);
+    setCommentError(null);
     try {
-      await fetch(`/api/portal/csat/${encodeURIComponent(token)}/comment`, {
+      const res = await fetch(`/api/portal/csat/${encodeURIComponent(token)}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ comment: text }),
       });
-      setCommentDone(true);
+      const data = await res.json().catch(() => null);
+      // A rejected save must never render as "shared with the team" — the customer
+      // would walk away believing they had been heard when nothing was stored.
+      if (data?.ok) setCommentDone(true);
+      else setCommentError(
+        data?.error === 'expired'
+          ? 'This feedback window has closed, so we could not save your comment. Your rating is safe.'
+          : 'We could not save your comment. Your rating is safe — please try again.',
+      );
     } catch {
-      setCommentDone(true); // rating is already safe; don't nag about the comment
+      setCommentError('We could not save your comment. Your rating is safe — please try again.');
     }
     setCommentSaving(false);
   };
@@ -209,6 +219,9 @@ export default function PortalCSAT({ token }: Props) {
                 fontSize: '14px', resize: 'none', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
               }}
             />
+            {commentError && (
+              <div style={{ marginTop: '8px', fontSize: '13px', color: '#b91c1c' }}>{commentError}</div>
+            )}
             <button
               onClick={sendComment}
               disabled={!comment.trim() || commentSaving}
