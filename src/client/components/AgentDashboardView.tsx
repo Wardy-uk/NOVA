@@ -124,18 +124,6 @@ interface AgentAlert {
   createdAt: string;
 }
 
-interface KbGap {
-  id: number;
-  category: string;
-  suggested_title: string | null;
-  frequency: number;
-  first_seen: string;
-  last_seen: string;
-  ticket_ids: string;
-  assigned_to: string | null;
-  jira_ticket_key: string | null;
-}
-
 interface RiskFactor {
   id: string;
   label: string;
@@ -193,16 +181,6 @@ function apiJson(path: string, method: string, body: unknown) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-}
-
-async function kbApi(path: string, opts?: RequestInit) {
-  const r = await fetch(`/api/kb-articles${path}`, opts);
-  const text = await r.text();
-  try { return JSON.parse(text); } catch { return { ok: false, error: `Non-JSON response (${r.status})` }; }
-}
-
-function kbApiJson(path: string, method: string, body: unknown) {
-  return kbApi(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 
 function confidenceColor(c: number): string {
@@ -315,7 +293,7 @@ interface ApprovalHealth {
 export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { userRole?: string; onNavigateToWorkspace?: (filter: { aiAction?: string }) => void }) {
   const isSuperAdmin = checkSuperAdmin(userRole);
   const canControlAgent = checkAgentController(userRole);
-  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-gaps' | 'kb-index' | 'kb-health' | 'training-signals' | 'learning' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
+  const [tab, setTab] = useState<'overview' | 'decisions' | 'guardrails' | 'providers' | 'autonomy' | 'alerts' | 'kb-index' | 'kb-health' | 'training-signals' | 'learning' | 'quick-actions' | 'costs' | 'flagged' | 'ai-improvement' | 'pipelines' | 'assignment' | 'predictions' | 'incidents' | 'sla-management'>('overview');
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -325,7 +303,6 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
   const [guardrails, setGuardrails] = useState<GuardrailRule[]>([]);
   const [autonomyRules, setAutonomyRules] = useState<AutonomyRule[]>([]);
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
-  const [kbGaps, setKbGaps] = useState<KbGap[]>([]);
   const [costData, setCostData] = useState<CostSummary | null>(null);
   const [costError, setCostError] = useState<string | null>(null);
   const [flaggedTickets, setFlaggedTickets] = useState<FlaggedTicket[]>([]);
@@ -402,9 +379,6 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
     }
     if (tab === 'alerts') {
       api('/alerts?limit=100&includeAcknowledged=true').then(r => { if (r.ok) setAlerts(r.data); });
-    }
-    if (tab === 'kb-gaps') {
-      api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); });
     }
     if (tab === 'costs') {
       setCostError(null);
@@ -486,7 +460,6 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
           { key: 'guardrails', label: 'Guardrails' },
           { key: 'alerts', label: `Alerts${alerts.filter(a => !a.acknowledged).length > 0 ? ` (${alerts.filter(a => !a.acknowledged).length})` : ''}` },
           { key: 'flagged', label: `Flagged${(flaggedSummary?.count ?? 0) > 0 ? ` (${flaggedSummary!.count})` : ''}` },
-          { key: 'kb-gaps', label: 'KB Gaps' },
           { key: 'kb-index', label: 'KB Index' },
           { key: 'kb-health' as const, label: 'KB Health' },
           { key: 'training-signals' as const, label: 'Training' },
@@ -521,7 +494,6 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
       {tab === 'autonomy' && <AutonomyTab rules={autonomyRules} onRefresh={() => api('/autonomy').then(r => { if (r.ok) setAutonomyRules(r.data); })} isSuperAdmin={isSuperAdmin} />}
       {tab === 'guardrails' && <GuardrailsTab rules={guardrails} onToggle={toggleGuardrail} onRefresh={() => api('/guardrails').then(r => { if (r.ok) setGuardrails(r.data); })} />}
       {tab === 'alerts' && <AlertsTab alerts={alerts} onRefresh={() => api('/alerts?limit=100&includeAcknowledged=true').then(r => { if (r.ok) setAlerts(r.data); })} />}
-      {tab === 'kb-gaps' && <KbGapsTab gaps={kbGaps} onRefresh={() => api('/kb-gaps').then(r => { if (r.ok) setKbGaps(r.data); })} />}
       {tab === 'kb-index' && <KbIndexTab />}
       {tab === 'ai-improvement' && <AiImprovementTab />}
       {tab === 'quick-actions' && <QuickActionsTab />}
@@ -2490,342 +2462,6 @@ function AlertsTab({ alerts, onRefresh }: { alerts: AgentAlert[]; onRefresh: () 
           <div className="text-xs text-neutral-500 text-center py-6">No alerts</div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ── KB Gaps Tab ──
-
-interface KbDraft {
-  id: number;
-  title: string;
-  body: string;
-  category: string | null;
-  labels: string | null;
-  status: string;
-  confluence_url: string | null;
-  created_at: string;
-  published_at: string | null;
-}
-
-function KbGapsTab({ gaps, onRefresh }: { gaps: KbGap[]; onRefresh: () => void }) {
-  const [counts, setCounts] = useState<{ open: number; article_drafted: number; article_published: number; dismissed: number } | null>(null);
-  const [generating, setGenerating] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<KbDraft | null>(null);
-  const [drafts, setDrafts] = useState<KbDraft[]>([]);
-  const [showDrafts, setShowDrafts] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [rosterNames, setRosterNames] = useState<string[]>([]);
-  const [creatingTicket, setCreatingTicket] = useState<number | null>(null);
-
-  useEffect(() => {
-    api('/kb-gaps/counts').then(r => { if (r.ok) setCounts(r.data); });
-    api('/roster').then(r => { if (r.ok && Array.isArray(r.data)) setRosterNames(r.data.filter((a: any) => a.active).map((a: any) => a.display_name)); });
-  }, [gaps]);
-
-  const loadDrafts = async () => {
-    const r = await kbApi('');
-    if (r.ok) setDrafts(r.data);
-  };
-
-  const dismiss = async (category: string, suggestedTitle: string | null) => {
-    await apiJson('/kb-gaps/dismiss', 'POST', { category, suggestedTitle });
-    onRefresh();
-  };
-
-  const generateArticle = async (gap: KbGap) => {
-    setGenerating(gap.category + '||' + (gap.suggested_title || ''));
-    setDraftError(null);
-    try {
-      const ticketIds = gap.ticket_ids ? gap.ticket_ids.split(',').map(t => t.trim()) : [];
-      const r = await kbApiJson('/generate', 'POST', {
-        category: gap.category,
-        suggestedTitle: gap.suggested_title,
-        reason: null,
-        ticketIds,
-      });
-      if (r.ok) {
-        setEditDraft(r.data);
-        onRefresh();
-      } else {
-        setDraftError(r.error || 'Generation failed');
-      }
-    } catch (e) {
-      setDraftError(e instanceof Error ? e.message : 'Generation failed');
-    } finally {
-      setGenerating(null);
-    }
-  };
-
-  const assignGap = async (id: number, assignedTo: string) => {
-    await apiJson(`/kb-gaps/${id}`, 'PATCH', { assigned_to: assignedTo || null });
-    onRefresh();
-  };
-
-  const createGapTicket = async (gap: KbGap) => {
-    setCreatingTicket(gap.id);
-    try {
-      const r = await apiJson(`/kb-gaps/${gap.id}/create-ticket`, 'POST', {});
-      if (r.ok) onRefresh();
-    } finally {
-      setCreatingTicket(null);
-    }
-  };
-
-  const saveDraft = async () => {
-    if (!editDraft) return;
-    setSaving(true);
-    try {
-      await kbApiJson(`/${editDraft.id}`, 'PUT', { title: editDraft.title, body: editDraft.body, labels: editDraft.labels });
-      setSaving(false);
-    } catch { setSaving(false); }
-  };
-
-  const publishDraft = async () => {
-    if (!editDraft) return;
-    setPublishing(true);
-    setDraftError(null);
-    try {
-      const r = await kbApiJson(`/${editDraft.id}/publish`, 'POST', {});
-      if (r.ok) {
-        setEditDraft({ ...editDraft, status: 'published', confluence_url: r.data?.url || null });
-        onRefresh();
-        loadDrafts();
-      } else {
-        setDraftError(r.error || 'Publish failed');
-      }
-    } catch (e) {
-      setDraftError(e instanceof Error ? e.message : 'Publish failed');
-    } finally {
-      setPublishing(false);
-    }
-  };
-
-  const deleteDraft = async (id: number) => {
-    await kbApiJson(`/${id}`, 'DELETE', {});
-    if (editDraft?.id === id) setEditDraft(null);
-    loadDrafts();
-  };
-
-  // Article editor modal
-  if (editDraft) {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <button onClick={() => setEditDraft(null)} className="text-xs text-blue-400 hover:text-blue-300">← Back to gaps</button>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] px-2 py-0.5 rounded ${editDraft.status === 'published' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>
-              {editDraft.status}
-            </span>
-            {editDraft.status !== 'published' && (
-              <>
-                <button onClick={saveDraft} disabled={saving} className="px-3 py-1 text-[11px] rounded bg-zinc-700 text-zinc-200 hover:bg-zinc-600 disabled:opacity-50">
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-                <button onClick={publishDraft} disabled={publishing} className="px-3 py-1 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50">
-                  {publishing ? 'Publishing…' : 'Publish to Confluence'}
-                </button>
-              </>
-            )}
-            {editDraft.confluence_url && (
-              <a href={editDraft.confluence_url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-400 hover:text-blue-300">
-                View in Confluence →
-              </a>
-            )}
-          </div>
-        </div>
-        {draftError && <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-xs">{draftError}</div>}
-        <input
-          value={editDraft.title}
-          onChange={e => setEditDraft({ ...editDraft, title: e.target.value })}
-          className="w-full px-3 py-2 bg-[#272C33] border border-[#3a424d] rounded text-sm text-white"
-          placeholder="Article title"
-        />
-        <textarea
-          value={editDraft.body}
-          onChange={e => setEditDraft({ ...editDraft, body: e.target.value })}
-          className="w-full px-3 py-2 bg-[#272C33] border border-[#3a424d] rounded text-xs text-neutral-200 font-mono min-h-[400px] resize-y"
-          placeholder="Article body (HTML)"
-        />
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-neutral-500">Labels:</span>
-          <input
-            value={editDraft.labels || ''}
-            onChange={e => setEditDraft({ ...editDraft, labels: e.target.value })}
-            className="flex-1 px-2 py-1 bg-[#272C33] border border-[#3a424d] rounded text-[11px] text-neutral-300"
-            placeholder="comma-separated labels"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-500">
-          Ticket types where the AI identified a missing KB article. Grouped by category and suggested title, sorted by frequency.
-        </p>
-        <button
-          onClick={() => { setShowDrafts(!showDrafts); if (!showDrafts) loadDrafts(); }}
-          className="px-3 py-1 text-[11px] rounded bg-[#2f353d] border border-[#3a424d] text-neutral-300 hover:bg-[#363d47]"
-        >
-          {showDrafts ? 'Show Gaps' : `View Drafts${counts?.article_drafted ? ` (${counts.article_drafted})` : ''}`}
-        </button>
-      </div>
-      {draftError && <div className="p-2 bg-red-950/50 border border-red-900 rounded text-red-400 text-xs">{draftError}</div>}
-      {counts && (
-        <div className="flex gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span className="text-[11px] text-neutral-400">Open</span>
-            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.open}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
-            <span className="w-2 h-2 rounded-full bg-blue-400" />
-            <span className="text-[11px] text-neutral-400">Drafted</span>
-            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.article_drafted}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
-            <span className="w-2 h-2 rounded-full bg-green-400" />
-            <span className="text-[11px] text-neutral-400">Published</span>
-            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.article_published}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f353d] border border-[#3a424d]">
-            <span className="w-2 h-2 rounded-full bg-neutral-500" />
-            <span className="text-[11px] text-neutral-400">Dismissed</span>
-            <span className="text-sm font-semibold text-neutral-200 ml-1">{counts.dismissed}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Drafts list */}
-      {showDrafts ? (
-        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-left">
-                <th className="px-4 py-2 font-medium">Title</th>
-                <th className="px-4 py-2 font-medium w-24">Category</th>
-                <th className="px-4 py-2 font-medium w-20">Status</th>
-                <th className="px-4 py-2 font-medium w-24">Created</th>
-                <th className="px-4 py-2 font-medium w-28"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#3a424d]">
-              {drafts.map(d => (
-                <tr key={d.id} className="hover:bg-[#363d47]/50 transition-colors">
-                  <td className="px-4 py-2 text-neutral-200 text-xs">{d.title}</td>
-                  <td className="px-4 py-2 text-neutral-400">{d.category}</td>
-                  <td className="px-4 py-2">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${d.status === 'published' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                      {d.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-[10px] text-neutral-500">{new Date(d.created_at).toLocaleDateString()}</td>
-                  <td className="px-4 py-2 flex gap-2">
-                    <button onClick={() => setEditDraft(d)} className="text-[10px] text-blue-400 hover:text-blue-300">Edit</button>
-                    {d.status !== 'published' && (
-                      <button onClick={() => deleteDraft(d.id)} className="text-[10px] text-neutral-600 hover:text-red-400">Delete</button>
-                    )}
-                    {d.confluence_url && (
-                      <a href={d.confluence_url} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300">View</a>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {drafts.length === 0 && (
-            <div className="px-4 py-6 text-center text-xs text-neutral-500">No article drafts yet. Generate one from a KB gap.</div>
-          )}
-        </div>
-      ) : (
-        /* Gaps table */
-        <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] overflow-hidden">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-[#272C33] text-neutral-500 uppercase tracking-wider text-left">
-                <th className="px-4 py-2 font-medium w-16">Count</th>
-                <th className="px-4 py-2 font-medium">Category</th>
-                <th className="px-4 py-2 font-medium">Suggested Article</th>
-                <th className="px-4 py-2 font-medium w-24">First Seen</th>
-                <th className="px-4 py-2 font-medium w-24">Last Seen</th>
-                <th className="px-4 py-2 font-medium w-28">Tickets</th>
-                <th className="px-4 py-2 font-medium w-32">Assign</th>
-                <th className="px-4 py-2 font-medium w-28">Jira</th>
-                <th className="px-4 py-2 font-medium w-36"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#3a424d]">
-              {gaps.map((g, i) => {
-                const key = g.category + '||' + (g.suggested_title || '');
-                const isGenerating = generating === key;
-                return (
-                  <tr key={i} className="hover:bg-[#363d47]/50 transition-colors">
-                    <td className="px-4 py-2">
-                      <span className={`inline-flex items-center justify-center w-7 h-5 rounded text-[10px] font-bold ${
-                        g.frequency >= 5 ? 'bg-red-950/60 text-red-400' :
-                        g.frequency >= 3 ? 'bg-amber-950/60 text-amber-400' :
-                        'bg-neutral-800 text-neutral-400'
-                      }`}>
-                        {g.frequency}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-neutral-300">{g.category}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="text-neutral-200 text-xs">{g.suggested_title ?? '—'}</div>
-                    </td>
-                    <td className="px-4 py-2 text-[10px] text-neutral-500">{g.first_seen ? new Date(g.first_seen).toLocaleDateString() : ''}</td>
-                    <td className="px-4 py-2 text-[10px] text-neutral-500">{g.last_seen ? new Date(g.last_seen).toLocaleDateString() : ''}</td>
-                    <td className="px-4 py-2 text-[10px] text-neutral-500 font-mono truncate max-w-[7rem]" title={g.ticket_ids}>{g.ticket_ids}</td>
-                    <td className="px-4 py-2">
-                      <select
-                        value={g.assigned_to || ''}
-                        onChange={e => assignGap(g.id, e.target.value)}
-                        className="bg-[#272C33] border border-[#3a424d] rounded px-1.5 py-0.5 text-[10px] text-neutral-300 w-full"
-                      >
-                        <option value="">Unassigned</option>
-                        {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-4 py-2">
-                      {g.jira_ticket_key ? (
-                        <a href={`https://nurturtech.atlassian.net/browse/${g.jira_ticket_key}`} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 font-mono">{g.jira_ticket_key} &rarr;</a>
-                      ) : (
-                        <button
-                          onClick={() => createGapTicket(g)}
-                          disabled={creatingTicket === g.id}
-                          className="text-[10px] text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
-                        >
-                          {creatingTicket === g.id ? 'Creating…' : 'Create Ticket'}
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 flex gap-2">
-                      <button
-                        onClick={() => generateArticle(g)}
-                        disabled={isGenerating}
-                        className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-50"
-                      >
-                        {isGenerating ? 'Generating…' : 'Generate Article'}
-                      </button>
-                      <button onClick={() => dismiss(g.category, g.suggested_title)} className="text-[10px] text-neutral-600 hover:text-red-400">
-                        Dismiss
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {gaps.length === 0 && (
-            <div className="px-4 py-6 text-center text-xs text-neutral-500">No KB gaps identified yet. Gaps are recorded during ticket triage when the AI detects a missing article.</div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

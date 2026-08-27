@@ -31,6 +31,8 @@ import type { EscalationLogService } from '../services/escalation-log-service.js
 import type { DriftDetector } from '../services/drift-detector.js';
 import type { UserQueries, UserTeamQueries, TeamQueries, AutoRuleOverrideQueries } from '../db/queries.js';
 import type { JiraUserClientFactory } from '../services/jira-user-client.js';
+import type { KbGapRegisterService } from '../services/kb-gap-register.js';
+import type { KbArticleService } from '../services/kb-article-service.js';
 import { HygieneChecker } from '../services/hygiene-checker.js';
 import { createWorkingDayClock } from '../../shared/utils/workingDayClock.js';
 
@@ -55,10 +57,16 @@ interface AgentRouteDeps {
   teamQueries: TeamQueries | null;
   autoRuleOverrideQueries: AutoRuleOverrideQueries | null;
   jiraUserClientFactory: JiraUserClientFactory | null;
+  kbGapRegister: KbGapRegisterService | null;
+  kbArticleService: KbArticleService | null;
 }
 
 export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<AgentRouteDeps, 'agentLoop'>>): Router {
   const router = Router();
+
+  // Was hardcoded to nurtur.atlassian.net in one place and nurturtech in another;
+  // the configured jira_url is the only one that's right in every environment.
+  const JIRA_BROWSE_BASE = `${(deps?.settingsQueries?.get('jira_url') || 'https://nurturtech.atlassian.net').replace(/\/+$/, '')}/browse/`;
 
   async function requireJiraForUser(req: any, res: any): Promise<import('../services/jira-client.js').JiraRestClient | null> {
     const userId = req.user?.id as number | undefined;
@@ -911,9 +919,194 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         [created.key, id, id, id],
       );
 
-      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `https://nurtur.atlassian.net/browse/${created.key}` } });
+      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `${JIRA_BROWSE_BASE}${created.key}` } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create Jira ticket' });
+    }
+  });
+
+  // ── KB Gap Register (clustered topics) ──
+  //
+  // The register is what people work from; kb-gaps above stays the raw log behind it.
+
+  function requireRegister(res: any): KbGapRegisterService | null {
+    if (!deps?.kbGapRegister) {
+      res.status(503).json({ ok: false, error: 'KB gap register not available' });
+      return null;
+    }
+    return deps.kbGapRegister;
+  }
+
+  router.get('/kb-gaps/clusters', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      const status = (req.query.status as string) || 'open';
+      const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 500);
+      res.json({ ok: true, data: await reg.listClusters(status, limit) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to list gap clusters' });
+    }
+  });
+
+  router.get('/kb-gaps/clusters/counts', async (_req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      res.json({ ok: true, data: await reg.counts() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get cluster counts' });
+    }
+  });
+
+  router.get('/kb-gaps/clusters/:id', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    const id = parseInt(req.params.id, 10);
+    try {
+      const cluster = await reg.getCluster(id);
+      if (!cluster) { res.status(404).json({ ok: false, error: 'Cluster not found' }); return; }
+      res.json({ ok: true, data: { ...cluster, members: await reg.listMembers(id) } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get cluster' });
+    }
+  });
+
+  router.post('/kb-gaps/clusters/:id/brief', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      res.json({ ok: true, data: await reg.generateBrief(parseInt(req.params.id, 10)) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to generate brief' });
+    }
+  });
+
+  router.patch('/kb-gaps/clusters/:id', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      if ('assigned_to' in req.body) await reg.assign(parseInt(req.params.id, 10), req.body.assigned_to || null);
+      if ('status' in req.body) await reg.setStatus(parseInt(req.params.id, 10), req.body.status);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to update cluster' });
+    }
+  });
+
+  router.post('/kb-gaps/clusters/:id/dismiss', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      await reg.setStatus(parseInt(req.params.id, 10), 'dismissed');
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to dismiss cluster' });
+    }
+  });
+
+  router.post('/kb-gaps/clusters/:id/create-ticket', requireRole('admin'), async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    const id = parseInt(req.params.id as string, 10);
+    try {
+      const cluster = await reg.getCluster(id);
+      if (!cluster) { res.status(404).json({ ok: false, error: 'Cluster not found' }); return; }
+      if (cluster.jira_ticket_key) {
+        res.json({ ok: true, data: { ticket_key: cluster.jira_ticket_key, already_exists: true } });
+        return;
+      }
+
+      const members = await reg.listMembers(id);
+      const ticketKeys = [...new Set(members.map(m => m.ticket_id))].slice(0, 30).join(', ');
+      const outline: Array<{ heading: string; covers: string | null }> =
+        cluster.outline_json ? JSON.parse(cluster.outline_json) : [];
+
+      // The ticket carries the whole brief — an engineer picking it up shouldn't have
+      // to come back to NOVA to find out what the article is meant to contain.
+      const body = [
+        `*AI-identified knowledge base gap* — ${cluster.member_count} ticket${cluster.member_count === 1 ? '' : 's'}`,
+        cluster.why_needed ? `\n*Why this article is needed*\n${cluster.why_needed}` : '',
+        cluster.audience ? `\n*Audience:* ${cluster.audience}` : '',
+        outline.length ? `\n*What it needs to cover*\n${outline.map(s => `• ${s.heading}${s.covers ? ` — ${s.covers}` : ''}`).join('\n')}` : '',
+        cluster.category ? `\n*Category:* ${cluster.category}` : '',
+        ticketKeys ? `\n*Source tickets:* ${ticketKeys}` : '',
+      ].filter(Boolean).join('\n');
+
+      const jiraClient = agentLoop.getJiraClient();
+      const project = deps?.settingsQueries?.get('kb_jira_project') || deps?.settingsQueries?.get('agent_jira_project')?.split(',')[0]?.trim() || 'NT';
+      const issueType = deps?.settingsQueries?.get('kb_jira_issue_type') || 'Task';
+
+      const fields: Record<string, unknown> = {
+        project: { key: project },
+        issuetype: { name: issueType },
+        summary: `Create KB Article: ${cluster.canonical_title}`.slice(0, 255),
+        description: {
+          type: 'doc', version: 1,
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }],
+        },
+        labels: ['kb-article', 'ai-identified'],
+      };
+
+      if (cluster.assigned_to) {
+        const roster = await queryOne<{ jira_account_id: string }>(
+          `SELECT jira_account_id FROM agent_roster WHERE display_name = ? AND active = 1`,
+          [cluster.assigned_to],
+        );
+        if (roster?.jira_account_id) fields.assignee = { accountId: roster.jira_account_id };
+      }
+
+      const created = await jiraClient.createIssue({ fields });
+      await reg.setJiraKey(id, created.key);
+
+      res.json({ ok: true, data: { ticket_key: created.key, ticket_url: `${JIRA_BROWSE_BASE}${created.key}` } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to create Jira ticket' });
+    }
+  });
+
+  router.post('/kb-gaps/clusters/:id/generate-article', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    if (!deps?.kbArticleService) { res.status(503).json({ ok: false, error: 'KB article service not available' }); return; }
+    const id = parseInt(req.params.id, 10);
+    try {
+      let cluster = await reg.getCluster(id);
+      if (!cluster) { res.status(404).json({ ok: false, error: 'Cluster not found' }); return; }
+      // Writing without a brief means guessing at scope — generate one first.
+      if (!cluster.brief_generated_at) cluster = await reg.generateBrief(id);
+
+      const members = await reg.listMembers(id);
+      const draft = await deps.kbArticleService.generateFromCluster(
+        cluster!, members.map(m => m.ticket_id), req.user!.id,
+      );
+      await reg.setDraft(id, draft.id);
+      res.json({ ok: true, data: draft });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to generate article' });
+    }
+  });
+
+  // Publishing goes through the register so the cluster and every gap row behind it
+  // are closed in one step — the old flow left them open after a successful publish.
+  router.post('/kb-gaps/clusters/:id/publish', async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    if (!deps?.kbArticleService) { res.status(503).json({ ok: false, error: 'KB article service not available' }); return; }
+    const id = parseInt(req.params.id, 10);
+    try {
+      const cluster = await reg.getCluster(id);
+      if (!cluster) { res.status(404).json({ ok: false, error: 'Cluster not found' }); return; }
+      if (!cluster.draft_id) { res.status(400).json({ ok: false, error: 'No draft to publish — generate the article first' }); return; }
+
+      const result = await deps.kbArticleService.publishToConfluence(cluster.draft_id);
+      await reg.setPublished(id, result.url);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to publish' });
+    }
+  });
+
+  // Embed → cluster → brief. Admin-only and bounded: briefLimit caps the LLM spend
+  // for one run, so the first pass over a large backlog is taken in bites.
+  router.post('/kb-gaps/refresh', requireRole('admin', 'super_admin'), async (req, res) => {
+    const reg = requireRegister(res); if (!reg) return;
+    try {
+      const briefLimit = Math.min(parseInt(req.body?.briefLimit, 10) || 25, 100);
+      res.json({ ok: true, data: await reg.refresh({ rebuild: req.body?.rebuild === true, briefLimit }) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Refresh failed' });
     }
   });
 
@@ -4278,42 +4471,49 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       const whereClause = ids?.length ? `AND g.id IN (${ids.map(() => '?').join(',')})` : '';
       const params = ids?.length ? ids : [];
 
-      let closedResolved = 0, closedCovered = 0, stale = 0;
+      let closedCovered = 0, stale = 0;
 
-      const openGaps = await query<{ id: number; ticket_key: string; topic: string; created_at: string }>(
-        `SELECT g.id, g.ticket_key, g.topic, g.created_at FROM kb_gap_log g WHERE g.status = 'open' ${whereClause}`,
+      const openGaps = await query<{ id: number; ticket_id: string; category: string | null; suggested_title: string | null; created_at: string; cluster_id: number | null }>(
+        `SELECT g.id, g.ticket_id, g.category, g.suggested_title, g.created_at, g.cluster_id
+         FROM kb_gap_log g WHERE g.status = 'open' ${whereClause}`,
         params,
       );
 
-      for (const gap of openGaps) {
-        const ticket = await queryOne<{ status_name: string }>(
-          `SELECT status_name FROM jira_issue_cache WHERE issue_key = ?`, [gap.ticket_key],
-        );
-        if (ticket && ['Done', 'Resolved', 'Closed'].includes(ticket.status_name)) {
-          await execute(`UPDATE kb_gap_log SET status = 'auto_closed_resolved' WHERE id = ?`, [gap.id]);
-          closedResolved++;
-          continue;
-        }
+      // A cluster is only stale when the WHOLE topic has gone quiet. Judging staleness
+      // per row would retire April tickets out of a cluster that is still recurring.
+      const clusterLastSeen = new Map<number, number>();
+      for (const row of await query<{ cluster_id: number; last_seen: string }>(
+        `SELECT cluster_id, MAX(created_at) AS last_seen FROM kb_gap_log WHERE cluster_id IS NOT NULL GROUP BY cluster_id`,
+      )) {
+        clusterLastSeen.set(row.cluster_id, new Date(row.last_seen).getTime());
+      }
 
-        const published = await queryOne<{ id: number }>(
-          `SELECT TOP 1 id FROM kb_article_drafts WHERE status = 'published' AND topic LIKE '%' + ? + '%'`,
-          [gap.topic?.substring(0, 50) || ''],
-        );
+      for (const gap of openGaps) {
+        // Note: a resolved ticket is deliberately NOT a close reason. Agents resolve
+        // these by hand precisely because no article exists — the gap is still open.
+        const topic = gap.suggested_title || gap.category;
+        const published = topic
+          ? await queryOne<{ id: number }>(
+              `SELECT TOP 1 id FROM kb_article_drafts WHERE status = 'published' AND title LIKE '%' + ? + '%'`,
+              [topic.substring(0, 50)],
+            )
+          : null;
         if (published) {
           await execute(`UPDATE kb_gap_log SET status = 'auto_closed_covered' WHERE id = ?`, [gap.id]);
           closedCovered++;
           continue;
         }
 
-        const age = (Date.now() - new Date(gap.created_at).getTime()) / 86400_000;
-        if (age > 90) {
+        const lastSeen = (gap.cluster_id !== null ? clusterLastSeen.get(gap.cluster_id) : undefined)
+          ?? new Date(gap.created_at).getTime();
+        if ((Date.now() - lastSeen) / 86400_000 > 90) {
           await execute(`UPDATE kb_gap_log SET status = 'stale' WHERE id = ?`, [gap.id]);
           stale++;
         }
       }
 
-      const stillOpen = openGaps.length - closedResolved - closedCovered - stale;
-      res.json({ ok: true, data: { closedResolved, closedCovered, stale, stillOpen, total: openGaps.length } });
+      const stillOpen = openGaps.length - closedCovered - stale;
+      res.json({ ok: true, data: { closedCovered, stale, stillOpen, total: openGaps.length } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Revalidation failed' });
     }

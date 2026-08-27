@@ -1408,7 +1408,7 @@ export function App() {
             <UatComparisonView />
           )}
           {view === 'agent-kb-gaps' && canSeeArea('ai-agent') && (
-            <KbGapsView token={auth.token!} />
+            <KbGapsView token={auth.token!} role={auth.user?.role} />
           )}
           {view === 'agent-learnings' && canSeeArea('ai-agent') && (
             <AgentLearningsView token={auth.token!} />

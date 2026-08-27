@@ -298,13 +298,11 @@ Provide a specific, actionable recommendation in 1-2 sentences. Focus on what th
       );
       if (articles.length > 0) {
         kbLink = articles[0].article_url;
-      } else {
-        await execute(
-          `INSERT INTO kb_gap_log (ticket_id, category, suggested_title, reason, status)
-           VALUES (?, ?, ?, ?, 'open')`,
-          ['training_signal', requestType, `Training: ${requestType}`, `Training signal identified gap: no KB article for ${requestType}`],
-        );
       }
+      // No kb_gap_log entry here: a Jira request type ("Emailed request") is not a
+      // KB topic, so these produced tautological gaps ("no KB article for Emailed
+      // request") that crowded out real ones. The absent kbLink on the signal below
+      // already carries "no article covers this".
     }
 
     await executeAndGetId(

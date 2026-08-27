@@ -3824,6 +3824,63 @@ async function runMigrations(): Promise<void> {
        created_at   DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
        CONSTRAINT UQ_failed_jobs_ticket_log_date UNIQUE (ticket_date)
      );`,
+
+    // ── KB gap register (clustered topics) ──
+    // kb_gap_log stays the raw append-only log: one row per ticket per triage. The
+    // register above it groups those rows into TOPICS by embedding similarity, because
+    // grouping on the LLM's free-text suggested_title split "product cancellation"
+    // across 8 near-identical rows and buried the real volume.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'kb_gap_clusters') AND type = 'U')
+     CREATE TABLE kb_gap_clusters (
+       id                 INT IDENTITY(1,1) PRIMARY KEY,
+       canonical_title    NVARCHAR(500)  NOT NULL,
+       category           NVARCHAR(100)  NULL,
+       -- Brief fields: written by an LLM pass over the whole cluster, not per ticket.
+       why_needed         NVARCHAR(MAX)  NULL,
+       outline_json       NVARCHAR(MAX)  NULL,
+       audience           NVARCHAR(50)   NULL,
+       brief_generated_at DATETIME2      NULL,
+       -- Centroid of member embeddings + count, so new gaps join incrementally
+       -- without re-reading every member vector.
+       centroid           VARBINARY(MAX) NULL,
+       member_count       INT            NOT NULL DEFAULT 0,
+       embedding_model    NVARCHAR(100)  NULL,
+       status             NVARCHAR(30)   NOT NULL DEFAULT 'open',
+       assigned_to        NVARCHAR(100)  NULL,
+       jira_ticket_key    NVARCHAR(20)   NULL,
+       confluence_url     NVARCHAR(500)  NULL,
+       draft_id           INT            NULL,
+       first_seen         DATETIME2      NULL,
+       last_seen          DATETIME2      NULL,
+       created_at         DATETIME2      NOT NULL DEFAULT GETUTCDATE(),
+       updated_at         DATETIME2      NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_gap_clusters_status')
+     CREATE INDEX IX_kb_gap_clusters_status ON kb_gap_clusters (status, member_count DESC);`,
+
+    `IF COL_LENGTH('kb_gap_log', 'cluster_id') IS NULL
+     ALTER TABLE kb_gap_log ADD cluster_id INT NULL;`,
+
+    `IF COL_LENGTH('kb_gap_log', 'embedding') IS NULL
+     ALTER TABLE kb_gap_log ADD embedding VARBINARY(MAX) NULL;`,
+
+    `IF COL_LENGTH('kb_gap_log', 'embedding_model') IS NULL
+     ALTER TABLE kb_gap_log ADD embedding_model NVARCHAR(100) NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_kb_gap_log_cluster')
+     CREATE INDEX IX_kb_gap_log_cluster ON kb_gap_log (cluster_id) WHERE cluster_id IS NOT NULL;`,
+
+    // Portal chat KB misses. Deliberately no message text — the transcript is already
+    // in portal_chat_messages, and copying raw inbound email here duplicated customer
+    // PII into a register people browse.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'portal_kb_miss_log') AND type = 'U')
+     CREATE TABLE portal_kb_miss_log (
+       id         INT IDENTITY(1,1) PRIMARY KEY,
+       session_id INT           NOT NULL,
+       category   NVARCHAR(100) NULL,
+       created_at DATETIME2     NOT NULL DEFAULT GETUTCDATE()
+     );`,
   ];
   for (const sql of migrations) {
     try { await execute(sql); } catch (e) { console.warn('[schema] Migration warning:', e); }

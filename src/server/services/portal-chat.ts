@@ -2002,7 +2002,7 @@ Set confidence 0.0-1.0 for how certain you are about the classification. If both
               },
             };
           }
-          await this.logKbGap(content, meta.category, sessionId);
+          await this.logKbMiss(meta.category, sessionId);
         } catch (err) {
           console.warn('[portal-chat] KB search failed:', err instanceof Error ? err.message : err);
         }
@@ -3710,8 +3710,8 @@ Return JSON with only the fields present in the message.`,
           },
         };
       }
-      // No KB match — log the gap
-      await this.logKbGap(searchQuery, meta.category, sessionId);
+      // No KB match — record the miss
+      await this.logKbMiss(meta.category, sessionId);
     } catch (err) {
       console.warn('[portal-chat] KB deflection search failed:', err instanceof Error ? err.message : err);
     }
@@ -3737,7 +3737,7 @@ Return JSON with only the fields present in the message.`,
     try {
       const kbResult = await this.searchKb(content);
       if (kbResult.length === 0) {
-        await this.logKbGap(content, meta.category, sessionId);
+        await this.logKbMiss(meta.category, sessionId);
         return null;
       }
 
@@ -4799,15 +4799,19 @@ Rules:
     }
   }
 
-  private async logKbGap(queryText: string, category: string | null, sessionId: number): Promise<void> {
+  /** Record that KB search found nothing for this session. Deliberately stores no
+   *  message text — the transcript is already in portal_chat_messages, and copying
+   *  raw inbound email into the gap register duplicated customer PII. A miss here is
+   *  also a weaker signal than a triaged ticket (often it's a work request, not a
+   *  knowledge gap), so it stays out of kb_gap_log and off the KB Gaps register. */
+  private async logKbMiss(category: string | null, sessionId: number): Promise<void> {
     try {
       await execute(
-        `INSERT INTO kb_gap_log (ticket_id, category, reason, source, query_text)
-         VALUES (?, ?, 'No KB article matched portal chat query', 'portal_chat', ?)`,
-        [`session-${sessionId}`, category || 'unknown', queryText.slice(0, 1000)],
+        `INSERT INTO portal_kb_miss_log (session_id, category) VALUES (?, ?)`,
+        [sessionId, category || null],
       );
     } catch (err) {
-      console.warn('[portal-chat] Failed to log KB gap:', err instanceof Error ? err.message : err);
+      console.warn('[portal-chat] Failed to log KB miss:', err instanceof Error ? err.message : err);
     }
   }
 

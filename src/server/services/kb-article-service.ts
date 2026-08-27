@@ -42,6 +42,93 @@ export class KbArticleService {
     private mcpManager: McpClientManager,
   ) {}
 
+  /** Generate from a register cluster. Unlike generateFromGap this has a brief to work
+   *  from — the agreed title, the case for the article and the required sections — so
+   *  the LLM is filling in a commissioned outline rather than guessing at scope from
+   *  one ticket. Falls back to generateFromGap's behaviour if no brief exists yet. */
+  async generateFromCluster(
+    cluster: {
+      id: number;
+      canonical_title: string;
+      category: string | null;
+      why_needed: string | null;
+      outline_json: string | null;
+      audience: string | null;
+      member_count: number;
+    },
+    ticketIds: string[],
+    userId: number,
+  ): Promise<KbArticleDraft> {
+    const outline: Array<{ heading: string; covers: string | null }> =
+      cluster.outline_json ? JSON.parse(cluster.outline_json) : [];
+
+    const ticketSnippets = await this.fetchTicketSnippets(ticketIds, 8);
+
+    const systemPrompt = `You are a technical knowledge base writer for Nurtur Ltd's internal support KB.
+Write clear, actionable articles that help support agents resolve issues quickly.
+Use a professional but approachable tone. Structure with headers, numbered steps where appropriate.
+Do NOT include metadata headers like "Title:" — just the article body content.
+Follow the commissioned outline: cover every section given, in that order. Where the source
+tickets don't establish a step, say what the reader must confirm rather than inventing it.`;
+
+    const userMessage = `Write the KB article commissioned by this brief.
+
+Title: ${cluster.canonical_title}
+Category: ${cluster.category || '(none)'}
+Audience: ${cluster.audience || 'support agent'}
+Raised by: ${cluster.member_count} support ticket${cluster.member_count === 1 ? '' : 's'}
+${cluster.why_needed ? `\nWhy it's needed:\n${cluster.why_needed}` : ''}
+
+Required sections:
+${outline.length ? outline.map((s, i) => `${i + 1}. ${s.heading}${s.covers ? `\n   Must cover: ${s.covers}` : ''}`).join('\n') : '(none specified — use your judgement)'}
+
+Source tickets:
+${ticketSnippets || '(no ticket data available)'}
+
+Generate:
+- A clear, concise title
+- A full article body in Confluence-compatible HTML (use <h2>, <p>, <ol>, <li>, <code>, <table> tags)
+- Relevant labels for categorisation`;
+
+    const result = await this.llm.call(systemPrompt, userMessage, ArticleLlmSchema, {
+      callType: 'kb_article_gen', tier: 'standard',
+    });
+
+    const draftId = await executeAndGetId(
+      `INSERT INTO kb_article_drafts (gap_id, title, body, category, labels, status, created_by)
+       VALUES (NULL, ?, ?, ?, ?, 'draft', ?)`,
+      [result.data.title, result.data.body, cluster.category, result.data.labels.join(','), userId],
+    );
+
+    return {
+      id: draftId,
+      gap_id: null,
+      title: result.data.title,
+      body: result.data.body,
+      category: cluster.category,
+      labels: result.data.labels.join(','),
+      status: 'draft',
+      confluence_page_id: null,
+      confluence_url: null,
+      created_by: userId,
+      created_at: new Date().toISOString(),
+      published_at: null,
+    };
+  }
+
+  private async fetchTicketSnippets(ticketIds: string[], max: number): Promise<string> {
+    const keys = [...new Set(ticketIds.filter(k => /^(NT|NTPJ)-\d+$/i.test(k)))].slice(0, max);
+    if (keys.length === 0) return '';
+    const rows = await query<{ issue_key: string; summary: string; description: string | null; answer: string | null }>(
+      `SELECT issue_key, summary, LEFT(description_text, 500) AS description, LEFT(last_public_comment, 700) AS answer
+       FROM jira_issue_cache WHERE issue_key IN (${keys.map(() => '?').join(',')})`,
+      keys,
+    );
+    return rows.map(r =>
+      `[${r.issue_key}] ${r.summary}\n${r.description || '(no description)'}\nAnswer given: ${r.answer || '(not recorded)'}`,
+    ).join('\n\n');
+  }
+
   async generateFromGap(
     category: string,
     suggestedTitle: string | null,
@@ -89,11 +176,14 @@ Generate:
       { callType: 'kb_article_gen', tier: 'standard' },
     );
 
+    // Match the exact gap group the caller generated from. Matching on category
+    // alone attached the draft to an unrelated gap and flipped that one's status
+    // instead — with ~900 distinct titles under "website" that was near-random.
     const gapRows = await query<{ id: number }>(
-      `SELECT TOP 1 id FROM kb_gap_log
-       WHERE category = ? AND status = 'open'
+      `SELECT id FROM kb_gap_log
+       WHERE category = ? AND ISNULL(suggested_title, '') = ISNULL(?, '') AND status = 'open'
        ORDER BY created_at DESC`,
-      [category],
+      [category, suggestedTitle],
     );
     const gapId = gapRows[0]?.id ?? null;
 
@@ -103,10 +193,13 @@ Generate:
       [gapId, result.data.title, result.data.body, category, result.data.labels.join(','), userId],
     );
 
-    if (gapId) {
+    // The whole group is the unit of work, so move every row in it — otherwise the
+    // group keeps reappearing as "open" with a one-lower count.
+    if (gapRows.length > 0) {
       await execute(
-        `UPDATE kb_gap_log SET status = 'article_drafted' WHERE id = ?`,
-        [gapId],
+        `UPDATE kb_gap_log SET status = 'article_drafted'
+         WHERE id IN (${gapRows.map(() => '?').join(',')})`,
+        gapRows.map(r => r.id),
       );
     }
 

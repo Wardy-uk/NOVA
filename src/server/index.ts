@@ -168,6 +168,7 @@ import { BriefEngine } from './services/brief-engine.js';
 
 import { KbSearchService } from './services/kb-search.js';
 import { KbEmbedder } from './services/kb-embedder.js';
+import { KbGapRegisterService } from './services/kb-gap-register.js';
 import { KbChunker } from './services/kb-chunker.js';
 import { KbSyncWorker } from './services/kb-sync-worker.js';
 import { TfsDocsSyncProvider } from './services/kb-tfs-docs-sync.js';
@@ -1686,6 +1687,8 @@ async function main() {
       }
     }, 60 * 60 * 1000);
 
+    const kbGapRegister = new KbGapRegisterService(kbEmbedder, llmService, settingsQueries);
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
@@ -1706,6 +1709,8 @@ async function main() {
       teamQueries,
       autoRuleOverrideQueries,
       jiraUserClientFactory,
+      kbGapRegister,
+      kbArticleService,
     }));
 
     const bankHolidaysPath = path.join(__dirname, '../../config/bank-holidays.json');
