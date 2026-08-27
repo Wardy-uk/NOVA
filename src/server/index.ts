@@ -39,6 +39,7 @@ import { createAuthRoutes } from './routes/auth.js';
 import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
 import { createNeuroBridgeFlowRoutes } from './routes/neuro-bridge-flow.js';
+import { createNeuroBridgeAvailabilityRoutes } from './routes/neuro-bridge-availability.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
 import { createAdminRoutes } from './routes/admin.js';
 import { createKpiDataRoutes, createKpiWallboardRoutes } from './routes/kpi-data.js';
@@ -1015,6 +1016,11 @@ async function main() {
   // service dependency, so it has nothing to wire lazily; same shared-secret
   // door, so it mounts here with the other two.
   app.use('/api/neuro-bridge', createNeuroBridgeFlowRoutes());
+  // Availability half — who is off, from the People HR sync. NEURO uses it to
+  // stay quiet on a booked day off instead of waiting to be told. Same
+  // shared-secret door, so it mounts here with the others, ahead of the JWT
+  // middleware that makes /api/agent/availability/* unreachable to the bridge.
+  app.use('/api/neuro-bridge', createNeuroBridgeAvailabilityRoutes(settingsQueries));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {
