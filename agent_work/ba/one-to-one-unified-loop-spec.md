@@ -4,10 +4,11 @@
 source) and **§9 phase 6** (Outlook mirror). Everything else in v1 stands and is still
 the reference for the shipped loop.
 
-Status: written 2026-08-27 from a live prod audit (§1). **WP1, WP2, WP3, WP5, WP6.1 and
-WP6.3 are built and pushed but NOT YET DEPLOYED** — NOVA v1.1.472 on `nova-codex`, NEURO
-on `main`. Prod still runs the old code, so the stalled sessions in §1 are still stalled.
-Outstanding: WP4, WP6.2, WP7, and the deliberate omissions in §7.
+Status: written 2026-08-27 from a live prod audit (§1). **Everything except WP6.2 is built
+and pushed, and NONE OF IT IS DEPLOYED** — NOVA v1.1.473 on `nova-codex`, NEURO on `main`.
+Prod still runs the old code, so the stalled sessions in §1 are still stalled and the
+07:00 prep job still no-ops every morning. Deploying is Nick's to do; the two go out
+together. Outstanding: WP6.2 (needs a decision, §6) and the deliberate omissions in §7.
 
 ⚠ **WP6.1 makes the two deploys a matched pair.** NOVA no longer writes an Outlook event,
 so NOVA shipped without NEURO on the Pi means setting a date in NOVA books nothing.
@@ -367,17 +368,27 @@ turns them into a state.
 | 4 | WP6.1 kill the Outlook mirror | **built** | must deploy WITH WP2 — see the status note |
 | 5 | WP3 cadence | **built** | vault `cadence:` → `one21_cadence_days` |
 | 6 | WP5 vault write-back | **built** | People card + actions + tracker; nightly, off the rollup |
-| 7 | WP4 roster drift panel | outstanding | drift is computed and logged by the 06:20 sweep and returned by `POST /api/1to1/nova-sync`; the NOVA-side panel is not built |
-| 8 | WP6.2 collapse prep generators | outstanding | `Briefing121Service` still parallel to `generatePrepForAgent` |
-| 9 | WP7 absence-aware booking | outstanding | optional |
+| 7 | WP4 roster drift | **built** | panel on the overview (`GET /api/121/roster-drift`), plus the vault half in NEURO's 06:20 sweep |
+| 8 | WP7 absence-aware booking | **built elsewhere** | delivered by a separate session in `one-to-one-booking.js` (`personOff` / `awayCheck`) |
+| 9 | WP6.2 collapse prep generators | **needs a decision** | see below |
+
+**WP6.2 is not a cleanup — it removes a screen.** `Briefing121Service` backs a live
+**AI Agent → 1-2-1 Prep** tab ([Briefing121View.tsx](../../src/client/components/Briefing121View.tsx),
+`view: 'agent-121'` in App.tsx) with its own table and its own LLM brief, richer in places
+than the prep snapshot (escalation analysis, QA best/worst, autonomy interaction). Folding
+it in means deciding what of that survives into `generatePrepForAgent`, and dropping it
+means deleting a working tab. Nick's call, not a refactor to be done quietly.
 
 **Remediation still to do, once deployed** (data, not code — Nick has confirmed he is up
 to date on the physical 1-2-1s, so these are real meetings that need *completing*, not
 abandoning): the six stalled August sessions, Kayleigh's 01-Jul row, and deleting the
 "Nick Ward" session and plan row.
 
-**Test coverage.** 23 new tests across `nova-121-sync.test.js` and
-`nova-121-writeback.test.js`, pinning the rules that would otherwise fail silently: an
+**Test coverage.** 37 new tests — `one21-service.test.ts` (NOVA) plus
+`nova-121-sync.test.js` and `nova-121-writeback.test.js` (NEURO) — pinning the rules that
+would otherwise fail silently: stalled means `in_progress` and past rather than a
+`scheduled` date that has simply gone by, prep stays editable until the manager opens the
+1-2-1, case and spacing are the same person while a missing space is a typo, an
 unchanged re-push is a no-op, a spent booking is not resurrected, `next-1-2-1-due` is
 never pushed as a booking, a blank `cadence:` is unknown rather than off-the-rota, an
 unreadable NOVA state aborts rather than re-pushing everyone, the actions block appends
