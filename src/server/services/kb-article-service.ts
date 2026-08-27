@@ -3,6 +3,7 @@ import { query, execute, executeAndGetId } from './database.js';
 import type { LlmService } from './llm-service.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { McpClientManager } from './mcp-client.js';
+import { resolveConfluenceAuth } from './confluence-auth.js';
 
 // ── Types ──
 
@@ -257,32 +258,45 @@ Generate:
     const spaceKey = this.settings.get('kb_confluence_space') || this.settings.get('agent_kb_confluence_space') || 'NT';
     const parentPageId = this.settings.get('kb_confluence_parent_page_id') || this.settings.get('agent_kb_parent_page_id') || '2798027072';
 
-    if (!this.mcpManager.isConnected('jira')) {
-      throw new Error('Jira/Confluence MCP server not connected');
+    // Publishes over Confluence REST with the global Jira credentials — the same
+    // token and code path the KB sync already uses. It previously went through the
+    // 'jira' MCP server, which meant publishing failed whenever that connection was
+    // down and left the outcome dependent on whatever shape the tool returned.
+    const auth = resolveConfluenceAuth(this.settings);
+    const headers = { ...auth.headers, 'Content-Type': 'application/json' };
+
+    const spaceRes = await fetch(`${auth.baseUrl}/wiki/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`, { headers });
+    if (!spaceRes.ok) {
+      throw new Error(`Could not resolve Confluence space "${spaceKey}": ${spaceRes.status} ${(await spaceRes.text()).slice(0, 200)}`);
+    }
+    const spaceData = await spaceRes.json() as { results?: Array<{ id: string }> };
+    const spaceId = spaceData.results?.[0]?.id;
+    if (!spaceId) {
+      throw new Error(`Confluence space "${spaceKey}" not found — check the key and that the Jira service account has Confluence access`);
     }
 
-    const args: Record<string, string> = {
-      spaceKey,
+    const payload: Record<string, unknown> = {
+      spaceId,
+      status: 'current',
       title: draft.title,
-      content: draft.body,
+      body: { representation: 'storage', value: draft.body },
     };
-    if (parentPageId) args.parentPageId = parentPageId;
+    if (parentPageId) payload.parentId = parentPageId;
 
-    const result = await this.mcpManager.callTool('jira', 'create_page', args);
-    const text = typeof result === 'string' ? result : JSON.stringify(result);
-
-    let pageId = '';
-    let url = '';
-    try {
-      const parsed = JSON.parse(text);
-      pageId = parsed.id || parsed.pageId || '';
-      url = parsed._links?.webui
-        ? `${parsed._links?.base || ''}${parsed._links.webui}`
-        : parsed.url || '';
-    } catch {
-      const idMatch = text.match(/id['":\s]+(\d+)/);
-      if (idMatch) pageId = idMatch[1];
+    const createRes = await fetch(`${auth.baseUrl}/wiki/api/v2/pages`, {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    });
+    const createText = await createRes.text();
+    if (!createRes.ok) {
+      throw new Error(`Confluence publish failed: ${createRes.status} ${createText.slice(0, 300)}`);
     }
+
+    const created = JSON.parse(createText) as { id?: string; _links?: { webui?: string; base?: string } };
+    const pageId = created.id || '';
+    const webui = created._links?.webui || '';
+    const url = webui
+      ? `${created._links?.base || `${auth.baseUrl}/wiki`}${webui}`
+      : `${auth.baseUrl}/wiki/spaces/${spaceKey}/pages/${pageId}`;
 
     await execute(
       `UPDATE kb_article_drafts

@@ -1,5 +1,6 @@
 import type { KbSyncProvider, RawDocument } from './kb-sync-provider.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import { resolveConfluenceAuth, confluenceConfigured, type ConfluenceAuth } from './confluence-auth.js';
 
 const MAX_CONCURRENT = 4;
 
@@ -13,31 +14,11 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
   }
 
   isConfigured(): boolean {
-    const spaceKeys = this.settings.get('kb_confluence_space_keys')?.trim();
-    const siteUrl = this.settings.get('confluence_site_url')?.trim()
-      || this.settings.get('jira_url')?.trim();
-    const email = this.settings.get('kb_confluence_email')?.trim()
-      || this.settings.get('jira_username')?.trim()
-      || this.settings.get('jira_ob_email')?.trim();
-    const token = this.settings.get('kb_confluence_token')?.trim()
-      || this.settings.get('jira_token')?.trim()
-      || this.settings.get('jira_ob_token')?.trim();
-    return !!(spaceKeys && siteUrl && email && token);
+    return !!this.settings.get('kb_confluence_space_keys')?.trim() && confluenceConfigured(this.settings);
   }
 
-  private getAuth(): { baseUrl: string; email: string; token: string } {
-    const siteUrl = this.settings.get('confluence_site_url')?.trim()
-      || this.settings.get('jira_url')?.trim();
-    const email = this.settings.get('kb_confluence_email')?.trim()
-      || this.settings.get('jira_username')?.trim()
-      || this.settings.get('jira_ob_email')?.trim();
-    const token = this.settings.get('kb_confluence_token')?.trim()
-      || this.settings.get('jira_token')?.trim()
-      || this.settings.get('jira_ob_token')?.trim();
-    if (!siteUrl || !email || !token) {
-      throw new Error('Confluence sync needs confluence_site_url/jira_url plus email/token (kb_confluence_* → jira_username/jira_token → jira_ob_*)');
-    }
-    return { baseUrl: siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, ''), email, token };
+  private getAuth(): ConfluenceAuth {
+    return resolveConfluenceAuth(this.settings);
   }
 
   private getSpaceKeys(): string[] {

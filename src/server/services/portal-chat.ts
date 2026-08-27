@@ -3,6 +3,7 @@ import { query, queryOne, execute } from './database.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { LlmService } from './llm-service.js';
 import type { PortalJiraService } from './portal-jira.js';
+import { resolveConfluenceAuth, confluenceConfigured } from './confluence-auth.js';
 import type { PortalIntakeService } from './portal-intake.js';
 import type { PortalChatSession, PortalChatMessage } from '../../shared/portal-types.js';
 import type { IntakeSessionMetadata, IntakeCollectedFields, ChatMessageMetadata } from '../../shared/portal-types.js';
@@ -4746,22 +4747,19 @@ Rules:
     allTerms: string[],
   ): Promise<Array<{ title: string; excerpt: string }>> {
     try {
-      const siteUrl = (this.settings.get('confluence_base_url') || this.settings.get('confluence_site_url') || this.settings.get('jira_url'))?.trim();
-      const email = (this.settings.get('confluence_user') || this.settings.get('kb_confluence_email') || this.settings.get('jira_username') || this.settings.get('jira_email') || this.settings.get('jira_ob_email'))?.trim();
-      const token = (this.settings.get('confluence_api_token') || this.settings.get('kb_confluence_token') || this.settings.get('jira_token') || this.settings.get('jira_api_token') || this.settings.get('jira_ob_token'))?.trim();
+      if (!confluenceConfigured(this.settings)) return [];
+      const auth = resolveConfluenceAuth(this.settings);
       const spaceKey = this.settings.get('kb_confluence_space')
         || this.settings.get('kb_confluence_space_keys')?.split(',')[0]?.trim()
         || 'NT';
 
-      if (!siteUrl || !email || !token) return [];
-
       const searchText = originalTerms.join(' ');
       const cql = `text ~ "${searchText}" AND space = "${spaceKey}" AND type = "page" ORDER BY lastmodified DESC`;
-      const url = `${siteUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, '')}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=8&expand=body.view`;
+      const url = `${auth.baseUrl}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=8&expand=body.view`;
 
       const res = await fetch(url, {
         headers: {
-          Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
+          Authorization: auth.headers.Authorization,
           Accept: 'application/json',
         },
       });

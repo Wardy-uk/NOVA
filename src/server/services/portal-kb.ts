@@ -4,6 +4,7 @@ import type { McpClientManager } from './mcp-client.js';
 import type { PortalKbArticle } from '../../shared/portal-types.js';
 import { trackEvent } from './portal-analytics.js';
 import { expandSearchTerms, cleanSearchTerms, rankAndFilter } from './kb-search-utils.js';
+import { resolveConfluenceAuth } from './confluence-auth.js';
 
 const kbViewCache = new Map<number, { articleIds: number[]; viewedAt: number }>();
 
@@ -131,27 +132,10 @@ export class PortalKbService {
   }
 
   private getConfluenceAuth(): { url: string; auth: string } {
-    const confluenceUrl = this.settings.get('confluence_base_url')
-      || this.settings.get('confluence_site_url')
-      || this.settings.get('jira_url');
-    const confluenceUser = this.settings.get('confluence_user')
-      || this.settings.get('kb_confluence_email')
-      || this.settings.get('jira_username')
-      || this.settings.get('jira_email')
-      || this.settings.get('jira_ob_email');
-    const confluenceToken = this.settings.get('confluence_api_token')
-      || this.settings.get('kb_confluence_token')
-      || this.settings.get('jira_token')
-      || this.settings.get('jira_api_token')
-      || this.settings.get('jira_ob_token');
-
-    if (!confluenceUrl || !confluenceUser || !confluenceToken) {
-      throw new Error('Confluence REST credentials not configured');
-    }
-
+    const auth = resolveConfluenceAuth(this.settings);
     return {
-      url: confluenceUrl.replace(/\/wiki\/?$/, '').replace(/\/$/, ''),
-      auth: Buffer.from(`${confluenceUser}:${confluenceToken}`).toString('base64'),
+      url: auth.baseUrl,
+      auth: Buffer.from(`${auth.email}:${auth.token}`).toString('base64'),
     };
   }
 
