@@ -267,6 +267,7 @@ export function OneToOneSessionView({ agentName, onClose, onCompleted }: {
                         <Metric label="CSAT" value={fmt(detail.kpis.summary.csatAvg)} />
                         <Metric label="Solved (period)" value={fmt(detail.kpis.summary.solvedTotal, 0)} />
                       </div>
+                      {detail.prep?.signals && <Signals s={detail.prep.signals} />}
                       {detail.prep && (
                         <div style={{ marginTop: 10 }}>
                           <PrepList title="What's improved" items={detail.prep.whats_improved} color={C.green} />
@@ -413,6 +414,71 @@ function Metric({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+/**
+ * The evidence block — escalations, AI-agent interaction, coaching signals, named QA
+ * tickets, movement vs the previous period.
+ *
+ * These are the facts the prep summary was generated FROM, shown as themselves. Named
+ * tickets are the point: "your QA average is 7.2" is not a conversation, "NT-28061
+ * scored 4.5" is.
+ */
+function Signals({ s }: { s: any }) {
+  const rows: Array<{ label: string; value: string; color?: string }> = [];
+
+  for (const t of s.trends ?? []) {
+    rows.push({
+      label: t.metric,
+      value: `${t.direction === 'improving' ? '▲' : t.direction === 'declining' ? '▼' : '–'} ${t.detail}`,
+      color: t.direction === 'improving' ? C.green : t.direction === 'declining' ? C.red : C.text2,
+    });
+  }
+  if (s.escalations) {
+    rows.push({
+      label: 'Escalations',
+      value: `${s.escalations.count}` + (s.escalations.appropriateRate !== null
+        ? ` · ${(s.escalations.appropriateRate * 100).toFixed(0)}% judged appropriate`
+        : ' · appropriateness not scored'),
+    });
+  }
+  if (s.autonomy) {
+    rows.push({ label: 'AI suggestions', value: `${s.autonomy.approvals} approved · ${s.autonomy.rejections} rejected` });
+  }
+  if (s.qaWorst?.length) {
+    rows.push({ label: 'Weakest QA', value: s.qaWorst.map((t: any) => `${t.ticketKey} (${t.score})`).join(', '), color: C.red });
+  }
+  if (s.qaBest?.length) {
+    rows.push({ label: 'Strongest QA', value: s.qaBest.map((t: any) => `${t.ticketKey} (${t.score})`).join(', '), color: C.green });
+  }
+
+  const hasAnything = rows.length > 0 || (s.coaching ?? []).length > 0 || (s.unavailable ?? []).length > 0;
+  if (!hasAnything) return null;
+
+  return (
+    <div style={{ marginTop: 4, marginBottom: 14, padding: '12px 14px', background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+      <div style={{ fontSize: 10, color: C.purple, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, marginBottom: 8 }}>Evidence</div>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 4 }}>
+          <div style={{ color: C.text3, width: 120, flexShrink: 0 }}>{r.label}</div>
+          <div style={{ color: r.color ?? C.text1 }}>{r.value}</div>
+        </div>
+      ))}
+      {(s.coaching ?? []).map((c: any, i: number) => (
+        <div key={`c${i}`} style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 4 }}>
+          <div style={{ color: C.text3, width: 120, flexShrink: 0 }}>Coaching</div>
+          <div style={{ color: C.amber }}>{c.signalType}{c.requestType ? ` (${c.requestType})` : ''} — {c.detail}</div>
+        </div>
+      ))}
+      {(s.unavailable ?? []).length > 0 && (
+        // Said out loud. Five sections silently reading zero is what made the old
+        // briefing tab look like it was working.
+        <div style={{ fontSize: 11, color: C.text3, marginTop: 8, fontStyle: 'italic' }}>
+          Not available: {s.unavailable.join('; ')}.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrepList({ title, items, color }: { title: string; items: string[] | undefined; color: string }) {
   if (!items || items.length === 0) return null;
   return (

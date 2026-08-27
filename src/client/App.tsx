@@ -102,7 +102,6 @@ const TrainingSignalsView = lazy(() => import('./components/TrainingSignalsView.
 const CapacityView = lazy(() => import('./components/CapacityView.js').then(m => ({ default: m.CapacityView })));
 const IntelligenceView = lazy(() => import('./components/IntelligenceView.js').then(m => ({ default: m.IntelligenceView })));
 const OpsPackView = lazy(() => import('./components/OpsPackView.js').then(m => ({ default: m.OpsPackView })));
-const Briefing121View = lazy(() => import('./components/Briefing121View.js').then(m => ({ default: m.Briefing121View })));
 import { useTasks, useHealth } from './hooks/useTasks.js';
 import { useTheme, type Theme } from './hooks/useTheme.js';
 import { useAuth } from './hooks/useAuth.js';
@@ -128,7 +127,7 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
   | 'agent-dashboard' | 'agent-workspace' | 'agent-nova-queue' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
-  | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack' | 'agent-121'
+  | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack'
   | 'backlog-board'
   | 'standup-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'admin-contract-terms' | 'my-feedback'
@@ -331,7 +330,6 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'agent-intelligence', label: 'Intelligence' },
       { view: 'agent-impact', label: 'Impact' },
       { view: 'agent-ops-pack', label: 'Ops Pack' },
-      { view: 'agent-121', label: '1-2-1 Prep' },
     ],
   },
   backlog: {
@@ -1432,11 +1430,6 @@ export function App() {
           )}
           {view === 'agent-ops-pack' && canSeeArea('ai-agent') && (
             <OpsPackView />
-          )}
-          {view === 'agent-121' && canSeeArea('ai-agent') && selectedAgentName && (
-            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
-              <Briefing121View agentId={selectedAgentName} agentName={selectedAgentName} />
-            </Suspense>
           )}
 
           {/* Administration */}

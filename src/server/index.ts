@@ -189,14 +189,12 @@ import { EmailService } from './services/email.js';
 import { KbHealthService } from './services/kb-health.js';
 import { KbGapClosureService } from './services/kb-gap-closure.js';
 import { TrainingSignalGenerator } from './services/training-signal-generator.js';
-import { Briefing121Service } from './services/briefing-121.js';
 import { OpsPackService } from './services/ops-pack.js';
 import { SelfDirectedLearning } from './services/self-directed-learning.js';
 import { CapacityPlanner } from './services/capacity-planner.js';
 import { CrossFunctionalIntelligence } from './services/cross-functional-intelligence.js';
 import { createKbHealthRoutes } from './routes/kb-health.js';
 import { createTrainingSignalRoutes } from './routes/training-signals.js';
-import { createBriefing121Routes } from './routes/briefing-121.js';
 import { createOpsPackRoutes } from './routes/ops-pack.js';
 import { createCapacityRoutes } from './routes/capacity.js';
 import { createCrossFunctionalRoutes } from './routes/cross-functional.js';
@@ -1611,7 +1609,6 @@ async function main() {
 
     // P5 Theme 3: Operational Colleague
     const trainingSignals = new TrainingSignalGenerator(llmService, settingsQueries);
-    const briefing121 = new Briefing121Service(llmService, settingsQueries);
     const opsPack = new OpsPackService(llmService, settingsQueries);
     const selfDirectedLearning = new SelfDirectedLearning(settingsQueries);
     agentLoop.getObserver().setLearning(selfDirectedLearning);
@@ -1619,7 +1616,6 @@ async function main() {
     const crossFunctional = new CrossFunctionalIntelligence(llmService, settingsQueries);
 
     app.use('/api/training-signals', createTrainingSignalRoutes(trainingSignals));
-    app.use('/api/briefing/121', createBriefing121Routes(briefing121));
     app.use('/api/ops-pack', createOpsPackRoutes(opsPack));
     app.use('/api/learning', createLearningRoutes(selfDirectedLearning));
     app.use('/api/capacity', createCapacityRoutes(capacityPlanner));

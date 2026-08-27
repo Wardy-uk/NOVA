@@ -8,6 +8,7 @@ import type { McpClientManager } from '../services/mcp-client.js';
 import { LlmService } from '../services/llm-service.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { upsertBooking, cancelOpenSessions } from '../services/one21-service.js';
+import { gatherPrepSignals, signalsToPrompt } from '../services/one21-prep-signals.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
 let kpiPool: sql.ConnectionPool | null = null;
@@ -115,9 +116,18 @@ export async function generatePrepForAgent(
     }
   }
 
+  // The richer signals — escalations, AI-agent interaction, coaching signals, named QA
+  // tickets, movement vs the previous period. These were the whole point of the separate
+  // Briefing121Service, which never worked because it was keyed on a display name where
+  // a Jira account id was needed. See one21-prep-signals.ts.
+  const signals = await gatherPrepSignals(settingsQueries, agentName, sinceDate, qaRows as any);
+
   const systemPrompt = `You are an assistant helping a support team manager prepare for a 1-2-1 meeting with a team member.
-Generate a structured prep document. Be specific, reference actual numbers and tickets. Keep it concise and actionable.
+Generate a structured prep document. Be specific, reference actual numbers and TICKET KEYS. Keep it concise and actionable.
 Focus on: what's improved, what needs attention, goal progress, and suggested talking points.
+
+Ground every point in the data given. Never infer a number that is not there, and treat
+anything listed as unavailable as UNKNOWN — never as zero, and never as a finding.
 
 You MUST respond with a single flat JSON object with exactly these keys:
 {
@@ -125,7 +135,7 @@ You MUST respond with a single flat JSON object with exactly these keys:
   "whats_improved": ["string array of improvements"],
   "needs_attention": ["string array of concerns"],
   "goal_progress": [{"goal": "string", "status": "string", "notes": "string"}],
-  "qa_highlights": ["string array of QA observations"],
+  "qa_highlights": ["string array of QA observations, citing ticket keys"],
   "suggested_talking_points": ["string array"],
   "suggested_actions": ["string array"]
 }
@@ -148,6 +158,8 @@ ${JSON.stringify(kpiRows.slice(0, 5).map((r: any) => ({
 ${concerningQa.length > 0
   ? concerningQa.map((r: any) => `- ${r.issueKey}: score ${r.overallScore}, grade ${r.grade}${r.isConcerning ? ' [CONCERNING]' : ''}`).join('\n')
   : 'None — all QA results acceptable'}
+
+${signalsToPrompt(signals)}
 
 ## Development Goals
 ${goals.map((g: any) => `- [${g.status}] ${g.title}: ${g.description ?? ''}${g.metric_key ? ` (target: ${g.metric_key} ≥ ${g.metric_target})` : ''}${g.target_date ? ` by ${g.target_date}` : ''}`).join('\n') || 'No goals set'}
@@ -198,6 +210,12 @@ ${plan?.important_context ?? 'None'}`;
     periodDays: kpiRows.length,
   };
 
+  // The gathered signals ride along inside prep_json, so every existing reader —
+  // getSessionDetail, stage 2, the manager email — gets them without a schema change,
+  // and the numbers on screen are the same ones the model reasoned over rather than a
+  // second query that could disagree with it.
+  const prepJson = { ...llmResult.data, signals };
+
   const goalsJson = goals.map((g: any) => ({
     id: g.id, title: g.title, status: g.status,
     metric_key: g.metric_key, metric_target: g.metric_target,
@@ -213,7 +231,7 @@ ${plan?.important_context ?? 'None'}`;
     new Date().toISOString().slice(0, 10),
     JSON.stringify(metricsJson),
     JSON.stringify(goalsJson),
-    JSON.stringify(llmResult.data),
+    JSON.stringify(prepJson),
     `Auto-generated prep (${llmResult.provider}/${llmResult.model})`,
   ]);
 
@@ -228,7 +246,7 @@ ${plan?.important_context ?? 'None'}`;
     });
   }
 
-  return { snapshotId, prep: llmResult.data };
+  return { snapshotId, prep: prepJson };
 }
 
 export function createPeopleRoutes(deps: PeopleDeps): Router {

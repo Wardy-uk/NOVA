@@ -186,6 +186,17 @@ export function one21PrepManagerHtml(opts: {
   whatsImproved: string[];
   needsAttention: string[];
   talkingPoints: string[];
+  /** Escalations / AI-agent interaction / coaching / named QA tickets / period movement.
+   *  Optional so a snapshot generated before these existed still renders. */
+  signals?: {
+    escalations?: { count: number; appropriateRate: number | null } | null;
+    autonomy?: { approvals: number; rejections: number } | null;
+    coaching?: Array<{ signalType: string; detail: string; requestType: string | null }>;
+    qaBest?: Array<{ ticketKey: string; score: number }>;
+    qaWorst?: Array<{ ticketKey: string; score: number; grade: string | null }>;
+    trends?: Array<{ metric: string; direction: string; detail: string }>;
+    unavailable?: string[];
+  } | null;
   openUrl: string;
 }): string {
   const list = (items: string[]) =>
@@ -195,6 +206,28 @@ export function one21PrepManagerHtml(opts: {
   const section = (title: string, color: string, items: string[]) => `
     <p style="margin:16px 0 4px;color:${color};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600">${title}</p>
     <table cellpadding="0" cellspacing="0" width="100%">${list(items)}</table>`;
+
+  // Facts, not prose — rendered from the same numbers the model was given, so the email
+  // cannot say one thing while the screen says another.
+  const s = opts.signals;
+  const evidence: string[] = [];
+  if (s) {
+    for (const t of s.trends ?? []) {
+      const mark = t.direction === 'improving' ? '▲' : t.direction === 'declining' ? '▼' : '–';
+      evidence.push(`${mark} ${t.metric}: ${t.detail}`);
+    }
+    if (s.escalations) {
+      evidence.push(`Escalations: ${s.escalations.count}` +
+        (s.escalations.appropriateRate !== null
+          ? ` (${(s.escalations.appropriateRate * 100).toFixed(0)}% judged appropriate)`
+          : ''));
+    }
+    if (s.autonomy) evidence.push(`AI suggestions: ${s.autonomy.approvals} approved, ${s.autonomy.rejections} rejected`);
+    if (s.qaWorst?.length) evidence.push(`Weakest QA: ${s.qaWorst.map((t) => `${t.ticketKey} (${t.score})`).join(', ')}`);
+    if (s.qaBest?.length) evidence.push(`Strongest QA: ${s.qaBest.map((t) => `${t.ticketKey} (${t.score})`).join(', ')}`);
+    for (const c of s.coaching ?? []) evidence.push(`Coaching signal — ${c.signalType}: ${c.detail}`);
+  }
+
   return wrap(`
     <p style="margin:0 0 8px;color:#e5e5e5;font-size:15px;font-weight:600">1-2-1 prep — ${opts.agentName}</p>
     <p style="margin:0 0 6px;color:#a0a0a0;font-size:13px">Scheduled for <strong style="color:#e5e5e5">${opts.dateDisplay}</strong>.</p>
@@ -202,7 +235,11 @@ export function one21PrepManagerHtml(opts: {
     ${opts.summary ? `<p style="margin:0 0 8px;color:#e5e5e5;font-size:14px">${opts.summary}</p>` : '<p style="margin:0 0 8px;color:#f59e0b;font-size:13px">Auto-prep summary was unavailable — open NOVA for the latest numbers.</p>'}
     ${section("What's improved", '#10b981', opts.whatsImproved)}
     ${section('Needs attention', '#ef4444', opts.needsAttention)}
+    ${evidence.length ? section('Evidence', '#a78bfa', evidence) : ''}
     ${section('Talking points', '#5ec1ca', opts.talkingPoints)}
+    ${s?.unavailable?.length
+      ? `<p style="margin:14px 0 0;color:#6b7280;font-size:11px">Not available this time: ${s.unavailable.join('; ')}.</p>`
+      : ''}
     <div style="height:8px"></div>
     ${button(opts.openUrl, 'Open in N.O.V.A')}
   `);

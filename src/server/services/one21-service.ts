@@ -1107,6 +1107,7 @@ export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorro
             whatsImproved: prep?.whats_improved ?? [],
             needsAttention: prep?.needs_attention ?? [],
             talkingPoints: prep?.suggested_talking_points ?? [],
+            signals: prep?.signals ?? null,
             openUrl: novaBaseUrl(),
           }),
         });

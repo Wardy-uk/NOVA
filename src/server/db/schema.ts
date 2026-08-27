@@ -1866,6 +1866,13 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_training_signals_agent')
      CREATE INDEX IX_training_signals_agent ON agent_training_signals(agent_id, generated_at DESC);`,
 
+    // ⚠ ORPHANED, deliberately. Nothing reads or writes this table since 2026-08-27:
+    // Briefing121Service was a second 1-2-1 prep generator that never actually ran (it
+    // was keyed on a display name where a Jira account id was needed, and held zero rows
+    // in its whole life). Its useful signals now live in services/one21-prep-signals.ts,
+    // folded into the prep that the day-before job really sends. Kept rather than
+    // dropped — the migration is idempotent and an empty table costs nothing, whereas a
+    // DROP in a startup migration is a destructive step nobody asked for.
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_briefings') AND type = 'U')
      CREATE TABLE agent_121_briefings (
        id INT IDENTITY(1,1) PRIMARY KEY,
