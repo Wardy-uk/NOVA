@@ -309,6 +309,9 @@ export function createNeuroBridge121Routes(): Router {
         notePath: req.body?.notePath ? String(req.body.notePath).slice(0, 500) : null,
         transcript,
         attribution: req.body?.attribution ? String(req.body.attribution).slice(0, 200) : null,
+        participants: req.body?.participants ? String(req.body.participants).slice(0, 500) : null,
+        durationMinutes: Number.isFinite(Number(req.body?.durationMinutes)) ? Math.round(Number(req.body.durationMinutes)) : null,
+        summaryExcerpt: req.body?.summaryExcerpt ? String(req.body.summaryExcerpt).slice(0, 2000) : null,
       });
       if (result.created) {
         console.log(`[121-bridge] transcript candidate for ${req.body?.agentName ?? 'unknown'} (${meetingDate || 'no date'})`);

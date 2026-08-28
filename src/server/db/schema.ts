@@ -690,6 +690,17 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_121_transcript_candidate_plaud')
      CREATE UNIQUE INDEX UX_121_transcript_candidate_plaud ON agent_121_transcript_candidates (plaud_id);`,
 
+    // What a human needs to judge the proposal. The first cut showed a title, a date and
+    // "no transcript text", which is not enough to decide whether a recording belongs on
+    // someone's permanent record — so approving it was a guess, which defeats the point
+    // of asking. Plaud's own summary names the participants and says what was discussed.
+    `IF COL_LENGTH('agent_121_transcript_candidates', 'participants') IS NULL
+     ALTER TABLE agent_121_transcript_candidates ADD participants NVARCHAR(500) NULL;`,
+    `IF COL_LENGTH('agent_121_transcript_candidates', 'duration_minutes') IS NULL
+     ALTER TABLE agent_121_transcript_candidates ADD duration_minutes INT NULL;`,
+    `IF COL_LENGTH('agent_121_transcript_candidates', 'summary_excerpt') IS NULL
+     ALTER TABLE agent_121_transcript_candidates ADD summary_excerpt NVARCHAR(2000) NULL;`,
+
     // Per-agent 1-2-1 cadence in days (default monthly). Override per agent in §B2.
     `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL
      ALTER TABLE agent_development_plans ADD one21_cadence_days INT NULL;`,

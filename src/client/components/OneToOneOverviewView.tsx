@@ -24,6 +24,7 @@ interface Overview {
 interface Candidate {
   id: number; plaud_id: string; agent_name: string | null; meeting_date: string | null;
   title: string | null; note_path: string | null; attribution: string | null;
+  participants: string | null; duration_minutes: number | null; summary_excerpt: string | null;
   preview?: string; transcript_chars?: number;
 }
 
@@ -188,15 +189,32 @@ export function OneToOneOverviewView() {
           {candidates.map((c) => (
             <div key={c.id} style={{ background: C.glass, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
               <div style={{ fontSize: 13, color: C.text1, fontWeight: 600 }}>{c.title || '(untitled recording)'}</div>
-              <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>
                 {c.meeting_date ? d(c.meeting_date) : 'no date'}
-                {c.transcript_chars ? ` · ${Math.round(c.transcript_chars / 1000)}k chars` : ' · no transcript text'}
-                {c.attribution ? ` · matched by ${c.attribution}` : ''}
+                {c.duration_minutes ? ` · ${c.duration_minutes} min` : ''}
+                {c.transcript_chars
+                  ? ` · transcript ${Math.round(c.transcript_chars / 1000)}k chars`
+                  : ' · ⚠ no transcript — nothing to extract from'}
               </div>
-              {c.preview && (
-                <div style={{ fontSize: 11.5, color: C.text2, marginTop: 6, fontStyle: 'italic', maxHeight: 54, overflow: 'hidden' }}>
-                  {c.preview}…
+              {/* Who Plaud actually heard. This is the single most useful line for
+                  deciding, and the reason attribution stopped being a title guess. */}
+              {c.participants && (
+                <div style={{ fontSize: 12, color: C.text2, marginTop: 5 }}>
+                  <span style={{ color: C.text3 }}>In the room: </span>{c.participants}
                 </div>
+              )}
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 3, fontStyle: 'italic' }}>
+                {c.attribution ? `NEURO: ${c.attribution}` : 'no attribution'}
+                {c.note_path ? ` · ${c.note_path}` : ''}
+              </div>
+              {c.summary_excerpt && (
+                <details style={{ marginTop: 7 }}>
+                  <summary style={{ fontSize: 11.5, color: C.teal, cursor: 'pointer' }}>What was discussed</summary>
+                  <div style={{
+                    fontSize: 12, color: C.text2, marginTop: 6, whiteSpace: 'pre-wrap',
+                    maxHeight: 260, overflowY: 'auto', paddingRight: 6, lineHeight: 1.5,
+                  }}>{c.summary_excerpt}</div>
+                </details>
               )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
                 <select
