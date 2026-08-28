@@ -88,7 +88,10 @@ export function KbGapsView({ token, role }: { token: string; role?: string }) {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
-  const isAdmin = role === 'admin' || role === 'super_admin';
+  // role is a comma-separated list ("super_admin,admin,support,…"), so it has to be
+  // split — an equality check silently hides the refresh button from every real admin.
+  const roles = (role ?? '').split(',').map(r => r.trim());
+  const isAdmin = roles.includes('admin') || roles.includes('super_admin');
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   const api = useCallback(async (path: string, init?: RequestInit) => {
@@ -270,7 +273,18 @@ export function KbGapsView({ token, role }: { token: string; role?: string }) {
 
         {!loading && clusters.length === 0 && (
           <div className="text-neutral-500 text-sm py-8 text-center">
-            No topics with this status.{isAdmin && statusFilter === 'open' ? ' Run "Refresh topics" to build the register from recent triage.' : ''}
+            {statusFilter === 'open' && (counts.pending_gaps ?? 0) > 0 ? (
+              <>
+                <div className="text-neutral-300">
+                  {counts.pending_gaps.toLocaleString()} logged gap{counts.pending_gaps === 1 ? '' : 's'} waiting to be grouped into topics.
+                </div>
+                <div className="mt-1">
+                  Nothing is lost — {isAdmin ? 'click "Refresh topics" to build the register.' : 'an admin needs to run "Refresh topics".'}
+                </div>
+              </>
+            ) : (
+              'No topics with this status.'
+            )}
           </div>
         )}
 

@@ -336,6 +336,13 @@ Produce:
     );
     const counts: Record<string, number> = { open: 0, article_drafted: 0, article_published: 0, dismissed: 0 };
     for (const r of rows) counts[r.status] = r.cnt;
+
+    // Raw gaps still waiting to be clustered. Without this the view reads "0 topics"
+    // while thousands of logged gaps sit behind it, which looks like data loss.
+    const pending = await query<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM kb_gap_log WHERE status = 'open' AND cluster_id IS NULL`,
+    );
+    counts.pending_gaps = pending[0]?.cnt ?? 0;
     return counts;
   }
 
