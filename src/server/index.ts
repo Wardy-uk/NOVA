@@ -1697,6 +1697,32 @@ async function main() {
     });
     const kbGapRegister = new KbGapRegisterService(kbGapEmbedder, llmService, settingsQueries);
 
+    // Keep the KB gap register current. Without this it only ever holds the gaps that
+    // existed when someone last pressed the button, and goes stale exactly the way the
+    // old ungrouped list did. Ticks every 5 min and acts at 00:00 and 12:00 UK.
+    // briefLimit is per run, so the backlog is worked through over days rather than
+    // spending the whole LLM budget in one pass.
+    let lastGapRefreshSlot = '';
+    jobRegistry.register('kb-gap-register-refresh', 'KB gap register: embed, cluster, brief (00:00 & 12:00)', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
+      if (!(ukHour === 0 || ukHour === 12) || ukMin >= 5) return;
+
+      // A restart inside the 5-minute window would otherwise re-brief new clusters.
+      const slot = `${now.toLocaleDateString('en-GB', { timeZone: 'Europe/London' })}-${ukHour}`;
+      if (lastGapRefreshSlot === slot) return;
+      lastGapRefreshSlot = slot;
+
+      const briefLimit = Math.min(parseInt(settingsQueries.get('kb_gap_brief_limit_per_run') || '', 10) || 10, 50);
+      try {
+        const r = await kbGapRegister.refresh({ briefLimit });
+        console.log(`[kb-gap-register] refresh: embedded ${r.embedded}, ${r.created} new topics, ${r.joined} merged, ${r.briefed} briefed, ${r.failed} failed`);
+      } catch (err) {
+        console.error('[kb-gap-register] scheduled refresh failed:', err instanceof Error ? err.message : err);
+      }
+    }, 5 * 60 * 1000);
+
     app.use('/api/agent', createAgentRoutes(agentLoop, {
       assignmentEngine,
       availabilityService,
