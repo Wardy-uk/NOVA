@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { PlaudAttachButton } from './PlaudAttachButton.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -206,6 +205,10 @@ export function AgentRosterView({ onSelectAgent }: {
   const [sessionsData, setSessionsData] = useState<Record<string, SessionEntry>>({});
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState<string | null>(null);
+  // Recordings waiting to be approved on the 1-2-1 Overview, keyed by agent. Fetched
+  // separately and failing silently — the roster is the main screen and must render
+  // whether or not this answers.
+  const [pendingTranscripts, setPendingTranscripts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [snapshotting, setSnapshotting] = useState<string | null>(null);
   const [generatingPrepFor, setGeneratingPrepFor] = useState<string | null>(null);
@@ -214,6 +217,17 @@ export function AgentRosterView({ onSelectAgent }: {
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    fetch('/api/121/transcript-candidates')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.ok) return;
+        const byName: Record<string, number> = {};
+        for (const c of j.data as Array<{ agent_name: string | null }>) {
+          if (c.agent_name) byName[c.agent_name] = (byName[c.agent_name] ?? 0) + 1;
+        }
+        setPendingTranscripts(byName);
+      })
+      .catch(() => {});
     setLoading(true);
     try {
       const [rosterRes, kpiRes, surveyRes, calRes, sessRes] = await Promise.all([
@@ -568,12 +582,14 @@ export function AgentRosterView({ onSelectAgent }: {
                   {card.trainingLabel}
                 </div>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                {ragDot(card.satisfactionHealth)}
+              {/* Per-agent satisfaction is unobtainable BY DESIGN — the survey promises
+                  responses are never traced to a named agent, and the token that would
+                  make the join possible was removed. A grey dot that never lights reads
+                  as missing data and invites someone to "fix" it, so say so instead. */}
+              <div style={{ textAlign: 'center' }} title="Not available by design — survey responses are anonymous and are never attributed to an individual">
+                <div style={{ fontSize: 13, color: C.text3, lineHeight: '13px' }}>–</div>
                 <div style={{ fontSize: 8, color: C.text3, marginTop: 3 }}>Satisf.</div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.text2 }}>
-                  {card.satisfactionAvg !== null ? fmt(card.satisfactionAvg) : '—'}
-                </div>
+                <div style={{ fontSize: 9, fontWeight: 500, color: C.text3 }}>n/a</div>
               </div>
               <div style={{ textAlign: 'center' }}>
                 {ragDot(card.next121Health)}
@@ -647,7 +663,18 @@ export function AgentRosterView({ onSelectAgent }: {
               >{snapshotting === card.name ? 'Saving...' : '1-2-1 Snapshot'}</button>
             </div>
             <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
-              <PlaudAttachButton agentName={card.name} compact onAttached={fetchData} />
+              {/* "Attach Recording" used to live here and called Plaud over MCP — a
+                  connection never authorised in prod, so the button could not work at
+                  all. Transcripts now arrive from NEURO and are approved on the 1-2-1
+                  Overview; this says when one is waiting for THIS person. */}
+              {pendingTranscripts[card.name] > 0 && (
+                <div style={{
+                  marginTop: 6, padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  background: `${C.teal}18`, border: `1px solid ${C.teal}55`, color: C.teal,
+                }}>
+                  🎙 {pendingTranscripts[card.name]} recording{pendingTranscripts[card.name] === 1 ? '' : 's'} to approve — 1-2-1 Overview
+                </div>
+              )}
             </div>
           </div>
         ))}

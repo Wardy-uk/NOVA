@@ -4,7 +4,7 @@ import { query } from '../services/database.js';
 import {
   upsertBooking, cancelOpenSessions, isKnownAgent, setAgentCadenceDays,
 } from '../services/one21-service.js';
-import { recordCandidate, getKnownPlaudIds } from '../services/one21-candidates.js';
+import { recordCandidate, getResolvedPlaudIds, getPendingByAgent } from '../services/one21-candidates.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
 /**
@@ -334,10 +334,26 @@ export function createNeuroBridge121Routes(): Router {
   router.get('/121/known-recordings', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
     try {
-      res.json({ ok: true, data: { plaudIds: await getKnownPlaudIds() } });
+      const { approved, rejected } = await getResolvedPlaudIds();
+      // `plaudIds` is both lists together — what the sweep needs to stop re-offering.
+      // The split is what the ACTION EXTRACTION needs: an approved recording is
+      // extracted here and NEURO must not pay for a second pass over the same words,
+      // while a rejected one is not a 1-2-1 and belongs in NEURO's ordinary scan.
+      res.json({ ok: true, data: { plaudIds: [...approved, ...rejected], approved, rejected } });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(503).json({ ok: false, error: message, plaudIds: null });
+    }
+  });
+
+  /** GET /121/pending-candidates — who has a transcript awaiting a decision. */
+  router.get('/121/pending-candidates', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      res.json({ ok: true, data: { agents: await getPendingByAgent() } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({ ok: false, error: message, agents: null });
     }
   });
 

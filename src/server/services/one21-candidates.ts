@@ -176,10 +176,33 @@ export async function rejectCandidate(candidateId: number): Promise<void> {
   `, [candidateId]);
 }
 
-/** Plaud ids NEURO need not offer again — already resolved one way or the other. */
-export async function getKnownPlaudIds(): Promise<string[]> {
-  const rows = await query<{ plaud_id: string }>(
-    `SELECT plaud_id FROM agent_121_transcript_candidates WHERE status <> 'pending'
-     UNION SELECT plaud_recording_id FROM agent_121_sessions WHERE plaud_recording_id IS NOT NULL`);
-  return rows.map((r) => r.plaud_id).filter(Boolean);
+/**
+ * Which recordings NOVA has resolved, split by HOW.
+ *
+ * The split matters because NEURO uses it to decide whether to extract a note itself.
+ * A 1-2-1 recording is extracted once, here, and NEURO must not spend a second LLM call
+ * on the same words — but a recording Nick REJECTED is not a 1-2-1 at all, so it falls
+ * back to NEURO's ordinary meeting scan. Merging the two lists would silently drop
+ * rejected meetings out of both systems.
+ */
+export async function getResolvedPlaudIds(): Promise<{ approved: string[]; rejected: string[] }> {
+  const rows = await query<{ plaud_id: string; status: string }>(`
+    SELECT plaud_id, status FROM agent_121_transcript_candidates WHERE status <> 'pending'
+    UNION
+    SELECT plaud_recording_id, 'approved' FROM agent_121_sessions WHERE plaud_recording_id IS NOT NULL
+  `);
+  return {
+    approved: rows.filter((r) => r.status === 'approved').map((r) => r.plaud_id).filter(Boolean),
+    rejected: rows.filter((r) => r.status === 'rejected').map((r) => r.plaud_id).filter(Boolean),
+  };
+}
+
+/** Who has a transcript waiting on a decision — drives the badge on NEURO's People card. */
+export async function getPendingByAgent(): Promise<Array<{ agentName: string | null; count: number; latest: string | null }>> {
+  return query(`
+    SELECT agent_name AS agentName, COUNT(*) AS count, MAX(meeting_date) AS latest
+    FROM agent_121_transcript_candidates
+    WHERE status = 'pending'
+    GROUP BY agent_name
+  `);
 }
