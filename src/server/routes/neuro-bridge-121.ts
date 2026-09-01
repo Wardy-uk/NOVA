@@ -310,6 +310,7 @@ export function createNeuroBridge121Routes(): Router {
         transcript,
         attribution: req.body?.attribution ? String(req.body.attribution).slice(0, 200) : null,
         participants: req.body?.participants ? String(req.body.participants).slice(0, 500) : null,
+        startedAt: req.body?.startedAt ? String(req.body.startedAt).slice(0, 30) : null,
         durationMinutes: Number.isFinite(Number(req.body?.durationMinutes)) ? Math.round(Number(req.body.durationMinutes)) : null,
         summaryExcerpt: req.body?.summaryExcerpt ? String(req.body.summaryExcerpt).slice(0, 2000) : null,
       });

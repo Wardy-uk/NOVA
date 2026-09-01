@@ -29,6 +29,7 @@ export interface TranscriptCandidate {
   note_path: string | null;
   attribution: string | null;
   participants: string | null;
+  started_at: string | null;
   duration_minutes: number | null;
   summary_excerpt: string | null;
   status: string;
@@ -56,6 +57,7 @@ export async function recordCandidate(input: {
   transcript: string | null;
   attribution: string | null;
   participants?: string | null;
+  startedAt?: string | null;
   durationMinutes?: number | null;
   summaryExcerpt?: string | null;
 }): Promise<{ id: number; created: boolean; status: string }> {
@@ -68,11 +70,12 @@ export async function recordCandidate(input: {
         UPDATE agent_121_transcript_candidates
         SET agent_name = ?, meeting_date = ?, title = ?, note_path = ?,
             transcript_text = COALESCE(?, transcript_text), attribution = ?,
-            participants = ?, duration_minutes = ?, summary_excerpt = ?
+            participants = ?, started_at = ?, duration_minutes = ?, summary_excerpt = ?
         WHERE id = ?
       `, [input.agentName, input.meetingDate, input.title, input.notePath,
           input.transcript, input.attribution,
-          input.participants ?? null, input.durationMinutes ?? null, input.summaryExcerpt ?? null,
+          input.participants ?? null, input.startedAt ?? null,
+          input.durationMinutes ?? null, input.summaryExcerpt ?? null,
           existing.id]);
     }
     return { id: existing.id, created: false, status: existing.status };
@@ -81,11 +84,12 @@ export async function recordCandidate(input: {
   const id = await executeAndGetId(`
     INSERT INTO agent_121_transcript_candidates
       (plaud_id, agent_name, meeting_date, title, note_path, transcript_text, attribution,
-       participants, duration_minutes, summary_excerpt, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+       participants, started_at, duration_minutes, summary_excerpt, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
   `, [input.plaudId, input.agentName, input.meetingDate, input.title, input.notePath,
       input.transcript, input.attribution,
-      input.participants ?? null, input.durationMinutes ?? null, input.summaryExcerpt ?? null]);
+      input.participants ?? null, input.startedAt ?? null,
+      input.durationMinutes ?? null, input.summaryExcerpt ?? null]);
   return { id, created: true, status: 'pending' };
 }
 
@@ -93,7 +97,7 @@ export async function recordCandidate(input: {
 export async function listPendingCandidates(): Promise<TranscriptCandidate[]> {
   const rows = await query<TranscriptCandidate & { transcript_text: string | null }>(`
     SELECT id, plaud_id, agent_name, meeting_date, title, note_path, attribution,
-           participants, duration_minutes, summary_excerpt,
+           participants, started_at, duration_minutes, summary_excerpt,
            status, session_id, created_at,
            LEFT(transcript_text, 400) AS transcript_text,
            LEN(transcript_text) AS transcript_chars

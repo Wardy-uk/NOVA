@@ -700,6 +700,11 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE agent_121_transcript_candidates ADD duration_minutes INT NULL;`,
     `IF COL_LENGTH('agent_121_transcript_candidates', 'summary_excerpt') IS NULL
      ALTER TABLE agent_121_transcript_candidates ADD summary_excerpt NVARCHAR(2000) NULL;`,
+    // The TIME the recording started, not just its date. Nick runs several 1-2-1s on the
+    // same day, so a date alone does not identify which conversation a card is — and the
+    // whole point of the card is to decide exactly that.
+    `IF COL_LENGTH('agent_121_transcript_candidates', 'started_at') IS NULL
+     ALTER TABLE agent_121_transcript_candidates ADD started_at NVARCHAR(30) NULL;`,
 
     // Per-agent 1-2-1 cadence in days (default monthly). Override per agent in §B2.
     `IF COL_LENGTH('agent_development_plans', 'one21_cadence_days') IS NULL

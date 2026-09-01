@@ -24,7 +24,8 @@ interface Overview {
 interface Candidate {
   id: number; plaud_id: string; agent_name: string | null; meeting_date: string | null;
   title: string | null; note_path: string | null; attribution: string | null;
-  participants: string | null; duration_minutes: number | null; summary_excerpt: string | null;
+  participants: string | null; started_at: string | null;
+  duration_minutes: number | null; summary_excerpt: string | null;
   preview?: string; transcript_chars?: number;
 }
 
@@ -33,6 +34,14 @@ interface Drift {
   notOnRoster: Array<{ agentName: string; nearMatch: string | null }>;
   noPlan: string[];
 }
+
+/** "14:04" from a PLAUD `start_at`. Rendered as-is rather than through a Date: the vault
+ *  stores local wall-clock with no zone, so parsing it would shift the time by the
+ *  viewer's offset and put an afternoon 1-2-1 in the morning. */
+const startTime = (s: string | null): string | null => {
+  const m = /T(\d{2}:\d{2})/.exec(String(s ?? ''));
+  return m ? m[1] : null;
+};
 
 const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
 
@@ -191,6 +200,9 @@ export function OneToOneOverviewView() {
               <div style={{ fontSize: 13, color: C.text1, fontWeight: 600 }}>{c.title || '(untitled recording)'}</div>
               <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>
                 {c.meeting_date ? d(c.meeting_date) : 'no date'}
+                {/* The TIME matters: several 1-2-1s happen on one day, and the date alone
+                    does not say which conversation this is. */}
+                {startTime(c.started_at) ? ` at ${startTime(c.started_at)}` : ''}
                 {c.duration_minutes ? ` · ${c.duration_minutes} min` : ''}
                 {c.transcript_chars
                   ? ` · transcript ${Math.round(c.transcript_chars / 1000)}k chars`
