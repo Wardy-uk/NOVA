@@ -195,6 +195,36 @@ function fmt(v: number | null, dp = 1): string {
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
+/** Per-agent 1-2-1 loop state, as `GET /api/121/overview` reports it. */
+interface LoopState {
+  agent_name: string;
+  nextStatus: string | null;
+  overdue: boolean; stalled: boolean; awaitingPrep: boolean; prepSubmitted: boolean;
+  outstandingActions: number; awaitingConfirmation: number; deliveryRate: number | null;
+}
+
+/**
+ * What the 1-2-1 column should SAY — the state, not the date.
+ *
+ * A red date duplicated what NEURO's board already shows and read as an alarm without
+ * saying what to do. These are the things only NOVA knows: whether prep went out, whether
+ * they answered it, whether a session was opened and abandoned.
+ *
+ * Ordered by what needs attention first. `stalled` outranks `overdue` because a stalled
+ * session blocks the loop — no prep can fire for it and the next 1-2-1 is never booked —
+ * whereas an overdue one is simply a meeting not yet held.
+ */
+function loopLabel(l: LoopState | undefined, overdueFallback: boolean): { text: string; tone: 'red' | 'amber' | 'green' | 'grey' } {
+  if (!l) return { text: overdueFallback ? 'Overdue' : '—', tone: overdueFallback ? 'red' : 'grey' };
+  if (l.stalled) return { text: 'Stalled', tone: 'red' };
+  if (l.overdue) return { text: 'Overdue', tone: 'red' };
+  if (l.awaitingConfirmation > 0) return { text: `${l.awaitingConfirmation} to confirm`, tone: 'amber' };
+  if (l.awaitingPrep) return { text: 'Prep sent', tone: 'amber' };
+  if (l.prepSubmitted) return { text: 'Prep in', tone: 'green' };
+  if (l.nextStatus) return { text: 'Scheduled', tone: 'grey' };
+  return { text: 'Not scheduled', tone: 'grey' };
+}
+
 export function AgentRosterView({ onSelectAgent }: {
   onSelectAgent: (agentName: string) => void;
 }) {
@@ -209,6 +239,10 @@ export function AgentRosterView({ onSelectAgent }: {
   // separately and failing silently — the roster is the main screen and must render
   // whether or not this answers.
   const [pendingTranscripts, setPendingTranscripts] = useState<Record<string, number>>({});
+  // The 1-2-1 loop's own numbers, from the overview endpoint that already computes them.
+  // Deliberately NOT recomputed here: two screens deriving "is this overdue" from the
+  // same rows is how they come to disagree.
+  const [loop, setLoop] = useState<Record<string, LoopState>>({});
   const [loading, setLoading] = useState(true);
   const [snapshotting, setSnapshotting] = useState<string | null>(null);
   const [generatingPrepFor, setGeneratingPrepFor] = useState<string | null>(null);
@@ -217,6 +251,16 @@ export function AgentRosterView({ onSelectAgent }: {
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    fetch('/api/121/overview')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.ok) return;
+        const byName: Record<string, LoopState> = {};
+        for (const a of j.data.agents as LoopState[]) byName[a.agent_name] = a;
+        setLoop(byName);
+      })
+      .catch(() => {});
+
     fetch('/api/121/transcript-candidates')
       .then((r) => r.json())
       .then((j) => {
@@ -593,7 +637,16 @@ export function AgentRosterView({ onSelectAgent }: {
               </div>
               <div style={{ textAlign: 'center' }}>
                 {ragDot(card.next121Health)}
-                <div style={{ fontSize: 8, color: C.text3, marginTop: 3 }}>1-2-1</div>
+                {/* The STATE, not just the date — a date alone duplicated NEURO's board
+                    and said nothing about what to do next. The date stays underneath,
+                    still click-to-edit. */}
+                <div style={{ fontSize: 8, color: C.text3, marginTop: 3 }}>
+                  {(() => {
+                    const l = loopLabel(loop[card.name], card.next121Overdue);
+                    const tone = l.tone === 'red' ? C.red : l.tone === 'amber' ? C.amber : l.tone === 'green' ? C.green : C.text3;
+                    return <span style={{ color: tone, fontWeight: l.tone === 'grey' ? 400 : 700 }}>{l.text}</span>;
+                  })()}
+                </div>
                 {editingDate === card.name ? (
                   <input
                     type="date"
@@ -635,6 +688,35 @@ export function AgentRosterView({ onSelectAgent }: {
               </div>
             </div>
 
+            {/* The loop's own outputs — none of this was on the card, so the work the
+                1-2-1 process produces was invisible on the screen Nick actually uses.
+                Rendered only when there is something to say: a row of zeros on every
+                card teaches you to stop reading it. */}
+            {(() => {
+              const l = loop[card.name];
+              if (!l) return null;
+              const bits: Array<{ label: string; value: string; color: string }> = [];
+              if (l.outstandingActions > 0) bits.push({ label: 'open', value: String(l.outstandingActions), color: C.text2 });
+              if (l.awaitingConfirmation > 0) bits.push({ label: 'to confirm', value: String(l.awaitingConfirmation), color: C.teal });
+              if (l.deliveryRate !== null) {
+                bits.push({
+                  label: 'delivered',
+                  value: `${l.deliveryRate}%`,
+                  color: l.deliveryRate >= 80 ? C.green : l.deliveryRate >= 50 ? C.amber : C.red,
+                });
+              }
+              if (!bits.length) return null;
+              return (
+                <div style={{ display: 'flex', gap: 12, marginBottom: 8, fontSize: 10, color: C.text3 }}>
+                  {bits.map((b) => (
+                    <span key={b.label}>
+                      <strong style={{ color: b.color, fontWeight: 700 }}>{b.value}</strong> {b.label}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: 8 }}>
               <button
@@ -648,8 +730,10 @@ export function AgentRosterView({ onSelectAgent }: {
                   fontSize: 10, fontWeight: 600, cursor: generatingPrepFor === card.name ? 'wait' : 'pointer',
                   transition: 'all 0.2s',
                 }}
-                title={prepResult?.agent === card.name && !prepResult.ok ? prepResult.error : undefined}
-              >{generatingPrepFor === card.name ? 'Generating...' : prepResult?.agent === card.name && prepResult.ok ? '✓ Prep Ready' : prepResult?.agent === card.name && !prepResult.ok ? 'Failed' : 'Generate 1-2-1 Prep'}</button>
+                title={prepResult?.agent === card.name && !prepResult.ok
+                  ? prepResult.error
+                  : "Prep is generated automatically the day before a booked 1-2-1 and emailed to you both. This is the ad-hoc path — regenerate it, or prep a 1-2-1 that isn't booked."}
+              >{generatingPrepFor === card.name ? 'Generating...' : prepResult?.agent === card.name && prepResult.ok ? '✓ Prep Ready' : prepResult?.agent === card.name && !prepResult.ok ? 'Failed' : 'Prep now'}</button>
               <button
                 onClick={e => { e.stopPropagation(); createSnapshot(card.name); }}
                 disabled={snapshotting === card.name}
