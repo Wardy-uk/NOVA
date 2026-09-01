@@ -837,22 +837,32 @@ function UserOrgMemberships({ user, orgs }: {
 
 function OrgsPanel() {
   const [reloadKey, setReloadKey] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
   const { data: orgs, loading } = useFetch<Array<{
     id: number; name: string; domain: string | null; user_count: number;
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
-    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number; archived: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
 
   if (loading) return <div className="animate-pulse h-48 bg-gray-800 rounded-lg" />;
 
+  const archivedCount = (orgs || []).filter(o => o.archived).length;
+  const visible = (orgs || []).filter(o => showArchived || !o.archived);
+
   return (
     <div className="space-y-3">
       <AddOrg onCreated={() => setReloadKey(k => k + 1)} />
-      {(orgs || []).map(o => (
+      {archivedCount > 0 && (
+        <label className="flex items-center gap-2 px-1 text-xs text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+          Show {archivedCount} archived organisation{archivedCount === 1 ? '' : 's'}
+        </label>
+      )}
+      {visible.map(o => (
         <OrgRow key={o.id} org={o} onSaved={() => setReloadKey(k => k + 1)} />
       ))}
       {(!orgs || orgs.length === 0) && (
@@ -1043,7 +1053,7 @@ function OrgRow({ org, onSaved }: {
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
-    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number; archived: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
@@ -1058,6 +1068,7 @@ function OrgRow({ org, onSaved }: {
     onboarding: !!org.guild_onboarding_enabled, digest: !!org.guild_digest_enabled, intsEscalations: !!org.guild_ints_escalations_enabled,
   });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [features, setFeatures] = useState({
     getHelp: !!org.feat_get_help, kb: !!org.feat_kb, support: !!org.feat_support, onboarding: !!org.feat_onboarding, raiseTicket: !!org.feat_raise_ticket,
   });
@@ -1164,12 +1175,29 @@ function OrgRow({ org, onSaved }: {
 
   const inputCls = 'px-2 py-1 text-xs bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:ring-1 focus:ring-teal-500';
 
+  // Archive is the practical alternative to Delete, which has to unpick every
+  // dependent row and times out on established orgs.
+  const setArchived = async (archived: boolean) => {
+    setArchiving(true);
+    try {
+      const res = await fetch(`${API}/organisations/${org.id}/archive`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived }),
+      });
+      const d = await res.json();
+      if (d.ok) onSaved();
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
+    <div className={`bg-gray-800 rounded-lg p-4${org.archived ? ' opacity-60' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-baseline gap-3">
           <h3 className="text-sm font-semibold text-white">{org.name}</h3>
+          {!!org.archived && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">Archived</span>}
           <span className="text-xs font-mono text-gray-500">{org.domain || 'no domain'}</span>
           <span className="text-xs text-gray-500">{org.user_count} user{org.user_count === 1 ? '' : 's'}</span>
         </div>
@@ -1183,6 +1211,14 @@ function OrgRow({ org, onSaved }: {
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           )}
+          <button
+            onClick={() => setArchived(!org.archived)}
+            disabled={archiving}
+            title={org.archived ? 'Restore this organisation to the list' : 'Hide this organisation from the list — nothing is deleted'}
+            className="px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-50 font-medium"
+          >
+            {archiving ? '…' : org.archived ? 'Restore' : 'Archive'}
+          </button>
           <button
             onClick={() => setConfirmDelete(true)}
             title="Delete organisation"

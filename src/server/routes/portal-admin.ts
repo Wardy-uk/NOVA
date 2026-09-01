@@ -365,19 +365,20 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         guild_digest_enabled: number;
         guild_ints_escalations_enabled: number;
         exp_onboarding_enabled: number;
+        archived: number;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket, po.support_routes,
                 po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font, po.support_cc_email,
-                po.guild_onboarding_enabled, po.guild_digest_enabled, po.guild_ints_escalations_enabled, po.exp_onboarding_enabled,
+                po.guild_onboarding_enabled, po.guild_digest_enabled, po.guild_ints_escalations_enabled, po.exp_onboarding_enabled, po.archived,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
                    AND po.domain IS NOT NULL AND po.domain != '') AS ticket_count
          FROM portal_organisations po
-         ORDER BY po.name`,
+         ORDER BY po.archived, po.name`,
       );
       res.json({ ok: true, data: orgs });
     } catch (err) {
@@ -412,6 +413,23 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
   // Preview what deleting an org would remove — the users homed here (hard
   // deleted, flagged if they also belong to other orgs) and the count of users
   // merely a member here (who just lose this one membership).
+  // Archive / restore. Deleting a large org has to unpick every dependent row
+  // and times out, so archiving hides it from this list instead — nothing about
+  // the org's own portal access changes.
+  router.post('/organisations/:id/archive', async (req: Request, res: Response) => {
+    const orgId = parseInt(req.params.id as string, 10);
+    if (!Number.isFinite(orgId)) { res.status(400).json({ ok: false, error: 'Invalid organisation id' }); return; }
+    const archived = req.body?.archived === false ? 0 : 1;
+    try {
+      const org = await queryOne<{ id: number }>(`SELECT TOP 1 id FROM portal_organisations WHERE id = ?`, [orgId]);
+      if (!org) { res.status(404).json({ ok: false, error: 'Organisation not found' }); return; }
+      await execute(`UPDATE portal_organisations SET archived = ?, updated_at = GETUTCDATE() WHERE id = ?`, [archived, orgId]);
+      res.json({ ok: true, data: { archived: !!archived } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to archive organisation' });
+    }
+  });
+
   router.get('/organisations/:id/deletion-impact', async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string, 10);
     if (!id) { res.status(400).json({ ok: false, error: 'Valid organisation ID is required' }); return; }

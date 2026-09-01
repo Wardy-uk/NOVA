@@ -2226,6 +2226,10 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE portal_organisations ADD guild_ints_escalations_enabled BIT NOT NULL CONSTRAINT DF_portal_org_guild_ints DEFAULT 0;`,
     `IF COL_LENGTH('portal_organisations', 'onboarding_config') IS NULL
      ALTER TABLE portal_organisations ADD onboarding_config NVARCHAR(MAX) NULL;`,
+    // Archive hides an inactive org from the Portal Admin list without deleting
+    // it — deletion has to unpick every dependent row and times out on big orgs.
+    `IF COL_LENGTH('portal_organisations', 'archived') IS NULL
+     ALTER TABLE portal_organisations ADD archived BIT NOT NULL CONSTRAINT DF_portal_org_archived DEFAULT 0;`,
     // eXp "new agent joining" onboarding (NT-24880) — a simplified sibling of the
     // Guild pipeline: one submission per agent, QA + Onboarding ticket pair.
     `IF COL_LENGTH('portal_organisations', 'exp_onboarding_enabled') IS NULL
