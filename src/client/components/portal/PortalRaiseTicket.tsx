@@ -16,6 +16,9 @@ interface Props {
   /** eXp "new agent joining" (NT-24880) — the onboarding route becomes the
    *  simplified new-agent form instead of the standard onboarding request. */
   expOnboarding?: boolean;
+  /** GPEA's bespoke intake — adds Network, Agent Name & Branch, Agent Office ID
+   *  and the Hubspot link. Every other org gets the simplified form. */
+  networkForm?: boolean;
 }
 
 type ObFormType = 'application' | 'standard' | 'multi';
@@ -42,7 +45,8 @@ interface OnboardingUser {
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm';
 const labelCls = 'block text-sm font-medium text-gray-700 mb-1';
 
-export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, expOnboarding }: Props) {
+export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, expOnboarding, networkForm }: Props) {
+  const gpeaForm = !!networkForm;
   const enabledRoutes = (routes && routes.length > 0 ? routes : DEFAULT_PORTAL_SUPPORT_ROUTES);
   const [route, setRoute] = useState<PortalSupportRoute>(enabledRoutes[0]);
 
@@ -207,7 +211,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
   }, [openApps, ob.brand, ob.branch, guildOb, obFormType, applicationTouched]);
   const autoMatched = !applicationTouched && applicationId !== '';
 
-  const canSubmitStandard = !!network && !!summary && !!agentNameBranch && !!detail;
+  const canSubmitStandard = !!summary && !!detail && (!gpeaForm || (!!network && !!agentNameBranch));
   const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim() && !!ob.hexCode.trim();
   const canSubmitApplication = !!app.brand.trim() && !!app.branch.trim();
 
@@ -231,15 +235,16 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
       const res = await pf('/api/portal/requests', {
         method: 'POST',
         body: JSON.stringify({
-          network,
+          // GPEA-only context; omitted entirely on the simplified form.
+          network: gpeaForm ? network : undefined,
+          agentNameBranch: gpeaForm ? agentNameBranch : undefined,
+          agentOfficeId: gpeaForm ? (agentOfficeId || undefined) : undefined,
+          hubspotLink: gpeaForm ? (hubspotLink || undefined) : undefined,
           summary,
-          agentNameBranch,
-          agentOfficeId: agentOfficeId || undefined,
           detail,
           priority,
           businessCriticalReason: priority === 'Business Critical' ? (businessCriticalReason || undefined) : undefined,
           requestType,
-          hubspotLink: hubspotLink || undefined,
           notes: notes || undefined,
           ccEmails: ccRecipients.split(',').map(e => e.trim()).filter(Boolean).slice(0, 10) || undefined,
           supportTeam: route === 'development' ? 'development' : 'support',
@@ -553,14 +558,14 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
           />
         ) : (
           <>
-            {/* Network */}
-            <div>
+            {/* Network — GPEA only */}
+            {gpeaForm && <div>
               <label htmlFor="rt-network" className={labelCls}>Network *</label>
               <select id="rt-network" value={network} onChange={e => setNetwork(e.target.value as Network)} className={inputCls}>
                 <option value="Guild">Guild</option>
                 <option value="Fine &amp; Country">Fine &amp; Country</option>
               </select>
-            </div>
+            </div>}
 
             {/* Summary */}
             <div>
@@ -568,17 +573,16 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
               <input id="rt-summary" type="text" value={summary} onChange={e => setSummary(e.target.value)} placeholder="One-line summary of the request" aria-required="true" className={inputCls} />
             </div>
 
-            {/* Agent Name & Branch */}
-            <div>
+            {/* Agent Name & Branch + Agent Office ID — GPEA only */}
+            {gpeaForm && <div>
               <label htmlFor="rt-agent" className={labelCls}>Agent Name &amp; Branch *</label>
               <input id="rt-agent" type="text" value={agentNameBranch} onChange={e => setAgentNameBranch(e.target.value)} placeholder="e.g. Parkers Estate Agents (Backwell)" aria-required="true" className={inputCls} />
-            </div>
+            </div>}
 
-            {/* Agent Office ID */}
-            <div>
+            {gpeaForm && <div>
               <label htmlFor="rt-office" className={labelCls}>Agent Office ID</label>
               <input id="rt-office" type="text" value={agentOfficeId} onChange={e => setAgentOfficeId(e.target.value)} placeholder="e.g. 4579" className={inputCls} />
-            </div>
+            </div>}
 
             {/* Detailed description */}
             <div>
@@ -615,11 +619,11 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
               </div>
             )}
 
-            {/* Hubspot link */}
-            <div>
+            {/* Hubspot link — GPEA only */}
+            {gpeaForm && <div>
               <label htmlFor="rt-hubspot" className={labelCls}>Link to originating Hubspot ticket</label>
               <input id="rt-hubspot" type="text" value={hubspotLink} onChange={e => setHubspotLink(e.target.value)} placeholder="For the Dev team's reference" className={inputCls} />
-            </div>
+            </div>}
 
             {/* Notes */}
             <div>

@@ -192,10 +192,12 @@ export type PortalTicketCreateInput = z.infer<typeof PortalTicketCreateSchema>;
 
 // ── Network Request (Guild / Fine & Country intake → NT) ──
 
+// GPEA's bespoke intake carries Network / Agent / Hubspot context; every other
+// org submits the simplified form, which omits those three, so they're optional.
 export const PortalNetworkRequestSchema = z.object({
-  network: z.enum(['Guild', 'Fine & Country']),
+  network: z.enum(['Guild', 'Fine & Country']).optional(),
   summary: z.string().min(1).max(500),
-  agentNameBranch: z.string().min(1).max(300),
+  agentNameBranch: z.string().max(300).optional(),
   agentOfficeId: z.string().max(100).optional(),
   detail: z.string().min(1),
   priority: z.enum(['Low', 'Medium', 'High', 'Business Critical']).default('Medium'),
@@ -837,6 +839,14 @@ export interface PortalOrgFeatures {
   /** eXp "new agent joining" onboarding (NT-24880) enabled for this org → the
    *  onboarding route offers the simplified new-agent form. */
   expOnboarding?: boolean;
+  /** GPEA's bespoke Raise-a-Ticket form (Network, Agent Name & Branch, Agent
+   *  Office ID, Hubspot link). Every other org gets the simplified form. */
+  networkForm?: boolean;
+}
+
+/** GPEA is the single org with the bespoke intake — matched on its org name. */
+export function isGpeaOrgName(name: string | null | undefined): boolean {
+  return /^gpea/i.test((name || '').trim());
 }
 
 // ── Customer Dashboards (Onboarding + Support) ──

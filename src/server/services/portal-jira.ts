@@ -600,9 +600,10 @@ export class PortalJiraService {
    *  reports on behalf of the portal user, then applies priority, network label,
    *  and — when triaged for development — Current Tier = Tier 3. */
   async createNetworkRequest(params: {
-    network: 'Guild' | 'Fine & Country';
+    /** GPEA only — absent on the simplified form every other org submits. */
+    network?: 'Guild' | 'Fine & Country';
     summary: string;
-    agentNameBranch: string;
+    agentNameBranch?: string;
     agentOfficeId?: string;
     detail: string;
     priority: 'Low' | 'Medium' | 'High' | 'Business Critical';
@@ -635,17 +636,24 @@ export class PortalJiraService {
       : (this.settings.get('portal_nt_rt_service_request_id') || '598');
 
     const requestTypeLabel = params.requestType === 'broken' ? 'Something is broken' : 'Something needs changing';
-    const descLines = [
-      `Network: ${params.network}`,
-      `Agent Name & Branch: ${params.agentNameBranch}`,
-      `Agent Office ID: ${params.agentOfficeId || '—'}`,
-      '',
+    const descLines: string[] = [];
+    if (params.network) {
+      descLines.push(
+        `Network: ${params.network}`,
+        `Agent Name & Branch: ${params.agentNameBranch || '—'}`,
+        `Agent Office ID: ${params.agentOfficeId || '—'}`,
+        '',
+      );
+    }
+    descLines.push(
       'Detailed description of Issue:',
       params.detail,
       '',
       `Request type: ${requestTypeLabel}`,
-      `Link to originating ${params.network} Support Hubspot ticket (For Dev team's reference): ${params.hubspotLink || '—'}`,
-    ];
+    );
+    if (params.network) {
+      descLines.push(`Link to originating ${params.network} Support Hubspot ticket (For Dev team's reference): ${params.hubspotLink || '—'}`);
+    }
     if (params.priority === 'Business Critical') {
       descLines.push('', `⚠ BUSINESS CRITICAL${params.businessCriticalReason ? `: ${params.businessCriticalReason}` : ''}`);
     }
@@ -682,10 +690,10 @@ export class PortalJiraService {
     const blockerId = this.settings.get('portal_business_critical_priority_id') || '1';
     const priorityId = params.priority === 'Business Critical' ? blockerId
       : params.priority === 'Low' ? '4' : params.priority === 'High' ? '3' : '10100'; // Blocker / Minor / Major / Normal
-    const networkLabel = params.network === 'Guild' ? 'guild' : 'fine-and-country';
+    const networkLabel = params.network === 'Guild' ? 'guild' : params.network ? 'fine-and-country' : null;
     const extraFields: Record<string, unknown> = {
       priority: { id: priorityId },
-      labels: [networkLabel, params.requestType === 'broken' ? 'incident' : 'change-request'],
+      labels: [...(networkLabel ? [networkLabel] : []), params.requestType === 'broken' ? 'incident' : 'change-request'],
     };
     // BC Account Number comes from the org's Customer Scope (portal admin); the
     // setting is only a last-resort override if the org has none configured.
