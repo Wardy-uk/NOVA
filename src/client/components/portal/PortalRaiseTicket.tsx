@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PortalExpOnboarding from './PortalExpOnboarding.js';
 import {
   DEFAULT_PORTAL_SUPPORT_ROUTES,
   PORTAL_SUPPORT_ROUTE_LABELS,
@@ -12,6 +13,9 @@ interface Props {
   /** Guild two-stage onboarding (backlog #8) — splits the onboarding route into
    *  the three Guild forms (Membership Application / Standard / Multi-Branch). */
   guildOnboarding?: boolean;
+  /** eXp "new agent joining" (NT-24880) — the onboarding route becomes the
+   *  simplified new-agent form instead of the standard onboarding request. */
+  expOnboarding?: boolean;
 }
 
 type ObFormType = 'application' | 'standard' | 'multi';
@@ -38,7 +42,7 @@ interface OnboardingUser {
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand text-sm';
 const labelCls = 'block text-sm font-medium text-gray-700 mb-1';
 
-export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }: Props) {
+export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, expOnboarding }: Props) {
   const enabledRoutes = (routes && routes.length > 0 ? routes : DEFAULT_PORTAL_SUPPORT_ROUTES);
   const [route, setRoute] = useState<PortalSupportRoute>(enabledRoutes[0]);
 
@@ -61,6 +65,8 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   });
   const setAppField = (k: keyof typeof app, v: string | boolean) => setApp(prev => ({ ...prev, [k]: v }));
   const guildOb = route === 'onboarding' && !!guildOnboarding;
+  // eXp replaces the onboarding route outright; Guild wins if both are somehow on.
+  const expOb = route === 'onboarding' && !guildOnboarding && !!expOnboarding;
   const [importing, setImporting] = useState(false);
   const [showImportWarning, setShowImportWarning] = useState(false);
   const [importedFile, setImportedFile] = useState<File | null>(null);  // the Guild form used for import → attached to QA + email
@@ -411,7 +417,9 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
   // single 'onboarding' route expands into the three named Guild forms.
   const selectorOptions: Array<{ value: string; label: string }> = [];
   for (const r of enabledRoutes) {
-    if (r === 'onboarding' && guildOnboarding) {
+    if (r === 'onboarding' && !guildOnboarding && expOnboarding) {
+      selectorOptions.push({ value: r, label: 'Raise Notification of New Agent Joining' });
+    } else if (r === 'onboarding' && guildOnboarding) {
       selectorOptions.push({ value: 'ob:application', label: OB_FORM_LABELS.application });
       selectorOptions.push({ value: 'ob:standard', label: OB_FORM_LABELS.standard });
       selectorOptions.push({ value: 'ob:multi', label: OB_FORM_LABELS.multi });
@@ -474,7 +482,9 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
           </div>
         )}
 
-        {guildOb ? (
+        {expOb ? (
+          <PortalExpOnboarding onCreated={onCreated} />
+        ) : guildOb ? (
           <>
             <p className="text-xs text-gray-500">
               {obFormType === 'application'
@@ -626,7 +636,7 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding }
           </>
         )}
 
-        <div className="flex items-center justify-end pt-2">
+        <div className={`flex items-center justify-end pt-2${expOb ? ' hidden' : ''}`}>
           <button
             onClick={handleSubmit}
             disabled={submitting || !canSubmit}

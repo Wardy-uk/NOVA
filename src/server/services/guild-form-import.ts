@@ -22,7 +22,7 @@ export type GuildImportFormType = 'application' | 'setup';
 // with the actual data fields only from ~page 7 (after the T&C boilerplate).
 const MAX_EXTRACT_CHARS = 120_000;
 
-async function extractText(buffer: Buffer, filename: string): Promise<string> {
+export async function extractText(buffer: Buffer, filename: string): Promise<string> {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
     const XLSX = (await import('xlsx')).default;

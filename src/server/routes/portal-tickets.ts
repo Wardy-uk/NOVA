@@ -3,7 +3,7 @@ import Busboy from 'busboy';
 import type { PortalJiraService } from '../services/portal-jira.js';
 import type { PortalIntakeService } from '../services/portal-intake.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
-import { PortalTicketCreateSchema, PortalNetworkRequestSchema, PortalOnboardingRequestSchema, PortalMembershipApplicationSchema, PortalOnboardingSetupSchema } from '../../shared/portal-types.js';
+import { PortalTicketCreateSchema, PortalNetworkRequestSchema, PortalOnboardingRequestSchema, PortalMembershipApplicationSchema, PortalOnboardingSetupSchema, PortalExpOnboardingSchema } from '../../shared/portal-types.js';
 import { trackEvent } from '../services/portal-analytics.js';
 import { query } from '../services/database.js';
 
@@ -204,6 +204,66 @@ export function createPortalTicketRoutes(
         res.json({ ok: true, data: result });
       } catch (err) {
         res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit setup form' });
+      }
+    });
+    bb.on('error', () => { if (!res.headersSent) res.status(400).json({ ok: false, error: 'Upload error' }); });
+    req.pipe(bb);
+  });
+
+  // eXp "Notification of New Agent Joining" (NT-24880) — one QA + Onboarding
+  // ticket pair per joining agent. Gated per-org (exp_onboarding_enabled).
+  router.post('/onboarding/exp', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    const parsed = PortalExpOnboardingSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ ok: false, error: parsed.error.issues.map(i => i.message).join(', ') }); return; }
+    try {
+      const result = await intakeService.submitExpOnboarding(
+        parsed.data, req.portalUser.userId, req.portalUser.orgId, req.portalUser.email, req.portalUser.orgName);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to submit new agent request' });
+    }
+  });
+
+  // Import eXp joiners from a pasted email body (JSON { text }) or an uploaded
+  // file (multipart) → LLM-mapped agent rows for the submitter to review.
+  router.post('/onboarding/exp/import', async (req: Request, res: Response) => {
+    if (!req.portalUser) { res.status(401).json({ ok: false }); return; }
+    if (!llm) { res.status(503).json({ ok: false, error: 'AI extraction is not configured.' }); return; }
+    const { importExpAgents } = await import('../services/exp-form-import.js');
+
+    // Pasted-text path — the common case (eXp send an email, not a form).
+    if (!req.is('multipart/form-data')) {
+      const text = typeof req.body?.text === 'string' ? req.body.text : '';
+      if (!text.trim()) { res.status(400).json({ ok: false, error: 'Paste the email text first.' }); return; }
+      try {
+        const agents = await importExpAgents({ text }, llm);
+        res.json({ ok: true, data: { agents } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Import failed' });
+      }
+      return;
+    }
+
+    let fileBuf: Buffer | null = null, filename = '', tooBig = false;
+    let bb: ReturnType<typeof Busboy>;
+    try { bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE, files: 1 } }); }
+    catch { res.status(400).json({ ok: false, error: 'Invalid upload' }); return; }
+    bb.on('file', (_f: string, stream: NodeJS.ReadableStream & { on(e: 'limit', l: () => void): void }, info: { filename: string }) => {
+      filename = info.filename || '';
+      const chunks: Buffer[] = [];
+      stream.on('data', (c: Buffer) => chunks.push(c));
+      stream.on('limit', () => { tooBig = true; });
+      stream.on('end', () => { fileBuf = Buffer.concat(chunks); });
+    });
+    bb.on('finish', async () => {
+      if (tooBig) { res.status(400).json({ ok: false, error: 'File too large (max 10 MB).' }); return; }
+      if (!fileBuf) { res.status(400).json({ ok: false, error: 'No file uploaded.' }); return; }
+      try {
+        const agents = await importExpAgents({ file: { buffer: fileBuf, filename } }, llm);
+        res.json({ ok: true, data: { agents } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Import failed' });
       }
     });
     bb.on('error', () => { if (!res.headersSent) res.status(400).json({ ok: false, error: 'Upload error' }); });

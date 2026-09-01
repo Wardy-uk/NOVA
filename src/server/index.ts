@@ -138,6 +138,7 @@ import { portalAuthMiddleware, portalViewAsReadOnly } from './middleware/portal-
 import { PortalJiraService } from './services/portal-jira.js';
 import { PortalIntakeService } from './services/portal-intake.js';
 import { GuildOnboardingService } from './services/guild-onboarding.js';
+import { ExpOnboardingService } from './services/exp-onboarding.js';
 import { PortalChatService } from './services/portal-chat.js';
 import { PortalKbService } from './services/portal-kb.js';
 import { createContractsRoutes } from './routes/contracts.js';
@@ -4617,10 +4618,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   const guildOnboarding = portalJiraClient
     ? new GuildOnboardingService(portalJiraClient, onboardingRecordQueries, (k) => settingsQueries.get(k))
     : null;
-  const portalIntake = new PortalIntakeService(settingsQueries, portalJira, onboardingRecordQueries, guildOnboarding, portalEmailService);
+  // eXp "new agent joining" (NT-24880) — same Jira client, simplified fan-out.
+  const expOnboarding = portalJiraClient
+    ? new ExpOnboardingService(portalJiraClient, onboardingRecordQueries, (k) => settingsQueries.get(k))
+    : null;
+  const portalIntake = new PortalIntakeService(settingsQueries, portalJira, onboardingRecordQueries, guildOnboarding, portalEmailService, expOnboarding);
   // Guild onboarding dashboard + manual capture (backlog #8, R5/R6) — internal staff.
   const guildDashboard = new GuildDashboardService(portalJiraClient, onboardingRecordQueries);
-  app.use('/api/guild-onboarding', createGuildOnboardingRoutes({ dashboard: guildDashboard, records: onboardingRecordQueries, guild: guildOnboarding }));
+  app.use('/api/guild-onboarding', createGuildOnboardingRoutes({ dashboard: guildDashboard, records: onboardingRecordQueries, guild: guildOnboarding, exp: expOnboarding }));
 
   // Guild digest (R8, Monday ~14:00 UTC) + INTS escalation sweep (R4, hourly).
   // Both off by default (guild_digest_enabled / guild_ints_escalations_enabled).

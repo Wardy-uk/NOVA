@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { GuildDashboardService } from '../services/guild-dashboard.js';
 import type { GuildOnboardingService } from '../services/guild-onboarding.js';
+import type { ExpOnboardingService } from '../services/exp-onboarding.js';
 import type { OnboardingRecordQueries } from '../db/queries.js';
 import { GUILD_MANUAL_FIELDS } from '../services/guild-onboarding-sla.js';
 
@@ -13,6 +14,8 @@ export function createGuildOnboardingRoutes(deps: {
   dashboard: GuildDashboardService;
   records: OnboardingRecordQueries;
   guild: GuildOnboardingService | null;
+  /** eXp channel (NT-24880) — records with channel='exp' retry through this. */
+  exp?: ExpOnboardingService | null;
 }): Router {
   const router = Router();
 
@@ -63,12 +66,16 @@ export function createGuildOnboardingRoutes(deps: {
 
   // Re-run creation for a partial/failed record — idempotent, safe to repeat.
   router.post('/records/:id/retry', async (req: Request, res: Response) => {
-    if (!deps.guild) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
     const id = parseInt(req.params.id as string, 10);
     const record = await deps.records.getById(id);
     if (!record) { res.status(404).json({ ok: false, error: 'Not found' }); return; }
+    // Retry through the channel that created it — an eXp record must not be
+    // re-run through the Guild fan-out (it would raise 7 unwanted children).
+    const isExp = (record.channel || 'guild') === 'exp';
+    const service = isExp ? deps.exp : deps.guild;
+    if (!service) { res.status(503).json({ ok: false, error: isExp ? 'eXp onboarding not configured' : 'Jira not configured' }); return; }
     try {
-      const result = await deps.guild.createForRecord(record);
+      const result = await service.createForRecord(record);
       res.json({ ok: true, data: result });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Retry failed' });

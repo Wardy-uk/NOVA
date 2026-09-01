@@ -31,7 +31,9 @@ export class GuildDashboardService {
 
   async getDashboard(opts?: { orgId?: number }): Promise<GuildOnboardingDashboardResponse> {
     const records = opts?.orgId != null
-      ? await this.records.listByOrg(opts.orgId)
+      // Org listings must stay Guild-only — an org can also hold 'exp' records
+      // (NT-24880), which have no milestones and no 30-day SLA.
+      ? (await this.records.listByOrg(opts.orgId)).filter(r => (r.channel || 'guild') === 'guild')
       : await this.records.listByChannel('guild');
 
     // One Jira fetch for every parent + child key across all records.

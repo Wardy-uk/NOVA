@@ -364,13 +364,14 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
         guild_onboarding_enabled: number;
         guild_digest_enabled: number;
         guild_ints_escalations_enabled: number;
+        exp_onboarding_enabled: number;
         user_count: number;
         ticket_count: number;
       }>(
         `SELECT po.id, po.name, po.domain, po.external_id, po.bc_account_number, po.scope_reporters,
                 po.feat_get_help, po.feat_kb, po.feat_support, po.feat_onboarding, po.feat_raise_ticket, po.support_routes,
                 po.brand_website_url, po.brand_logo_url, po.brand_primary, po.brand_secondary, po.brand_font, po.support_cc_email,
-                po.guild_onboarding_enabled, po.guild_digest_enabled, po.guild_ints_escalations_enabled,
+                po.guild_onboarding_enabled, po.guild_digest_enabled, po.guild_ints_escalations_enabled, po.exp_onboarding_enabled,
                 (SELECT COUNT(*) FROM portal_users WHERE org_id = po.id) AS user_count,
                 (SELECT COUNT(*) FROM jira_issue_cache jic
                  WHERE jic.reporter_email LIKE '%@' + po.domain
@@ -544,7 +545,7 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
 
   router.put('/org-mapping/:orgId', async (req: Request, res: Response) => {
     const orgId = parseInt(req.params.orgId as string, 10);
-    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes, support_cc_email, guild } = req.body;
+    const { jira_organisation_id, jira_email_domain, bc_account_number, scope_reporters, features, branding, support_routes, support_cc_email, guild, exp_onboarding } = req.body;
     try {
       const existing = await queryOne(
         `SELECT id FROM portal_org_jira_mapping WHERE org_id = ?`,
@@ -604,6 +605,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
            SET guild_onboarding_enabled = ?, guild_digest_enabled = ?, guild_ints_escalations_enabled = ?, updated_at = GETUTCDATE()
            WHERE id = ?`,
           [bit(guild.onboarding), bit(guild.digest), bit(guild.intsEscalations), orgId],
+        );
+      }
+      // eXp "new agent joining" onboarding (NT-24880) — per-org enable.
+      if (exp_onboarding !== undefined) {
+        await execute(
+          `UPDATE portal_organisations SET exp_onboarding_enabled = ?, updated_at = GETUTCDATE() WHERE id = ?`,
+          [exp_onboarding ? 1 : 0, orgId],
         );
       }
       // Shared CC address(es) copied on every raised ticket for this org.
@@ -736,6 +744,13 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
     { key: 'onboarding_inbox_email' },
     { key: 'app_base_url' },
     { key: 'guild_ob_parent_label' },
+    // eXp channel (NT-24880) — falls back to the Guild wiring above.
+    { key: 'jira_exp_rt_qa_id', fallback: 'jira_ob_rt_qa_id' },
+    { key: 'jira_exp_rt_onboarding_id', fallback: 'jira_ob_rt_onboarding_id' },
+    { key: 'exp_ob_company_name' },
+    { key: 'exp_ob_qa_summary' },
+    { key: 'exp_ob_onboarding_summary' },
+    { key: 'exp_onboarding_inbox_email', fallback: 'onboarding_inbox_email' },
   ];
   router.get('/onboarding-global-config', (_req: Request, res: Response) => {
     const out: Record<string, string> = {};

@@ -318,6 +318,48 @@ export const PortalOnboardingRequestSchema = z.object({
 
 export type PortalOnboardingRequestInput = z.infer<typeof PortalOnboardingRequestSchema>;
 
+// ── eXp "Notification of New Agent Joining" (NT-24880) ──
+// The simplified eXp channel: one submission carries one or more joining agents,
+// and each agent gets its own QA + Onboarding ticket pair. The email that this
+// replaces carries exactly these fields, plus a set of standing instructions
+// (agents never admins, registered company always eXp World UK Limited, LeadPro
+// abandoned basket enabled for the IVT) which the service adds to every ticket.
+
+export const PortalExpAgentSchema = z.object({
+  name: z.string().min(1, 'Agent name is required').max(200),
+  email: z.string().min(1, 'Agent email is required').max(200),
+  phone: z.string().max(60).optional(),
+  address: z.string().max(400).optional(),
+  /** true → eXp microsite (valuation.firstnamesurname.expuk.com);
+   *  false → LeadPro URL (valuation.firstnamesurname.lead.pro). */
+  hasMicrosite: z.boolean().default(false),
+  /** Overrides the URL derived from the name + microsite choice. */
+  micrositeUrl: z.string().max(300).optional(),
+  /** Joiner who may already exist in LeadPro → a NEW IVT on the existing account. */
+  existingAgent: z.boolean().default(false),
+  notes: z.string().max(2000).optional(),
+});
+export type PortalExpAgentInput = z.infer<typeof PortalExpAgentSchema>;
+
+export const PortalExpOnboardingSchema = z.object({
+  agents: z.array(PortalExpAgentSchema).min(1, 'Add at least one agent').max(50),
+  notes: z.string().max(5000).optional(),
+});
+export type PortalExpOnboardingInput = z.infer<typeof PortalExpOnboardingSchema>;
+
+/** Slug used in both microsite forms: "Adriana Martinez" → "adrianamartinez". */
+export function expAgentSlug(name: string): string {
+  return (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** The URL the agent gets, derived from the name unless one was entered. */
+export function expMicrositeUrl(agent: { name: string; hasMicrosite: boolean; micrositeUrl?: string }): string {
+  if (agent.micrositeUrl && agent.micrositeUrl.trim()) return agent.micrositeUrl.trim();
+  const slug = expAgentSlug(agent.name);
+  if (!slug) return '';
+  return agent.hasMicrosite ? `valuation.${slug}.expuk.com` : `valuation.${slug}.lead.pro`;
+}
+
 // ── Guild Membership Application (backlog #8 two-stage, step 1) ──
 // Mirrors the Guild "Membership Application Form (Single Office)". Creates the
 // onboarding record but NO tickets — the setup form (step 2) fires those.
@@ -792,6 +834,9 @@ export interface PortalOrgFeatures {
   /** Guild two-stage onboarding (backlog #8) enabled for this org → the
    *  onboarding route offers the three Guild forms instead of the legacy one. */
   guildOnboarding?: boolean;
+  /** eXp "new agent joining" onboarding (NT-24880) enabled for this org → the
+   *  onboarding route offers the simplified new-agent form. */
+  expOnboarding?: boolean;
 }
 
 // ── Customer Dashboards (Onboarding + Support) ──

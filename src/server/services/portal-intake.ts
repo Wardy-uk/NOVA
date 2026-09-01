@@ -1,6 +1,6 @@
 import type { FileSettingsQueries } from '../db/settings-store.js';
 import type { PortalJiraService } from './portal-jira.js';
-import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput, PortalMembershipApplicationInput, PortalOnboardingSetupInput } from '../../shared/portal-types.js';
+import type { PortalTicketCreateInput, PortalNetworkRequestInput, PortalOnboardingRequestInput, PortalMembershipApplicationInput, PortalOnboardingSetupInput, PortalExpOnboardingInput, PortalExpAgentInput } from '../../shared/portal-types.js';
 import { execute, queryOne, query } from './database.js';
 import { logError } from './error-log.js';
 import { trackEvent } from './portal-analytics.js';
@@ -8,7 +8,17 @@ import { EscalationLogService } from './escalation-log-service.js';
 import { broadcastPortalEvent } from '../routes/portal-events.js';
 import type { OnboardingRecordQueries } from '../db/queries.js';
 import type { GuildOnboardingService } from './guild-onboarding.js';
+import type { ExpOnboardingService } from './exp-onboarding.js';
 import type { EmailService } from './email.js';
+
+/** Per-agent outcome of an eXp "new agent joining" submission. */
+export interface ExpAgentResult {
+  agent: string;
+  ref: string;
+  qaKey: string | null;
+  onboardingKey: string | null;
+  error: string | null;
+}
 
 const URGENCY_TO_PRIORITY_HINT: Record<string, string> = {
   Normal: 'Medium',
@@ -245,6 +255,8 @@ export class PortalIntakeService {
     private records: OnboardingRecordQueries | null = null,
     private guild: GuildOnboardingService | null = null,
     private email: EmailService | null = null,
+    // eXp "new agent joining" pipeline (NT-24880) — optional, gated per-org.
+    private exp: ExpOnboardingService | null = null,
   ) {}
 
   async submitTicket(
@@ -638,6 +650,84 @@ export class PortalIntakeService {
       console.warn('[portal-intake] Onboarding inbox alert failed:', err instanceof Error ? err.message : err));
     await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: result.parentKey, category: 'onboarding_setup' });
     return { ticketKey: result.parentKey, recordId, childKeys: result.childKeys };
+  }
+
+  // ── eXp "Notification of New Agent Joining" (NT-24880) ──
+
+  async isExpEnabled(orgId: number): Promise<boolean> {
+    const row = await queryOne<{ exp_onboarding_enabled: number }>(
+      `SELECT exp_onboarding_enabled FROM portal_organisations WHERE id = ?`, [orgId]);
+    return !!row?.exp_onboarding_enabled;
+  }
+
+  /** One submission → one record + one QA/Onboarding ticket pair PER AGENT.
+   *  A failure on one agent doesn't lose the others: each is reported back with
+   *  its own error and can be retried from the internal onboarding record. */
+  async submitExpOnboarding(
+    input: PortalExpOnboardingInput, portalUserId: number, orgId: number, userEmail: string, userName: string,
+  ): Promise<{ results: ExpAgentResult[] }> {
+    if (!this.records || !this.exp || !(await this.isExpEnabled(orgId))) {
+      throw new Error('New agent onboarding is not enabled for your organisation.');
+    }
+    await trackEvent('form_completed', portalUserId, orgId, { category: 'exp_onboarding' });
+
+    const results: ExpAgentResult[] = [];
+    for (const agent of input.agents) {
+      const merged: PortalExpAgentInput = input.notes
+        ? { ...agent, notes: [agent.notes, input.notes].filter(Boolean).join('\n') }
+        : agent;
+      const ref = `EXP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7)}`;
+      try {
+        const recordId = await this.records.create({
+          onboarding_ref: ref, channel: 'exp', org_id: orgId,
+          office_name: 'eXp World UK', branch_name: merged.name,
+          stage: 'setup', reporter_email: userEmail,
+        });
+        await this.records.update(recordId, { setup_date: new Date().toISOString(), setup_data: JSON.stringify(merged) });
+        const record = await this.records.getById(recordId);
+        if (!record) throw new Error('Onboarding record vanished after creation');
+
+        const created = await this.exp.createForRecord(record);
+        await execute(
+          `INSERT INTO portal_form_submissions (portal_user_id, jira_issue_key, form_data, category)
+           VALUES (?, ?, ?, ?)`,
+          [portalUserId, created.qaKey, JSON.stringify({ ...merged, onboardingRef: ref, onboardingKey: created.onboardingKey }), 'exp_onboarding'],
+        );
+        await trackEvent('ticket_created', portalUserId, orgId, { ticket_key: created.qaKey, category: 'exp_onboarding' });
+        results.push({ agent: merged.name, ref, qaKey: created.qaKey, onboardingKey: created.onboardingKey, error: null });
+      } catch (err) {
+        console.error('[portal-intake] eXp onboarding creation failed for', merged.name, err);
+        await logError('portal-intake', err, { severity: 'critical', context: { phase: 'exp-onboarding', ref, agent: merged.name } });
+        results.push({ agent: merged.name, ref, qaKey: null, onboardingKey: null, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    if (results.every(r => r.error)) {
+      throw new Error('We couldn\'t create the onboarding tickets right now. Please try again, or contact us directly at support@nurtur.tech.');
+    }
+    await this.notifyExpInbox(results, userName, userEmail).catch(err =>
+      console.warn('[portal-intake] eXp inbox alert failed:', err instanceof Error ? err.message : err));
+    return { results };
+  }
+
+  /** Best-effort alert to the onboarding inbox listing every pair created. */
+  private async notifyExpInbox(results: ExpAgentResult[], submittedBy: string, submitterEmail: string): Promise<void> {
+    const inbox = this.settings.get('exp_onboarding_inbox_email') || this.settings.get('onboarding_inbox_email') || '';
+    if (!inbox || !this.email || !this.email.isConfigured()) return;
+    const ok = results.filter(r => !r.error);
+    const failed = results.filter(r => r.error);
+    const lines = ok.map(r => `${r.agent} — QA ${r.qaKey}, Onboarding ${r.onboardingKey}`);
+    const failLines = failed.map(r => `${r.agent} — FAILED: ${r.error}`);
+    const subject = `New eXp agent${ok.length === 1 ? '' : 's'} joining — ${ok.map(r => r.agent).join(', ') || 'submission'}`;
+    await this.email.send({
+      to: inbox,
+      subject,
+      text: `${submittedBy} (${submitterEmail}) submitted a new eXp agent notification.\n\n${lines.join('\n')}`
+        + (failLines.length ? `\n\nNot created:\n${failLines.join('\n')}` : ''),
+      html: `<p><strong>${submittedBy}</strong> (${submitterEmail}) submitted a new eXp agent notification.</p>`
+        + `<ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>`
+        + (failLines.length ? `<p><strong>Not created:</strong></p><ul>${failLines.map(l => `<li>${l}</li>`).join('')}</ul>` : ''),
+    });
   }
 
   /** List application-stage records for the org, for the setup form's picker. */

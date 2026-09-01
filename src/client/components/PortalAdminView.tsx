@@ -842,7 +842,7 @@ function OrgsPanel() {
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
-    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   }>>(`${API}/organisations`, [reloadKey]);
@@ -1043,7 +1043,7 @@ function OrgRow({ org, onSaved }: {
     bc_account_number: string | null; scope_reporters: string | null;
     feat_get_help: number; feat_kb: number; feat_support: number; feat_onboarding: number; feat_raise_ticket: number;
     support_routes: string | null; support_cc_email: string | null;
-    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number;
+    guild_onboarding_enabled: number; guild_digest_enabled: number; guild_ints_escalations_enabled: number; exp_onboarding_enabled: number;
     brand_website_url: string | null; brand_logo_url: string | null;
     brand_primary: string | null; brand_secondary: string | null; brand_font: string | null;
   };
@@ -1053,6 +1053,7 @@ function OrgRow({ org, onSaved }: {
   const [reporters, setReporters] = useState(org.scope_reporters || '');
   const [routes, setRoutes] = useState<PortalSupportRoute[]>(parseSupportRoutes(org.support_routes));
   const [ccEmail, setCcEmail] = useState(org.support_cc_email || '');
+  const [expOnboarding, setExpOnboarding] = useState(!!org.exp_onboarding_enabled);
   const [guild, setGuild] = useState({
     onboarding: !!org.guild_onboarding_enabled, digest: !!org.guild_digest_enabled, intsEscalations: !!org.guild_ints_escalations_enabled,
   });
@@ -1079,6 +1080,7 @@ function OrgRow({ org, onSaved }: {
     guild.onboarding !== !!org.guild_onboarding_enabled ||
     guild.digest !== !!org.guild_digest_enabled ||
     guild.intsEscalations !== !!org.guild_ints_escalations_enabled ||
+    expOnboarding !== !!org.exp_onboarding_enabled ||
     routes.join(',') !== origRoutes.join(',') ||
     FEATURE_DEFS.some(f => features[f.key] !== origFeatures[f.key]) ||
     (Object.keys(brand) as Array<keyof typeof brand>).some(k => brand[k] !== origBrand[k]);
@@ -1120,6 +1122,7 @@ function OrgRow({ org, onSaved }: {
           scope_reporters: reporters.trim() || null,
           support_cc_email: ccEmail.trim() || null,
           guild,
+          exp_onboarding: expOnboarding,
           features,
           support_routes: routes,
           branding: {
@@ -1218,6 +1221,14 @@ function OrgRow({ org, onSaved }: {
               Run INTS day 7/14/21/30 escalations
             </label>
             <div className="text-[11px] text-gray-500">Recipient addresses are set by the org's own admin on their Onboarding Configuration page.</div>
+          </div>
+
+          <div className="pt-3 mt-1 border-t border-gray-700 space-y-1">
+            <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">eXp onboarding</div>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={expOnboarding} onChange={e => setExpOnboarding(e.target.checked)} className="rounded border-gray-600 bg-gray-900 text-teal-500 focus:ring-teal-500" />
+              Enable new agent joining form (QA + Onboarding ticket per agent)
+            </label>
           </div>
         </div>
 
@@ -1370,6 +1381,12 @@ function GuildGlobalConfigPanel() {
     { key: 'onboarding_inbox_email', label: 'Onboarding inbox', placeholder: 'onboarding@nurtur.tech — alerted on each new onboarding', group: 'Notifications' },
     { key: 'app_base_url', label: 'App base URL (email links)', placeholder: 'https://nova.nurtur.tech', group: 'Optional' },
     { key: 'guild_ob_parent_label', label: 'Parent name label', placeholder: 'QA', group: 'Optional' },
+    { key: 'jira_exp_rt_qa_id', label: 'eXp QA request-type id', placeholder: 'blank = same as Guild QA', group: 'eXp' },
+    { key: 'jira_exp_rt_onboarding_id', label: 'eXp Onboarding request-type id', placeholder: 'blank = same as Guild child', group: 'eXp' },
+    { key: 'exp_ob_company_name', label: 'Registered company name', placeholder: 'EXP WORLD UK LIMITED', group: 'eXp' },
+    { key: 'exp_ob_qa_summary', label: 'QA ticket summary', placeholder: 'eXp QA – {agent}', group: 'eXp' },
+    { key: 'exp_ob_onboarding_summary', label: 'Onboarding ticket summary', placeholder: 'eXp New Agent Onboarding – {agent}', group: 'eXp' },
+    { key: 'exp_onboarding_inbox_email', label: 'eXp onboarding inbox', placeholder: 'blank = the onboarding inbox above', group: 'eXp' },
   ];
   const [vals, setVals] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);

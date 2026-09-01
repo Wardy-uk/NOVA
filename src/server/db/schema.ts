@@ -2226,6 +2226,10 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE portal_organisations ADD guild_ints_escalations_enabled BIT NOT NULL CONSTRAINT DF_portal_org_guild_ints DEFAULT 0;`,
     `IF COL_LENGTH('portal_organisations', 'onboarding_config') IS NULL
      ALTER TABLE portal_organisations ADD onboarding_config NVARCHAR(MAX) NULL;`,
+    // eXp "new agent joining" onboarding (NT-24880) — a simplified sibling of the
+    // Guild pipeline: one submission per agent, QA + Onboarding ticket pair.
+    `IF COL_LENGTH('portal_organisations', 'exp_onboarding_enabled') IS NULL
+     ALTER TABLE portal_organisations ADD exp_onboarding_enabled BIT NOT NULL CONSTRAINT DF_portal_org_exp_ob DEFAULT 0;`,
 
     // Portal escalations — links an original ticket to the Escalation request a
     // manager raised from it, so the portal can show/open the escalation.
