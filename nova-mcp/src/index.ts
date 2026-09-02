@@ -98,6 +98,24 @@ function rangeLabel(days: number, fallback: number, from?: string, to?: string):
   return from && to ? `${from} → ${to}` : `the last ${num(days, fallback)} days`;
 }
 
+// Key names alone do not identify a secret: `*_connection`/`*_url` values embed
+// a password (`Password=...;`, `https://user:pw@host`) under a key name that
+// matches no sensitive pattern. Redact on the value as well as the key.
+const SECRET_KEY_RE = /token|password|secret|apikey|api_key|client_secret|credential|private_key|conn|connection|dsn|pass$/i;
+const SECRET_VALUE_RE = /(password|pwd)\s*=|:\/\/[^/\s:@]+:[^/\s@]+@|^(sk|xox[baprs]|ghp|gho|github_pat|AKIA|ya29)[-_]/i;
+
+function redactSecrets(settings: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if (typeof value === 'string' && value.length > 0 && (SECRET_KEY_RE.test(key) || SECRET_VALUE_RE.test(value))) {
+      out[key] = `[redacted, len ${value.length}]`;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 function likeToRegex(pattern: string): RegExp {
   const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = escaped.replace(/%/g, '.*').replace(/_/g, '.');
@@ -580,7 +598,9 @@ server.tool(
       const masked: Record<string, any> = {};
       for (const [key, value] of entries.sort(([a], [b]) => a.localeCompare(b))) {
         if (!unmask && typeof value === 'string' && value.length > 0) {
-          if (sensitivePattern.test(key)) {
+          // Key name OR value shape — a connection string hides a password under
+          // a key that matches no sensitive name pattern.
+          if (sensitivePattern.test(key) || SECRET_KEY_RE.test(key) || SECRET_VALUE_RE.test(value)) {
             masked[key] = `XXXX…XXXX (len ${value.length})`;
             continue;
           }
@@ -1771,6 +1791,21 @@ server.tool(
 // ── People & Roster (3) ──────────────────────────────────────────────
 
 server.tool(
+  'nova_agent_availability',
+  'Get historical agent leave/availability (annual leave, sick, WFH, training) for a date range, all agents. Use this to size working-day denominators — the AvailableHours field on agent KPI rows is NOT leave-aware and shows a full day even when the agent was off.',
+  {
+    from: z.string().describe('Start date YYYY-MM-DD'),
+    to: z.string().describe('End date YYYY-MM-DD'),
+  },
+  async ({ from, to }) => {
+    try {
+      const data = await api<any[]>('/api/agent/availability/range', { from, to });
+      return toolResult(`Agent availability ${from} → ${to}: ${data.length} row(s)`, data);
+    } catch (err: any) { return toolError(err.message); }
+  },
+);
+
+server.tool(
   'nova_people_roster',
   'Get the team roster. "roster" returns all team members with roles and status. "calendar" returns availability/shift data. "survey-scores" returns internal survey scores per person.',
   {
@@ -2174,7 +2209,7 @@ server.tool(
 
 server.tool(
   'nova_settings',
-  'Get system settings and feature flags. "all" returns all NOVA settings. "feature-flags" returns just the feature flag configuration.',
+  'Get system settings and feature flags. "all" returns all NOVA settings with secret values redacted. "feature-flags" returns just the feature flag configuration.',
   {
     view: z.enum(['all', 'feature-flags']).default('all').describe('View mode'),
   },
@@ -2182,6 +2217,13 @@ server.tool(
     try {
       const endpoint = view === 'feature-flags' ? '/api/settings/feature-flags' : '/api/settings';
       const data = await api<any>(endpoint);
+      // /api/settings returns every value in the clear to an admin caller, and
+      // this account is an admin, so an unfiltered "all" rendered live API keys,
+      // the JWT signing secret, OAuth client secrets and DB connection strings
+      // straight into the transcript. Redact before returning.
+      if (view === 'all' && data && typeof data === 'object') {
+        return toolResult('Settings (all, secrets redacted)', redactSecrets(data as Record<string, unknown>));
+      }
       return toolResult(`Settings (${view})`, data);
     } catch (err: any) { return toolError(err.message); }
   },

@@ -136,6 +136,29 @@ export class AgentAvailabilityService {
     return count;
   }
 
+  /**
+   * Every availability row in a date range, for all agents, with display names
+   * attached. getAvailability() is per-agent and getDaySnapshot() is per-day;
+   * neither can answer "who was off across these months", which is what any
+   * productivity comparison needs to size its working-day denominators.
+   */
+  async getRange(startDate: string, endDate: string): Promise<AgentAvailability[]> {
+    const agents = await this.getAgentsFromKpi();
+    const byId = new Map(agents.map(a => [a.AgentId, a]));
+
+    const rows = await query<any>(`
+      SELECT * FROM agent_availability
+      WHERE available_date BETWEEN ? AND ?
+      ORDER BY available_date, roster_id
+    `, [startDate, endDate]);
+
+    return rows.map((r: any) => ({
+      ...r,
+      display_name: byId.get(r.roster_id)?.display_name ?? `Agent ${r.roster_id}`,
+      pool: byId.get(r.roster_id)?.pool ?? 'cc',
+    }));
+  }
+
   async getAvailability(rosterId: number, startDate: string, endDate: string): Promise<AgentAvailability[]> {
     const agents = await this.getAgentsFromKpi();
     const agent = agents.find(a => a.AgentId === rosterId);

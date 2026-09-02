@@ -3700,6 +3700,27 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // GET /availability/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Historical leave for all agents. Needed to size working-day denominators in
+  // productivity comparisons — AvailableHours on the KPI rows is not leave-aware
+  // and shows a full 7.5h on days an agent was off.
+  router.get('/availability/range', async (req, res) => {
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) { res.json({ ok: true, data: [] }); return; }
+      const from = String(req.query.from ?? '');
+      const to = String(req.query.to ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        res.status(400).json({ ok: false, error: 'from and to are required (YYYY-MM-DD)' });
+        return;
+      }
+      const data = await svc.getRange(from, to);
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to get availability range' });
+    }
+  });
+
   router.get('/availability/upcoming', async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string, 10) || 14, 60);
     try {
