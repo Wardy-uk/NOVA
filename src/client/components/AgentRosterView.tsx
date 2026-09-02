@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ReturnToWorkModal } from './ReturnToWorkModal.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -249,6 +250,7 @@ export function AgentRosterView({ onSelectAgent }: {
   const [prepResult, setPrepResult] = useState<{ agent: string; ok: boolean; error?: string } | null>(null);
   const [filterTeam, setFilterTeam] = useState<string>('all');
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const [rtwAgent, setRtwAgent] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     fetch('/api/121/overview')
@@ -745,6 +747,20 @@ export function AgentRosterView({ onSelectAgent }: {
                   transition: 'all 0.2s',
                 }}
               >{snapshotting === card.name ? 'Saving...' : '1-2-1 Snapshot'}</button>
+              {/* Return to Work sits with the 1-2-1 buttons because it is the same
+                  conversation-with-this-person job, and it is only ever needed right
+                  after an absence — hunting for it in a separate screen means it does
+                  not happen. Opens a prompt sheet; nothing is recorded in NOVA. */}
+              <button
+                onClick={e => { e.stopPropagation(); setRtwAgent(card.name); }}
+                title="Guided prompts for a return-to-work conversation after sickness absence"
+                style={{
+                  flex: 1, padding: '6px 0', borderRadius: 8,
+                  border: `1px solid ${C.border}`, background: C.glass,
+                  color: C.text2, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >Return to Work</button>
             </div>
             <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
               {/* "Attach Recording" used to live here and called Plaud over MCP — a
@@ -775,6 +791,8 @@ export function AgentRosterView({ onSelectAgent }: {
           </div>
         </div>
       )}
+
+      {rtwAgent && <ReturnToWorkModal agentName={rtwAgent} onClose={() => setRtwAgent(null)} />}
     </div>
   );
 }
