@@ -789,7 +789,7 @@ export class KpiPipeline {
       const resolvedRows = await localQuery<{ request_type: string | null; current_tier: string | null }>(`
         SELECT request_type, current_tier FROM jira_issue_cache
         WHERE ${pf.sql} AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND LOWER(ISNULL(request_type, '')) != 'onboarding'
       `, pf.params);
 
@@ -803,7 +803,7 @@ export class KpiPipeline {
       const csatRows = await localQuery<{ fields_json: string | null }>(`
         SELECT fields_json FROM jira_issue_cache
         WHERE ${pf.sql} AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND fields_json IS NOT NULL
       `, pf.params);
       let csatSum = 0, csatCount = 0;
@@ -821,7 +821,7 @@ export class KpiPipeline {
       const resolvedForComments = await localQuery<{ issue_key: string; request_type: string | null; created_at: string | null }>(`
         SELECT issue_key, request_type, jira_created AS created_at FROM jira_issue_cache
         WHERE ${pf.sql} AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND LOWER(ISNULL(request_type, '')) != 'onboarding'
       `, pf.params);
 
@@ -1052,7 +1052,7 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND assignee_account_id IS NOT NULL
           AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
         GROUP BY assignee_account_id
@@ -1067,7 +1067,7 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND status_category = 'Done'
-          AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
+          AND COALESCE(status_category_changed_at, resolved_at) >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
           AND assignee_account_id IS NOT NULL
           AND current_tier IN ('Customer Care', 'Production', 'Tier 2', 'Tier 3', 'Development')
         GROUP BY assignee_account_id
@@ -1268,7 +1268,7 @@ export class KpiPipeline {
         const csatRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
           SELECT assignee_account_id, fields_json FROM jira_issue_cache
           WHERE ${pfAgent.sql} AND status_category = 'Done'
-            AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+            AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
             AND fields_json IS NOT NULL
         `, pfAgent.params);
@@ -1289,7 +1289,7 @@ export class KpiPipeline {
         const slaRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
           SELECT assignee_account_id, fields_json FROM jira_issue_cache
           WHERE ${pfAgent.sql} AND status_category = 'Done'
-            AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+            AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
         `, pfAgent.params);
         for (const r of slaRows) {
@@ -1678,7 +1678,7 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND status_category = 'Done'
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND assignee_account_id = @p${pf.params.length}
       `, [...pf.params, novaAccountId]);
 
@@ -1687,7 +1687,7 @@ export class KpiPipeline {
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND status_category = 'Done'
-          AND jira_updated >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
+          AND COALESCE(status_category_changed_at, resolved_at) >= DATEADD(day, -DATEPART(weekday, GETUTCDATE()) + 2, CAST(GETUTCDATE() AS DATE))
           AND assignee_account_id = @p${pf.params.length}
       `, [...pf.params, novaAccountId]);
 
