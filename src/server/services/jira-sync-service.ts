@@ -37,7 +37,7 @@ const ORPHAN_CHECK_MAX = 400;
 const ALL_FIELDS = [
   'summary', 'description', 'status', 'priority', 'issuetype',
   'assignee', 'reporter', 'created', 'updated', 'duedate',
-  'resolution', 'resolutiondate', 'labels', 'issuelinks', 'attachment',
+  'resolution', 'resolutiondate', 'statuscategorychangedate', 'labels', 'issuelinks', 'attachment',
   'customfield_10010', // SLA (legacy — not returned by API)
   'customfield_10020', // JSM customer request type (legacy — not used for CC bucketing)
   'customfield_12800', // Request type fallback
@@ -512,7 +512,7 @@ export class JiraSyncService {
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
         issue_links_json = ?, rejection_reason_text = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
-        resolved_at = ?, synced_at = GETUTCDATE()
+        resolved_at = ?, status_category_changed_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
         status_name, status_category, priority_name, issuetype_name,
@@ -525,7 +525,8 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
-        issue_links_json, rejection_reason_text, fields_json, organisation_name, bc_account_number, resolved_at
+        issue_links_json, rejection_reason_text, fields_json, organisation_name, bc_account_number, resolved_at,
+        status_category_changed_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
@@ -538,7 +539,8 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?,
+        ?
       );`,
       [
         // Source key
@@ -562,6 +564,7 @@ export class JiraSyncService {
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
+        f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
         // INSERT values (same order as columns)
         issue.key, issue.id, issue.key.split('-')[0], f.summary as string ?? null,
         descriptionText || null, descriptionAdf,
@@ -581,6 +584,7 @@ export class JiraSyncService {
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
         issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
+        f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
       ],
     );
 

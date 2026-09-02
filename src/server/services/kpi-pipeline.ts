@@ -370,6 +370,20 @@ export class KpiPipeline {
       `, pf.params);
 
       // Step 2: Load resolved-today tickets
+      //
+      // Dated by status_category_changed_at (Jira's statuscategorychangedate) —
+      // when the ticket moved into Done — with resolved_at as fallback for rows
+      // not yet re-synced since that column was added.
+      //
+      // This used to be `resolution_name IS NOT NULL AND jira_updated = today`,
+      // which was wrong in both directions. `jira_updated` is bumped by ANY edit,
+      // so every later touch of an already-closed ticket re-counted as a fresh
+      // solve — that is what produced 699 and 1,632 "solves" on 13-14 Jul 2026
+      // against a 20-40 norm, with FRT/resolution breach counts scaling in step
+      // and compliance ratios unchanged (the tell that these were historical
+      // tickets being re-touched, not same-day work). Meanwhile the
+      // `resolution_name IS NOT NULL` guard dropped essentially every NOVA close,
+      // because NOVA moves tickets to Resolved without setting `resolution`.
       const resolvedRows = await localQuery<CacheRow>(`
         SELECT issue_key, status_name, status_category, current_tier, request_type,
                assignee_account_id, assignee_display, jira_created, jira_updated, due_date,
@@ -377,9 +391,8 @@ export class KpiPipeline {
                no_reply, fields_json, issuetype_name, resolution_name
         FROM jira_issue_cache
         WHERE ${pf.sql}
-          AND resolution_name IS NOT NULL
-          AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE)
           AND status_category = 'Done'
+          AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
       `, pf.params);
 
       // Step 3: Created today count

@@ -829,6 +829,20 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'resolved_at') IS NULL
      ALTER TABLE jira_issue_cache ADD resolved_at DATETIME2 NULL;`,
 
+    // status_category_changed_at — Jira's statuscategorychangedate, i.e. when the
+    // ticket last moved between status CATEGORIES. For a ticket currently in Done
+    // this is the moment it was solved.
+    //
+    // This exists because neither of the obvious columns can date a solve:
+    // `resolved_at` (resolutiondate) is NULL on effectively every NOVA close —
+    // NOVA moves tickets to Resolved without setting the `resolution` field — and
+    // is set on only ~30% of human closes. `jira_updated` is set by ANY edit, so
+    // dating solves by it counts every later touch of an already-closed ticket as
+    // a fresh solve. Jira stamps this field on the move into Done regardless of
+    // whether `resolution` was set, so it dates both cases correctly.
+    `IF COL_LENGTH('jira_issue_cache', 'status_category_changed_at') IS NULL
+     ALTER TABLE jira_issue_cache ADD status_category_changed_at DATETIME2 NULL;`,
+
     // Rejection Reason (customfield_13216), mandatory on the "Submit for
     // Rejection to ..." transition screen.
     //
