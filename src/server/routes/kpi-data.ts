@@ -186,7 +186,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         `);
         res.json({ ok: true, data: result.recordset, env });
       } else {
-        const days = Math.min(parseInt(req.query.days as string) || 7, 90);
+        const days = Math.min(parseInt(req.query.days as string) || 7, 730);
         const result = await p.request().query(`
           SELECT kpi, kpiGroup, [count], target, direction, rag, CreatedAt
           FROM dbo.jira_kpi_daily${s}
@@ -283,7 +283,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       // Date range
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
-      const days = Math.min(parseInt(req.query.days as string) || 30, 90);
+      const days = Math.min(parseInt(req.query.days as string) || 30, 730);
 
       // Department filter
       const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
@@ -451,7 +451,7 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
         `);
         res.json({ ok: true, data: result.recordset, env });
       } else {
-        const days = Math.min(parseInt(req.query.days as string) || 7, 90);
+        const days = Math.min(parseInt(req.query.days as string) || 7, 730);
         const result = await p.request().query(`
           SELECT d.*
           FROM dbo.jira_agent_kpi_daily${s} d
@@ -1121,8 +1121,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       res.json({
         ok: true,
         env,
-        agentDaily: dailyStats.recordset[0],
-        eodSnapshot: eodStats.recordset[0],
+        data: {
+          agentDaily: dailyStats.recordset[0],
+          eodSnapshot: eodStats.recordset[0],
+        },
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });

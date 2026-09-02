@@ -83,7 +83,7 @@ function DailySnapshotPanel({ onToast }: { onToast: (t: Toast) => void }) {
     try {
       const res = await fetch(`/api/kpi-data/backfill-status?env=${env}`);
       const json = await res.json();
-      if (json.ok) setStatus({ agentDaily: json.agentDaily, eodSnapshot: json.eodSnapshot });
+      if (json.ok) setStatus({ agentDaily: json.data.agentDaily, eodSnapshot: json.data.eodSnapshot });
     } catch { /* ignore */ }
   }, [env]);
 

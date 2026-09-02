@@ -81,6 +81,14 @@ function ragStatus(value, target, lowerIsBetter) {
         return 'amber';
     return 'red';
 }
+// The NOVA KPI endpoints cap `days`, but honour an uncapped from/to range.
+// Prefer from/to whenever both are supplied so long lookbacks aren't clamped.
+function rangeParams(days, fallback, from, to) {
+    return from && to ? { from, to } : { days: num(days, fallback) };
+}
+function rangeLabel(days, fallback, from, to) {
+    return from && to ? `${from} → ${to}` : `the last ${num(days, fallback)} days`;
+}
 function likeToRegex(pattern) {
     const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = escaped.replace(/%/g, '.*').replace(/_/g, '.');
@@ -92,15 +100,17 @@ function likeToRegex(pattern) {
 // 1. Trend Analysis
 server.tool('nova_trend_analysis', 'Analyse a KPI trend over time. Returns time series, week-over-week change, rolling average, breach periods, and whether the metric is improving or degrading vs target.', {
     metric: z.string().describe('KPI name or SQL LIKE pattern (e.g. "%FRT%" matches all FRT metrics)'),
-    days: z.number().default(90).describe('Lookback days (default 90)'),
+    days: z.number().default(90).describe('Lookback days (default 90). Ignored when from/to are given.'),
+    from: z.string().optional().describe('Start date YYYY-MM-DD. Use with `to` for lookbacks beyond the days cap.'),
+    to: z.string().optional().describe('End date YYYY-MM-DD. Use with `from`.'),
     granularity: z.enum(['daily', 'weekly']).default('weekly'),
-}, async ({ metric, days, granularity }) => {
+}, async ({ metric, days, from, to, granularity }) => {
     try {
-        const rows = await api('/api/kpi-data/daily-history', { days });
+        const rows = await api('/api/kpi-data/daily-history', rangeParams(days, 90, from, to));
         const re = likeToRegex(metric);
         const matched = rows.filter((r) => re.test(r.kpi || r.KPI || ''));
         if (matched.length === 0) {
-            return toolResult(`No KPIs matching "${metric}" found in the last ${days} days`, { kpiName: metric, timeSeries: [] });
+            return toolResult(`No KPIs matching "${metric}" found in ${rangeLabel(days, 90, from, to)}`, { kpiName: metric, timeSeries: [] });
         }
         const byKpi = new Map();
         for (const r of matched) {
@@ -163,7 +173,7 @@ server.tool('nova_trend_analysis', 'Analyse a KPI trend over time. Returns time 
             }
             results.push({ kpiName, target, direction, timeSeries, wowChange: wowChange !== null ? Math.round(wowChange * 100) / 100 : null, rollingAvg4Period, improving, breachPeriods });
         }
-        return toolResult(`Trend analysis for ${results.length} KPI(s) matching "${metric}" over ${days} days (${granularity})`, results.length === 1 ? results[0] : results);
+        return toolResult(`Trend analysis for ${results.length} KPI(s) matching "${metric}" over ${rangeLabel(days, 90, from, to)} (${granularity})`, results.length === 1 ? results[0] : results);
     }
     catch (err) {
         return toolError(err.message);
@@ -437,10 +447,12 @@ server.tool('nova_checkpoint_summary', 'Live vs UAT data comparison — row coun
 // 7. Raw KPI Query
 server.tool('nova_raw_kpi_query', 'Low-level query: fetch KPI daily data matching a LIKE pattern. Returns raw time series grouped by KPI name.', {
     kpi_pattern: z.string().describe('SQL LIKE pattern (e.g. "%FRT%")'),
-    days: z.number().default(30).describe('Lookback days (default 30)'),
-}, async ({ kpi_pattern, days }) => {
+    days: z.number().default(30).describe('Lookback days (default 30). Ignored when from/to are given.'),
+    from: z.string().optional().describe('Start date YYYY-MM-DD. Use with `to` for lookbacks beyond the days cap.'),
+    to: z.string().optional().describe('End date YYYY-MM-DD. Use with `from`.'),
+}, async ({ kpi_pattern, days, from, to }) => {
     try {
-        const rows = await api('/api/kpi-data/daily-history', { days });
+        const rows = await api('/api/kpi-data/daily-history', rangeParams(days, 30, from, to));
         const re = likeToRegex(kpi_pattern);
         const matched = rows.filter((r) => re.test(r.kpi || r.KPI || ''));
         const kpis = {};
@@ -1105,16 +1117,18 @@ server.tool('nova_eod_snapshot', 'Get the end-of-day KPI snapshot for a specific
     }
 });
 server.tool('nova_agent_daily', 'Get per-agent daily KPI time series. Returns daily values for each agent including volume (open tickets, solved), QA scores (overall, accuracy, clarity, tone), Golden Rules (all 5 dimensions), SLA (resolved, breached, compliance %), and CSAT. Supports filtering to a single agent. Use for individual agent trend analysis or identifying performance changes over time.', {
-    days: z.number().default(30).describe('Lookback days (default 30, max 90)'),
+    days: z.number().default(30).describe('Lookback days (default 30). Ignored when from/to are given.'),
+    from: z.string().optional().describe('Start date YYYY-MM-DD. Use with `to` for lookbacks beyond the days cap.'),
+    to: z.string().optional().describe('End date YYYY-MM-DD. Use with `from`.'),
     agent: z.string().optional().describe('Filter to specific agent name'),
     env: z.enum(['live', 'uat']).default('live').describe('Environment (default live)'),
-}, async ({ days, agent, env }) => {
+}, async ({ days, from, to, agent, env }) => {
     try {
-        const data = await api('/api/kpi-data/agent-daily', { env, days: Math.min(days, 90) });
+        const data = await api('/api/kpi-data/agent-daily', { env, ...rangeParams(days, 30, from, to) });
         const filtered = agent
             ? data.filter((r) => (r.agent_name || r.AgentName || '').toLowerCase() === agent.toLowerCase())
             : data;
-        return toolResult(`Agent daily data: ${filtered.length} rows over ${days} days${agent ? ` for ${agent}` : ''} (${env})`, filtered);
+        return toolResult(`Agent daily data: ${filtered.length} rows over ${rangeLabel(days, 30, from, to)}${agent ? ` for ${agent}` : ''} (${env})`, filtered);
     }
     catch (err) {
         return toolError(err.message);
@@ -1307,13 +1321,15 @@ server.tool('nova_hygiene_status', 'Get the current queue hygiene status — whi
 // ── KPI Data Gaps (8) ────────────────────────────────────────────────
 server.tool('nova_kpi_agent_detail', 'Get detailed per-agent KPI metrics including all tracked fields. More comprehensive than nova_agent_leaderboard — returns the full agent-kpis dataset with every metric field. Use for deep agent performance analysis and data completeness audits.', {
     agent: z.string().optional().describe('Filter to specific agent name'),
-    days: z.number().default(30).describe('Lookback days (default 30)'),
+    days: z.number().default(30).describe('Lookback days (default 30). Ignored when from/to are given.'),
+    from: z.string().optional().describe('Start date YYYY-MM-DD. Use with `to` for lookbacks beyond the days cap.'),
+    to: z.string().optional().describe('End date YYYY-MM-DD. Use with `from`.'),
     env: z.enum(['live', 'uat']).default('live').describe('Environment'),
-}, async ({ agent, days, env }) => {
+}, async ({ agent, days, from, to, env }) => {
     try {
-        const data = await api('/api/kpi-data/agent-kpis', { env, days: num(days, 30) });
+        const data = await api('/api/kpi-data/agent-kpis', { env, ...rangeParams(days, 30, from, to) });
         const filtered = agent ? data.filter((r) => (r.AgentName || r.agentName || '').toLowerCase() === agent.toLowerCase()) : data;
-        return toolResult(`Agent KPI detail: ${filtered.length} rows over ${num(days, 30)} days${agent ? ` for ${agent}` : ''} (${env})`, filtered);
+        return toolResult(`Agent KPI detail: ${filtered.length} rows over ${rangeLabel(days, 30, from, to)}${agent ? ` for ${agent}` : ''} (${env})`, filtered);
     }
     catch (err) {
         return toolError(err.message);
