@@ -3743,6 +3743,25 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // POST /availability/backfill-peoplehr?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // The scheduled sync only fetches today→+14, so leave history predating it has
+  // to be pulled explicitly. Overwrites any manually-set availability in range.
+  router.post('/availability/backfill-peoplehr', async (req, res) => {
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) { res.json({ ok: false, error: 'Availability service not available' }); return; }
+      const from = String(req.query.from ?? '');
+      const to = String(req.query.to ?? '');
+      if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to are required (YYYY-MM-DD)' }); return; }
+      const { backfillPeopleHR } = await import('../services/people-hr-sync.js');
+      const agents = await svc.getAgentsFromKpiPublic();
+      const result = await backfillPeopleHR(deps.settingsQueries!, svc, agents, from, to);
+      res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
+    }
+  });
+
   // ── KPI Pipeline (WP-16) ──
 
   router.post('/kpi/snapshot', async (_req, res) => {

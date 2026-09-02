@@ -182,6 +182,48 @@ async function runSync(
   availabilityService: AgentAvailabilityService,
   kpiAgents: KpiAgent[],
 ): Promise<SyncResult> {
+  const today = new Date();
+  const end = new Date(today.getTime() + 14 * 86400000);
+  return runWindow(settings, availabilityService, kpiAgents, today.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+}
+
+/**
+ * Pull leave for an arbitrary past window and write it to agent_availability.
+ *
+ * The scheduled sync only ever asks for today→+14, so NOVA holds no leave
+ * history before the sync first ran (20 Jul 2026) even though PeopleHR does —
+ * GetHolidayDetail and GetAbsenceDetail both accept any date range. Without it,
+ * any productivity comparison silently reads annual leave as low output, which
+ * matters most across a summer.
+ *
+ * Idempotent: setAvailability upserts on (roster_id, available_date), so
+ * re-running over the same window rewrites rather than duplicates. It will
+ * overwrite manually-set availability for those dates with what PeopleHR says.
+ */
+export async function backfillPeopleHR(
+  settings: SettingsQueries,
+  availabilityService: AgentAvailabilityService,
+  kpiAgents: KpiAgent[],
+  startDate: string,
+  endDate: string,
+): Promise<SyncResult> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { synced: 0, skipped: 0, errors: ['startDate and endDate must be YYYY-MM-DD'] };
+  }
+  if (startDate > endDate) {
+    return { synced: 0, skipped: 0, errors: ['startDate must not be after endDate'] };
+  }
+  console.log(`[people-hr] Backfill ${startDate} → ${endDate}`);
+  return runWindow(settings, availabilityService, kpiAgents, startDate, endDate);
+}
+
+async function runWindow(
+  settings: SettingsQueries,
+  availabilityService: AgentAvailabilityService,
+  kpiAgents: KpiAgent[],
+  startStr: string,
+  endStr: string,
+): Promise<SyncResult> {
   const config = getConfig(settings);
   if (!config) return { synced: 0, skipped: 0, errors: ['People HR not configured or disabled'] };
 
@@ -192,11 +234,6 @@ async function runSync(
   const agentsWithHrId = kpiAgents.filter(a => a.PeopleHrId);
   const skipped = kpiAgents.length - agentsWithHrId.length;
   console.log(`[people-hr] ${agentsWithHrId.length} agents have People HR IDs (${skipped} without)`);
-
-  const today = new Date();
-  const endDate = new Date(today.getTime() + 14 * 86400000);
-  const startStr = today.toISOString().slice(0, 10);
-  const endStr = endDate.toISOString().slice(0, 10);
 
   const leaveEntries: { rosterId: number; date: string; status: AvailabilityStatus; reason: string }[] = [];
 
