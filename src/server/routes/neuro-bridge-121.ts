@@ -4,7 +4,7 @@ import { query } from '../services/database.js';
 import {
   upsertBooking, cancelOpenSessions, isKnownAgent, setAgentCadenceDays,
 } from '../services/one21-service.js';
-import { recordCandidate, getResolvedPlaudIds, getPendingByAgent } from '../services/one21-candidates.js';
+import { recordCandidate, CONVERSATION_TYPES, getResolvedPlaudIds, getPendingByAgent } from '../services/one21-candidates.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
 /**
@@ -313,6 +313,10 @@ export function createNeuroBridge121Routes(): Router {
         startedAt: req.body?.startedAt ? String(req.body.startedAt).slice(0, 30) : null,
         durationMinutes: Number.isFinite(Number(req.body?.durationMinutes)) ? Math.round(Number(req.body.durationMinutes)) : null,
         summaryExcerpt: req.body?.summaryExcerpt ? String(req.body.summaryExcerpt).slice(0, 2000) : null,
+        // Validated against the known set rather than trusted: an unrecognised value would
+        // otherwise reach the person's record as a category nothing renders or filters on.
+        conversationType: (CONVERSATION_TYPES as readonly string[]).includes(String(req.body?.conversationType))
+          ? String(req.body.conversationType) : null,
       });
       if (result.created) {
         console.log(`[121-bridge] transcript candidate for ${req.body?.agentName ?? 'unknown'} (${meetingDate || 'no date'})`);

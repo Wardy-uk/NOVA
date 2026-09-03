@@ -714,6 +714,61 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_121_sessions', 'submit_token') IS NULL
      ALTER TABLE agent_121_sessions ADD submit_token NVARCHAR(64) NULL;`,
 
+    // ── Every OTHER individual conversation with a direct report ──
+    //
+    // A 1-2-1 is one kind of conversation, not the only kind that belongs on somebody's
+    // record. Return-to-work interviews, performance conversations, welfare checks and
+    // ad-hoc chats were all being recorded on Plaud and all being thrown away: the vault
+    // sweep offered 1-2-1s and ignored the rest, so the disciplinary hearing, the
+    // occupational-health consultation and the welfare check on overtime existed as
+    // transcripts nobody could reach.
+    //
+    // ⚠ SEPARATE FROM `agent_121_sessions`, DELIBERATELY.
+    //
+    // The 1-2-1 loop reads `agent_121_sessions` to answer "when is this person due" and
+    // "are they stalled". A welfare check on Tuesday does not discharge the monthly 1-2-1,
+    // and filing one as a session would silently reset that clock, mark the person
+    // up-to-date and stop their next 1-2-1 being booked. Different table, no cadence.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_conversations') AND type = 'U')
+     CREATE TABLE agent_conversations (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       agent_name NVARCHAR(200) NOT NULL,
+       -- return_to_work | performance | welfare | ad_hoc. Not a lookup table: the set is
+       -- small, stable and meaningful to a human reading the row.
+       conversation_type NVARCHAR(40) NOT NULL,
+       -- Text, matching agent_121_sessions.scheduled_date, so the two can be merged into
+       -- one timeline without casting either side.
+       occurred_on NVARCHAR(20) NOT NULL,
+       started_at NVARCHAR(30) NULL,
+       plaud_recording_id NVARCHAR(200) NULL,
+       title NVARCHAR(500) NULL,
+       summary_excerpt NVARCHAR(2000) NULL,
+       transcript_text NVARCHAR(MAX) NULL,
+       note_path NVARCHAR(500) NULL,
+       source NVARCHAR(20) NOT NULL DEFAULT 'plaud',
+       -- Same manual confirmation as a 1-2-1 carries. These are the conversations MOST
+       -- likely to need a formal HR write-up, so the tick matters more here, not less.
+       peoplehr_logged_at DATETIME2 NULL,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // One row per recording. Filtered, because a manually-added conversation has no
+    // recording id and several NULLs must not collide.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_conversations_plaud')
+     CREATE UNIQUE INDEX UX_agent_conversations_plaud ON agent_conversations (plaud_recording_id)
+     WHERE plaud_recording_id IS NOT NULL;`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_conversations_agent')
+     CREATE INDEX IX_agent_conversations_agent ON agent_conversations (agent_name, occurred_on DESC);`,
+
+    // What KIND of conversation a detected recording is. Nullable and correctable in the
+    // review screen for the same reason the agent name is: it is NEURO's reading of a
+    // title, not a fact, and filing a welfare check as a performance conversation on
+    // somebody's permanent record is exactly the sort of mistake that must stay one click
+    // from being fixed.
+    `IF COL_LENGTH('agent_121_transcript_candidates', 'conversation_type') IS NULL
+     ALTER TABLE agent_121_transcript_candidates ADD conversation_type NVARCHAR(40) NULL;`,
+
     // Manually ticked once the 1-2-1 has been written up in PeopleHR.
     //
     // NOVA has no way to ask PeopleHR whether a note exists — this is Nick's own

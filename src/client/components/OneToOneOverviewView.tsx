@@ -26,6 +26,7 @@ interface Overview {
 interface Candidate {
   id: number; plaud_id: string; agent_name: string | null; meeting_date: string | null;
   title: string | null; note_path: string | null; attribution: string | null;
+  conversation_type: string | null;
   participants: string | null; started_at: string | null;
   duration_minutes: number | null; summary_excerpt: string | null;
   preview?: string; transcript_chars?: number;
@@ -58,6 +59,17 @@ const startTime = (s: string | null): string | null => {
   return Number.isNaN(t.getTime()) ? null : LONDON_HHMM.format(t);
 };
 
+/* Kept in step with CONVERSATION_TYPES in one21-candidates.ts. Only `one_to_one` reaches
+   agent_121_sessions and so only it moves the cadence clock — the rest go on the person's
+   record without marking them as seen this month. */
+const CONVERSATION_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'one_to_one', label: '1-2-1' },
+  { value: 'return_to_work', label: 'Return to work' },
+  { value: 'performance', label: 'Performance' },
+  { value: 'welfare', label: 'Welfare' },
+  { value: 'ad_hoc', label: 'Ad-hoc' },
+];
+
 const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
 
 export function OneToOneOverviewView() {
@@ -66,6 +78,7 @@ export function OneToOneOverviewView() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [busyCandidate, setBusyCandidate] = useState<number | null>(null);
   const [candidateAgent, setCandidateAgent] = useState<Record<number, string>>({});
+  const [candidateType, setCandidateType] = useState<Record<number, string>>({});
   const [candidateError, setCandidateError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanOpen, setScanOpen] = useState(false);
@@ -123,7 +136,9 @@ export function OneToOneOverviewView() {
     try {
       const res = await fetch(`/api/121/transcript-candidate/${c.id}/${approve ? 'approve' : 'reject'}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(approve ? { agentName: agent } : {}),
+        body: JSON.stringify(approve
+          ? { agentName: agent, conversationType: candidateType[c.id] ?? c.conversation_type ?? 'one_to_one' }
+          : {}),
       });
       const json = await res.json();
       if (!json.ok) setCandidateError(json.error || 'Could not save that.');
@@ -236,7 +251,8 @@ export function OneToOneOverviewView() {
             🎙 {candidates.length} Plaud transcript{candidates.length === 1 ? '' : 's'} detected
           </div>
           <div style={{ fontSize: 11, color: C.text3, marginBottom: 10 }}>
-            Nothing is attached until you approve it. Check who it was with — the name is NEURO's best guess, not a fact.
+            Nothing is attached until you approve it. Check who it was with AND what kind of conversation it was —
+            both are NEURO's best guess, not facts, and only a 1-2-1 counts towards the cadence.
           </div>
           {candidateError && <div style={{ fontSize: 12, color: C.red, marginBottom: 8 }}>{candidateError}</div>}
           {candidates.map((c) => (
@@ -281,16 +297,27 @@ export function OneToOneOverviewView() {
                   <option value="">— who was this with? —</option>
                   {data.agents.map((a) => <option key={a.agent_name} value={a.agent_name}>{a.agent_name}</option>)}
                 </select>
+                {/* The type is the more consequential of the two dropdowns. Only a 1-2-1
+                    moves the cadence clock, so filing a welfare check as one would mark
+                    the person as seen this month and stop their real 1-2-1 being booked. */}
+                <select
+                  value={candidateType[c.id] ?? c.conversation_type ?? 'one_to_one'}
+                  onChange={(e) => setCandidateType((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  title="What kind of conversation was this? Only a 1-2-1 counts towards the cadence."
+                  style={{ background: C.bg2, color: C.text1, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 12 }}
+                >
+                  {CONVERSATION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
                 <button
                   onClick={() => resolveCandidate(c, true)}
                   disabled={busyCandidate === c.id}
                   style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: `1px solid ${C.green}`, background: `${C.green}20`, color: C.green, cursor: 'pointer' }}
-                >{busyCandidate === c.id ? 'Working…' : 'Attach to 1-2-1'}</button>
+                >{busyCandidate === c.id ? 'Working…' : 'Add to record'}</button>
                 <button
                   onClick={() => resolveCandidate(c, false)}
                   disabled={busyCandidate === c.id}
                   style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.border}`, background: 'transparent', color: C.text3, cursor: 'pointer' }}
-                >Not a 1-2-1</button>
+                >Not a conversation</button>
               </div>
             </div>
           ))}

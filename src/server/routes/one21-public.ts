@@ -8,7 +8,10 @@ import {
   dismissRecording, setPeopleHrLogged, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { extractSessionOutcomes, resolveClaim } from '../services/one21-transcript.js';
-import { listPendingCandidates, approveCandidate, rejectCandidate } from '../services/one21-candidates.js';
+import {
+  listPendingCandidates, approveCandidate, rejectCandidate,
+  listConversations, setConversationPeopleHrLogged, CONVERSATION_TYPES,
+} from '../services/one21-candidates.js';
 import { getPrepQuestions } from '../config/one21-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -82,6 +85,40 @@ export function createOne21PublicRoutes(settings: FileSettingsQueries): Router {
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
+  });
+
+  /**
+   * GET /agent/:name/conversations — every individual conversation on one person's record.
+   *
+   * 1-2-1s and everything else, merged and newest first. One endpoint because "who have I
+   * sat down with, and when" is one question; two shapes here is how consumers drift.
+   */
+  router.get('/agent/:name/conversations', async (req, res) => {
+    try {
+      res.json({ ok: true, data: await listConversations(String(req.params.name)) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  /** The conversation-table sibling of PATCH /session/:id/peoplehr. Same manual tick. */
+  router.patch('/conversation/:id/peoplehr', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      if (typeof req.body?.logged !== 'boolean') {
+        res.status(400).json({ ok: false, error: 'logged must be true or false' }); return;
+      }
+      const result = await setConversationPeopleHrLogged(id, req.body.logged);
+      res.status(result.ok ? 200 : 404).json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  /** The conversation types, so the review screen's dropdown cannot drift from the server. */
+  router.get('/conversation-types', (_req, res) => {
+    res.json({ ok: true, data: CONVERSATION_TYPES });
   });
 
   return router;
@@ -284,13 +321,17 @@ export function createOne21Routes(deps: One21Deps): Router {
   });
 
   // Approve — binds the transcript to the agent's 1-2-1 and lets the extractor read it.
-  // `agentName` overrides NEURO's guess, which is the main reason this step exists.
+  // `agentName` and `conversationType` both override NEURO's guess, which is the main
+  // reason this step exists. The type is the more consequential of the two: only
+  // `one_to_one` touches the cadence, so mis-filing a welfare check as a 1-2-1 marks the
+  // person as seen this month and stops their real one being booked.
   router.post('/transcript-candidate/:id/approve', async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
       const agent = req.body?.agentName ? String(req.body.agentName).trim() : undefined;
-      const result = await approveCandidate(id, agent);
+      const type = req.body?.conversationType ? String(req.body.conversationType).trim() : undefined;
+      const result = await approveCandidate(id, agent, type);
       if (!result.ok) { res.status(409).json({ ok: false, error: result.error }); return; }
       res.json({ ok: true, data: result });
     } catch (err) {

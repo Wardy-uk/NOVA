@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { AgentConversationsPanel } from './AgentConversationsPanel.js';
 import { OneToOneSessionView } from './OneToOneSessionView.js';
 import { PlaudAttachButton } from './PlaudAttachButton.js';
 
@@ -1161,6 +1162,12 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
           </div>
         </div>
       )}
+
+      {/* Every individual conversation on this person's record — 1-2-1s, return-to-work,
+          performance, welfare, ad-hoc. Above the snapshot history because it answers the
+          first question a manager opening this page has: when did I last sit down with
+          them, and about what. */}
+      {resolvedAgent && <AgentConversationsPanel agentName={resolvedAgent} />}
 
       {/* 1-2-1 History Section */}
       {snapshots.length > 0 && (
