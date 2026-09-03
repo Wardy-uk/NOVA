@@ -775,18 +775,21 @@ async function runMigrations(): Promise<void> {
        AND status = 'in_progress'
        AND plaud_recording_id IS NULL;`,
 
-    // One-off repair: put Naomi Wentworth's 18 Aug transcript back in the approval queue.
+    // One-off repair: two transcripts rejected by mis-click, put back in the queue.
     //
-    // It was rejected by mis-click while clearing the backfill batch, and a rejection is
-    // permanent by design — NEURO reads the resolved list and never re-offers it, so the
-    // transcript would have sat in the vault unreachable and Naomi would have stayed on
-    // 30 Apr forever. There is no undo in the UI; this is it.
+    // Naomi Wentworth's 18 Aug and Sebastian Broome's 17 Jun, both caught in a batch of
+    // rejections while clearing the backfill. A rejection is permanent by design — NEURO
+    // reads the resolved list and never re-offers it — so both transcripts were sitting
+    // in the vault unreachable, Naomi stuck on 30 Apr and Sebastian on 7 Apr. Sebastian's
+    // is the same recording that had to be taken off Abdi's record two migrations up, so
+    // without this it would have gone straight back out of reach. There is no undo in the
+    // UI; this is it.
     //
-    // Guarded on the recording id and on it still being rejected, so re-running after it
-    // has been approved (or rejected again on purpose) does nothing.
+    // Guarded on the recording ids and on each still being rejected, so re-running after
+    // one has been approved (or rejected again on purpose) does nothing.
     `UPDATE agent_121_transcript_candidates
      SET status = 'pending', resolved_at = NULL, session_id = NULL
-     WHERE plaud_id = 'bb7426627d360b97ee343b8f1f6ab22e'
+     WHERE plaud_id IN ('bb7426627d360b97ee343b8f1f6ab22e', '12c84bd68b0937f3978814788fe200ae')
        AND status = 'rejected';`,
 
     // ── Jira Issue Cache ──
