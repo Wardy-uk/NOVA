@@ -194,7 +194,9 @@ export function estimateCost(model: string, inputTokens: number, outputTokens: n
 
 // ── Token budget defaults (per call_type, daily) ──
 
-const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
+/** Exported so the admin screen can list the budgets without keeping its own copy
+ *  of the call types — a duplicated list here would silently drift. */
+export const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
   triage: 2_000_000,
   respond: 5_000_000,
   chase: 50_000,

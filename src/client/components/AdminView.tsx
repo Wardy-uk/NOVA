@@ -1550,6 +1550,10 @@ export function AdminView() {
         </div>
       </CollapsibleSection>
 
+      <CollapsibleSection title="Token Budgets">
+        <TokenBudgets />
+      </CollapsibleSection>
+
       <CollapsibleSection title="Integrations">
         <div className="space-y-4">
           <p className="text-xs text-neutral-500">
@@ -2810,3 +2814,113 @@ function MilestonesTab({
   );
 }
 
+
+interface TokenBudgetRow {
+  callType: string;
+  defaultBudget: number;
+  override: number | null;
+  effective: number;
+}
+
+/**
+ * Daily LLM token budgets, one cap per call type.
+ *
+ * These are not a cost control so much as a truncation risk: once a call type is over
+ * budget it is suppressed until UTC midnight, so a cap set too low silently shortens a
+ * pipeline run rather than failing loudly. Editable here so a cap can be raised for a
+ * backfill and put back afterwards without a deploy.
+ */
+function TokenBudgets() {
+  const [rows, setRows] = useState<TokenBudgetRow[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    fetch('/api/admin/token-budgets')
+      .then(r => r.json())
+      .then(j => {
+        if (j.ok) {
+          setRows(j.data);
+          setDrafts(Object.fromEntries(j.data.map((r: TokenBudgetRow) => [r.callType, r.override != null ? String(r.override) : ''])));
+        }
+      })
+      .catch(() => setError('Could not load budgets'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const save = async (callType: string) => {
+    setSaving(callType);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/token-budgets/${callType}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: drafts[callType] ?? '' }),
+      });
+      const j = await res.json();
+      if (!j.ok) setError(j.error ?? 'Save failed');
+      else load();
+    } catch {
+      setError('Save failed');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (loading) return <div className="text-xs text-neutral-500">Loading budgets…</div>;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-500">
+        One daily cap per call type, in tokens, reset at UTC midnight. When a type goes over
+        budget it stops until the next day — a cap set too low quietly truncates a run rather
+        than failing. Leave blank to use the built-in default.
+      </p>
+      {error && <div className="text-xs text-red-400">{error}</div>}
+      <div className="border border-[#3a424d] rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-[#2f353d] text-left">
+              {['Call type', 'Default', 'Override', ''].map(h => (
+                <th key={h} className="px-4 py-2 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.callType} className="border-t border-[#3a424d]">
+                <td className="px-4 py-2 font-mono text-neutral-300">{r.callType}</td>
+                <td className="px-4 py-2 text-neutral-500 tabular-nums">{r.defaultBudget.toLocaleString()}</td>
+                <td className="px-4 py-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={drafts[r.callType] ?? ''}
+                    placeholder={r.defaultBudget.toLocaleString()}
+                    onChange={e => setDrafts(d => ({ ...d, [r.callType]: e.target.value.replace(/[^0-9]/g, '') }))}
+                    className="bg-[#272C33] text-neutral-300 text-sm rounded px-3 py-1.5 border border-[#3a424d] outline-none focus:border-[#5ec1ca] transition-colors w-40 tabular-nums placeholder:text-neutral-600"
+                  />
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <button
+                    onClick={() => save(r.callType)}
+                    disabled={saving === r.callType || (drafts[r.callType] ?? '') === (r.override != null ? String(r.override) : '')}
+                    className="px-3 py-1.5 bg-[#5ec1ca] text-[#272C33] font-semibold rounded text-xs hover:bg-[#4db0b9] transition-colors disabled:opacity-30"
+                  >
+                    {saving === r.callType ? 'Saving…' : 'Save'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-neutral-500">
+        Takes effect on the next call — no restart needed.
+      </p>
+    </div>
+  );
+}

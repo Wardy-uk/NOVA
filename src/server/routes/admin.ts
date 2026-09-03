@@ -8,6 +8,7 @@ import { requireRole } from '../middleware/auth.js';
 import { parseRoles, isAdmin, isSuperAdmin } from '../utils/role-helpers.js';
 import { EmailService } from '../services/email.js';
 import { inviteHtml } from '../services/email-templates.js';
+import { DEFAULT_TOKEN_BUDGETS } from '../services/llm-service.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 
 function generateTempPassword(): string {
@@ -531,6 +532,45 @@ export function createAdminRoutes(
     // Mask all but last 4 chars
     const masked = globalKey.length > 4 ? '•'.repeat(globalKey.length - 4) + globalKey.slice(-4) : globalKey;
     res.json({ ok: true, data: { globalKey: masked, hasGlobalKey: globalKey.length > 0 } });
+  });
+
+  // ── Daily LLM token budgets ──
+  // Each call type caps its own spend per UTC day. Once a type is over budget it is
+  // suppressed until midnight, so a too-low cap silently truncates a pipeline: QA sat at
+  // 300k for a month and stopped after ~52 of 85-180 daily tickets, which is what made
+  // per-agent QA a non-comparable sample. Surfaced here so a cap can be raised for a
+  // backfill without a deploy.
+  router.get('/token-budgets', (_req, res) => {
+    const data = Object.entries(DEFAULT_TOKEN_BUDGETS).map(([callType, defaultBudget]) => {
+      const raw = settingsQueries.get(`agent_token_budget_daily_${callType}`)?.trim() ?? '';
+      const override = raw ? parseInt(raw, 10) : null;
+      return {
+        callType,
+        defaultBudget,
+        override: Number.isFinite(override as number) ? override : null,
+        effective: override && Number.isFinite(override) ? override : defaultBudget,
+      };
+    });
+    res.json({ ok: true, data });
+  });
+
+  router.put('/token-budgets/:callType', (req, res) => {
+    const { callType } = req.params;
+    if (!(callType in DEFAULT_TOKEN_BUDGETS)) {
+      res.status(400).json({ ok: false, error: `Unknown call type: ${callType}` });
+      return;
+    }
+    const key = `agent_token_budget_daily_${callType}`;
+    const raw = String(req.body?.value ?? '').trim();
+    // Empty clears the override and falls back to the built-in default.
+    if (!raw) { settingsQueries.delete(key); res.json({ ok: true, data: { callType, override: null } }); return; }
+    const parsed = parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      res.status(400).json({ ok: false, error: 'Budget must be a positive whole number of tokens' });
+      return;
+    }
+    settingsQueries.set(key, String(parsed));
+    res.json({ ok: true, data: { callType, override: parsed } });
   });
 
   router.put('/ai-keys/global', (req, res) => {
