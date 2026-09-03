@@ -20,6 +20,12 @@ import { getLatestSession } from './one21-service.js';
  * neither. So a candidate sits here, with its attribution shown, until Nick approves it.
  */
 
+/**
+ * How far a booked session's date may sit from a recording's and still be the same
+ * meeting. A 1-2-1 gets moved within its week; it does not slip a month.
+ */
+const SAME_MEETING_DAYS = 14;
+
 export interface TranscriptCandidate {
   id: number;
   plaud_id: string;
@@ -142,9 +148,18 @@ export async function approveCandidate(candidateId: number, agentName?: string):
     ? c.meeting_date
     : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
+  // Reuse the agent's latest recording-less session only when it is plausibly THIS
+  // meeting. Attaching rewrites `scheduled_date` to the recording's date, so binding a
+  // June recording to an April session does not fill a gap — it overwrites the April
+  // 1-2-1, and one row then claims to be two meetings. That could not happen while the
+  // NEURO sweep only offered the last 30 days; it can now that it offers six months, and
+  // backfilling the stalled people is exactly what a wide window is for.
   const latest = await getLatestSession(agent);
+  const daysApart = latest
+    ? Math.abs(Date.parse(`${String(latest.scheduled_date).slice(0, 10)}T00:00:00Z`) - Date.parse(`${held}T00:00:00Z`)) / 86400000
+    : Infinity;
   let sessionId: number;
-  if (latest && !latest.plaud_recording_id) {
+  if (latest && !latest.plaud_recording_id && daysApart <= SAME_MEETING_DAYS) {
     sessionId = latest.id;
   } else {
     sessionId = await executeAndGetId(`
