@@ -104,6 +104,7 @@ export class GrPipeline {
       const agentLookup = await this.getAgentKeys(p);
       console.log(`[gr-pipeline] Loaded ${agentLookup.keys.size} agent keys, ${agentLookup.displayNames.size} display names`);
 
+      const offRoster = new Set<string>();
       let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, skippedResolved = 0, skippedNotLatest = 0, eligible = 0;
       const scoredAgentNames = new Set<string>();
 
@@ -150,11 +151,11 @@ export class GrPipeline {
           if (filterResult === 'customer') { skippedCustomer++; continue; }
           if (filterResult === 'bot') { skippedBot++; continue; }
           if (filterResult === 'not_agent') {
-            if (skippedNotAgent < 3) {
-              const accountId = comment.author?.accountId ?? '';
-              const dispName = comment.author?.displayName ?? '';
-              console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", displayName="${dispName}", keys sample: [${[...agentLookup.keys].slice(0, 3).join(', ')}]`);
-            }
+            // Expected for participants and other departments, so record who rather than
+            // shouting about a lookup failure — it was a failure before the roster was
+            // scoped to NT, and it is normal now.
+            const who = comment.author?.displayName;
+            if (who) offRoster.add(who);
             skippedNotAgent++;
             continue;
           }
@@ -207,6 +208,9 @@ export class GrPipeline {
 
       const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + skippedResolved + skippedNotLatest + eligible;
       console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} atOrAfterResolution=${skippedResolved} notLatest=${skippedNotLatest}`);
+      if (offRoster.size > 0) {
+        console.log(`[gr-pipeline] ${skippedNotAgent} comment(s) from ${offRoster.size} non-NT commenter(s), not scored: ${[...offRoster].slice(0, 8).join(', ')}${offRoster.size > 8 ? '…' : ''}`);
+      }
       console.log(`[gr-pipeline] Coverage: ${eligible + skippedAlready} latest-comment candidates — ${eligible} newly scored, ${skippedAlready} already scored on a previous run`);
       console.log(`[gr-pipeline] Scored ${rowsAffected} comments from ${issues.length} issues → ${s || 'live'}`);
 
@@ -303,8 +307,11 @@ export class GrPipeline {
 
   private async getAgentKeys(p: sql.ConnectionPool): Promise<{ keys: Set<string>; displayNames: Set<string> }> {
     try {
+      // Department = 'NT' only, matching the QA pipeline. dbo.Agent also holds the TPJ
+      // agents, and NT tickets additionally attract comments from participants outside
+      // the team (dev, account management). Neither is this team's Golden Rules score.
       const result = await p.request().query(
-        `SELECT AgentKey, AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1`,
+        `SELECT AgentKey, AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'`,
       );
       const keys = new Set<string>();
       const displayNames = new Set<string>();
@@ -322,7 +329,7 @@ export class GrPipeline {
       }
       const sampleKeys = [...keys].slice(0, 5);
       const sampleRow = result.recordset[0];
-      console.log(`[gr-pipeline] Agent lookup: ${result.recordset.length} active agents, ${keys.size} keys, ${displayNames.size} names. Sample keys: [${sampleKeys.join(', ')}]. Columns present: AccountId=${!!sampleRow?.AccountId}, AgentName=${!!sampleRow?.AgentName}`);
+      console.log(`[gr-pipeline] Agent lookup: ${result.recordset.length} active NT agents, ${keys.size} keys, ${displayNames.size} names. Sample keys: [${sampleKeys.join(', ')}]. Columns present: AccountId=${!!sampleRow?.AccountId}, AgentName=${!!sampleRow?.AgentName}`);
       return { keys, displayNames };
     } catch (err) {
       console.warn('[gr-pipeline] getAgentKeys failed:', err instanceof Error ? err.message : err);
