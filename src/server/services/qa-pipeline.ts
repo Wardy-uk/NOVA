@@ -305,8 +305,10 @@ export class QaPipeline {
     const names = new Set<string>();
     try {
       const p = await getKpiPool(this.settings);
+      // Department = 'NT' only. dbo.Agent also holds the five TPJ agents, who are not
+      // part of this team's QA even when they close an NT ticket.
       const result = await p.request().query(
-        `SELECT AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1`,
+        `SELECT AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'`,
       );
       for (const row of result.recordset) {
         if (row.AccountId) {
@@ -316,6 +318,7 @@ export class QaPipeline {
         const full = [row.AgentName, row.AgentSurname].filter(Boolean).join(' ').trim();
         if (full) names.add(full.toLowerCase());
       }
+      console.log(`[qa-pipeline] Roster: ${names.size} active NT agents`);
     } catch (err) {
       console.warn('[qa-pipeline] getActiveRoster failed, scoring unfiltered:', err instanceof Error ? err.message : err);
     }
