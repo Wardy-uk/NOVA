@@ -1343,7 +1343,7 @@ export class KpiPipeline {
           ? (qa.avgOverall7d >= 8.0 ? 'Green' : qa.avgOverall7d >= 6.0 ? 'Amber' : 'Red')  // QA OverallScore is 0–10
           : null;
         const ragGoldenRules = gr && Number(gr.scored7d) >= minSample.goldenRules
-          ? (gr.avgOverall7d >= 3.0 ? 'Green' : gr.avgOverall7d >= 2.0 ? 'Amber' : 'Red')
+          ? (gr.avgOverall7d >= 2.5 ? 'Green' : gr.avgOverall7d >= 2.0 ? 'Amber' : 'Red')  // see rag.ts for why 2.5
           : null;
         const ragOver2h = Number(a.OpenTickets_Over2Hours) <= 0 ? 'Green' : Number(a.OpenTickets_Over2Hours) <= 2 ? 'Amber' : 'Red';
         const ragStale = Number(a.OpenTickets_NoUpdateToday) <= 0 ? 'Green' : Number(a.OpenTickets_NoUpdateToday) <= 1 ? 'Amber' : 'Red';

@@ -1,0 +1,46 @@
+kpi,value,kpiGroup
+CC (TPJ) over SLA (actionable),1,SLA_Actionable
+CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+CC Incidents over SLA (actionable),1,SLA_Actionable
+CC Incidents over SLA (not actionable),0,SLA_Backlog
+CC Service Requests over SLA (actionable),0,SLA_Actionable
+CC Service Requests over SLA (not actionable),0,SLA_Backlog
+Development over SLA (actionable),20,SLA_Actionable
+Development over SLA (not actionable),1,SLA_Backlog
+Escalation Accuracy %,100,Tiered Support
+Number of Tickets With No Reply in CC (Incidents),1618,Response Quality
+Number of Tickets With No Reply in CC (Service Requests),1059,Response Quality
+Number of Tickets With No Reply in CC (TPJ),2292,Response Quality
+Number of Tickets With No Reply in Production,51,Response Quality
+Number of Tickets With No Reply in Tier 2,34,Response Quality
+Number of Tickets With No Reply in Tier 3,4,Response Quality
+Number of Tickets in CC (Incidents),78,Volume
+Number of Tickets in CC (Service Requests),56,Volume
+Number of Tickets in CC (TPJ),35,Volume
+Number of Tickets in Customer Care (Incidents),1618,Queue Sizes
+Number of Tickets in Customer Care (Service Requests),1059,Queue Sizes
+Number of Tickets in Development,228,Queue Sizes
+Number of Tickets in Production,51,Queue Sizes
+Number of Tickets in Tier 2,34,Queue Sizes
+Number of Tickets in Tier 3,4,Queue Sizes
+Oldest actionable ticket (days) in CC (TPJ),13,Age
+Oldest actionable ticket (days) in CC Incidents,23,Age
+Oldest actionable ticket (days) in CC Service Requests,132,Age
+Oldest actionable ticket (days) in Development,159,Age
+Oldest actionable ticket (days) in Production,39,Age
+Oldest actionable ticket (days) in Tier 2,35,Age
+Oldest actionable ticket (days) in Tier 3,12,Age
+Production over SLA (actionable),0,SLA_Actionable
+Production over SLA (not actionable),0,SLA_Backlog
+Tickets escalated to Development,1,Tiered Support
+Tickets escalated to Tier 2,0,Tiered Support
+Tickets escalated to Tier 3,0,Tiered Support
+Tickets opened today,121,Daily Activity
+Tickets rejected by Development,0,Tiered Support
+Tickets rejected by Tier 2,0,Tiered Support
+Tickets rejected by Tier 3,0,Tiered Support
+Tickets solved today,53,Daily Activity
+Tier 2 over SLA (actionable),0,SLA_Actionable
+Tier 2 over SLA (not actionable),0,SLA_Backlog
+Tier 3 over SLA (actionable),0,SLA_Actionable
+Tier 3 over SLA (not actionable),0,SLA_Backlog

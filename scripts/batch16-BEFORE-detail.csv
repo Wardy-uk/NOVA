@@ -1,0 +1,671 @@
+date,kpi,value,kpiGroup
+2026-03-31,1st Line Resolution Rate %,73,Tiered Support
+2026-03-31,CC (TPJ) FRT breached (actionable),11,
+2026-03-31,CC (TPJ) FRT breached (not actionable),0,
+2026-03-31,CC (TPJ) over SLA (actionable),2,SLA_Actionable
+2026-03-31,CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+2026-03-31,CC Incidents FRT breached (actionable),2,
+2026-03-31,CC Incidents FRT breached (not actionable),0,
+2026-03-31,CC Incidents over SLA (actionable),1,SLA_Actionable
+2026-03-31,CC Incidents over SLA (not actionable),0,SLA_Backlog
+2026-03-31,CC Service Requests FRT breached (actionable),7,
+2026-03-31,CC Service Requests FRT breached (not actionable),0,
+2026-03-31,CC Service Requests over SLA (actionable),1,SLA_Actionable
+2026-03-31,CC Service Requests over SLA (not actionable),0,SLA_Backlog
+2026-03-31,CSAT %,20,Quality
+2026-03-31,Development FRT breached (actionable),78,
+2026-03-31,Development FRT breached (not actionable),7,
+2026-03-31,Development over SLA (actionable),18,SLA_Actionable
+2026-03-31,Development over SLA (not actionable),2,SLA_Backlog
+2026-03-31,Escalation Accuracy %,97,Escalations
+2026-03-31,FCR Rate %,59,Customer Satisfaction
+2026-03-31,FRT Breached (All),113,SLA_Raw
+2026-03-31,FRT Breached (Customer Care),109,SLA_Raw
+2026-03-31,FRT Breached (Development),3,SLA_Raw
+2026-03-31,FRT Breached (Production),1,SLA_Raw
+2026-03-31,FRT Breached (Tier 2),0,SLA_Raw
+2026-03-31,FRT Breached (Tier 3),0,SLA_Raw
+2026-03-31,FRT Breaches (Resolved Today),113,SLA_Breaches
+2026-03-31,FRT Compliance % (Customer Care),59,SLA_Compliance
+2026-03-31,FRT Compliance % (Development),81,SLA_Compliance
+2026-03-31,FRT Compliance % (Open Queue),67,SLA_Compliance
+2026-03-31,FRT Compliance % (Production),96,SLA_Compliance
+2026-03-31,FRT Compliance % (Resolved Today),64,SLA_Compliance
+2026-03-31,FRT Compliance % (Tier 2),100,SLA_Compliance
+2026-03-31,FRT Met (All),202,SLA_Raw
+2026-03-31,FRT Met (Customer Care),159,SLA_Raw
+2026-03-31,FRT Met (Development),13,SLA_Raw
+2026-03-31,FRT Met (Production),22,SLA_Raw
+2026-03-31,FRT Met (Tier 2),8,SLA_Raw
+2026-03-31,FRT Met (Tier 3),0,SLA_Raw
+2026-03-31,New Tickets Today,154,Volume
+2026-03-31,Number of Tickets With No Reply in CC (Incidents),0,Hygiene
+2026-03-31,Number of Tickets With No Reply in CC (Service Requests),1,Hygiene
+2026-03-31,Number of Tickets With No Reply in CC (TPJ),0,Hygiene
+2026-03-31,Number of Tickets With No Reply in Development,84,Hygiene
+2026-03-31,Number of Tickets With No Reply in Production,0,Hygiene
+2026-03-31,Number of Tickets With No Reply in Tier 2,0,Hygiene
+2026-03-31,Number of Tickets With No Reply in Tier 3,0,Hygiene
+2026-03-31,Number of Tickets in CC (Incidents),69,Volume
+2026-03-31,Number of Tickets in CC (Service Requests),70,Volume
+2026-03-31,Number of Tickets in CC (TPJ),51,Volume
+2026-03-31,Number of Tickets in Development,224,Volume
+2026-03-31,Number of Tickets in Production,50,Volume
+2026-03-31,Number of Tickets in Tier 2,16,Volume
+2026-03-31,Number of Tickets in Tier 3,1,Volume
+2026-03-31,Oldest actionable ticket (days) in CC (TPJ),6,Age
+2026-03-31,Oldest actionable ticket (days) in CC Incidents,15,Age
+2026-03-31,Oldest actionable ticket (days) in CC Service Requests,27,Age
+2026-03-31,Oldest actionable ticket (days) in Development,151,Age
+2026-03-31,Oldest actionable ticket (days) in Production,30,Age
+2026-03-31,Oldest actionable ticket (days) in Tier 2,27,Age
+2026-03-31,Oldest actionable ticket (days) in Tier 3,4,Age
+2026-03-31,Production FRT breached (actionable),1,
+2026-03-31,Production FRT breached (not actionable),0,
+2026-03-31,Production over SLA (actionable),0,SLA_Actionable
+2026-03-31,Production over SLA (not actionable),0,SLA_Backlog
+2026-03-31,Resolution Breached (All),48,SLA_Raw
+2026-03-31,Resolution Breached (Customer Care),44,SLA_Raw
+2026-03-31,Resolution Breached (Development),0,SLA_Raw
+2026-03-31,Resolution Breached (Production),0,SLA_Raw
+2026-03-31,Resolution Breached (Tier 2),4,SLA_Raw
+2026-03-31,Resolution Breached (Tier 3),0,SLA_Raw
+2026-03-31,Resolution Breaches (Resolved Today),48,SLA_Breaches
+2026-03-31,Resolution Compliance % (Customer Care),84,SLA_Compliance
+2026-03-31,Resolution Compliance % (Development),100,SLA_Compliance
+2026-03-31,Resolution Compliance % (Open Queue),80,SLA_Compliance
+2026-03-31,Resolution Compliance % (Production),100,SLA_Compliance
+2026-03-31,Resolution Compliance % (Resolved Today),85,SLA_Compliance
+2026-03-31,Resolution Compliance % (Tier 2),50,SLA_Compliance
+2026-03-31,Resolution Met (All),267,SLA_Raw
+2026-03-31,Resolution Met (Customer Care),224,SLA_Raw
+2026-03-31,Resolution Met (Development),16,SLA_Raw
+2026-03-31,Resolution Met (Production),23,SLA_Raw
+2026-03-31,Resolution Met (Tier 2),4,SLA_Raw
+2026-03-31,Resolution Met (Tier 3),0,SLA_Raw
+2026-03-31,Tickets Solved Today,319,Volume
+2026-03-31,Tickets escalated to Development,2,Escalations
+2026-03-31,Tickets escalated to Tier 2,0,Escalations
+2026-03-31,Tickets escalated to Tier 3,0,Escalations
+2026-03-31,Tickets rejected by Development,0,Escalations
+2026-03-31,Tickets rejected by Tier 2,0,Escalations
+2026-03-31,Tickets rejected by Tier 3,0,Escalations
+2026-03-31,Tier 2 FRT breached (actionable),4,
+2026-03-31,Tier 2 FRT breached (not actionable),0,
+2026-03-31,Tier 2 over SLA (actionable),0,SLA_Actionable
+2026-03-31,Tier 2 over SLA (not actionable),0,SLA_Backlog
+2026-03-31,Tier 3 FRT breached (actionable),0,
+2026-03-31,Tier 3 FRT breached (not actionable),0,
+2026-03-31,Tier 3 over SLA (actionable),0,SLA_Actionable
+2026-03-31,Tier 3 over SLA (not actionable),0,SLA_Backlog
+2026-04-01,1st Line Resolution Rate %,69,Tiered Support
+2026-04-01,CC (TPJ) FRT breached (actionable),9,
+2026-04-01,CC (TPJ) FRT breached (not actionable),1,
+2026-04-01,CC (TPJ) over SLA (actionable),6,SLA_Actionable
+2026-04-01,CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+2026-04-01,CC Incidents FRT breached (actionable),2,
+2026-04-01,CC Incidents FRT breached (not actionable),0,
+2026-04-01,CC Incidents over SLA (actionable),2,SLA_Actionable
+2026-04-01,CC Incidents over SLA (not actionable),0,SLA_Backlog
+2026-04-01,CC Service Requests FRT breached (actionable),6,
+2026-04-01,CC Service Requests FRT breached (not actionable),0,
+2026-04-01,CC Service Requests over SLA (actionable),1,SLA_Actionable
+2026-04-01,CC Service Requests over SLA (not actionable),0,SLA_Backlog
+2026-04-01,CSAT %,20,Quality
+2026-04-01,Development FRT breached (actionable),78,
+2026-04-01,Development FRT breached (not actionable),7,
+2026-04-01,Development over SLA (actionable),18,SLA_Actionable
+2026-04-01,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-01,Escalation Accuracy %,97,Escalations
+2026-04-01,FCR Rate %,63,Customer Satisfaction
+2026-04-01,FRT Breached (All),66,SLA_Raw
+2026-04-01,FRT Breached (Customer Care),63,SLA_Raw
+2026-04-01,FRT Breached (Development),2,SLA_Raw
+2026-04-01,FRT Breached (Production),1,SLA_Raw
+2026-04-01,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-01,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-01,FRT Breaches (Resolved Today),66,SLA_Breaches
+2026-04-01,FRT Compliance % (Customer Care),66,SLA_Compliance
+2026-04-01,FRT Compliance % (Development),78,SLA_Compliance
+2026-04-01,FRT Compliance % (Open Queue),67,SLA_Compliance
+2026-04-01,FRT Compliance % (Production),93,SLA_Compliance
+2026-04-01,FRT Compliance % (Resolved Today),69,SLA_Compliance
+2026-04-01,FRT Compliance % (Tier 2),100,SLA_Compliance
+2026-04-01,FRT Met (All),147,SLA_Raw
+2026-04-01,FRT Met (Customer Care),120,SLA_Raw
+2026-04-01,FRT Met (Development),7,SLA_Raw
+2026-04-01,FRT Met (Production),13,SLA_Raw
+2026-04-01,FRT Met (Tier 2),7,SLA_Raw
+2026-04-01,FRT Met (Tier 3),0,SLA_Raw
+2026-04-01,New Tickets Today,112,Volume
+2026-04-01,Number of Tickets With No Reply in CC (Incidents),0,Hygiene
+2026-04-01,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-01,Number of Tickets With No Reply in CC (TPJ),0,Hygiene
+2026-04-01,Number of Tickets With No Reply in Development,91,Hygiene
+2026-04-01,Number of Tickets With No Reply in Production,1,Hygiene
+2026-04-01,Number of Tickets With No Reply in Tier 2,0,Hygiene
+2026-04-01,Number of Tickets With No Reply in Tier 3,0,Hygiene
+2026-04-01,Number of Tickets in CC (Incidents),82,Volume
+2026-04-01,Number of Tickets in CC (Service Requests),66,Volume
+2026-04-01,Number of Tickets in CC (TPJ),52,Volume
+2026-04-01,Number of Tickets in Development,223,Volume
+2026-04-01,Number of Tickets in Production,44,Volume
+2026-04-01,Number of Tickets in Tier 2,18,Volume
+2026-04-01,Number of Tickets in Tier 3,1,Volume
+2026-04-01,Oldest actionable ticket (days) in CC (TPJ),14,Age
+2026-04-01,Oldest actionable ticket (days) in CC Incidents,16,Age
+2026-04-01,Oldest actionable ticket (days) in CC Service Requests,35,Age
+2026-04-01,Oldest actionable ticket (days) in Development,152,Age
+2026-04-01,Oldest actionable ticket (days) in Production,33,Age
+2026-04-01,Oldest actionable ticket (days) in Tier 2,37,Age
+2026-04-01,Oldest actionable ticket (days) in Tier 3,5,Age
+2026-04-01,Production FRT breached (actionable),1,
+2026-04-01,Production FRT breached (not actionable),0,
+2026-04-01,Production over SLA (actionable),0,SLA_Actionable
+2026-04-01,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-01,Resolution Breached (All),25,SLA_Raw
+2026-04-01,Resolution Breached (Customer Care),21,SLA_Raw
+2026-04-01,Resolution Breached (Development),0,SLA_Raw
+2026-04-01,Resolution Breached (Production),1,SLA_Raw
+2026-04-01,Resolution Breached (Tier 2),3,SLA_Raw
+2026-04-01,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-01,Resolution Breaches (Resolved Today),25,SLA_Breaches
+2026-04-01,Resolution Compliance % (Customer Care),89,SLA_Compliance
+2026-04-01,Resolution Compliance % (Development),100,SLA_Compliance
+2026-04-01,Resolution Compliance % (Open Queue),80,SLA_Compliance
+2026-04-01,Resolution Compliance % (Production),93,SLA_Compliance
+2026-04-01,Resolution Compliance % (Resolved Today),88,SLA_Compliance
+2026-04-01,Resolution Compliance % (Tier 2),57,SLA_Compliance
+2026-04-01,Resolution Met (All),188,SLA_Raw
+2026-04-01,Resolution Met (Customer Care),162,SLA_Raw
+2026-04-01,Resolution Met (Development),9,SLA_Raw
+2026-04-01,Resolution Met (Production),13,SLA_Raw
+2026-04-01,Resolution Met (Tier 2),4,SLA_Raw
+2026-04-01,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-01,Tickets Solved Today,216,Volume
+2026-04-01,Tickets escalated to Development,1,Escalations
+2026-04-01,Tickets escalated to Tier 2,5,Escalations
+2026-04-01,Tickets escalated to Tier 3,0,Escalations
+2026-04-01,Tickets rejected by Development,0,Escalations
+2026-04-01,Tickets rejected by Tier 2,0,Escalations
+2026-04-01,Tickets rejected by Tier 3,0,Escalations
+2026-04-01,Tier 2 FRT breached (actionable),4,
+2026-04-01,Tier 2 FRT breached (not actionable),0,
+2026-04-01,Tier 2 over SLA (actionable),0,SLA_Actionable
+2026-04-01,Tier 2 over SLA (not actionable),0,SLA_Backlog
+2026-04-01,Tier 3 FRT breached (actionable),0,
+2026-04-01,Tier 3 FRT breached (not actionable),0,
+2026-04-01,Tier 3 over SLA (actionable),0,SLA_Actionable
+2026-04-01,Tier 3 over SLA (not actionable),0,SLA_Backlog
+2026-04-02,1st Line Resolution Rate %,86,Tiered Support
+2026-04-02,CC (TPJ) FRT breached (actionable),11,
+2026-04-02,CC (TPJ) FRT breached (not actionable),1,
+2026-04-02,CC (TPJ) over SLA (actionable),1,SLA_Actionable
+2026-04-02,CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+2026-04-02,CC Incidents FRT breached (actionable),2,
+2026-04-02,CC Incidents FRT breached (not actionable),0,
+2026-04-02,CC Incidents over SLA (actionable),0,SLA_Actionable
+2026-04-02,CC Incidents over SLA (not actionable),0,SLA_Backlog
+2026-04-02,CC Service Requests FRT breached (actionable),6,
+2026-04-02,CC Service Requests FRT breached (not actionable),0,
+2026-04-02,CC Service Requests over SLA (actionable),0,SLA_Actionable
+2026-04-02,CC Service Requests over SLA (not actionable),0,SLA_Backlog
+2026-04-02,Development FRT breached (actionable),78,
+2026-04-02,Development FRT breached (not actionable),7,
+2026-04-02,Development over SLA (actionable),18,SLA_Actionable
+2026-04-02,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-02,Escalation Accuracy %,97,Escalations
+2026-04-02,FCR Rate %,53,Customer Satisfaction
+2026-04-02,FRT Breached (All),26,SLA_Raw
+2026-04-02,FRT Breached (Customer Care),25,SLA_Raw
+2026-04-02,FRT Breached (Development),0,SLA_Raw
+2026-04-02,FRT Breached (Production),1,SLA_Raw
+2026-04-02,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-02,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-02,FRT Breaches (Resolved Today),26,SLA_Breaches
+2026-04-02,FRT Compliance % (Customer Care),71,SLA_Compliance
+2026-04-02,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-02,FRT Compliance % (Production),83,SLA_Compliance
+2026-04-02,FRT Compliance % (Resolved Today),72,SLA_Compliance
+2026-04-02,FRT Compliance % (Tier 2),100,SLA_Compliance
+2026-04-02,FRT Met (All),68,SLA_Raw
+2026-04-02,FRT Met (Customer Care),61,SLA_Raw
+2026-04-02,FRT Met (Development),0,SLA_Raw
+2026-04-02,FRT Met (Production),5,SLA_Raw
+2026-04-02,FRT Met (Tier 2),2,SLA_Raw
+2026-04-02,FRT Met (Tier 3),0,SLA_Raw
+2026-04-02,New Tickets Today,90,Volume
+2026-04-02,Number of Tickets With No Reply in CC (Incidents),0,Hygiene
+2026-04-02,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-02,Number of Tickets With No Reply in CC (TPJ),0,Hygiene
+2026-04-02,Number of Tickets With No Reply in Development,96,Hygiene
+2026-04-02,Number of Tickets With No Reply in Production,0,Hygiene
+2026-04-02,Number of Tickets With No Reply in Tier 2,0,Hygiene
+2026-04-02,Number of Tickets With No Reply in Tier 3,0,Hygiene
+2026-04-02,Number of Tickets in CC (Incidents),86,Volume
+2026-04-02,Number of Tickets in CC (Service Requests),69,Volume
+2026-04-02,Number of Tickets in CC (TPJ),55,Volume
+2026-04-02,Number of Tickets in Development,223,Volume
+2026-04-02,Number of Tickets in Production,46,Volume
+2026-04-02,Number of Tickets in Tier 2,18,Volume
+2026-04-02,Number of Tickets in Tier 3,1,Volume
+2026-04-02,Oldest actionable ticket (days) in CC (TPJ),15,Age
+2026-04-02,Oldest actionable ticket (days) in CC Incidents,17,Age
+2026-04-02,Oldest actionable ticket (days) in CC Service Requests,36,Age
+2026-04-02,Oldest actionable ticket (days) in Development,153,Age
+2026-04-02,Oldest actionable ticket (days) in Production,34,Age
+2026-04-02,Oldest actionable ticket (days) in Tier 2,38,Age
+2026-04-02,Oldest actionable ticket (days) in Tier 3,6,Age
+2026-04-02,Production FRT breached (actionable),2,
+2026-04-02,Production FRT breached (not actionable),0,
+2026-04-02,Production over SLA (actionable),0,SLA_Actionable
+2026-04-02,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-02,Resolution Breached (All),11,SLA_Raw
+2026-04-02,Resolution Breached (Customer Care),9,SLA_Raw
+2026-04-02,Resolution Breached (Development),0,SLA_Raw
+2026-04-02,Resolution Breached (Production),1,SLA_Raw
+2026-04-02,Resolution Breached (Tier 2),1,SLA_Raw
+2026-04-02,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-02,Resolution Breaches (Resolved Today),11,SLA_Breaches
+2026-04-02,Resolution Compliance % (Customer Care),90,SLA_Compliance
+2026-04-02,Resolution Compliance % (Open Queue),79,SLA_Compliance
+2026-04-02,Resolution Compliance % (Production),83,SLA_Compliance
+2026-04-02,Resolution Compliance % (Resolved Today),88,SLA_Compliance
+2026-04-02,Resolution Compliance % (Tier 2),50,SLA_Compliance
+2026-04-02,Resolution Met (All),83,SLA_Raw
+2026-04-02,Resolution Met (Customer Care),77,SLA_Raw
+2026-04-02,Resolution Met (Development),0,SLA_Raw
+2026-04-02,Resolution Met (Production),5,SLA_Raw
+2026-04-02,Resolution Met (Tier 2),1,SLA_Raw
+2026-04-02,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-02,Tickets Solved Today,94,Volume
+2026-04-02,Tickets escalated to Development,1,Escalations
+2026-04-02,Tickets escalated to Tier 2,0,Escalations
+2026-04-02,Tickets escalated to Tier 3,0,Escalations
+2026-04-02,Tickets rejected by Development,0,Escalations
+2026-04-02,Tickets rejected by Tier 2,0,Escalations
+2026-04-02,Tickets rejected by Tier 3,0,Escalations
+2026-04-02,Tier 2 FRT breached (actionable),4,
+2026-04-02,Tier 2 FRT breached (not actionable),0,
+2026-04-02,Tier 2 over SLA (actionable),0,SLA_Actionable
+2026-04-02,Tier 2 over SLA (not actionable),0,SLA_Backlog
+2026-04-02,Tier 3 FRT breached (actionable),0,
+2026-04-02,Tier 3 FRT breached (not actionable),0,
+2026-04-02,Tier 3 over SLA (actionable),0,SLA_Actionable
+2026-04-02,Tier 3 over SLA (not actionable),0,SLA_Backlog
+2026-04-03,CC (TPJ) FRT breached (actionable),13,
+2026-04-03,CC (TPJ) FRT breached (not actionable),1,
+2026-04-03,CC Incidents FRT breached (actionable),2,
+2026-04-03,CC Incidents FRT breached (not actionable),0,
+2026-04-03,CC Service Requests FRT breached (actionable),9,
+2026-04-03,CC Service Requests FRT breached (not actionable),0,
+2026-04-03,Development FRT breached (actionable),78,
+2026-04-03,Development FRT breached (not actionable),7,
+2026-04-03,Development over SLA (actionable),18,SLA_Actionable
+2026-04-03,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-03,Escalation Accuracy %,97,Escalations
+2026-04-03,FRT Breached (All),37,SLA_Raw
+2026-04-03,FRT Breached (Customer Care),37,SLA_Raw
+2026-04-03,FRT Breached (Development),0,SLA_Raw
+2026-04-03,FRT Breached (Production),0,SLA_Raw
+2026-04-03,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-03,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-03,FRT Breaches (Resolved Today),37,SLA_Breaches
+2026-04-03,FRT Compliance % (Customer Care),44,SLA_Compliance
+2026-04-03,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-03,FRT Compliance % (Resolved Today),44,SLA_Compliance
+2026-04-03,FRT Met (All),29,SLA_Raw
+2026-04-03,FRT Met (Customer Care),29,SLA_Raw
+2026-04-03,FRT Met (Development),0,SLA_Raw
+2026-04-03,FRT Met (Production),0,SLA_Raw
+2026-04-03,FRT Met (Tier 2),0,SLA_Raw
+2026-04-03,FRT Met (Tier 3),0,SLA_Raw
+2026-04-03,New Tickets Today,38,Volume
+2026-04-03,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-03,Number of Tickets With No Reply in Development,98,Hygiene
+2026-04-03,Oldest actionable ticket (days) in Development,154,Age
+2026-04-03,Production FRT breached (actionable),2,
+2026-04-03,Production FRT breached (not actionable),0,
+2026-04-03,Production over SLA (actionable),0,SLA_Actionable
+2026-04-03,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-03,Resolution Breached (All),0,SLA_Raw
+2026-04-03,Resolution Breached (Customer Care),0,SLA_Raw
+2026-04-03,Resolution Breached (Development),0,SLA_Raw
+2026-04-03,Resolution Breached (Production),0,SLA_Raw
+2026-04-03,Resolution Breached (Tier 2),0,SLA_Raw
+2026-04-03,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-03,Resolution Breaches (Resolved Today),0,SLA_Breaches
+2026-04-03,Resolution Compliance % (Customer Care),100,SLA_Compliance
+2026-04-03,Resolution Compliance % (Open Queue),78,SLA_Compliance
+2026-04-03,Resolution Compliance % (Resolved Today),100,SLA_Compliance
+2026-04-03,Resolution Met (All),66,SLA_Raw
+2026-04-03,Resolution Met (Customer Care),66,SLA_Raw
+2026-04-03,Resolution Met (Development),0,SLA_Raw
+2026-04-03,Resolution Met (Production),0,SLA_Raw
+2026-04-03,Resolution Met (Tier 2),0,SLA_Raw
+2026-04-03,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-03,Tickets Solved Today,66,Volume
+2026-04-03,Tier 2 FRT breached (actionable),4,
+2026-04-03,Tier 2 FRT breached (not actionable),0,
+2026-04-03,Tier 3 FRT breached (actionable),0,
+2026-04-03,Tier 3 FRT breached (not actionable),0,
+2026-04-04,1st Line Resolution Rate %,100,Tiered Support
+2026-04-04,CC (TPJ) FRT breached (actionable),13,
+2026-04-04,CC (TPJ) FRT breached (not actionable),1,
+2026-04-04,CC Incidents FRT breached (actionable),3,
+2026-04-04,CC Incidents FRT breached (not actionable),0,
+2026-04-04,CC Service Requests FRT breached (actionable),9,
+2026-04-04,CC Service Requests FRT breached (not actionable),0,
+2026-04-04,Development FRT breached (actionable),78,
+2026-04-04,Development FRT breached (not actionable),7,
+2026-04-04,Development over SLA (actionable),18,SLA_Actionable
+2026-04-04,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-04,Escalation Accuracy %,97,Escalations
+2026-04-04,FCR Rate %,100,Customer Satisfaction
+2026-04-04,FRT Breached (All),49,SLA_Raw
+2026-04-04,FRT Breached (Customer Care),49,SLA_Raw
+2026-04-04,FRT Breached (Development),0,SLA_Raw
+2026-04-04,FRT Breached (Production),0,SLA_Raw
+2026-04-04,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-04,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-04,FRT Breaches (Resolved Today),49,SLA_Breaches
+2026-04-04,FRT Compliance % (Customer Care),48,SLA_Compliance
+2026-04-04,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-04,FRT Compliance % (Resolved Today),48,SLA_Compliance
+2026-04-04,FRT Met (All),46,SLA_Raw
+2026-04-04,FRT Met (Customer Care),46,SLA_Raw
+2026-04-04,FRT Met (Development),0,SLA_Raw
+2026-04-04,FRT Met (Production),0,SLA_Raw
+2026-04-04,FRT Met (Tier 2),0,SLA_Raw
+2026-04-04,FRT Met (Tier 3),0,SLA_Raw
+2026-04-04,New Tickets Today,34,Volume
+2026-04-04,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-04,Number of Tickets With No Reply in Development,98,Hygiene
+2026-04-04,Oldest actionable ticket (days) in Development,155,Age
+2026-04-04,Production FRT breached (actionable),2,
+2026-04-04,Production FRT breached (not actionable),0,
+2026-04-04,Production over SLA (actionable),0,SLA_Actionable
+2026-04-04,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-04,Resolution Breached (All),0,SLA_Raw
+2026-04-04,Resolution Breached (Customer Care),0,SLA_Raw
+2026-04-04,Resolution Breached (Development),0,SLA_Raw
+2026-04-04,Resolution Breached (Production),0,SLA_Raw
+2026-04-04,Resolution Breached (Tier 2),0,SLA_Raw
+2026-04-04,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-04,Resolution Breaches (Resolved Today),0,SLA_Breaches
+2026-04-04,Resolution Compliance % (Customer Care),100,SLA_Compliance
+2026-04-04,Resolution Compliance % (Open Queue),78,SLA_Compliance
+2026-04-04,Resolution Compliance % (Resolved Today),100,SLA_Compliance
+2026-04-04,Resolution Met (All),95,SLA_Raw
+2026-04-04,Resolution Met (Customer Care),95,SLA_Raw
+2026-04-04,Resolution Met (Development),0,SLA_Raw
+2026-04-04,Resolution Met (Production),0,SLA_Raw
+2026-04-04,Resolution Met (Tier 2),0,SLA_Raw
+2026-04-04,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-04,Tickets Solved Today,95,Volume
+2026-04-04,Tier 2 FRT breached (actionable),4,
+2026-04-04,Tier 2 FRT breached (not actionable),0,
+2026-04-04,Tier 3 FRT breached (actionable),0,
+2026-04-04,Tier 3 FRT breached (not actionable),0,
+2026-04-05,CC (TPJ) FRT breached (actionable),13,
+2026-04-05,CC (TPJ) FRT breached (not actionable),1,
+2026-04-05,CC Incidents FRT breached (actionable),3,
+2026-04-05,CC Incidents FRT breached (not actionable),0,
+2026-04-05,CC Service Requests FRT breached (actionable),9,
+2026-04-05,CC Service Requests FRT breached (not actionable),0,
+2026-04-05,Development FRT breached (actionable),78,
+2026-04-05,Development FRT breached (not actionable),7,
+2026-04-05,Development over SLA (actionable),18,SLA_Actionable
+2026-04-05,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-05,Escalation Accuracy %,97,Escalations
+2026-04-05,FRT Breached (All),13,SLA_Raw
+2026-04-05,FRT Breached (Customer Care),13,SLA_Raw
+2026-04-05,FRT Breached (Development),0,SLA_Raw
+2026-04-05,FRT Breached (Production),0,SLA_Raw
+2026-04-05,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-05,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-05,FRT Breaches (Resolved Today),13,SLA_Breaches
+2026-04-05,FRT Compliance % (Customer Care),82,SLA_Compliance
+2026-04-05,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-05,FRT Compliance % (Resolved Today),82,SLA_Compliance
+2026-04-05,FRT Met (All),59,SLA_Raw
+2026-04-05,FRT Met (Customer Care),59,SLA_Raw
+2026-04-05,FRT Met (Development),0,SLA_Raw
+2026-04-05,FRT Met (Production),0,SLA_Raw
+2026-04-05,FRT Met (Tier 2),0,SLA_Raw
+2026-04-05,FRT Met (Tier 3),0,SLA_Raw
+2026-04-05,New Tickets Today,36,Volume
+2026-04-05,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-05,Number of Tickets With No Reply in Development,98,Hygiene
+2026-04-05,Oldest actionable ticket (days) in Development,156,Age
+2026-04-05,Production FRT breached (actionable),2,
+2026-04-05,Production FRT breached (not actionable),0,
+2026-04-05,Production over SLA (actionable),0,SLA_Actionable
+2026-04-05,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-05,Resolution Breached (All),0,SLA_Raw
+2026-04-05,Resolution Breached (Customer Care),0,SLA_Raw
+2026-04-05,Resolution Breached (Development),0,SLA_Raw
+2026-04-05,Resolution Breached (Production),0,SLA_Raw
+2026-04-05,Resolution Breached (Tier 2),0,SLA_Raw
+2026-04-05,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-05,Resolution Breaches (Resolved Today),0,SLA_Breaches
+2026-04-05,Resolution Compliance % (Customer Care),100,SLA_Compliance
+2026-04-05,Resolution Compliance % (Open Queue),78,SLA_Compliance
+2026-04-05,Resolution Compliance % (Resolved Today),100,SLA_Compliance
+2026-04-05,Resolution Met (All),72,SLA_Raw
+2026-04-05,Resolution Met (Customer Care),72,SLA_Raw
+2026-04-05,Resolution Met (Development),0,SLA_Raw
+2026-04-05,Resolution Met (Production),0,SLA_Raw
+2026-04-05,Resolution Met (Tier 2),0,SLA_Raw
+2026-04-05,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-05,Tickets Solved Today,72,Volume
+2026-04-05,Tier 2 FRT breached (actionable),4,
+2026-04-05,Tier 2 FRT breached (not actionable),0,
+2026-04-05,Tier 3 FRT breached (actionable),0,
+2026-04-05,Tier 3 FRT breached (not actionable),0,
+2026-04-06,CC (TPJ) FRT breached (actionable),13,
+2026-04-06,CC (TPJ) FRT breached (not actionable),1,
+2026-04-06,CC Incidents FRT breached (actionable),3,
+2026-04-06,CC Incidents FRT breached (not actionable),0,
+2026-04-06,CC Service Requests FRT breached (actionable),9,
+2026-04-06,CC Service Requests FRT breached (not actionable),0,
+2026-04-06,CSAT %,60,Quality
+2026-04-06,Development FRT breached (actionable),78,
+2026-04-06,Development FRT breached (not actionable),7,
+2026-04-06,Development over SLA (actionable),18,SLA_Actionable
+2026-04-06,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-06,Escalation Accuracy %,97,Escalations
+2026-04-06,FRT Breached (All),10,SLA_Raw
+2026-04-06,FRT Breached (Customer Care),9,SLA_Raw
+2026-04-06,FRT Breached (Development),0,SLA_Raw
+2026-04-06,FRT Breached (Production),1,SLA_Raw
+2026-04-06,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-06,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-06,FRT Breaches (Resolved Today),28,SLA_Breaches
+2026-04-06,FRT Compliance % (Customer Care),93,SLA_Compliance
+2026-04-06,FRT Compliance % (Development),100,SLA_Compliance
+2026-04-06,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-06,FRT Compliance % (Production),67,SLA_Compliance
+2026-04-06,FRT Compliance % (Resolved Today),86,SLA_Compliance
+2026-04-06,FRT Met (All),124,SLA_Raw
+2026-04-06,FRT Met (Customer Care),120,SLA_Raw
+2026-04-06,FRT Met (Development),2,SLA_Raw
+2026-04-06,FRT Met (Production),2,SLA_Raw
+2026-04-06,FRT Met (Tier 2),0,SLA_Raw
+2026-04-06,FRT Met (Tier 3),0,SLA_Raw
+2026-04-06,New Tickets Today,46,Volume
+2026-04-06,Number of Tickets With No Reply in CC (Service Requests),0,Hygiene
+2026-04-06,Number of Tickets With No Reply in Development,99,Hygiene
+2026-04-06,Oldest actionable ticket (days) in Development,157,Age
+2026-04-06,Production FRT breached (actionable),2,
+2026-04-06,Production FRT breached (not actionable),0,
+2026-04-06,Production over SLA (actionable),0,SLA_Actionable
+2026-04-06,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-06,Resolution Breached (All),8,SLA_Raw
+2026-04-06,Resolution Breached (Customer Care),7,SLA_Raw
+2026-04-06,Resolution Breached (Development),0,SLA_Raw
+2026-04-06,Resolution Breached (Production),1,SLA_Raw
+2026-04-06,Resolution Breached (Tier 2),0,SLA_Raw
+2026-04-06,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-06,Resolution Breaches (Resolved Today),28,SLA_Breaches
+2026-04-06,Resolution Compliance % (Customer Care),95,SLA_Compliance
+2026-04-06,Resolution Compliance % (Development),100,SLA_Compliance
+2026-04-06,Resolution Compliance % (Open Queue),78,SLA_Compliance
+2026-04-06,Resolution Compliance % (Production),67,SLA_Compliance
+2026-04-06,Resolution Compliance % (Resolved Today),86,SLA_Compliance
+2026-04-06,Resolution Met (All),126,SLA_Raw
+2026-04-06,Resolution Met (Customer Care),122,SLA_Raw
+2026-04-06,Resolution Met (Development),2,SLA_Raw
+2026-04-06,Resolution Met (Production),2,SLA_Raw
+2026-04-06,Resolution Met (Tier 2),0,SLA_Raw
+2026-04-06,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-06,Tickets Solved Today,198,Volume
+2026-04-06,Tier 2 FRT breached (actionable),4,
+2026-04-06,Tier 2 FRT breached (not actionable),0,
+2026-04-06,Tier 3 FRT breached (actionable),0,
+2026-04-06,Tier 3 FRT breached (not actionable),0,
+2026-04-07,1st Line Resolution Rate %,82,Tiered Support
+2026-04-07,CC (TPJ) FRT breached (actionable),13,
+2026-04-07,CC (TPJ) FRT breached (not actionable),1,
+2026-04-07,CC (TPJ) over SLA (actionable),1,SLA_Actionable
+2026-04-07,CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+2026-04-07,CC Incidents FRT breached (actionable),4,
+2026-04-07,CC Incidents FRT breached (not actionable),0,
+2026-04-07,CC Incidents over SLA (actionable),3,SLA_Actionable
+2026-04-07,CC Incidents over SLA (not actionable),0,SLA_Backlog
+2026-04-07,CC Service Requests FRT breached (actionable),9,
+2026-04-07,CC Service Requests FRT breached (not actionable),0,
+2026-04-07,CC Service Requests over SLA (actionable),0,SLA_Actionable
+2026-04-07,CC Service Requests over SLA (not actionable),0,SLA_Backlog
+2026-04-07,CSAT %,60,Quality
+2026-04-07,Development FRT breached (actionable),78,
+2026-04-07,Development FRT breached (not actionable),7,
+2026-04-07,Development over SLA (actionable),18,SLA_Actionable
+2026-04-07,Development over SLA (not actionable),2,SLA_Backlog
+2026-04-07,Escalation Accuracy %,100,Tiered Support
+2026-04-07,FCR Rate %,25,Customer Satisfaction
+2026-04-07,FRT Breached (All),9,SLA_Raw
+2026-04-07,FRT Breached (Customer Care),8,SLA_Raw
+2026-04-07,FRT Breached (Development),0,SLA_Raw
+2026-04-07,FRT Breached (Production),1,SLA_Raw
+2026-04-07,FRT Breached (Tier 2),0,SLA_Raw
+2026-04-07,FRT Breached (Tier 3),0,SLA_Raw
+2026-04-07,FRT Breaches (Resolved Today),27,SLA_Breaches
+2026-04-07,FRT Compliance % (Customer Care),91,SLA_Compliance
+2026-04-07,FRT Compliance % (Development),100,SLA_Compliance
+2026-04-07,FRT Compliance % (Open Queue),68,SLA_Compliance
+2026-04-07,FRT Compliance % (Production),67,SLA_Compliance
+2026-04-07,FRT Compliance % (Resolved Today),83,SLA_Compliance
+2026-04-07,FRT Met (All),82,SLA_Raw
+2026-04-07,FRT Met (Customer Care),78,SLA_Raw
+2026-04-07,FRT Met (Development),2,SLA_Raw
+2026-04-07,FRT Met (Production),2,SLA_Raw
+2026-04-07,FRT Met (Tier 2),0,SLA_Raw
+2026-04-07,FRT Met (Tier 3),0,SLA_Raw
+2026-04-07,New Tickets Today,107,Volume
+2026-04-07,Number of Tickets With No Reply in CC (Incidents),1589,Response Quality
+2026-04-07,Number of Tickets With No Reply in CC (Service Requests),1040,Response Quality
+2026-04-07,Number of Tickets With No Reply in CC (TPJ),2278,Response Quality
+2026-04-07,Number of Tickets With No Reply in Development,100,Hygiene
+2026-04-07,Number of Tickets With No Reply in Production,54,Response Quality
+2026-04-07,Number of Tickets With No Reply in Tier 2,34,Response Quality
+2026-04-07,Number of Tickets With No Reply in Tier 3,4,Response Quality
+2026-04-07,Number of Tickets in CC (Incidents),83,Volume
+2026-04-07,Number of Tickets in CC (Service Requests),73,Volume
+2026-04-07,Number of Tickets in CC (TPJ),38,Volume
+2026-04-07,Number of Tickets in Customer Care (Incidents),1589,Queue Sizes
+2026-04-07,Number of Tickets in Customer Care (Service Requests),1040,Queue Sizes
+2026-04-07,Number of Tickets in Development,232,Queue Sizes
+2026-04-07,Number of Tickets in Production,54,Queue Sizes
+2026-04-07,Number of Tickets in Tier 2,34,Queue Sizes
+2026-04-07,Number of Tickets in Tier 3,4,Queue Sizes
+2026-04-07,Oldest actionable ticket (days) in CC (TPJ),20,Age
+2026-04-07,Oldest actionable ticket (days) in CC Incidents,22,Age
+2026-04-07,Oldest actionable ticket (days) in CC Service Requests,41,Age
+2026-04-07,Oldest actionable ticket (days) in Development,158,Age
+2026-04-07,Oldest actionable ticket (days) in Production,39,Age
+2026-04-07,Oldest actionable ticket (days) in Tier 2,43,Age
+2026-04-07,Oldest actionable ticket (days) in Tier 3,11,Age
+2026-04-07,Production FRT breached (actionable),2,
+2026-04-07,Production FRT breached (not actionable),0,
+2026-04-07,Production over SLA (actionable),0,SLA_Actionable
+2026-04-07,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-07,Resolution Breached (All),8,SLA_Raw
+2026-04-07,Resolution Breached (Customer Care),7,SLA_Raw
+2026-04-07,Resolution Breached (Development),0,SLA_Raw
+2026-04-07,Resolution Breached (Production),1,SLA_Raw
+2026-04-07,Resolution Breached (Tier 2),0,SLA_Raw
+2026-04-07,Resolution Breached (Tier 3),0,SLA_Raw
+2026-04-07,Resolution Breaches (Resolved Today),28,SLA_Breaches
+2026-04-07,Resolution Compliance % (Customer Care),92,SLA_Compliance
+2026-04-07,Resolution Compliance % (Development),100,SLA_Compliance
+2026-04-07,Resolution Compliance % (Open Queue),77,SLA_Compliance
+2026-04-07,Resolution Compliance % (Production),67,SLA_Compliance
+2026-04-07,Resolution Compliance % (Resolved Today),82,SLA_Compliance
+2026-04-07,Resolution Met (All),83,SLA_Raw
+2026-04-07,Resolution Met (Customer Care),79,SLA_Raw
+2026-04-07,Resolution Met (Development),2,SLA_Raw
+2026-04-07,Resolution Met (Production),2,SLA_Raw
+2026-04-07,Resolution Met (Tier 2),0,SLA_Raw
+2026-04-07,Resolution Met (Tier 3),0,SLA_Raw
+2026-04-07,Tickets escalated to Development,0,Tiered Support
+2026-04-07,Tickets escalated to Tier 2,3,Tiered Support
+2026-04-07,Tickets escalated to Tier 3,0,Tiered Support
+2026-04-07,Tickets opened today,107,Daily Activity
+2026-04-07,Tickets rejected by Development,0,Tiered Support
+2026-04-07,Tickets rejected by Tier 2,0,Tiered Support
+2026-04-07,Tickets rejected by Tier 3,0,Tiered Support
+2026-04-07,Tickets solved today,52,Daily Activity
+2026-04-07,Tier 2 FRT breached (actionable),4,
+2026-04-07,Tier 2 FRT breached (not actionable),0,
+2026-04-07,Tier 2 over SLA (actionable),0,SLA_Actionable
+2026-04-07,Tier 2 over SLA (not actionable),0,SLA_Backlog
+2026-04-07,Tier 3 FRT breached (actionable),0,
+2026-04-07,Tier 3 FRT breached (not actionable),0,
+2026-04-07,Tier 3 over SLA (actionable),0,SLA_Actionable
+2026-04-07,Tier 3 over SLA (not actionable),0,SLA_Backlog
+2026-04-08,CC (TPJ) over SLA (actionable),1,SLA_Actionable
+2026-04-08,CC (TPJ) over SLA (not actionable),0,SLA_Backlog
+2026-04-08,CC Incidents over SLA (actionable),1,SLA_Actionable
+2026-04-08,CC Incidents over SLA (not actionable),0,SLA_Backlog
+2026-04-08,CC Service Requests over SLA (actionable),0,SLA_Actionable
+2026-04-08,CC Service Requests over SLA (not actionable),0,SLA_Backlog
+2026-04-08,Development over SLA (actionable),20,SLA_Actionable
+2026-04-08,Development over SLA (not actionable),1,SLA_Backlog
+2026-04-08,Escalation Accuracy %,100,Tiered Support
+2026-04-08,Number of Tickets With No Reply in CC (Incidents),1618,Response Quality
+2026-04-08,Number of Tickets With No Reply in CC (Service Requests),1059,Response Quality
+2026-04-08,Number of Tickets With No Reply in CC (TPJ),2292,Response Quality
+2026-04-08,Number of Tickets With No Reply in Production,51,Response Quality
+2026-04-08,Number of Tickets With No Reply in Tier 2,34,Response Quality
+2026-04-08,Number of Tickets With No Reply in Tier 3,4,Response Quality
+2026-04-08,Number of Tickets in CC (Incidents),78,Volume
+2026-04-08,Number of Tickets in CC (Service Requests),56,Volume
+2026-04-08,Number of Tickets in CC (TPJ),35,Volume
+2026-04-08,Number of Tickets in Customer Care (Incidents),1618,Queue Sizes
+2026-04-08,Number of Tickets in Customer Care (Service Requests),1059,Queue Sizes
+2026-04-08,Number of Tickets in Development,228,Queue Sizes
+2026-04-08,Number of Tickets in Production,51,Queue Sizes
+2026-04-08,Number of Tickets in Tier 2,34,Queue Sizes
+2026-04-08,Number of Tickets in Tier 3,4,Queue Sizes
+2026-04-08,Oldest actionable ticket (days) in CC (TPJ),13,Age
+2026-04-08,Oldest actionable ticket (days) in CC Incidents,23,Age
+2026-04-08,Oldest actionable ticket (days) in CC Service Requests,132,Age
+2026-04-08,Oldest actionable ticket (days) in Development,159,Age
+2026-04-08,Oldest actionable ticket (days) in Production,39,Age
+2026-04-08,Oldest actionable ticket (days) in Tier 2,35,Age
+2026-04-08,Oldest actionable ticket (days) in Tier 3,12,Age
+2026-04-08,Production over SLA (actionable),0,SLA_Actionable
+2026-04-08,Production over SLA (not actionable),0,SLA_Backlog
+2026-04-08,Tickets escalated to Development,1,Tiered Support
+2026-04-08,Tickets escalated to Tier 2,0,Tiered Support
+2026-04-08,Tickets escalated to Tier 3,0,Tiered Support
+2026-04-08,Tickets opened today,121,Daily Activity
+2026-04-08,Tickets rejected by Development,0,Tiered Support
+2026-04-08,Tickets rejected by Tier 2,0,Tiered Support
+2026-04-08,Tickets rejected by Tier 3,0,Tiered Support
+2026-04-08,Tickets solved today,53,Daily Activity
+2026-04-08,Tier 2 over SLA (actionable),0,SLA_Actionable
+2026-04-08,Tier 2 over SLA (not actionable),0,SLA_Backlog
+2026-04-08,Tier 3 over SLA (actionable),0,SLA_Actionable
+2026-04-08,Tier 3 over SLA (not actionable),0,SLA_Backlog

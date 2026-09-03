@@ -28,7 +28,12 @@ export const DEFAULT_RAG_THRESHOLDS: RagThresholds = {
   productivity: { green: 1.5, amber: 1.0 },
   csat: { green: 4.0, amber: 3.0 },
   qa: { green: 4.0, amber: 3.0 },
-  goldenRules: { green: 3.0, amber: 2.0 },
+  // Anchored to the rubric's own scale, not to the current spread: the prompt defines
+  // 2 as "tried but needs improvement" and 3 as "clearly followed the rule". So amber
+  // means the team is attempting every rule on average, and green means comfortably
+  // closer to doing it properly than not. Green >= 3.0 required a perfect 3 on every
+  // applicable rule of every comment — unreachable, so every agent sat permanently Red.
+  goldenRules: { green: 2.5, amber: 2.0 },
   sla: { green: 95, amber: 90 },
   over2h: { green: 0, amber: 2 },
   stale: { green: 0, amber: 1 },
