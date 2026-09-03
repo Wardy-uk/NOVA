@@ -728,6 +728,35 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_121_email_log_dedup')
      CREATE UNIQUE INDEX UX_agent_121_email_log_dedup ON agent_121_email_log (kind, dedup_key);`,
 
+    // One-off repair: Sebastian Broome's 17 Jun 1-2-1 was sitting on Abdi Mohamed's record.
+    //
+    // The old Scan Plaud flow suggested an agent from the recording title and took the
+    // answer, so recording 12c84bd6… was assigned to Abdi. The vault note is unambiguous —
+    // `people:` and Plaud's own participant list are Nick Ward and Sebastian Broome, no
+    // Abdi. Two consequences: Sebastian's last 1-2-1 read as 7 Apr and he showed as
+    // overdue, and because an attached recording counts as resolved, NEURO would never
+    // offer the transcript again. Deleting the row frees the recording, and the next sweep
+    // re-offers it as a candidate for approval — with the transcript this time, so the
+    // actions can actually be extracted.
+    //
+    // The session is spurious rather than a real 1-2-1 that got the wrong recording:
+    // assignPlaudToAgent always INSERTs a fresh session dated to the recording, this row's
+    // date matches the recording exactly, its id sits out of date order between Abdi's
+    // 18 Jun and 7 May sessions, and Abdi has his own genuine 18 Jun session alongside it.
+    //
+    // Pinned to the exact row, so re-running matches nothing and a similar-looking session
+    // elsewhere is untouched. The NOT EXISTS guard means that if anybody has written an
+    // action against it since, the row stays and this becomes a no-op rather than orphaning
+    // their work.
+    `DELETE FROM agent_121_sessions
+     WHERE plaud_recording_id = '12c84bd68b0937f3978814788fe200ae'
+       AND agent_name = 'Abdi Mohamed'
+       AND LEFT(scheduled_date, 10) = '2026-06-17'
+       AND NOT EXISTS (
+         SELECT 1 FROM agent_121_actions a
+         WHERE a.session_id = agent_121_sessions.id OR a.claim_session_id = agent_121_sessions.id
+       );`,
+
     // ── Jira Issue Cache ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND type = 'U')
      CREATE TABLE jira_issue_cache (
