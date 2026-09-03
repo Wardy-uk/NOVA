@@ -1,5 +1,5 @@
 import { query, queryOne, execute, executeAndGetId } from './database.js';
-import { getLatestSession } from './one21-service.js';
+import { getLatestSession, STALLED_AFTER_DAYS } from './one21-service.js';
 
 /**
  * Plaud transcripts, detected but not applied.
@@ -176,6 +176,28 @@ export async function approveCandidate(candidateId: number, agentName?: string):
         completed_at = COALESCE(completed_at, ?), status = 'complete', extracted_at = NULL
     WHERE id = ?
   `, [c.plaud_id, c.transcript_text, held, held, sessionId]);
+
+  // A stalled session is now debris — clear it, or the agent stays flagged forever.
+  //
+  // Attaching a recording proves the 1-2-1 happened, but it lands on its own row and
+  // nothing ever closed the half-finished wizard session sitting behind it. The overview
+  // reads STATUS off the oldest OPEN session, not off the last held one, so Stephen's
+  // 1-2-1 showed "Last 18 Aug" and "Stalled — 2 Jul" side by side, and no amount of
+  // recording would have cleared it.
+  //
+  // Only `in_progress` sessions well past their date, which is this codebase's own
+  // definition of stalled: opened in the click-through, never finished, "can never be
+  // prepped again and never books the next 1-2-1". A `scheduled` session in the past is
+  // left alone — that is a meeting that genuinely has not happened yet (overdue), a
+  // different problem with a different fix, and silencing it here would hide it.
+  const stalledBefore = new Date(Date.now() - STALLED_AFTER_DAYS * 86_400_000)
+    .toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  await execute(`
+    UPDATE agent_121_sessions
+    SET status = 'abandoned'
+    WHERE agent_name = ? AND id <> ? AND status = 'in_progress'
+      AND LEFT(scheduled_date, 10) < ?
+  `, [agent, sessionId, stalledBefore]);
 
   await execute(`
     UPDATE agent_121_transcript_candidates

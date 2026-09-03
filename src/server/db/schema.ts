@@ -757,6 +757,38 @@ async function runMigrations(): Promise<void> {
          WHERE a.session_id = agent_121_sessions.id OR a.claim_session_id = agent_121_sessions.id
        );`,
 
+    // One-off repair: Stephen Mitchell's 2 Jul session, stranded by his 18 Aug recording.
+    //
+    // Approving a recording lands it on its own row, and until now nothing closed the
+    // half-finished wizard session behind it. The overview reads STATUS off the oldest
+    // OPEN session rather than the last held one, so his card read "Last 18 Aug" and
+    // "Stalled — 2 Jul" at the same time. approveCandidate now clears stalled sessions as
+    // it attaches; this catches the one that was already approved before that shipped.
+    //
+    // Pinned to the row: in_progress on that date with no recording of its own. A
+    // `scheduled` session in the past is deliberately untouched — that is genuinely
+    // overdue, which is a real thing to look at, not debris.
+    `UPDATE agent_121_sessions
+     SET status = 'abandoned'
+     WHERE agent_name = 'Stephen Mitchell'
+       AND LEFT(scheduled_date, 10) = '2026-07-02'
+       AND status = 'in_progress'
+       AND plaud_recording_id IS NULL;`,
+
+    // One-off repair: put Naomi Wentworth's 18 Aug transcript back in the approval queue.
+    //
+    // It was rejected by mis-click while clearing the backfill batch, and a rejection is
+    // permanent by design — NEURO reads the resolved list and never re-offers it, so the
+    // transcript would have sat in the vault unreachable and Naomi would have stayed on
+    // 30 Apr forever. There is no undo in the UI; this is it.
+    //
+    // Guarded on the recording id and on it still being rejected, so re-running after it
+    // has been approved (or rejected again on purpose) does nothing.
+    `UPDATE agent_121_transcript_candidates
+     SET status = 'pending', resolved_at = NULL, session_id = NULL
+     WHERE plaud_id = 'bb7426627d360b97ee343b8f1f6ab22e'
+       AND status = 'rejected';`,
+
     // ── Jira Issue Cache ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_issue_cache') AND type = 'U')
      CREATE TABLE jira_issue_cache (
