@@ -1954,15 +1954,14 @@ async function main() {
     }, 2 * 60 * 60 * 1000);
     setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 120_000);
 
-    // GR comment scoring — every 60 min during business hours (Mon-Fri 08-18 UTC)
+    // GR comment scoring — hourly, 72h look-back.
+    // The old Mon-Fri 08:00-18:00 gate combined with a 24h window meant comments posted
+    // between Friday evening and Sunday morning were never scanned at all, with no
+    // catch-up. Scoring only the latest comment per ticket keeps the wider window cheap.
     jobRegistry.register('gr-scoring', 'Golden rules pipeline', async () => {
-      const hour = new Date().getUTCHours();
-      const day = new Date().getUTCDay();
-      if (hour >= 8 && hour <= 18 && day >= 1 && day <= 5) {
-        await grPipeline.scoreRecentComments();
-      }
+      await grPipeline.scoreRecentComments(72 * 60);
     }, 60 * 60 * 1000);
-    setTimeout(() => grPipeline.scoreRecentComments().catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 30_000);
+    setTimeout(() => grPipeline.scoreRecentComments(72 * 60).catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 30_000);
 
     // QA daily digest email — 17:00 UTC
     jobRegistry.register('qa-daily-digest', 'QA daily digest email', async () => {

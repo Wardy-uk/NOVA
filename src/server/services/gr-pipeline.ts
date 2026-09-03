@@ -38,18 +38,10 @@ async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool
 // QA'd as if they were an agent's, or they land in the team's Golden Rules stats.
 const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot', 'nova-jira'];
 
-const CLOSURE_PATTERNS = [
-  'issue has been resolved',
-  'closing this ticket',
-  'please don\'t hesitate to contact us',
-  'this has now been resolved',
-  'marking as resolved',
-  'this ticket has been resolved',
-  'we are closing this',
-  'resolved and closing',
-  'this is now resolved',
-  'please feel free to reopen',
-];
+// Resolution comments are excluded structurally — see the statusCategory check in
+// scoreRecentComments. The old approach matched ten hard-coded English closure phrases,
+// which was both easy to evade and prone to firing on a mid-ticket comment that happened
+// to say "this is now resolved".
 
 // Schema lives in comment-review.ts so the Golden-Rules rubric is defined once.
 const GrResultSchema = CommentReviewSchema;
@@ -107,7 +99,7 @@ export class GrPipeline {
       const agentLookup = await this.getAgentKeys(p);
       console.log(`[gr-pipeline] Loaded ${agentLookup.keys.size} agent keys, ${agentLookup.displayNames.size} display names`);
 
-      let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, skippedClosure = 0, eligible = 0;
+      let skippedNoId = 0, skippedDate = 0, skippedInternal = 0, skippedCustomer = 0, skippedBot = 0, skippedNotAgent = 0, skippedAlready = 0, skippedEmpty = 0, skippedResolved = 0, skippedNotLatest = 0, eligible = 0;
       const scoredAgentNames = new Set<string>();
 
       for (const issue of issues) {
@@ -116,74 +108,81 @@ export class GrPipeline {
         const assignee = fields.assignee?.displayName ?? 'Unassigned';
         const priority = fields.priority?.name ?? 'Unknown';
         const issueType = fields.issuetype?.name ?? 'Unknown';
-        const ticketDone = fields.status?.statusCategory?.key === 'done';
 
+        // A comment on a resolved ticket is the resolution itself. Golden Rules measure
+        // in-flight communication — ownership, next action, timeframe — none of which
+        // apply to "this is now closed". QA owns the quality of the closure.
+        if (fields.status?.statusCategory?.key === 'done') {
+          skippedResolved += comments.length;
+          continue;
+        }
+
+        // Score only the most recent public agent comment on the ticket. Scoring every
+        // comment in the window over-weighted chatty tickets and repeatedly re-graded
+        // the same conversation; a newer comment gets its own score on a later run.
+        const eligibleComments: any[] = [];
         for (const comment of comments) {
-          try {
-            const filterResult = this.classifyComment(comment, windowStart, windowEnd, agentLookup);
-            if (filterResult === 'no_id') { skippedNoId++; continue; }
-            if (filterResult === 'date') { skippedDate++; continue; }
-            if (filterResult === 'internal') { skippedInternal++; continue; }
-            if (filterResult === 'customer') { skippedCustomer++; continue; }
-            if (filterResult === 'bot') { skippedBot++; continue; }
-            if (filterResult === 'not_agent') {
-              if (skippedNotAgent < 3) {
-                const accountId = comment.author?.accountId ?? '';
-                const dispName = comment.author?.displayName ?? '';
-                console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", displayName="${dispName}", keys sample: [${[...agentLookup.keys].slice(0, 3).join(', ')}]`);
-              }
-              skippedNotAgent++;
-              continue;
+          const filterResult = this.classifyComment(comment, windowStart, windowEnd, agentLookup);
+          if (filterResult === 'no_id') { skippedNoId++; continue; }
+          if (filterResult === 'date') { skippedDate++; continue; }
+          if (filterResult === 'internal') { skippedInternal++; continue; }
+          if (filterResult === 'customer') { skippedCustomer++; continue; }
+          if (filterResult === 'bot') { skippedBot++; continue; }
+          if (filterResult === 'not_agent') {
+            if (skippedNotAgent < 3) {
+              const accountId = comment.author?.accountId ?? '';
+              const dispName = comment.author?.displayName ?? '';
+              console.log(`[gr-pipeline] Agent key miss: accountId="${accountId}", displayName="${dispName}", keys sample: [${[...agentLookup.keys].slice(0, 3).join(', ')}]`);
             }
-
-            const commentBody = extractText(comment.body);
-            if (!commentBody.trim()) { skippedEmpty++; continue; }
-
-            if (ticketDone && this.isClosureComment(commentBody)) {
-              if (skippedClosure < 3) {
-                console.log(`[gr-pipeline] Skipping closure comment ${issue.key}/${comment.id}: "${commentBody.slice(0, 80)}…"`);
-              }
-              skippedClosure++;
-              continue;
-            }
-
-            const alreadyScored = await this.isAlreadyScored(p, s, issue.key, comment.id);
-            if (alreadyScored) { skippedAlready++; continue; }
-
-            const agentEmail = await this.lookupAgentEmail(p, comment.author?.accountId);
-
-            const grResult = await this.scoreComment(issue.key, comment.id, commentBody, priority, issueType);
-            if (!grResult) continue;
-
-            await this.saveResult(p, s, {
-              issueKey: issue.key,
-              commentId: comment.id,
-              result: grResult,
-              assignee,
-              updater: comment.author?.displayName ?? 'Unknown',
-              commentBody,
-              agentEmail,
-              priority,
-              issueType,
-              commentTimestamp: comment.created ? new Date(comment.created) : new Date(),
-              passThreshold,
-            });
-            eligible++;
-            rowsAffected++;
-            const scoredAgentName = comment.author?.displayName;
-            if (scoredAgentName) scoredAgentNames.add(scoredAgentName);
-          } catch (err) {
-            console.warn(`[gr-pipeline] Failed to score ${issue.key}/${comment.id}:`, err instanceof Error ? err.message : err);
+            skippedNotAgent++;
+            continue;
           }
+          if (!extractText(comment.body).trim()) { skippedEmpty++; continue; }
+          eligibleComments.push(comment);
+        }
+
+        if (eligibleComments.length === 0) continue;
+        eligibleComments.sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
+        const latest = eligibleComments[eligibleComments.length - 1];
+        skippedNotLatest += eligibleComments.length - 1;
+
+        const comment = latest;
+        try {
+          const commentBody = extractText(comment.body);
+
+          const alreadyScored = await this.isAlreadyScored(p, s, issue.key, comment.id);
+          if (alreadyScored) { skippedAlready++; continue; }
+
+          const agentEmail = await this.lookupAgentEmail(p, comment.author?.accountId);
+
+          const grResult = await this.scoreComment(issue.key, comment.id, commentBody, priority, issueType);
+          if (!grResult) continue;
+
+          await this.saveResult(p, s, {
+            issueKey: issue.key,
+            commentId: comment.id,
+            result: grResult,
+            assignee,
+            updater: comment.author?.displayName ?? 'Unknown',
+            commentBody,
+            agentEmail,
+            priority,
+            issueType,
+            commentTimestamp: comment.created ? new Date(comment.created) : new Date(),
+            passThreshold,
+          });
+          eligible++;
+          rowsAffected++;
+          const scoredAgentName = comment.author?.displayName;
+          if (scoredAgentName) scoredAgentNames.add(scoredAgentName);
+        } catch (err) {
+          console.warn(`[gr-pipeline] Failed to score ${issue.key}/${comment.id}:`, err instanceof Error ? err.message : err);
         }
       }
 
-      const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + skippedClosure + eligible;
-      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} closure=${skippedClosure}`);
-      const totalAgentPublicComments = eligible + skippedAlready + skippedClosure;
-      const scoredTotal = eligible + skippedAlready;
-      const coveragePct = totalAgentPublicComments > 0 ? Math.round(scoredTotal / totalAgentPublicComments * 100) : 0;
-      console.log(`[gr-pipeline] Coverage: ${scoredTotal} of ${totalAgentPublicComments} agent public comments scored (${coveragePct}%)`);
+      const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + skippedResolved + skippedNotLatest + eligible;
+      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} resolvedTicket=${skippedResolved} notLatest=${skippedNotLatest}`);
+      console.log(`[gr-pipeline] Coverage: ${eligible + skippedAlready} latest-comment candidates — ${eligible} newly scored, ${skippedAlready} already scored on a previous run`);
       console.log(`[gr-pipeline] Scored ${rowsAffected} comments from ${issues.length} issues → ${s || 'live'}`);
 
       if (this.coachingEngine && scoredAgentNames.size > 0) {
@@ -382,11 +381,6 @@ export class GrPipeline {
         @commentTimestamp, SYSUTCDATETIME(), @commentTimestamp
       )
     `);
-  }
-
-  private isClosureComment(text: string): boolean {
-    const lower = text.toLowerCase();
-    return CLOSURE_PATTERNS.some(pattern => lower.includes(pattern));
   }
 
   private async logRun(started: Date, status: 'success' | 'error', rowsAffected: number, errorMessage?: string): Promise<void> {

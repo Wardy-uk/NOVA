@@ -221,7 +221,10 @@ export async function computeAgentKpis(
              SUM(CASE WHEN grade='AMBER' THEN 1 ELSE 0 END) AS amber,
              SUM(CASE WHEN grade='GREEN' THEN 1 ELSE 0 END) AS green,
              SUM(CAST(ISNULL(isConcerning,0) AS INT)) AS concerning
-      FROM dbo.jira_qa_results WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY assigneeName
+      FROM dbo.jira_qa_results
+      WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+        AND ISNULL(qaType, '') <> 'excluded'   -- excluded rows score 0; they'd sink the average
+      GROUP BY assigneeName
     `);
     for (const x of r.recordset) qaByName.set((x.assigneeName || '').trim().toLowerCase(), x);
   } catch { /* table may not exist */ }
@@ -229,10 +232,11 @@ export async function computeAgentKpis(
   const grByName = new Map<string, any>();
   try {
     const r = await pool.request().query(`
-      SELECT Assignee, COUNT(*) AS scored, AVG(CAST(OverallScore AS FLOAT)) AS overall,
+      -- Updater, not Assignee — the comment's author owns the score.
+      SELECT Updater AS Assignee, COUNT(*) AS scored, AVG(CAST(OverallScore AS FLOAT)) AS overall,
              AVG(CAST(Rule1Score AS FLOAT)) AS ownership, AVG(CAST(Rule2Score AS FLOAT)) AS nextAction,
              AVG(CAST(Rule3Score AS FLOAT)) AS timeframe
-      FROM dbo.Jira_QA_GoldenRules WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY Assignee
+      FROM dbo.Jira_QA_GoldenRules WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY Updater
     `);
     for (const x of r.recordset) grByName.set((x.Assignee || '').trim().toLowerCase(), x);
   } catch { /* table may not exist */ }

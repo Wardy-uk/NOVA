@@ -353,7 +353,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           GROUP BY CAST(CreatedAt AS DATE), assigneeName
         `).catch(() => ({ recordset: [] })),
         p.request().query(`
-          SELECT CAST(CreatedAt AS DATE) AS ReportDate, Assignee AS AgentName,
+          -- Updater, not Assignee — the comment's author owns the score.
+          SELECT CAST(CreatedAt AS DATE) AS ReportDate, Updater AS AgentName,
             COUNT(*) AS GoldenRulesScored,
             AVG(CAST(OverallScore AS FLOAT)) AS GoldenRulesAvg,
             AVG(CAST(Rule1Score AS FLOAT)) AS OwnershipAvg,
@@ -361,8 +362,8 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
             AVG(CAST(Rule3Score AS FLOAT)) AS TimeframeAvg
           FROM dbo.Jira_QA_GoldenRules${s}
           WHERE ${dateFilter}
-            AND Assignee IS NOT NULL AND Assignee <> '' ${agentNameFilter.replace('assigneeName', 'Assignee')}
-          GROUP BY CAST(CreatedAt AS DATE), Assignee
+            AND Updater IS NOT NULL AND Updater <> '' ${agentNameFilter.replace('assigneeName', 'Updater')}
+          GROUP BY CAST(CreatedAt AS DATE), Updater
         `).catch(() => ({ recordset: [] })),
       ]);
 
@@ -1278,7 +1279,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           SUM(CASE WHEN CAST(OverallScore AS FLOAT) >= 2.0 THEN 1 ELSE 0 END) AS passCount,
           COUNT(*) AS total
         FROM dbo.Jira_QA_GoldenRules${s}
-        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+        -- Updater only: matching on Assignee too meant an agent's average included
+        -- comments written by colleagues on their tickets, and the "lowest scoring
+        -- comments" list could show them someone else's words.
+        WHERE Updater = '${safeName}'
           AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
       `);
       const gr = grResult.recordset[0];
@@ -1292,7 +1296,10 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
           CAST(OverallScore AS FLOAT) AS overall,
           CreatedAt
         FROM dbo.Jira_QA_GoldenRules${s}
-        WHERE (Assignee = '${safeName}' OR Updater = '${safeName}')
+        -- Updater only: matching on Assignee too meant an agent's average included
+        -- comments written by colleagues on their tickets, and the "lowest scoring
+        -- comments" list could show them someone else's words.
+        WHERE Updater = '${safeName}'
           AND CreatedAt >= DATEADD(day, -${days}, GETUTCDATE())
         ORDER BY OverallScore ASC
       `);

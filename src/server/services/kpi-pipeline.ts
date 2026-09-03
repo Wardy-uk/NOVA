@@ -1236,6 +1236,9 @@ export class KpiPipeline {
                  SUM(CAST(ISNULL(isConcerning, 0) AS INT)) AS concerningCount
           FROM dbo.jira_qa_results
           WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+            -- Excluded rows (chat, no public agent contribution) store overallScore = 0.
+            -- Without this filter they drag every agent's daily QA average toward zero.
+            AND ISNULL(qaType, '') <> 'excluded'
           GROUP BY assigneeName
         `);
         for (const r of qaResult.recordset) {
@@ -1247,14 +1250,17 @@ export class KpiPipeline {
       const grScores = new Map<string, any>();
       try {
         const grResult = await p.request().query(`
-          SELECT Assignee, COUNT(*) AS goldenRulesScored,
+          -- Updater, not Assignee: the score belongs to whoever WROTE the comment.
+          -- Grouping by Assignee moved Agent A's score onto Agent B's average whenever
+          -- A commented on B's ticket.
+          SELECT Updater AS Assignee, COUNT(*) AS goldenRulesScored,
                  AVG(CAST(OverallScore AS FLOAT)) AS avgGoldenRulesScore,
                  AVG(CAST(Rule1Score AS FLOAT)) AS avgOwnershipScore,
                  AVG(CAST(Rule2Score AS FLOAT)) AS avgNextActionScore,
                  AVG(CAST(Rule3Score AS FLOAT)) AS avgTimeframeScore
           FROM dbo.Jira_QA_GoldenRules
           WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
-          GROUP BY Assignee
+          GROUP BY Updater
         `);
         for (const r of grResult.recordset) {
           grScores.set((r.Assignee || '').trim().toLowerCase(), r);

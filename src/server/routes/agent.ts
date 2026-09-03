@@ -3236,15 +3236,16 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         DECLARE @since DATE = DATEADD(DAY, -${days}, CAST(GETUTCDATE() AS DATE));
 
         SELECT
-          g.Assignee AS agent_name,
+          -- Updater, not Assignee — the comment's author owns the score.
+          g.Updater AS agent_name,
           AVG(CAST(g.OverallScore AS FLOAT)) AS avg_gr_overall,
           AVG(CAST(g.Rule1Score AS FLOAT)) AS avg_ownership,
           AVG(CAST(g.Rule2Score AS FLOAT)) AS avg_next_action,
           AVG(CAST(g.Rule3Score AS FLOAT)) AS avg_timeframe
         FROM dbo.Jira_QA_GoldenRules g
         WHERE CAST(g.CreatedAt AS DATE) >= @since
-          AND g.Assignee IS NOT NULL AND g.Assignee <> ''
-        GROUP BY g.Assignee
+          AND g.Updater IS NOT NULL AND g.Updater <> ''
+        GROUP BY g.Updater
       `);
 
       const grMap: Record<string, any> = {};
@@ -3314,7 +3315,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
             AVG(CAST(Rule2Score AS FLOAT)) AS avg_next_action,
             AVG(CAST(Rule3Score AS FLOAT)) AS avg_timeframe
           FROM dbo.Jira_QA_GoldenRules
-          WHERE Assignee = '${safeName}'
+          WHERE Updater = '${safeName}'
             AND CAST(CreatedAt AS DATE) >= @since
         `),
         p.request().query(`

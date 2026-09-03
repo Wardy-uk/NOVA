@@ -14,6 +14,14 @@ import { logError } from './error-log.js';
 // pipeline, not agent QA. Mirrors BOT_PATTERNS in gr-pipeline.ts.
 const BOT_ASSIGNEES = ['nova', 'automation', 'nurtur support', 'jira service', 'servicedesk', 'bot'];
 
+// Only appended to the prompt when the ticket actually carries a resolution type.
+const RESOLUTION_TYPE_CHECK = `**resolutionChecks.resolutionTypeMatch** — Does the Jira resolution type ("{{resolution}}") match what actually happened?
+    - passed: true/false
+    - detail: one sentence
+    - If the resolution type contradicts what happened ("No Fault Found" on a ticket with a clear fault), this FAILS
+    - A generic-but-not-wrong type ("Done" on a straightforward fix) PASSES — judge accuracy, not expressiveness
+    - suggestedType: what the resolution type should be, or null if it's correct`;
+
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -66,12 +74,18 @@ export class QaPipeline {
       // automated transitions never set resolutiondate — 232 of 241 tickets missed in
       // the 7 days to 2026-07-31 were missing for exactly this reason, and the gap fell
       // unevenly across agents (13%-100% coverage), making per-agent QA non-comparable.
+      // `statusCategory = Done` gates on CURRENT state as well as the transition. Without
+      // it a ticket that went to Done and was then reopened is still QA'd while it is back
+      // in flight (4 such tickets in the 3 days to 2026-09-03, e.g. NT-30034 `Reopened`).
       const days = Math.max(1, Math.ceil(lookbackHours / 24));
-      const jql = `project = ${this.jiraProject} AND status CHANGED TO ("Done", "Closed", "Resolved") DURING (-${days}d, now()) ORDER BY updated DESC`;
-      console.log(`[qa-pipeline] Searching: ${jql.slice(0, 160)} → target=${this.target}`);
+      const jql = `project = ${this.jiraProject} AND status CHANGED TO ("Done", "Closed", "Resolved") DURING (-${days}d, now()) AND statusCategory = Done ORDER BY updated DESC`;
+      console.log(`[qa-pipeline] Searching: ${jql.slice(0, 200)} → target=${this.target}`);
       const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'description', 'issuetype', 'priority', 'status',
         'resolution', 'assignee', 'reporter', 'comment', 'created', 'resolutiondate',
+        // Request type — isChatTicket() read these without asking for them, so they were
+        // always undefined and the chat exclusion never fired.
+        'customfield_13482', 'customfield_12800',
       ], 2000);
       const issues = result?.issues ?? [];
       console.log(`[qa-pipeline] Jira returned ${issues.length} tickets closed in the last ${days}d`);
@@ -106,11 +120,24 @@ export class QaPipeline {
 
       const results: QaTicketResult[] = [];
       let budgetStopped = false;
+      let excludedChat = 0, excludedNoPublic = 0;
 
       for (const issue of toScore) {
         try {
           if (this.isChatTicket(issue)) {
-            await this.saveExcludedResult(issue);
+            await this.saveExcludedResult(issue, 'Chat');
+            excludedChat++;
+            rowsAffected++;
+            continue;
+          }
+          // Quick closes — abuse reports, PMTA notifications, spam, NOVA auto-closes.
+          // The assignee said nothing to the customer; the only public comments are NOVA's
+          // boilerplate. Scoring accuracy/clarity/tone on words the agent did not write
+          // was 38% of all scored tickets in the 7 days to 2026-09-03, spread unevenly
+          // across agents (13%-67%), which made per-agent QA non-comparable.
+          if (this.agentPublicComments(issue).length === 0) {
+            await this.saveExcludedResult(issue, 'No public agent contribution');
+            excludedNoPublic++;
             rowsAffected++;
             continue;
           }
@@ -138,9 +165,11 @@ export class QaPipeline {
         }
       }
 
-      const unscored = budgetStopped ? toScore.length - results.length : 0;
-      const coveragePct = toScore.length > 0 ? Math.round(results.length / toScore.length * 100) : 100;
-      console.log(`[qa-pipeline] Scored ${results.length}/${toScore.length} (${coveragePct}% coverage, ${failed} failed)${budgetStopped ? `, STOPPED on daily token budget — ${unscored} ticket(s) left unscored` : ''} → ${this.s || 'live'}`);
+      const excluded = excludedChat + excludedNoPublic;
+      const scorable = toScore.length - excluded;
+      const unscored = budgetStopped ? scorable - results.length : 0;
+      const coveragePct = scorable > 0 ? Math.round(results.length / scorable * 100) : 100;
+      console.log(`[qa-pipeline] Scored ${results.length}/${scorable} scorable (${coveragePct}% coverage, ${failed} failed), excluded ${excluded} (chat=${excludedChat} noPublicAgentComment=${excludedNoPublic})${budgetStopped ? `, STOPPED on daily token budget — ${unscored} ticket(s) left unscored` : ''} → ${this.s || 'live'}`);
 
       // One row per run when the budget stops us, not one per ticket. Without it
       // the cap is invisible: a short run looks identical to full coverage.
@@ -176,14 +205,32 @@ export class QaPipeline {
     const description = extractText(fields.description);
     const assignee = fields.assignee?.displayName ?? 'Unassigned';
 
-    const comments = fields.comment?.comments ?? [];
-    const thread = comments.slice(-15).map((c: any) => {
-      const body = extractText(c.body);
-      const isInternal = c.properties?.some((p: any) =>
-        p.key === 'sd.public.comment' && p.value?.internal === true
-      ) ?? false;
-      return `[${c.created ?? ''}] ${c.author?.displayName ?? 'Unknown'}${isInternal ? ' (internal)' : ''}:\n${body.slice(0, 500)}`;
-    }).join('\n\n---\n\n');
+    const comments: any[] = fields.comment?.comments ?? [];
+
+    // The public thread is what gets graded, with the reviewed agent's own comments
+    // marked so the prompt can score only their contributions.
+    const publicThread = comments
+      .filter(c => !this.isInternalComment(c))
+      .slice(-15)
+      .map(c => {
+        const who = c.author?.displayName ?? 'Unknown';
+        const tag = this.isReviewedAgent(c, fields.assignee)
+          ? 'AGENT UNDER REVIEW'
+          : c.author?.accountType === 'customer' ? 'CUSTOMER' : 'OTHER';
+        return `[${tag}] [${c.created ?? ''}] ${who}:\n${extractText(c.body).slice(0, 500)}`;
+      })
+      .join('\n\n---\n\n');
+
+    // Internal notes are context only — never graded. Detection was previously done via
+    // `c.properties`, which the search API always returns as null, so internal notes were
+    // reaching the LLM as if they were customer-facing replies on 100% of tickets.
+    const internalNotes = comments
+      .filter(c => this.isInternalComment(c))
+      .slice(-10)
+      .map(c => `[${c.created ?? ''}] ${c.author?.displayName ?? 'Unknown'}:\n${extractText(c.body).slice(0, 400)}`)
+      .join('\n\n---\n\n');
+
+    const resolutionName = fields.resolution?.name ?? '';
 
     const prompt = loadPrompt('qa-ticket', {
       ticket_key: issue.key ?? '',
@@ -194,8 +241,14 @@ export class QaPipeline {
       assignee,
       created: fields.created ?? 'Unknown',
       resolved: fields.resolutiondate ?? 'Unknown',
-      resolution: fields.resolution?.name ?? 'Unknown',
-      conversation_thread: thread.slice(0, 6000) || 'No comments',
+      resolution: resolutionName || 'Not set',
+      conversation_thread: publicThread.slice(0, 6000) || 'No public comments',
+      internal_notes: internalNotes.slice(0, 3000) || 'None',
+      // NT leaves `resolution` empty on ~80% of tickets — asking the model to judge
+      // "Unknown" against what happened produced noise, not a signal.
+      resolution_type_check: resolutionName
+        ? RESOLUTION_TYPE_CHECK.replace('{{resolution}}', resolutionName)
+        : 'This ticket has no resolution type set, so there is nothing to check. OMIT `resolutionTypeMatch` from your response entirely.',
     });
 
     const result = await this.llmService.call<QaTicketResult>(
@@ -229,6 +282,34 @@ export class QaPipeline {
     return BOT_ASSIGNEES.some(pat => lower.includes(pat));
   }
 
+  /** The search API returns `properties: null` and carries visibility on `jsdPublic`. */
+  private isInternalComment(comment: any): boolean {
+    return comment?.jsdPublic === false;
+  }
+
+  /** Is this comment written by the agent whose work is being reviewed (the assignee)? */
+  private isReviewedAgent(comment: any, assignee: any): boolean {
+    if (!assignee) return false;
+    if (assignee.accountId && comment?.author?.accountId) {
+      return comment.author.accountId === assignee.accountId;
+    }
+    const a = (comment?.author?.displayName ?? '').trim().toLowerCase();
+    const b = (assignee.displayName ?? '').trim().toLowerCase();
+    return !!a && a === b;
+  }
+
+  /** Public comments the reviewed agent actually wrote. Empty ⇒ nothing to QA. */
+  private agentPublicComments(issue: any): any[] {
+    const fields = issue.fields as any ?? issue;
+    const comments: any[] = fields.comment?.comments ?? [];
+    return comments.filter(c =>
+      !this.isInternalComment(c) &&
+      this.isReviewedAgent(c, fields.assignee) &&
+      !this.isBotAssignee(c.author?.displayName) &&
+      extractText(c.body).trim().length > 0
+    );
+  }
+
   private isChatTicket(issue: any): boolean {
     const fields = issue.fields as any;
     const cf13482 = fields.customfield_13482;
@@ -242,13 +323,14 @@ export class QaPipeline {
     return requestType.toLowerCase() === 'chat';
   }
 
-  private async saveExcludedResult(issue: any): Promise<void> {
+  private async saveExcludedResult(issue: any, reason: string): Promise<void> {
     const p = await getKpiPool(this.settings);
     const s = this.s;
     const fields = issue.fields as any;
     const assignee = fields.assignee?.displayName ?? 'Unassigned';
 
     const request = p.request();
+    request.input('category', sql.NVarChar, reason);
     request.input('issueKey', sql.NVarChar, issue.key);
     request.input('assigneeName', sql.NVarChar, assignee);
     request.input('statusName', sql.NVarChar(100), (fields.status?.name ?? '').slice(0, 100));
@@ -265,7 +347,7 @@ export class QaPipeline {
       VALUES
         (@issueKey, @assigneeName, @statusName, @ticketSummary, 'excluded', 0,
          0, 0, 0, 0,
-         'EXCLUDED', 0, NULL, 'Chat',
+         'EXCLUDED', 0, NULL, @category,
          @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
     `);
   }
@@ -352,7 +434,8 @@ export class QaPipeline {
       { name: 'Clarity', ...rc.clarity },
       { name: 'Customer communication', ...rc.customerCommunication },
       { name: 'Completeness', ...rc.completeness },
-      { name: 'Resolution type', ...rc.resolutionTypeMatch },
+      // Only present when the ticket carries a resolution type — see RESOLUTION_TYPE_CHECK.
+      ...(rc.resolutionTypeMatch ? [{ name: 'Resolution type', ...rc.resolutionTypeMatch }] : []),
     ];
     const failedChecks = checks.filter(c => !c.passed);
     const allPassed = failedChecks.length === 0;

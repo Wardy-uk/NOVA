@@ -41,11 +41,13 @@ export const QaTicketResultSchema = z.object({
     clarity: z.object({ passed: flexBool, detail: flexString }),
     customerCommunication: z.object({ passed: flexBool, detail: flexString }),
     completeness: z.object({ passed: flexBool, detail: flexString }),
+    // Optional: NT leaves `resolution` empty on ~80% of tickets, so this check is only
+    // asked for (and only stored) when the ticket actually carries a resolution type.
     resolutionTypeMatch: z.object({
       passed: flexBool,
       detail: flexString,
       suggestedType: flexNullableString,
-    }),
+    }).optional(),
   }),
 });
 export type QaTicketResult = z.infer<typeof QaTicketResultSchema>;
