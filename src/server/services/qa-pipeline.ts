@@ -101,13 +101,25 @@ export class QaPipeline {
 
       // Agent QA only covers human-worked tickets. NOVA's own closes are scored by the
       // AI-learning pipeline, not here — counting them as agent work skews the team stats.
-      const humanIssues = issues.filter(i => !this.isBotAssignee((i.fields as any)?.assignee?.displayName));
-      const skippedBot = issues.length - humanIssues.length;
+      const assigned = issues.filter(i => !this.isBotAssignee((i.fields as any)?.assignee?.displayName));
+      const skippedBot = issues.length - assigned.length;
+
+      // Only our own team. Someone outside the roster who happens to be the assignee on an
+      // NT ticket is not ours to QA, and their score would land in the team stats.
+      const roster = await this.getActiveRoster();
+      const humanIssues = assigned.filter(i => this.isOnRoster((i.fields as any)?.assignee, roster));
+      const skippedOffRoster = assigned.length - humanIssues.length;
+      if (skippedOffRoster > 0) {
+        const who = [...new Set(assigned
+          .filter(i => !this.isOnRoster((i.fields as any)?.assignee, roster))
+          .map(i => (i.fields as any)?.assignee?.displayName ?? '?'))];
+        console.log(`[qa-pipeline] Skipped ${skippedOffRoster} ticket(s) assigned outside the active roster: ${who.join(', ')}`);
+      }
 
       const alreadyScored = opts.force ? new Set<string>() : await this.getAlreadyScored(humanIssues.map(i => i.key));
       const toScore = humanIssues.filter(i => !alreadyScored.has(i.key));
 
-      console.log(`[qa-pipeline] ${issues.length} closed → ${humanIssues.length} human-worked (${skippedBot} bot/unassigned) → ${toScore.length} to score, ${alreadyScored.size} already scored${opts.force ? ' [FORCE]' : ''}`);
+      console.log(`[qa-pipeline] ${issues.length} closed → ${humanIssues.length} on-roster (${skippedBot} bot/unassigned, ${skippedOffRoster} off-roster) → ${toScore.length} to score, ${alreadyScored.size} already scored${opts.force ? ' [FORCE]' : ''}`);
 
       if (toScore.length === 0) {
         await this.monitor?.logRun({
@@ -280,6 +292,42 @@ export class QaPipeline {
     if (!displayName) return true; // Unassigned — no agent to attribute the score to.
     const lower = displayName.toLowerCase();
     return BOT_ASSIGNEES.some(pat => lower.includes(pat));
+  }
+
+  /**
+   * Active agents from dbo.Agent — the same roster the Golden Rules pipeline and
+   * round-robin use. QA is for our team's work only; without this, anyone who happens to
+   * be the assignee on an NT ticket gets scored and lands in the team stats.
+   * Fails OPEN: an empty or failed lookup filters nothing, rather than skipping everyone.
+   */
+  private async getActiveRoster(): Promise<{ accountIds: Set<string>; names: Set<string> }> {
+    const accountIds = new Set<string>();
+    const names = new Set<string>();
+    try {
+      const p = await getKpiPool(this.settings);
+      const result = await p.request().query(
+        `SELECT AgentName, AgentSurname, AccountId FROM dbo.Agent WHERE IsActive = 1`,
+      );
+      for (const row of result.recordset) {
+        if (row.AccountId) {
+          accountIds.add(row.AccountId);
+          accountIds.add(row.AccountId.replace(/:/g, '%3A'));
+        }
+        const full = [row.AgentName, row.AgentSurname].filter(Boolean).join(' ').trim();
+        if (full) names.add(full.toLowerCase());
+      }
+    } catch (err) {
+      console.warn('[qa-pipeline] getActiveRoster failed, scoring unfiltered:', err instanceof Error ? err.message : err);
+    }
+    return { accountIds, names };
+  }
+
+  private isOnRoster(assignee: any, roster: { accountIds: Set<string>; names: Set<string> }): boolean {
+    if (roster.accountIds.size === 0 && roster.names.size === 0) return true;  // fail open
+    const id = assignee?.accountId ?? '';
+    if (id && (roster.accountIds.has(id) || roster.accountIds.has(id.replace(/:/g, '%3A')))) return true;
+    const name = (assignee?.displayName ?? '').trim().toLowerCase();
+    return !!name && roster.names.has(name);
   }
 
   /** The search API returns `properties: null` and carries visibility on `jsdPublic`. */
