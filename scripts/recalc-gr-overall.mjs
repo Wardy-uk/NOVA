@@ -24,6 +24,12 @@
  * Usage:
  *   node scripts/recalc-gr-overall.mjs --check     # report only, writes nothing
  *   node scripts/recalc-gr-overall.mjs --apply     # perform the update
+ *   node scripts/recalc-gr-overall.mjs --apply --table=Jira_QA_GoldenRules   # one table
+ *
+ * --table exists because the UAT table holds 21 abandoned rows whose average "overall"
+ * is 5.38 — impossible on a 1-3 scale, so they predate this scoring entirely and the
+ * guard below cannot distinguish them. Their original values are not recoverable from
+ * the rule scores, so they are left alone unless explicitly named.
  */
 import fs from 'fs';
 import path from 'path';
@@ -37,7 +43,8 @@ const settings = (() => {
   return raw.settings || raw;
 })();
 
-const TABLES = ['Jira_QA_GoldenRules', 'Jira_QA_GoldenRulesUAT'];
+const ONLY = (process.argv.find(a => a.startsWith('--table=')) || '').split('=')[1];
+const TABLES = ONLY ? [ONLY] : ['Jira_QA_GoldenRules', 'Jira_QA_GoldenRulesUAT'];
 
 async function main() {
   const pool = await new sql.ConnectionPool({
