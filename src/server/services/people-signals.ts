@@ -64,8 +64,15 @@ import type { AgentKpiRow } from './kpi-agent/compute.js';
  * is not. VANTAGE refuses to render figures from a stamp it does not recognise.
  *
  * Bump on any change to the shape of the response.
+ *
+ * `-b`: `capturedAt` and `lastSubmittedAt` now carry the `Z`. They are written with
+ * GETUTCDATE() and were serialised with CONVERT style 126, which emits a UTC instant with
+ * no marker on it — the same unmarked-instant trap that cost two fixes in the Plaud path
+ * on 3 Sep. Nothing consumed them yet, which is precisely why it was worth removing while
+ * it was still free: the first caller to render "captured at 18:05" would have been an
+ * hour early all summer, correct all winter, and unlikely to notice either.
  */
-export const PEOPLE_SIGNALS_BUILD = '2026-09-03-people-a';
+export const PEOPLE_SIGNALS_BUILD = '2026-09-03-people-b';
 
 /**
  * Department scope, matching the kpi-agent engine's roster query exactly
@@ -398,14 +405,14 @@ async function fetchFrozen(day?: string): Promise<FrozenRow[]> {
   const rows = day
     ? await query<{ metrics_json: string; kpi_date: string; captured_at: string }>(
       `SELECT CONVERT(varchar(10), kpi_date, 23) AS kpi_date, metrics_json,
-              CONVERT(varchar(33), captured_at, 126) AS captured_at
+              CONVERT(varchar(33), captured_at, 127) AS captured_at
          FROM kpi_agent_daily WHERE kpi_date = ?`,
       [day],
     )
     : await query<{ metrics_json: string; kpi_date: string; captured_at: string }>(
       `WITH d AS (SELECT MAX(kpi_date) AS mx FROM kpi_agent_daily)
        SELECT CONVERT(varchar(10), kpi_date, 23) AS kpi_date, metrics_json,
-              CONVERT(varchar(33), captured_at, 126) AS captured_at
+              CONVERT(varchar(33), captured_at, 127) AS captured_at
          FROM kpi_agent_daily WHERE kpi_date = (SELECT mx FROM d)`,
     );
 
@@ -511,7 +518,7 @@ async function standups(days: number, roster: RosterPerson[]): Promise<StandupDa
   const subs = await query<{ agent_name: string; submissions: number; last_at: string | null }>(
     `SELECT sub.agent_name,
             COUNT(*) AS submissions,
-            CONVERT(varchar(33), MAX(sub.submitted_at), 126) AS last_at
+            CONVERT(varchar(33), MAX(sub.submitted_at), 127) AS last_at
        FROM standup_submissions sub
        JOIN standup_sessions s ON s.id = sub.session_id
       WHERE s.[date] >= ?

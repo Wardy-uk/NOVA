@@ -355,7 +355,7 @@ export async function listConversations(agentName: string): Promise<Conversation
            c.started_at,
            c.title,
            CASE WHEN s.transcript_text IS NULL THEN 0 ELSE LEN(s.transcript_text) END AS tchars,
-           CONVERT(varchar(19), s.peoplehr_logged_at, 126) AS peoplehr_logged_at
+           CONVERT(varchar(33), s.peoplehr_logged_at, 127) AS peoplehr_logged_at
     FROM agent_121_sessions s
     -- The candidate row is where the recording's title and start time live; a session only
     -- ever knew its date. LEFT, because a 1-2-1 held without a recording is still a 1-2-1.
@@ -370,7 +370,7 @@ export async function listConversations(agentName: string): Promise<Conversation
   }>(`
     SELECT id, agent_name, conversation_type, occurred_on, started_at, title, summary_excerpt,
            CASE WHEN transcript_text IS NULL THEN 0 ELSE LEN(transcript_text) END AS tchars,
-           CONVERT(varchar(19), peoplehr_logged_at, 126) AS peoplehr_logged_at
+           CONVERT(varchar(33), peoplehr_logged_at, 127) AS peoplehr_logged_at
     FROM agent_conversations WHERE agent_name = ?
   `, [agentName]);
 
