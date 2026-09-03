@@ -40,6 +40,7 @@ import { createNeuroBridgeRoutes } from './routes/neuro-bridge.js';
 import { createNeuroBridgeKpiRoutes } from './routes/neuro-bridge-kpi.js';
 import { createNeuroBridgeFlowRoutes } from './routes/neuro-bridge-flow.js';
 import { createNeuroBridgeAvailabilityRoutes } from './routes/neuro-bridge-availability.js';
+import { createNeuroBridgePeopleRoutes } from './routes/neuro-bridge-people.js';
 import { createNeuroBridge121Routes } from './routes/neuro-bridge-121.js';
 import { runTranscriptExtraction as runOne21Extraction } from './services/one21-transcript.js';
 import { ManualEscalationService } from './services/manual-escalation-service.js';
@@ -1018,6 +1019,11 @@ async function main() {
   // service dependency, so it has nothing to wire lazily; same shared-secret
   // door, so it mounts here with the other two.
   app.use('/api/neuro-bridge', createNeuroBridgeFlowRoutes());
+  // People half — the per-person subset of the KPIs, plus the roster they were
+  // computed over, which is what lets a coverage figure have a denominator.
+  // Needs settings for the KPI pool (dbo.Agent lives in techservicesjsm); same
+  // shared-secret door, so it mounts here with the others.
+  app.use('/api/neuro-bridge', createNeuroBridgePeopleRoutes(settingsQueries));
   // Availability half — who is off, from the People HR sync. NEURO uses it to
   // stay quiet on a booked day off instead of waiting to be told. Same
   // shared-secret door, so it mounts here with the others, ahead of the JWT
