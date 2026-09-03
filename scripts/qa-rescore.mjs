@@ -29,6 +29,15 @@ const arg = (name, dflt) => {
 };
 const HOURS = parseInt(arg('hours', '168'), 10);
 const APPLY = process.argv.includes('--apply');
+// Resume mode. A full forced pass over a 7-day window is about an hour of sequential LLM
+// calls, longer than many remote sessions survive, and `force` restarts from the top each
+// time — so an interrupted run never finishes, it just re-does its first N tickets.
+// Instead: delete the stale rows for one batch of tickets, then run WITHOUT force, so the
+// pipeline's own already-scored check skips everything else and scores exactly the batch
+// whose rows are now missing. Repeat until nothing is stale.
+const RESUME = process.argv.includes('--resume');
+const BATCH = parseInt(arg('batch', '40'), 10);
+const BEFORE = arg('before', null);   // rows processed before this are pre-backfill
 
 const DIST = '../dist/server/server';
 const { initPool } = await import(`${DIST}/services/database.js`);
@@ -75,6 +84,41 @@ const llm = new LlmService(settings);
 const qa = new QaPipeline(settings, llm, jira, 'NT');
 
 const started = Date.now();
+
+if (RESUME) {
+  if (!BEFORE) { console.error('--resume needs --before=<ISO timestamp> to know which rows are stale.'); process.exit(1); }
+  const sqlMod = await import('mssql');
+  const mssql = sqlMod.default ?? sqlMod;
+  const days = Math.ceil(HOURS / 24);
+  const pool = await new mssql.ConnectionPool({
+    server: s.kpi_sql_server, database: s.kpi_sql_database, user: s.kpi_sql_user, password: s.kpi_sql_password,
+    options: { encrypt: true, trustServerCertificate: true }, requestTimeout: 120000,
+  }).connect();
+
+  const countStale = async () => (await pool.request()
+    .input('before', mssql.DateTime2, new Date(BEFORE))
+    .query(`SELECT COUNT(*) AS n FROM dbo.jira_qa_results
+            WHERE CreatedAt >= DATEADD(day, -${days}, GETDATE()) AND processedAt < @before`)).recordset[0].n;
+
+  console.log(`stale rows remaining before this batch: ${await countStale()}`);
+
+  const stale = await pool.request()
+    .input('before', mssql.DateTime2, new Date(BEFORE))
+    .query(`SELECT TOP (${BATCH}) issueKey FROM dbo.jira_qa_results
+            WHERE CreatedAt >= DATEADD(day, -${days}, GETDATE()) AND processedAt < @before
+            ORDER BY issueKey`);
+  const keys = stale.recordset.map(r => r.issueKey);
+  if (!keys.length) { console.log('Nothing stale left — backfill complete.'); await pool.close(); process.exit(0); }
+
+  const list = keys.map(k => `'${k.replace(/'/g, "''")}'`).join(',');
+  const del = await pool.request().query(`DELETE FROM dbo.jira_qa_results WHERE issueKey IN (${list})`);
+  console.log(`deleted ${del.rowsAffected[0]} stale row(s) across ${keys.length} ticket(s) — the pipeline will re-score exactly those`);
+  await pool.close();
+
+  const res = await qa.scoreRecentlyResolved(HOURS, { force: false });
+  console.log(`Batch done: ${res.length} scored in ${Math.round((Date.now() - started) / 1000)}s. Re-run to continue.`);
+  process.exit(0);
+}
 const results = await qa.scoreRecentlyResolved(HOURS, { force: true });
 console.log(`\nRe-scored ${results.length} tickets in ${Math.round((Date.now() - started) / 1000)}s.`);
 console.log('If the run stopped on the daily token budget, the log line above says how many were left — re-run to finish.');
