@@ -35,12 +35,25 @@ interface Drift {
   noPlan: string[];
 }
 
-/** "14:04" from a PLAUD `start_at`. Rendered as-is rather than through a Date: the vault
- *  stores local wall-clock with no zone, so parsing it would shift the time by the
- *  viewer's offset and put an afternoon 1-2-1 in the morning. */
+/** "14:02" from a PLAUD `start_at`, in London time.
+ *
+ * Plaud's API returns UTC with no marker on it — `2026-08-19T13:02:21` for a 1-2-1 that
+ * started at 14:02, which Plaud's own web UI shows as 14:02. This used to read the digits
+ * straight off the string on the assumption they were local wall-clock, so every recording
+ * made in BST displayed an hour early, and every one made in winter looked fine, which is
+ * why it took a while to notice.
+ *
+ * Parse as UTC and format for London: correct in BST, correct in GMT, and correct on the
+ * two days a year the offset moves. A timestamp that already carries a zone is trusted as
+ * it stands, so this stays right if the payload ever starts sending one. */
+const LONDON_HHMM = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: false,
+});
 const startTime = (s: string | null): string | null => {
-  const m = /T(\d{2}:\d{2})/.exec(String(s ?? ''));
-  return m ? m[1] : null;
+  const raw = String(s ?? '').trim();
+  if (!raw) return null;
+  const t = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`);
+  return Number.isNaN(t.getTime()) ? null : LONDON_HHMM.format(t);
 };
 
 const d = (s: string | null) => s ? new Date(`${s}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
