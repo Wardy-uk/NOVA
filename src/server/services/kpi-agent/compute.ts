@@ -9,7 +9,7 @@ import type { SettingsQueries } from '../../db/settings-store.js';
 import { query } from '../database.js';
 import { getKpiPool } from '../kpi-pipeline.js';
 import { NOVA_JIRA_ACCOUNT_ID } from '../kpi-org/registry.js';
-import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
+import { getRagThresholds, ragHigher, ragHigherWithSample, ragLower, type Rag } from './rag.js';
 import { noReplyCutoff } from '../shared/no-reply.js';
 
 const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
@@ -282,8 +282,8 @@ export async function computeAgentKpis(
     const rag: Record<string, Rag | null> = {
       productivity: ragHigher(ticketsPerHour, thresholds.productivity),
       csat: ragHigher(csatAvg, thresholds.csat),
-      qa: ragHigher(qaOverall, thresholds.qa),
-      goldenRules: ragHigher(grOverall, thresholds.goldenRules),
+      qa: ragHigherWithSample(qaOverall, thresholds.qa, qa?.scored || 0, thresholds.minSample.qa),
+      goldenRules: ragHigherWithSample(grOverall, thresholds.goldenRules, gr?.scored || 0, thresholds.minSample.goldenRules),
       sla: ragHigher(slaCompliancePct, thresholds.sla),
       over2h: ragLower(s1.overSla, thresholds.over2h),
       stale: ragLower(s1.noReply, thresholds.stale),

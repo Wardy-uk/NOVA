@@ -17,6 +17,11 @@ export interface RagThresholds {
   over2h: { green: number; amber: number };        // over-SLA count
   stale: { green: number; amber: number };         // no-update count
   oldest: { green: number; amber: number };        // oldest ticket days
+  // Minimum scored items before a QA / Golden Rules rating is awarded at all. QA now
+  // excludes tickets the agent made no public contribution to, so a day's sample can be
+  // 1-2 tickets for agents in the abuse-report pools; a RAG on that is noise presented
+  // as a judgement. Below the floor the rating is null and the UI shows the count only.
+  minSample: { qa: number; goldenRules: number };
 }
 
 export const DEFAULT_RAG_THRESHOLDS: RagThresholds = {
@@ -28,6 +33,7 @@ export const DEFAULT_RAG_THRESHOLDS: RagThresholds = {
   over2h: { green: 0, amber: 2 },
   stale: { green: 0, amber: 1 },
   oldest: { green: 3, amber: 7 },
+  minSample: { qa: 3, goldenRules: 3 },
 };
 
 export function getRagThresholds(settings: SettingsQueries): RagThresholds {
@@ -39,6 +45,17 @@ export function getRagThresholds(settings: SettingsQueries): RagThresholds {
   } catch {
     return DEFAULT_RAG_THRESHOLDS;
   }
+}
+
+/** ragHigher, suppressed when the sample is too small to mean anything. */
+export function ragHigherWithSample(
+  value: number | null,
+  t: { green: number; amber: number },
+  sampleSize: number,
+  minSample: number,
+): Rag | null {
+  if (sampleSize < minSample) return null;
+  return ragHigher(value, t);
 }
 
 export function ragHigher(value: number | null, t: { green: number; amber: number }): Rag | null {

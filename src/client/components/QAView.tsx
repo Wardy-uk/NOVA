@@ -485,6 +485,15 @@ export function QAView() {
             <StatCard label="Flagged"    value={summary?.concerning ?? null} colour={C.amber} />
             <StatCard label="Excluded"   value={summary?.excluded ?? null} colour={C.text3} />
           </div>
+          {!!summary?.excluded && (
+            <div style={{ fontSize: '0.78rem', color: C.text3, marginBottom: '1rem', lineHeight: 1.5 }}>
+              Excluded tickets are not scored and do not affect any average. A ticket is excluded
+              when the agent made no public contribution to it — abuse reports, PMTA notices, spam
+              and NOVA auto-closes, where the only customer-facing comments are NOVA's — or when it
+              came in through chat. QA measures the quality of the customer-facing resolution, so a
+              high excluded count means those tickets needed no agent reply, not that work was missed.
+            </div>
+          )}
           {summary && (
             <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 600, color: C.text2, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>Grade Distribution</div>

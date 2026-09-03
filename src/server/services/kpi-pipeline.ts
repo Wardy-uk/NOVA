@@ -10,6 +10,7 @@ import { tableSuffix } from './pipeline-monitor.js';
 import { query as localQuery } from './database.js';
 import { logError } from './error-log.js';
 import { noReplyCutoff } from './shared/no-reply.js';
+import { getRagThresholds } from './kpi-agent/rag.js';
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -1309,6 +1310,9 @@ export class KpiPipeline {
         }
       } catch { /* non-critical */ }
 
+      // Shared with the kpi-agent RAG path so the floor is defined once.
+      const { minSample } = getRagThresholds(this.settings);
+
       for (const a of agents.recordset) {
         if (!a.AgentName?.trim()) continue;
 
@@ -1326,8 +1330,15 @@ export class KpiPipeline {
         // RAG calculations
         const ragProductivity = ticketsPerHour !== null ? (ticketsPerHour >= 1.5 ? 'Green' : ticketsPerHour >= 1.0 ? 'Amber' : 'Red') : null;
         const ragCSAT = csatAvg !== null ? (csatAvg >= 4.0 ? 'Green' : csatAvg >= 3.0 ? 'Amber' : 'Red') : null;
-        const ragQA = qa ? (qa.avgOverallScore >= 8.0 ? 'Green' : qa.avgOverallScore >= 6.0 ? 'Amber' : 'Red') : null;  // QA OverallScore is 0–10
-        const ragGoldenRules = gr ? (gr.avgGoldenRulesScore >= 3.0 ? 'Green' : gr.avgGoldenRulesScore >= 2.0 ? 'Amber' : 'Red') : null;
+        // Below the minimum sample the rating is withheld rather than awarded on
+        // noise — QA now excludes tickets with no public agent contribution, so a single
+        // day's sample can be 1-2 tickets for agents in the abuse-report pools.
+        const ragQA = qa && Number(qa.qaTicketsScored) >= minSample.qa
+          ? (qa.avgOverallScore >= 8.0 ? 'Green' : qa.avgOverallScore >= 6.0 ? 'Amber' : 'Red')  // QA OverallScore is 0–10
+          : null;
+        const ragGoldenRules = gr && Number(gr.goldenRulesScored) >= minSample.goldenRules
+          ? (gr.avgGoldenRulesScore >= 3.0 ? 'Green' : gr.avgGoldenRulesScore >= 2.0 ? 'Amber' : 'Red')
+          : null;
         const ragOver2h = Number(a.OpenTickets_Over2Hours) <= 0 ? 'Green' : Number(a.OpenTickets_Over2Hours) <= 2 ? 'Amber' : 'Red';
         const ragStale = Number(a.OpenTickets_NoUpdateToday) <= 0 ? 'Green' : Number(a.OpenTickets_NoUpdateToday) <= 1 ? 'Amber' : 'Red';
         const ragSLA = slaCompliance !== null ? (slaCompliance >= 95 ? 'Green' : slaCompliance >= 90 ? 'Amber' : 'Red') : null;
