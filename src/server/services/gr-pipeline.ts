@@ -81,15 +81,25 @@ export class GrPipeline {
       const startStr = windowStart.toISOString().replace('T', ' ').slice(0, 16);
       const endStr = windowEnd.toISOString().replace('T', ' ').slice(0, 16);
 
-      const jql = `project = ${this.jiraProject} AND updated >= "${startStr}" AND updated < "${endStr}" ORDER BY updated ASC`;
+      // DESC, not ASC. The fetch is capped, and a 72h window holds ~710 NT tickets against
+      // a 500 cap — ordered ascending the scan never reached the most recently updated
+      // tickets, which is exactly where new comments are, so nothing new was ever scored.
+      // (Harmless while the window was 24h/~338 tickets; widening it to 72h exposed it.)
+      const jql = `project = ${this.jiraProject} AND updated >= "${startStr}" AND updated < "${endStr}" ORDER BY updated DESC`;
       console.log(`[gr-pipeline] JQL: ${jql} → target=${this.target}`);
+      const FETCH_CAP = 1200;   // 72h of NT is ~710 tickets; leaves real headroom
       const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'priority', 'issuetype', 'assignee', 'comment', 'status',
         // When the ticket entered its current status category — the resolution moment.
         'statuscategorychangedate',
-      ], 500);
+      ], FETCH_CAP);
       const issues = result?.issues ?? [];
       console.log(`[gr-pipeline] Jira returned ${issues.length} tickets`);
+      // Silence here is how the ASC/cap blind spot went unnoticed: a truncated scan looks
+      // exactly like a quiet window.
+      if (issues.length >= FETCH_CAP) {
+        console.warn(`[gr-pipeline] Fetch hit the ${FETCH_CAP}-ticket cap — the oldest part of the ${windowMinutes / 60}h window was not scanned. Raise FETCH_CAP or shorten the window.`);
+      }
 
       if (issues.length === 0) {
         await this.logRun(started, 'success', 0);
