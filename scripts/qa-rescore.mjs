@@ -31,17 +31,35 @@ const HOURS = parseInt(arg('hours', '168'), 10);
 const APPLY = process.argv.includes('--apply');
 
 const DIST = '../dist/server/server';
+const { initializeDatabase } = await import(`${DIST}/db/schema.js`);
 const { FileSettingsQueries } = await import(`${DIST}/db/settings-store.js`);
+const { ConfigService } = await import(`${DIST}/services/config-service.js`);
 const { LlmService } = await import(`${DIST}/services/llm-service.js`);
 const { JiraRestClient } = await import(`${DIST}/services/jira-client.js`);
 const { QaPipeline } = await import(`${DIST}/services/qa-pipeline.js`);
 
-const settings = new FileSettingsQueries();
+// Settings live in dbo.settings, read through ConfigService — settings.json is only a
+// pre-migration fallback and is badly stale on prod (last written July, and missing
+// qa_pipeline_target entirely). Reading the file directly resolved the target to 'uat'
+// and would have written every re-scored row to the dead UAT table while leaving the
+// live data untouched. Use the same path the service uses.
+await initializeDatabase();
+const settings = new ConfigService(new FileSettingsQueries());
+await settings.initialize();
 const s = settings.getAll();
 
 const target = s.qa_pipeline_target === 'live' ? 'live' : 'uat';
 const budget = s.agent_token_budget_daily_qa_scoring || '(unset — hardcoded default 1,200,000)';
 console.log(`QA re-score — window ${HOURS}h, target=${target}, daily token budget=${budget}`);
+
+// Writing a backfill into the wrong table is silent and wastes the whole run, so make
+// the target an explicit choice rather than something you have to notice in the output.
+if (target !== 'live' && !process.argv.includes('--allow-uat')) {
+  console.error(`
+ABORT: target resolved to '${target}', not 'live'. Refusing to write a backfill to the UAT table.`);
+  console.error('If that is genuinely what you want, re-run with --allow-uat.');
+  process.exit(1);
+}
 
 if (!APPLY) {
   console.log('\nDry run. Nothing written. Re-run with --apply to re-score.');
