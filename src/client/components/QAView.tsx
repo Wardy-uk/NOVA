@@ -62,10 +62,12 @@ interface GRResult {
   OverallScore: number;
   Rule1Score: number;
   Rule2Score: number;
-  Rule3Score: number;
+  /** null when a timeframe was not owed on this comment — not a failure. */
+  Rule3Score: number | null;
   rule1Pass: number;
   rule2Pass: number;
-  rule3Pass: number;
+  rule3Pass: number | null;
+  rule3NotApplicableReason: string | null;
   Summary: string | null;
   SuggestedRewrite: string | null;
   CommentBody: string | null;
@@ -761,10 +763,15 @@ export function QAView() {
                     : grResults.map(r => {
                         const key = `${r.IssueKey}-${r.CommentId}`;
                         const expanded = grExpanded === key;
-                        const ruleColour = (pass: number) => pass ? C.green : C.red;
-                        // Count of rules passed — NOT OverallScore, which is the weakest
-                        // rule's 1-3 score and reads as a pass count when rendered as "n/3".
-                        const passed = (r.rule1Pass ? 1 : 0) + (r.rule2Pass ? 1 : 0) + (r.rule3Pass ? 1 : 0);
+                        const ruleColour = (pass: number | null) => pass ? C.green : C.red;
+                        // Rule 3 is null when a timeframe was not owed (handed to another
+                        // team, waiting on the customer). That is not a failure — it comes
+                        // out of both the numerator and the denominator.
+                        const r3NA = r.Rule3Score === null || r.Rule3Score === undefined;
+                        const applicable = r3NA ? 2 : 3;
+                        // Count of rules passed — NOT OverallScore, which is the mean of the
+                        // applicable rules and reads as a pass count when rendered as "n/3".
+                        const passed = (r.rule1Pass ? 1 : 0) + (r.rule2Pass ? 1 : 0) + (!r3NA && r.rule3Pass ? 1 : 0);
                         return (
                           <>
                             <tr key={key} onClick={() => setGrExpanded(expanded ? null : key)} style={{ cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
@@ -775,15 +782,18 @@ export function QAView() {
                                 }
                               </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text1 }}>{r.Updater ?? r.Assignee ?? '—'}</td>
-                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: passed === 3 ? C.green : passed >= 2 ? C.amber : C.red }}>
-                                {passed}/3
-                                <span style={{ marginLeft: '0.4rem', fontWeight: 400, fontSize: '0.75rem', color: C.text3 }} title="Weakest rule score (1–3)">
-                                  (weakest {r.OverallScore})
+                              <td style={{ padding: '0.55rem 0.75rem', fontWeight: 700, color: passed === applicable ? C.green : passed >= applicable - 1 ? C.amber : C.red }}>
+                                {passed}/{applicable}
+                                <span style={{ marginLeft: '0.4rem', fontWeight: 400, fontSize: '0.75rem', color: C.text3 }} title="Mean of the rules that apply (1–3)">
+                                  (avg {Number(r.OverallScore).toFixed(2)})
                                 </span>
                               </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule1Pass) }}>{r.rule1Pass ? '✓' : '✗'} {r.Rule1Score}</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule2Pass) }}>{r.rule2Pass ? '✓' : '✗'} {r.Rule2Score}</td>
-                              <td style={{ padding: '0.55rem 0.75rem', color: ruleColour(r.rule3Pass) }}>{r.rule3Pass ? '✓' : '✗'} {r.Rule3Score}</td>
+                              <td style={{ padding: '0.55rem 0.75rem', color: r3NA ? C.text3 : ruleColour(r.rule3Pass) }}
+                                  title={r3NA ? (r.rule3NotApplicableReason ?? 'No timeframe was owed on this comment') : undefined}>
+                                {r3NA ? 'n/a' : <>{r.rule3Pass ? '✓' : '✗'} {r.Rule3Score}</>}
+                              </td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text2, fontSize: '0.8rem' }}>{r.ticketPriority ?? '—'}</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.8rem' }}>{r.processedAt ? new Date(r.processedAt).toLocaleDateString() : '—'}</td>
                               <td style={{ padding: '0.55rem 0.75rem', color: C.text3, fontSize: '0.7rem', textAlign: 'right' }}>{expanded ? '▲' : '▼'}</td>
