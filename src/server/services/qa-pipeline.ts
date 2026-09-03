@@ -136,6 +136,10 @@ export class QaPipeline {
 
       for (const issue of toScore) {
         try {
+          // force re-scores a ticket that already has a row, so the old row must go
+          // first — the saves are plain INSERTs and every average counts both, which is
+          // how duplicate issueKeys accumulated the last time a backfill was run.
+          if (opts.force) await this.deleteExistingRows(issue.key);
           if (this.isChatTicket(issue)) {
             await this.saveExcludedResult(issue, 'Chat');
             excludedChat++;
@@ -401,6 +405,20 @@ export class QaPipeline {
          'EXCLUDED', 0, NULL, @category,
          @ticketType, @ticketPriority, SYSUTCDATETIME(), GETUTCDATE())
     `);
+  }
+
+  /** Remove any prior rows for a ticket, so a forced re-score replaces rather than doubles. */
+  private async deleteExistingRows(issueKey: string): Promise<void> {
+    try {
+      const p = await getKpiPool(this.settings);
+      const request = p.request();
+      request.input('issueKey', sql.NVarChar, issueKey);
+      await request.query(`DELETE FROM dbo.jira_qa_results${this.s} WHERE issueKey = @issueKey`);
+    } catch (err) {
+      // Better to skip the ticket than to add a second row for it.
+      await logError('qa-pipeline', err, { entityRef: issueKey, context: { stage: 'deleteExistingRows' } });
+      throw err;
+    }
   }
 
   private async getAlreadyScored(ticketKeys: string[]): Promise<Set<string>> {
