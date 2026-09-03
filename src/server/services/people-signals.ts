@@ -127,7 +127,7 @@ function str(v: unknown): string | null {
  * only differences worth absorbing — anything cleverer would be guessing at
  * identity, and an unmatched name is reported rather than guessed.
  */
-function nameKey(v: string | null | undefined): string {
+export function nameKey(v: string | null | undefined): string {
   return (v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
@@ -344,7 +344,7 @@ export interface PeopleSignals {
  * current even when the capture is stale — and so a disagreement between the two
  * is visible instead of averaged away.
  */
-async function fetchRoster(settings: SettingsQueries): Promise<RosterPerson[]> {
+export async function fetchRoster(settings: SettingsQueries): Promise<RosterPerson[]> {
   const pool = await getKpiPool(settings);
   // Department is a later-added column; guard it the way compute.ts does, or an
   // older schema fails the whole signal instead of returning a wider roster.

@@ -1032,7 +1032,7 @@ async function main() {
   // 1-2-1 half — NEURO books the meeting, NOVA runs it. This is the only thing that
   // creates the 'scheduled' session the day-before prep job fires on; without it the
   // prep email cannot be sent at all, which is precisely what happened until 2026-08-27.
-  app.use('/api/neuro-bridge', createNeuroBridge121Routes());
+  app.use('/api/neuro-bridge', createNeuroBridge121Routes(settingsQueries));
 
   // Adobe Sign OAuth callback — public (redirect from Adobe, no NOVA JWT)
   app.get('/api/adobe-sign/callback', async (req, res) => {

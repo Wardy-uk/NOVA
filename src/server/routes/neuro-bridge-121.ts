@@ -1,10 +1,12 @@
 import { Router } from 'express';
+import type { FileSettingsQueries } from '../db/settings-store.js';
 
 import { query } from '../services/database.js';
 import {
   upsertBooking, cancelOpenSessions, isKnownAgent, setAgentCadenceDays,
 } from '../services/one21-service.js';
 import { recordCandidate, CONVERSATION_TYPES, getResolvedPlaudIds, getPendingByAgent } from '../services/one21-candidates.js';
+import { getConversationSignals, recordSweepStats } from '../services/conversation-signals.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
 /**
@@ -30,7 +32,7 @@ import { bridgeAuth } from './neuro-bridge.js';
  * a person's display name with no join table between them; quietly accepting a near-miss
  * is how one agent's history ends up split across two spellings.
  */
-export function createNeuroBridge121Routes(): Router {
+export function createNeuroBridge121Routes(settings: FileSettingsQueries): Router {
   const router = Router();
 
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -291,6 +293,59 @@ export function createNeuroBridge121Routes(): Router {
    * Idempotent on `plaud_id`, which is the same identifier NOVA stores in
    * `plaud_recording_id` — so the two systems never disagree about which recording this is.
    */
+  /**
+   * GET /121/conversations?since=YYYY-MM-DD — every individual conversation, team-wide.
+   *
+   * For VANTAGE. Team-wide rather than per-agent because per-agent means one call per
+   * person per refresh; newest first; `since` filters on the London calendar date.
+   *
+   * ⚠ READ-ONLY, and it must stay so. This route is in FRONT of the JWT middleware and is
+   * guarded only by the bridge secret, so it takes no caller-supplied identity and writes
+   * nothing. The PeopleHR tick is deliberately NOT exposed here: its whole evidential
+   * value is that it is Nick's own confirmation, and a tool ticking it would turn a
+   * personal attestation into a machine assertion. Ticking stays behind session auth.
+   *
+   * Every response carries a `build` stamp and per-section {ok,error,data} envelopes, so a
+   * stale deploy is detectable and one failing query degrades a section instead of the
+   * whole answer.
+   */
+  router.get('/121/conversations', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+      res.json({ ok: true, data: await getConversationSignals(settings, { since }) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  /**
+   * POST /121/sweep-stats — NEURO reports what its last sweep could not attribute.
+   *
+   * The one WRITE on this router, and it carries no identity and no per-person data: three
+   * counts about NEURO's own run. VANTAGE measures completeness and needs the size of the
+   * drop, not just the fact of one.
+   */
+  router.post('/121/sweep-stats', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    const unattributed = num(req.body?.unattributed);
+    const offered = num(req.body?.offered);
+    const scanned = num(req.body?.scanned);
+    // All three or none: a partial report would be indistinguishable from a zero, which is
+    // the exact confusion this endpoint exists to remove.
+    if (unattributed === null || offered === null || scanned === null) {
+      res.status(400).json({ ok: false, error: 'unattributed, offered and scanned are all required numbers' });
+      return;
+    }
+    try {
+      await recordSweepStats({ unattributed, offered, scanned });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
   router.post('/121/transcript-candidate', async (req, res) => {
     if (!bridgeAuth(req, res)) return;
 

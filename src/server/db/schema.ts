@@ -761,6 +761,24 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_conversations_agent')
      CREATE INDEX IX_agent_conversations_agent ON agent_conversations (agent_name, occurred_on DESC);`,
 
+    // What NEURO's last sweep could NOT attribute.
+    //
+    // The sweep drops any conversation it cannot put a name to. VANTAGE measures
+    // completeness, so it needs the SIZE of that drop, not just the fact of one — "12
+    // logged" and "12 logged, 5 unattributable" are different claims and only the second
+    // is honest. Append-only: the history is how you tell a one-off from a trend.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_conversation_sweep_stats') AND type = 'U')
+     CREATE TABLE agent_conversation_sweep_stats (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       unattributed INT NOT NULL,
+       offered INT NOT NULL,
+       scanned INT NOT NULL,
+       reported_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_conversation_sweep_stats_at')
+     CREATE INDEX IX_conversation_sweep_stats_at ON agent_conversation_sweep_stats (reported_at DESC);`,
+
     // What KIND of conversation a detected recording is. Nullable and correctable in the
     // review screen for the same reason the agent name is: it is NEURO's reading of a
     // title, not a fact, and filing a welfare check as a performance conversation on
