@@ -1226,17 +1226,19 @@ export class KpiPipeline {
       const qaScores = new Map<string, any>();
       try {
         const qaResult = await p.request().query(`
-          SELECT assigneeName, COUNT(*) AS qaTicketsScored,
-                 AVG(CAST(overallScore AS FLOAT)) AS avgOverallScore,
-                 AVG(CAST(accuracyScore AS FLOAT)) AS avgAccuracyScore,
-                 AVG(CAST(clarityScore AS FLOAT)) AS avgClarityScore,
-                 AVG(CAST(toneScore AS FLOAT)) AS avgToneScore,
-                 SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS redCount,
-                 SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS amberCount,
-                 SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS greenCount,
-                 SUM(CAST(ISNULL(isConcerning, 0) AS INT)) AS concerningCount
+          SELECT assigneeName,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS qaTicketsScored,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(overallScore AS FLOAT) END) AS avgOverallScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(accuracyScore AS FLOAT) END) AS avgAccuracyScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(clarityScore AS FLOAT) END) AS avgClarityScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(toneScore AS FLOAT) END) AS avgToneScore,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade = 'RED' THEN 1 ELSE 0 END) AS redCount,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade = 'AMBER' THEN 1 ELSE 0 END) AS amberCount,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade = 'GREEN' THEN 1 ELSE 0 END) AS greenCount,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(ISNULL(isConcerning, 0) AS INT) ELSE 0 END) AS concerningCount
+                 ,COUNT(*) AS scored7d, AVG(CAST(overallScore AS FLOAT)) AS avgOverall7d
           FROM dbo.jira_qa_results
-          WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          WHERE CAST(CreatedAt AS DATE) > DATEADD(day, -7, CAST(GETDATE() AS DATE))
             -- Excluded rows (chat, no public agent contribution) store overallScore = 0.
             -- Without this filter they drag every agent's daily QA average toward zero.
             AND ISNULL(qaType, '') <> 'excluded'
@@ -1254,13 +1256,15 @@ export class KpiPipeline {
           -- Updater, not Assignee: the score belongs to whoever WROTE the comment.
           -- Grouping by Assignee moved Agent A's score onto Agent B's average whenever
           -- A commented on B's ticket.
-          SELECT Updater AS Assignee, COUNT(*) AS goldenRulesScored,
-                 AVG(CAST(OverallScore AS FLOAT)) AS avgGoldenRulesScore,
-                 AVG(CAST(Rule1Score AS FLOAT)) AS avgOwnershipScore,
-                 AVG(CAST(Rule2Score AS FLOAT)) AS avgNextActionScore,
-                 AVG(CAST(Rule3Score AS FLOAT)) AS avgTimeframeScore
+          SELECT Updater AS Assignee,
+                 SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS goldenRulesScored,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(OverallScore AS FLOAT) END) AS avgGoldenRulesScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule1Score AS FLOAT) END) AS avgOwnershipScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule2Score AS FLOAT) END) AS avgNextActionScore,
+                 AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule3Score AS FLOAT) END) AS avgTimeframeScore,
+                 COUNT(*) AS scored7d, AVG(CAST(OverallScore AS FLOAT)) AS avgOverall7d
           FROM dbo.Jira_QA_GoldenRules
-          WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          WHERE CAST(CreatedAt AS DATE) > DATEADD(day, -7, CAST(GETDATE() AS DATE))
           GROUP BY Updater
         `);
         for (const r of grResult.recordset) {
@@ -1333,11 +1337,13 @@ export class KpiPipeline {
         // Below the minimum sample the rating is withheld rather than awarded on
         // noise — QA now excludes tickets with no public agent contribution, so a single
         // day's sample can be 1-2 tickets for agents in the abuse-report pools.
-        const ragQA = qa && Number(qa.qaTicketsScored) >= minSample.qa
-          ? (qa.avgOverallScore >= 8.0 ? 'Green' : qa.avgOverallScore >= 6.0 ? 'Amber' : 'Red')  // QA OverallScore is 0–10
+        // Rated on the rolling 7 days, not the single day: a day's post-exclusion sample
+        // is 1-3 tickets for most of the team, too few to colour a rating with.
+        const ragQA = qa && Number(qa.scored7d) >= minSample.qa
+          ? (qa.avgOverall7d >= 8.0 ? 'Green' : qa.avgOverall7d >= 6.0 ? 'Amber' : 'Red')  // QA OverallScore is 0–10
           : null;
-        const ragGoldenRules = gr && Number(gr.goldenRulesScored) >= minSample.goldenRules
-          ? (gr.avgGoldenRulesScore >= 3.0 ? 'Green' : gr.avgGoldenRulesScore >= 2.0 ? 'Amber' : 'Red')
+        const ragGoldenRules = gr && Number(gr.scored7d) >= minSample.goldenRules
+          ? (gr.avgOverall7d >= 3.0 ? 'Green' : gr.avgOverall7d >= 2.0 ? 'Amber' : 'Red')
           : null;
         const ragOver2h = Number(a.OpenTickets_Over2Hours) <= 0 ? 'Green' : Number(a.OpenTickets_Over2Hours) <= 2 ? 'Amber' : 'Red';
         const ragStale = Number(a.OpenTickets_NoUpdateToday) <= 0 ? 'Green' : Number(a.OpenTickets_NoUpdateToday) <= 1 ? 'Amber' : 'Red';

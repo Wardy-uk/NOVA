@@ -34,6 +34,9 @@ export interface AgentKpiRow {
   solvedWeek: number;
   // tier 2
   qaScored: number; qaOverall: number | null; qaAccuracy: number | null; qaClarity: number | null; qaTone: number | null;
+  // Rolling 7-day QA / GR — the window the RAG rating is computed on.
+  qaScored7d: number; qaOverall7d: number | null;
+  grScored7d: number; grOverall7d: number | null;
   qaGreen: number; qaAmber: number; qaRed: number; qaConcerning: number;
   grScored: number; grOverall: number | null; grOwnership: number | null; grNextAction: number | null; grTimeframe: number | null;
   csatAvg: number | null; csatCount: number;
@@ -210,19 +213,27 @@ export async function computeAgentKpis(
     solvedByAssignee(jira, weekStart, tomorrow, opts.attributeResolver),
   ]);
 
-  // 4a. QA + Golden Rules (by agent name, today) — read existing pipelines
+  // 4a. QA + Golden Rules (by agent name) — read existing pipelines.
+  // Two windows in one pass: TODAY for the daily figures, and a rolling 7 DAYS for the
+  // RAG rating. A single day's post-exclusion sample is 1-3 tickets for most of the team,
+  // too few to rate on; the rolling window is what the rating actually means.
   const qaByName = new Map<string, any>();
   try {
     const r = await pool.request().query(`
-      SELECT assigneeName, COUNT(*) AS scored,
-             AVG(CAST(overallScore AS FLOAT)) AS overall, AVG(CAST(accuracyScore AS FLOAT)) AS accuracy,
-             AVG(CAST(clarityScore AS FLOAT)) AS clarity, AVG(CAST(toneScore AS FLOAT)) AS tone,
-             SUM(CASE WHEN grade='RED' THEN 1 ELSE 0 END) AS red,
-             SUM(CASE WHEN grade='AMBER' THEN 1 ELSE 0 END) AS amber,
-             SUM(CASE WHEN grade='GREEN' THEN 1 ELSE 0 END) AS green,
-             SUM(CAST(ISNULL(isConcerning,0) AS INT)) AS concerning
+      SELECT assigneeName,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS scored,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(overallScore AS FLOAT) END) AS overall,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(accuracyScore AS FLOAT) END) AS accuracy,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(clarityScore AS FLOAT) END) AS clarity,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(toneScore AS FLOAT) END) AS tone,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade='RED' THEN 1 ELSE 0 END) AS red,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade='AMBER' THEN 1 ELSE 0 END) AS amber,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) AND grade='GREEN' THEN 1 ELSE 0 END) AS green,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(ISNULL(isConcerning,0) AS INT) ELSE 0 END) AS concerning,
+             COUNT(*) AS scored7d,
+             AVG(CAST(overallScore AS FLOAT)) AS overall7d
       FROM dbo.jira_qa_results
-      WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+      WHERE CAST(CreatedAt AS DATE) > DATEADD(day, -7, CAST(GETDATE() AS DATE))
         AND ISNULL(qaType, '') <> 'excluded'   -- excluded rows score 0; they'd sink the average
       GROUP BY assigneeName
     `);
@@ -233,10 +244,17 @@ export async function computeAgentKpis(
   try {
     const r = await pool.request().query(`
       -- Updater, not Assignee — the comment's author owns the score.
-      SELECT Updater AS Assignee, COUNT(*) AS scored, AVG(CAST(OverallScore AS FLOAT)) AS overall,
-             AVG(CAST(Rule1Score AS FLOAT)) AS ownership, AVG(CAST(Rule2Score AS FLOAT)) AS nextAction,
-             AVG(CAST(Rule3Score AS FLOAT)) AS timeframe
-      FROM dbo.Jira_QA_GoldenRules WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) GROUP BY Updater
+      SELECT Updater AS Assignee,
+             SUM(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS scored,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(OverallScore AS FLOAT) END) AS overall,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule1Score AS FLOAT) END) AS ownership,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule2Score AS FLOAT) END) AS nextAction,
+             AVG(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN CAST(Rule3Score AS FLOAT) END) AS timeframe,
+             COUNT(*) AS scored7d,
+             AVG(CAST(OverallScore AS FLOAT)) AS overall7d
+      FROM dbo.Jira_QA_GoldenRules
+      WHERE CAST(CreatedAt AS DATE) > DATEADD(day, -7, CAST(GETDATE() AS DATE))
+      GROUP BY Updater
     `);
     for (const x of r.recordset) grByName.set((x.Assignee || '').trim().toLowerCase(), x);
   } catch { /* table may not exist */ }
@@ -278,12 +296,15 @@ export async function computeAgentKpis(
     const csatAvg = csat && csat.count > 0 ? round(csat.sum / csat.count) : null;
     const qaOverall = qa?.overall != null ? round(qa.overall) : null;
     const grOverall = gr?.overall != null ? round(gr.overall) : null;
+    // Rolling 7-day — what the QA / Golden Rules RAG is rated on.
+    const qaOverall7d = qa?.overall7d != null ? round(qa.overall7d) : null;
+    const grOverall7d = gr?.overall7d != null ? round(gr.overall7d) : null;
 
     const rag: Record<string, Rag | null> = {
       productivity: ragHigher(ticketsPerHour, thresholds.productivity),
       csat: ragHigher(csatAvg, thresholds.csat),
-      qa: ragHigherWithSample(qaOverall, thresholds.qa, qa?.scored || 0, thresholds.minSample.qa),
-      goldenRules: ragHigherWithSample(grOverall, thresholds.goldenRules, gr?.scored || 0, thresholds.minSample.goldenRules),
+      qa: ragHigherWithSample(qaOverall7d, thresholds.qa, qa?.scored7d || 0, thresholds.minSample.qa),
+      goldenRules: ragHigherWithSample(grOverall7d, thresholds.goldenRules, gr?.scored7d || 0, thresholds.minSample.goldenRules),
       sla: ragHigher(slaCompliancePct, thresholds.sla),
       over2h: ragLower(s1.overSla, thresholds.over2h),
       stale: ragLower(s1.noReply, thresholds.stale),
@@ -299,8 +320,10 @@ export async function computeAgentKpis(
       qaScored: qa?.scored || 0, qaOverall, qaAccuracy: qa?.accuracy != null ? round(qa.accuracy) : null,
       qaClarity: qa?.clarity != null ? round(qa.clarity) : null, qaTone: qa?.tone != null ? round(qa.tone) : null,
       qaGreen: qa?.green || 0, qaAmber: qa?.amber || 0, qaRed: qa?.red || 0, qaConcerning: qa?.concerning || 0,
+      qaScored7d: qa?.scored7d || 0, qaOverall7d,
       grScored: gr?.scored || 0, grOverall, grOwnership: gr?.ownership != null ? round(gr.ownership) : null,
       grNextAction: gr?.nextAction != null ? round(gr.nextAction) : null, grTimeframe: gr?.timeframe != null ? round(gr.timeframe) : null,
+      grScored7d: gr?.scored7d || 0, grOverall7d,
       csatAvg, csatCount: csat?.count || 0,
       slaCompliancePct, ticketsPerHour, rag,
     };

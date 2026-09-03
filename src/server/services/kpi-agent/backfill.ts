@@ -47,6 +47,11 @@ export async function backfillAgentFromLegacy(settings: SettingsQueries, fromDay
       qaScored: n(r.QATicketsScored), qaOverall: nOrNull(r.QAOverallAvg), qaAccuracy: nOrNull(r.QAAccuracyAvg),
       qaClarity: nOrNull(r.QAClarityAvg), qaTone: nOrNull(r.QAToneAvg),
       qaGreen: n(r.QAGreenCount), qaAmber: n(r.QAAmberCount), qaRed: n(r.QARedCount), qaConcerning: n(r.QAConcerningCount),
+      // The legacy daily snapshot has no rolling window; fall back to the day's own
+      // figures. The RAG for backfilled days comes from the stored ragQA/ragGoldenRules
+      // below, not from these.
+      qaScored7d: n(r.QATicketsScored), qaOverall7d: nOrNull(r.QAOverallAvg),
+      grScored7d: n(r.GoldenRulesScored), grOverall7d: nOrNull(r.GoldenRulesAvg),
       grScored: n(r.GoldenRulesScored), grOverall: nOrNull(r.GoldenRulesAvg), grOwnership: nOrNull(r.OwnershipAvg),
       grNextAction: nOrNull(r.NextActionAvg), grTimeframe: nOrNull(r.TimeframeAvg),
       csatAvg: nOrNull(r.CSATAverage), csatCount: n(r.CSATCount),
