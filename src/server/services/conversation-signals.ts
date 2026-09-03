@@ -30,7 +30,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const CONVERSATION_SIGNALS_BUILD = '2026-09-03-conversations-a';
+export const CONVERSATION_SIGNALS_BUILD = '2026-09-03-conversations-b';
 
 export interface ConversationSignalRecord {
   kind: 'session' | 'conversation';
@@ -55,8 +55,34 @@ export interface ConversationSignalRecord {
   /** The transcript body is deliberately never sent. See the header comment. */
   hasTranscript: boolean;
   peoplehrLogged: boolean;
-  /** ISO. Present so "logged within N working days" is measurable, not just "logged". */
+  /**
+   * When Nick ticked it, as a UTC instant WITH the `Z` on it (CONVERT style 127).
+   *
+   * Style 126 was the first cut and it emits `2026-09-03T17:42:11.000` — a UTC instant
+   * that looks local, which is the exact ambiguity I spent this afternoon fixing in
+   * Plaud's payload before shipping it again in my own new field. It matters because a
+   * consumer compares this against `occurredOn`, a London calendar DATE: a tick at 00:30
+   * London is 23:30 UTC the previous day, so reading it as local moves it a day, and
+   * "logged within N working days" is a day-boundary measure where one day is the whole
+   * answer. Late evening is exactly when a manager catches up on write-ups.
+   */
   peoplehrLoggedAt: string | null;
+
+  /**
+   * When the conversation actually HAPPENED, as a UTC instant — distinct from
+   * `occurredOn`, which for a 1-2-1 is the date it was BOOKED for.
+   *
+   * Those diverge, and not rarely: `completeSession` stamps `completed_at` with the
+   * current time while `scheduled_date` stays at whatever it was booked for, and sessions
+   * sit open long past their date (one was still `in_progress` in September carrying a
+   * 2 July date). Measure a "logged within N days" clock from `occurredOn` and a
+   * conversation held and written up the same day in September reads as sixty days late.
+   *
+   * NULL for `agent_conversations` rows, which have no equivalent: their `occurredOn` is
+   * taken from the recording itself, so there is nothing for it to drift from and
+   * `occurredOn` is authoritative for that kind.
+   */
+  completedAt: string | null;
 }
 
 export interface AttributionCoverage {
@@ -109,12 +135,15 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
   const sessions = await query<{
     id: number; agent_name: string; occurred_on: string; started_at: string | null;
     title: string | null; tchars: number; peoplehr_logged_at: string | null;
+    completed_at: string | null;
   }>(`
     SELECT s.id, s.agent_name,
            LEFT(s.scheduled_date, 10) AS occurred_on,
            c.started_at, c.title,
            CASE WHEN s.transcript_text IS NULL THEN 0 ELSE LEN(s.transcript_text) END AS tchars,
-           CONVERT(varchar(33), s.peoplehr_logged_at, 126) AS peoplehr_logged_at
+           -- Style 127, not 126: 127 appends the Z. Both are UTC; only one says so.
+           CONVERT(varchar(33), s.peoplehr_logged_at, 127) AS peoplehr_logged_at,
+           CONVERT(varchar(33), s.completed_at, 127) AS completed_at
     FROM agent_121_sessions s
     LEFT JOIN agent_121_transcript_candidates c ON c.session_id = s.id
     WHERE s.status = 'complete' ${sinceClause}
@@ -128,7 +157,7 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
   }>(`
     SELECT id, agent_name, conversation_type, occurred_on, started_at, title, summary_excerpt,
            CASE WHEN transcript_text IS NULL THEN 0 ELSE LEN(transcript_text) END AS tchars,
-           CONVERT(varchar(33), peoplehr_logged_at, 126) AS peoplehr_logged_at
+           CONVERT(varchar(33), peoplehr_logged_at, 127) AS peoplehr_logged_at
     FROM agent_conversations ${convSince}
   `, since ? [since] : []);
 
@@ -154,6 +183,7 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
       hasTranscript: Number(r.tchars) > 0,
       peoplehrLogged: !!r.peoplehr_logged_at,
       peoplehrLoggedAt: r.peoplehr_logged_at,
+      completedAt: r.completed_at,
     })),
     ...conversations.map((r) => ({
       kind: 'conversation' as const,
@@ -169,6 +199,8 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
       hasTranscript: Number(r.tchars) > 0,
       peoplehrLogged: !!r.peoplehr_logged_at,
       peoplehrLoggedAt: r.peoplehr_logged_at,
+      // No equivalent, and none is missing: occurredOn came off the recording.
+      completedAt: null,
     })),
   ];
 
