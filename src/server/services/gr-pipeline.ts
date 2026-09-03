@@ -38,6 +38,9 @@ async function getKpiPool(settings: SettingsQueries): Promise<sql.ConnectionPool
 // QA'd as if they were an agent's, or they land in the team's Golden Rules stats.
 const BOT_PATTERNS = ['nurtur', 'automation', 'jira service', 'servicedesk', 'bot', 'nova-jira'];
 
+/** Comments this close to the status change count as part of the resolution. */
+const RESOLUTION_GRACE_MS = 5 * 60 * 1000;
+
 // Resolution comments are excluded structurally — see the statusCategory check in
 // scoreRecentComments. The old approach matched ten hard-coded English closure phrases,
 // which was both easy to evade and prone to firing on a mid-ticket comment that happened
@@ -82,6 +85,8 @@ export class GrPipeline {
       console.log(`[gr-pipeline] JQL: ${jql} → target=${this.target}`);
       const result = await this.jiraClient.searchJqlAll(jql, [
         'summary', 'priority', 'issuetype', 'assignee', 'comment', 'status',
+        // When the ticket entered its current status category — the resolution moment.
+        'statuscategorychangedate',
       ], 500);
       const issues = result?.issues ?? [];
       console.log(`[gr-pipeline] Jira returned ${issues.length} tickets`);
@@ -109,12 +114,28 @@ export class GrPipeline {
         const priority = fields.priority?.name ?? 'Unknown';
         const issueType = fields.issuetype?.name ?? 'Unknown';
 
-        // A comment on a resolved ticket is the resolution itself. Golden Rules measure
-        // in-flight communication — ownership, next action, timeframe — none of which
-        // apply to "this is now closed". QA owns the quality of the closure.
-        if (fields.status?.statusCategory?.key === 'done') {
-          skippedResolved += comments.length;
-          continue;
+        // Exclude the resolution itself, not the whole conversation. Skipping every
+        // comment on a now-resolved ticket threw away the in-flight communication Golden
+        // Rules exists to measure: "I'll update you by 3pm" on Monday is still worth
+        // scoring even though the ticket closed on Wednesday. It also gutted the sample —
+        // 2,263 of 4,431 comments in a 72h window were being dropped this way, leaving
+        // zero eligible and biasing what was left toward long-running open tickets.
+        const isDone = fields.status?.statusCategory?.key === 'done';
+        const resolvedAtRaw = fields.statuscategorychangedate;
+        let resolutionCutoff: number | null = null;
+        if (isDone) {
+          const parsed = resolvedAtRaw ? new Date(resolvedAtRaw).getTime() : NaN;
+          if (Number.isFinite(parsed)) {
+            // Agents often write the closing note and then transition, so the comment can
+            // precede the status change by seconds. Treat anything in the few minutes
+            // before it as part of the resolution too.
+            resolutionCutoff = parsed - RESOLUTION_GRACE_MS;
+          } else {
+            // Resolved but no timestamp to reason about — skip rather than risk scoring a
+            // closure note as if it were in-flight communication.
+            skippedResolved += comments.length;
+            continue;
+          }
         }
 
         // Score only the most recent public agent comment on the ticket. Scoring every
@@ -138,6 +159,10 @@ export class GrPipeline {
             continue;
           }
           if (!extractText(comment.body).trim()) { skippedEmpty++; continue; }
+          if (resolutionCutoff !== null && comment.created && new Date(comment.created).getTime() >= resolutionCutoff) {
+            skippedResolved++;
+            continue;
+          }
           eligibleComments.push(comment);
         }
 
@@ -181,7 +206,7 @@ export class GrPipeline {
       }
 
       const totalComments = skippedNoId + skippedDate + skippedInternal + skippedCustomer + skippedBot + skippedNotAgent + skippedAlready + skippedEmpty + skippedResolved + skippedNotLatest + eligible;
-      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} resolvedTicket=${skippedResolved} notLatest=${skippedNotLatest}`);
+      console.log(`[gr-pipeline] Comment filter stats: ${totalComments} total, ${eligible} eligible, skipped: noId=${skippedNoId} date=${skippedDate} internal=${skippedInternal} customer=${skippedCustomer} bot=${skippedBot} notAgent=${skippedNotAgent} already=${skippedAlready} empty=${skippedEmpty} atOrAfterResolution=${skippedResolved} notLatest=${skippedNotLatest}`);
       console.log(`[gr-pipeline] Coverage: ${eligible + skippedAlready} latest-comment candidates — ${eligible} newly scored, ${skippedAlready} already scored on a previous run`);
       console.log(`[gr-pipeline] Scored ${rowsAffected} comments from ${issues.length} issues → ${s || 'live'}`);
 
