@@ -16,9 +16,15 @@ export const CommentReviewSchema = z.object({
   // Derived, never trusted from the LLM — see overallOf(). Defaulted rather than
   // optional so the prompt may omit it while the inferred type stays required.
   overallScore: z.number().min(1).max(3).default(1),
+  // Why rule 3 was not scored, when it was not. Free text, one short clause.
+  rule3NotApplicableReason: z.string().nullable().default(null),
   rule1Score: z.number().min(1).max(3),
   rule2Score: z.number().min(1).max(3),
-  rule3Score: z.number().min(1).max(3),
+  // null = the rule does not apply to this comment. 66% of comments scored 1 on
+  // timeframes, and the samples showed why: handing off to a team whose timeline the
+  // agent does not control, or asking the customer a question. Neither owes a date, and
+  // marking them down for it made the whole metric unusable.
+  rule3Score: z.number().min(1).max(3).nullable(),
   summary: z.string(),
   suggestedRewrite: z.string(),
 });
@@ -28,11 +34,24 @@ export type CommentReviewRaw = z.infer<typeof CommentReviewSchema>;
 /** What callers get back — overallScore always present, always derived. */
 export interface CommentReview extends CommentReviewRaw { overallScore: number }
 
-/** Overall = weakest of the three rules. Single definition for every consumer. */
-export function overallOf(r: { rule1Score?: number; rule2Score?: number; rule3Score?: number }): number {
+/**
+ * Overall = MEAN of the rules that apply. Single definition for every consumer.
+ *
+ * It used to be the minimum, which threw away everything the other rules said: a
+ * comment scoring 3/3/1 and one scoring 1/1/1 both came out as 1. Combined with
+ * timeframes failing on two thirds of comments, every agent sat permanently Red and the
+ * metric discriminated between nobody. A rule scored null does not apply and is left out
+ * of the mean rather than counted as a failure.
+ */
+export function overallOf(r: { rule1Score?: number; rule2Score?: number; rule3Score?: number | null }): number {
   // Fallbacks are unreachable for schema-validated input; they exist because the
   // server tsconfig infers every zod field as optional.
-  return Math.min(r.rule1Score ?? 1, r.rule2Score ?? 1, r.rule3Score ?? 1);
+  const applicable = [r.rule1Score ?? 1, r.rule2Score ?? 1, r.rule3Score].filter(
+    (v): v is number => typeof v === 'number',
+  );
+  if (applicable.length === 0) return 1;
+  const mean = applicable.reduce((a, b) => a + b, 0) / applicable.length;
+  return Math.round(mean * 100) / 100;
 }
 
 export interface ReviewCommentInput {

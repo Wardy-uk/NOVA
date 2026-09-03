@@ -233,6 +233,36 @@ export class GrPipeline {
     return 'not_agent';
   }
 
+  /**
+   * Widen the score columns and allow rule 3 to be null.
+   *
+   * OverallScore and the rule scores were TINYINT NOT NULL, which silently truncated a
+   * mean of 2.33 to 2 and left no way to record "this rule does not apply". Idempotent
+   * and safe to re-run, matching the ALTER-guarded pattern used elsewhere for KPI tables.
+   */
+  async ensureScoreColumns(): Promise<void> {
+    try {
+      const p = await getKpiPool(this.settings);
+      for (const tbl of ['Jira_QA_GoldenRules', 'Jira_QA_GoldenRulesUAT']) {
+        await p.request().query(`
+          IF OBJECT_ID('dbo.${tbl}') IS NOT NULL BEGIN
+            IF EXISTS (SELECT 1 FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id
+                       WHERE c.object_id = OBJECT_ID('dbo.${tbl}') AND c.name = 'OverallScore' AND t.name = 'tinyint')
+              ALTER TABLE dbo.${tbl} ALTER COLUMN OverallScore DECIMAL(4,2) NOT NULL;
+            IF EXISTS (SELECT 1 FROM sys.columns c
+                       WHERE c.object_id = OBJECT_ID('dbo.${tbl}') AND c.name = 'Rule3Score' AND c.is_nullable = 0)
+              ALTER TABLE dbo.${tbl} ALTER COLUMN Rule3Score TINYINT NULL;
+            IF COL_LENGTH('${tbl}', 'rule3NotApplicableReason') IS NULL
+              ALTER TABLE dbo.${tbl} ADD rule3NotApplicableReason NVARCHAR(300) NULL;
+          END
+        `);
+      }
+      console.log('[gr-pipeline] Score columns ensured (OverallScore DECIMAL, Rule3Score nullable)');
+    } catch (err) {
+      console.warn('[gr-pipeline] ensureScoreColumns failed (may need a manual ALTER):', err instanceof Error ? err.message : err);
+    }
+  }
+
   private async getPassThreshold(p: sql.ConnectionPool, suffix: string): Promise<number> {
     try {
       const configTable = `QA_Config${suffix}`;
@@ -352,7 +382,8 @@ export class GrPipeline {
     request.input('overallScore', sql.Float, overallOf(r));
     request.input('rule1Score', sql.Float, r.rule1Score);
     request.input('rule2Score', sql.Float, r.rule2Score);
-    request.input('rule3Score', sql.Float, r.rule3Score);
+    request.input('rule3Score', sql.Float, r.rule3Score);   // null when the rule does not apply
+    request.input('rule3Reason', sql.NVarChar(300), r.rule3NotApplicableReason?.slice(0, 300) ?? null);
     request.input('summary', sql.NVarChar(2000), r.summary.slice(0, 2000));
     request.input('suggestedRewrite', sql.NVarChar(2000), r.suggestedRewrite.slice(0, 2000));
     request.input('assignee', sql.NVarChar(200), data.assignee);
@@ -363,7 +394,8 @@ export class GrPipeline {
     request.input('ticketType', sql.NVarChar(50), data.issueType);
     request.input('rule1Pass', sql.Bit, r.rule1Score >= data.passThreshold ? 1 : 0);
     request.input('rule2Pass', sql.Bit, r.rule2Score >= data.passThreshold ? 1 : 0);
-    request.input('rule3Pass', sql.Bit, r.rule3Score >= data.passThreshold ? 1 : 0);
+    // null, not 0 — "did not apply" is not the same as "failed".
+    request.input('rule3Pass', sql.Bit, r.rule3Score == null ? null : (r.rule3Score >= data.passThreshold ? 1 : 0));
     request.input('commentTimestamp', sql.DateTime, data.commentTimestamp);
 
     await request.query(`
@@ -371,13 +403,13 @@ export class GrPipeline {
         IssueKey, CommentId, OverallScore, Rule1Score, Rule2Score, Rule3Score,
         Summary, SuggestedRewrite, Assignee, Updater, CommentBody,
         agentEmail, ticketPriority, ticketType,
-        rule1Pass, rule2Pass, rule3Pass,
+        rule1Pass, rule2Pass, rule3Pass, rule3NotApplicableReason,
         commentTimestamp, processedAt, CreatedAt
       ) VALUES (
         @issueKey, @commentId, @overallScore, @rule1Score, @rule2Score, @rule3Score,
         @summary, @suggestedRewrite, @assignee, @updater, @commentBody,
         @agentEmail, @ticketPriority, @ticketType,
-        @rule1Pass, @rule2Pass, @rule3Pass,
+        @rule1Pass, @rule2Pass, @rule3Pass, @rule3Reason,
         @commentTimestamp, SYSUTCDATETIME(), @commentTimestamp
       )
     `);

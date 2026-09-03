@@ -1853,6 +1853,7 @@ async function main() {
     // Ensure NOVA AI synthetic agent exists in KPI database
     kpiPipeline.ensureNovaAiAgent().catch(() => {});
     kpiPipeline.ensureDigestColumns().catch(() => {});
+    grPipeline.ensureScoreColumns().catch(() => {});
     kpiPipeline.ensureKpiTargetDirections().catch(() => {});
 
     // KPI pipeline timers (initial kicks staggered to avoid startup storm)

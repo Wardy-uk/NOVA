@@ -28,10 +28,21 @@ Rule 2 — What's Happening
 2: Action mentioned but vague — 'we're looking into it', 'investigating'.
 1: Only acknowledges receipt, or no action.
 
-Rule 3 — Timeframes
+Rule 3 — Timeframes  (MAY NOT APPLY — read this carefully)
 3: Gives a specific committed timeframe — 'by 5pm today', 'within 2 business hours'.
 2: Mentions time but weak — 'later today', 'soon', 'shortly', 'ASAP'.
-1: No timeframe or non-committal.
+1: A timeframe was owed and none was given.
+null: The comment does not owe a timeframe at all. Score null, NOT 1, when:
+   - The next step belongs to the CUSTOMER — the comment asks them a question, requests
+     information, or waits on their confirmation. The agent cannot commit to their timing.
+   - The work has been handed to another team, and the agent does not control that team's
+     schedule. 'I've passed this to our finance team, they will be in touch' is complete
+     and honest; inventing a date the agent cannot keep would be worse service, not better.
+   - The comment is a status update on a queue with no committed date ('still with
+     development'), where a made-up date would be a false promise.
+   - The comment fully answers the question and nothing further is pending.
+Only score 1 when a timeframe was genuinely owed and withheld — the agent is doing the
+work themselves and the customer is left with no idea when to expect anything.
 
 CALIBRATION EXAMPLES
 
@@ -45,13 +56,25 @@ Next Action Score 1 (FAIL): "Thanks for getting in touch."
 
 Timeframe Score 3 (PASS): "I'll have an update for you by 3pm today."
 Timeframe Score 2 (PASS at threshold 2): "I'll update you tomorrow morning."
-Timeframe Score 1 (FAIL): "As soon as possible."
+Timeframe Score 1 (FAIL): "I'm looking into this now." — the agent owns the work and gave
+  the customer nothing to expect.
+Timeframe null (NOT APPLICABLE): "Could you let me know the name of the account she's
+  having issues with, and I can get this resolved for you?" — waiting on the customer.
+Timeframe null (NOT APPLICABLE): "I've raised this to our tier 2 technical team to
+  investigate. They will be in touch with any updates." — another team's schedule.
+Timeframe null (NOT APPLICABLE): "This is still in the development queue and we will keep
+  you updated." — no committed date exists to give.
 
 SUGGESTED REWRITE
-Rewrite the comment to score 3/3/3. Concise (2-4 sentences). Include: explicit owner + role, concrete action, specific timeframe. Tone: professional, empathetic, British English.
+Rewrite the comment to score 3 on every rule that applies. Concise (2-4 sentences).
+Include an explicit owner + role and a concrete action; include a specific timeframe ONLY
+if rule 3 applies. Where it does not, do not invent a date — say plainly what happens next
+and who has it. Tone: professional, empathetic, British English.
 
 SUMMARY
-One sentence naming the main weakness. Do NOT state an overall score — that is derived from the three rule scores outside this prompt.
+One sentence naming the main weakness. Do NOT state an overall score — that is derived from
+the applicable rule scores outside this prompt. If rule 3 is null, say so and why in
+rule3NotApplicableReason (one short clause, e.g. 'handed to finance team').
 
-OUTPUT — return STRICT JSON only, no markdown:
-{"issueKey":"string","commentId":"string","rule1Score":number,"rule2Score":number,"rule3Score":number,"summary":"string","suggestedRewrite":"string"}
+OUTPUT — return STRICT JSON only, no markdown. rule3Score is a number 1-3 OR null:
+{"issueKey":"string","commentId":"string","rule1Score":number,"rule2Score":number,"rule3Score":number|null,"rule3NotApplicableReason":"string|null","summary":"string","suggestedRewrite":"string"}
