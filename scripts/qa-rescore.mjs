@@ -31,7 +31,7 @@ const HOURS = parseInt(arg('hours', '168'), 10);
 const APPLY = process.argv.includes('--apply');
 
 const DIST = '../dist/server/server';
-const { initializeDatabase } = await import(`${DIST}/db/schema.js`);
+const { initPool } = await import(`${DIST}/services/database.js`);
 const { FileSettingsQueries } = await import(`${DIST}/db/settings-store.js`);
 const { ConfigService } = await import(`${DIST}/services/config-service.js`);
 const { LlmService } = await import(`${DIST}/services/llm-service.js`);
@@ -43,7 +43,10 @@ const { QaPipeline } = await import(`${DIST}/services/qa-pipeline.js`);
 // qa_pipeline_target entirely). Reading the file directly resolved the target to 'uat'
 // and would have written every re-scored row to the dead UAT table while leaving the
 // live data untouched. Use the same path the service uses.
-await initializeDatabase();
+// initPool, not initializeDatabase: the latter runs the whole idempotent migration set,
+// which a scoring script has no business doing on prod (it threw ALTER TABLE errors on
+// the first run). ConfigService only needs the pool.
+await initPool();
 const settings = new ConfigService(new FileSettingsQueries());
 await settings.initialize();
 const s = settings.getAll();
