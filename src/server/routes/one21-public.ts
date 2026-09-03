@@ -5,7 +5,7 @@ import {
   getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview, getRosterDrift,
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
-  dismissRecording, ACTION_REVIEW_STATUSES, type One21Deps,
+  dismissRecording, setPeopleHrLogged, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { extractSessionOutcomes, resolveClaim } from '../services/one21-transcript.js';
 import { listPendingCandidates, approveCandidate, rejectCandidate } from '../services/one21-candidates.js';
@@ -58,6 +58,27 @@ export function createOne21PublicRoutes(settings: FileSettingsQueries): Router {
       const result = await saveAgentSubmission(token, answers);
       if (!result.ok) { res.status(409).json({ ok: false, error: result.error }); return; }
       res.json({ ok: true, data: {} });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  /**
+   * PATCH /session/:id/peoplehr { logged } — tick a 1-2-1 as written up in PeopleHR.
+   *
+   * A manual confirmation and nothing more: NOVA has no PeopleHR connection and is not
+   * claiming the note exists, only that Nick said he wrote it. `logged` must be an actual
+   * boolean — a missing body would otherwise read as `false` and quietly untick something.
+   */
+  router.patch('/session/:id/peoplehr', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
+      if (typeof req.body?.logged !== 'boolean') {
+        res.status(400).json({ ok: false, error: 'logged must be true or false' }); return;
+      }
+      const result = await setPeopleHrLogged(id, req.body.logged);
+      res.status(result.ok ? 200 : 404).json(result);
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }

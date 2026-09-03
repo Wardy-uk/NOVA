@@ -592,6 +592,11 @@ export interface One21OverviewAgent {
   awaitingPrep: boolean;     // emailed prep questions, agent hasn't submitted yet
   prepSubmitted: boolean;    // agent has submitted for the open session
   lastDate: string | null;
+  /** The most recent held 1-2-1, so a row can act on it. */
+  lastSessionId: number | null;
+  /** Ticked by hand once that 1-2-1 is written up in PeopleHR. NOVA cannot see PeopleHR,
+   *  so this is Nick's word for it and nothing else — never inferred. */
+  lastLoggedInPeopleHr: boolean;
   outstandingActions: number;
   /** Closed per a transcript, still waiting for Nick to confirm at the next 1-2-1.
    *  Surfaced so they cannot sit unseen when a 1-2-1 slips. */
@@ -606,6 +611,9 @@ export interface One21Overview {
   summary: {
     total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number;
     awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null;
+    /** Held 1-2-1s not yet written up in PeopleHR. Counts the LAST one per person, not
+     *  every historical session — the backlog before this existed is not a to-do list. */
+    peoplehrPending: number;
   };
 }
 
@@ -623,6 +631,24 @@ export const STALLED_AFTER_DAYS = 2;
  */
 export function isStalled(status: string, scheduledDate: string, stalledBefore: string): boolean {
   return status === 'in_progress' && String(scheduledDate).slice(0, 10) < stalledBefore;
+}
+
+/**
+ * Tick (or untick) a 1-2-1 as written up in PeopleHR.
+ *
+ * Purely Nick's own record-keeping: NOVA has no PeopleHR connection and cannot verify the
+ * note exists, so this claims nothing beyond "he said he had done it". Unticking is
+ * allowed — a mis-click on a checkbox should not need a database migration to undo, which
+ * is a lesson this feature's neighbours have already taught the hard way.
+ */
+export async function setPeopleHrLogged(sessionId: number, logged: boolean): Promise<{ ok: boolean; error?: string }> {
+  const session = await queryOne<{ id: number; status: string }>(
+    `SELECT id, status FROM agent_121_sessions WHERE id = ?`, [sessionId]);
+  if (!session) return { ok: false, error: 'Session not found' };
+  await execute(
+    `UPDATE agent_121_sessions SET peoplehr_logged_at = ${logged ? 'GETUTCDATE()' : 'NULL'} WHERE id = ?`,
+    [sessionId]);
+  return { ok: true };
 }
 
 /** Whole-team 1-2-1 health for the manager overview dashboard. */
@@ -646,9 +672,19 @@ export async function getOne21Overview(): Promise<One21Overview> {
   `, [...OPEN_STATUSES, ...OPEN_STATUSES]);
   const openByAgent = new Map(openSessions.map((s) => [s.agent_name, s]));
 
-  const lastRows = await query<{ agent_name: string; last_date: string }>(
-    `SELECT agent_name, MAX(scheduled_date) AS last_date FROM agent_121_sessions WHERE status = 'complete' GROUP BY agent_name`);
-  const lastByAgent = new Map(lastRows.map((r) => [r.agent_name, r.last_date]));
+  // The last held 1-2-1 per agent, as a ROW rather than a MAX — the row carries the id
+  // and the PeopleHR tick, and a bare MAX cannot. ROW_NUMBER rather than a join back on
+  // the date, because two sessions can share one date (Maria has two on 20 Aug) and that
+  // join would silently return both and double the agent's row.
+  const lastRows = await query<{
+    agent_name: string; id: number; last_date: string; peoplehr_logged_at: string | null;
+  }>(`
+    SELECT agent_name, id, LEFT(scheduled_date, 10) AS last_date, peoplehr_logged_at FROM (
+      SELECT agent_name, id, scheduled_date, peoplehr_logged_at,
+             ROW_NUMBER() OVER (PARTITION BY agent_name ORDER BY scheduled_date DESC, id DESC) AS rn
+      FROM agent_121_sessions WHERE status = 'complete'
+    ) x WHERE rn = 1`);
+  const lastByAgent = new Map(lastRows.map((r) => [r.agent_name, r]));
 
   const actionRows = await query<{ agent_name: string; status: string; n: number }>(
     `SELECT agent_name, status, COUNT(*) AS n FROM agent_121_actions GROUP BY agent_name, status`);
@@ -679,7 +715,9 @@ export async function getOne21Overview(): Promise<One21Overview> {
       stalled: !!open && isStalled(open.status, open.scheduled_date, stalledBefore),
       awaitingPrep: open?.status === 'awaiting_agent' && !submitted,
       prepSubmitted: submitted,
-      lastDate: lastByAgent.get(p.agent_name) ?? null,
+      lastDate: lastByAgent.get(p.agent_name)?.last_date ?? null,
+      lastSessionId: lastByAgent.get(p.agent_name)?.id ?? null,
+      lastLoggedInPeopleHr: !!lastByAgent.get(p.agent_name)?.peoplehr_logged_at,
       outstandingActions: outstanding,
       awaitingConfirmation,
       delivered, missed,
@@ -698,6 +736,8 @@ export async function getOne21Overview(): Promise<One21Overview> {
       scheduled: agents.filter((x) => x.nextDate && !x.overdue).length,
       overdue: agents.filter((x) => x.overdue).length,
       dueThisWeek: agents.filter((x) => x.dueThisWeek).length,
+      // Only people who have actually HAD a 1-2-1 can owe a write-up for one.
+      peoplehrPending: agents.filter((x) => x.lastSessionId && !x.lastLoggedInPeopleHr).length,
       stalled: agents.filter((x) => x.stalled).length,
       awaitingConfirmation: agents.reduce((n, x) => n + x.awaitingConfirmation, 0),
       awaitingPrep: agents.filter((x) => x.awaitingPrep).length,

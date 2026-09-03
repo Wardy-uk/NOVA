@@ -13,12 +13,14 @@ const C = {
 interface OverviewAgent {
   agent_name: string; nextDate: string | null; nextStatus: string | null;
   overdue: boolean; dueThisWeek: boolean; stalled: boolean; awaitingPrep: boolean; prepSubmitted: boolean;
-  lastDate: string | null; outstandingActions: number; awaitingConfirmation: number;
+  lastDate: string | null; lastSessionId: number | null; lastLoggedInPeopleHr: boolean;
+  outstandingActions: number; awaitingConfirmation: number;
   delivered: number; missed: number; deliveryRate: number | null;
 }
 interface Overview {
   agents: OverviewAgent[];
-  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null };
+  summary: { total: number; scheduled: number; overdue: number; dueThisWeek: number; stalled: number; awaitingPrep: number; awaitingConfirmation: number; neverScheduled: number; deliveryRate: number | null;
+    peoplehrPending: number };
 }
 
 interface Candidate {
@@ -71,6 +73,7 @@ export function OneToOneOverviewView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [editing, setEditing] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState<string | null>(null);
+  const [savingHr, setSavingHr] = useState<number | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
 
   const load = (keepLoading = false) => {
@@ -146,6 +149,32 @@ export function OneToOneOverviewView() {
     setEditing(null);
   };
 
+  /**
+   * Tick a 1-2-1 off as written up in PeopleHR.
+   *
+   * Optimistic, because the whole point is ticking several in a row and a reload between
+   * each would make that feel broken. Reverted on failure rather than left showing a tick
+   * NOVA did not save — this is a record of what Nick has actually done, so a lie here is
+   * worse than a spinner.
+   */
+  const toggleHr = async (sessionId: number, logged: boolean) => {
+    setSavingHr(sessionId);
+    setData((prev) => prev && {
+      ...prev,
+      agents: prev.agents.map((a) => (a.lastSessionId === sessionId ? { ...a, lastLoggedInPeopleHr: logged } : a)),
+      summary: { ...prev.summary, peoplehrPending: prev.summary.peoplehrPending + (logged ? -1 : 1) },
+    });
+    try {
+      const r = await fetch(`/api/121/session/${sessionId}/peoplehr`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logged }),
+      });
+      if (!r.ok) throw new Error('save failed');
+    } catch {
+      load(true);
+    }
+    setSavingHr(null);
+  };
+
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>Loading…</div>;
   if (!data) return <div style={{ padding: 40, textAlign: 'center', color: C.text3 }}>No data.</div>;
 
@@ -191,6 +220,8 @@ export function OneToOneOverviewView() {
         <Tile label="Awaiting prep" value={data.summary.awaitingPrep} color={data.summary.awaitingPrep > 0 ? C.amber : C.text2} />
         <Tile label="To confirm" value={data.summary.awaitingConfirmation} color={data.summary.awaitingConfirmation > 0 ? C.teal : C.text2}
           hint="Closed per a 1-2-1 recording — confirmed at the next 1-2-1. Not counted as delivered until then." />
+        <Tile label="To log in PeopleHR" value={data.summary.peoplehrPending} color={data.summary.peoplehrPending > 0 ? C.amber : C.text2}
+          hint="Held 1-2-1s you have not yet ticked as written up. NOVA cannot see PeopleHR — this counts your own ticks." />
         <Tile label="Due this week" value={data.summary.dueThisWeek} color={C.teal} />
         <Tile label="Scheduled" value={data.summary.scheduled} color={C.text2} />
         <Tile label="Never scheduled" value={data.summary.neverScheduled} color={data.summary.neverScheduled > 0 ? C.amber : C.text2} />
@@ -316,14 +347,15 @@ export function OneToOneOverviewView() {
 
       {/* Per-agent table */}
       <div style={{ background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr 0.8fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 10, color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           <div>Agent</div>
           <div onClick={() => toggleSort('next')} style={{ cursor: 'pointer', color: sortBy === 'next' ? C.teal : C.text3, userSelect: 'none' }}>Next 1-2-1{sortArrow('next')}</div>
           <div onClick={() => toggleSort('last')} style={{ cursor: 'pointer', color: sortBy === 'last' ? C.teal : C.text3, userSelect: 'none' }}>Last{sortArrow('last')}</div>
           <div>Status</div><div>Open actions</div><div>Delivery</div>
+          <div title="Ticked by hand once the 1-2-1 is written up in PeopleHR — NOVA cannot check this itself">PeopleHR</div>
         </div>
         {sorted.map((a) => (
-          <div key={a.agent_name} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr', gap: 8, padding: '11px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center', fontSize: 13 }}>
+          <div key={a.agent_name} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr 0.8fr 1fr 0.8fr', gap: 8, padding: '11px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center', fontSize: 13 }}>
             <div style={{ color: C.text1, fontWeight: 600 }}>{a.agent_name}</div>
             {editing === a.agent_name ? (
               <input
@@ -348,6 +380,29 @@ export function OneToOneOverviewView() {
             <div style={{ color: ratePctColor(a.deliveryRate), fontWeight: 600 }}>
               {a.deliveryRate === null ? '—' : `${a.deliveryRate}%`}
               {(a.delivered + a.missed) > 0 && <span style={{ color: C.text3, fontWeight: 400, fontSize: 11 }}> ({a.delivered}/{a.delivered + a.missed})</span>}
+            </div>
+            {/* Only a 1-2-1 that has actually HAPPENED can be written up, so somebody with
+                no held session gets a dash rather than an un-tickable box. */}
+            <div>
+              {a.lastSessionId === null ? (
+                <span style={{ color: C.text3 }}>—</span>
+              ) : (
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}
+                  title={a.lastLoggedInPeopleHr
+                    ? `${d(a.lastDate)} 1-2-1 is logged in PeopleHR — click to undo`
+                    : `Tick once the ${d(a.lastDate)} 1-2-1 is written up in PeopleHR`}>
+                  <input
+                    type="checkbox"
+                    checked={a.lastLoggedInPeopleHr}
+                    disabled={savingHr === a.lastSessionId}
+                    onChange={(e) => toggleHr(a.lastSessionId as number, e.target.checked)}
+                    style={{ accentColor: C.teal, cursor: 'pointer', width: 15, height: 15 }}
+                  />
+                  <span style={{ fontSize: 11, color: a.lastLoggedInPeopleHr ? C.text3 : C.amber }}>
+                    {a.lastLoggedInPeopleHr ? 'Logged' : 'To log'}
+                  </span>
+                </label>
+              )}
             </div>
           </div>
         ))}

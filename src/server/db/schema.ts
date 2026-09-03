@@ -714,6 +714,15 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('agent_121_sessions', 'submit_token') IS NULL
      ALTER TABLE agent_121_sessions ADD submit_token NVARCHAR(64) NULL;`,
 
+    // Manually ticked once the 1-2-1 has been written up in PeopleHR.
+    //
+    // NOVA has no way to ask PeopleHR whether a note exists — this is Nick's own
+    // confirmation, and it is stored as a TIMESTAMP rather than a bit so "when did I say I
+    // had done this" survives. Per session, not per agent: each 1-2-1 needs its own write-up,
+    // and a flag on the person would be overwritten by the next one.
+    `IF COL_LENGTH('agent_121_sessions', 'peoplehr_logged_at') IS NULL
+     ALTER TABLE agent_121_sessions ADD peoplehr_logged_at DATETIME2 NULL;`,
+
     // Idempotent email dedup (mirrors standup_email_log).
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'agent_121_email_log') AND type = 'U')
      CREATE TABLE agent_121_email_log (
