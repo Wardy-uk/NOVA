@@ -200,6 +200,13 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
       peoplehrLogged: !!r.peoplehr_logged_at,
       peoplehrLoggedAt: r.peoplehr_logged_at,
       // No equivalent, and none is missing: occurredOn came off the recording.
+      //
+      // ⚠ NULL HERE IS A CONTRACT, NOT AN OVERSIGHT. VANTAGE branches on it: its clock is
+      // `completedAt ?? occurredOn` and it states which it used, so a value appearing here
+      // would silently change what it measures. If `agent_conversations` ever gains a
+      // distinct "actually happened" timestamp, bump CONVERSATION_SIGNALS_BUILD and TELL
+      // VANTAGE — a new field behind an unchanged stamp is the one failure the stamp
+      // cannot catch.
       completedAt: null,
     })),
   ];
