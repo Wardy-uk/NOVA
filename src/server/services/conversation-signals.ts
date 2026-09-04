@@ -30,7 +30,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const CONVERSATION_SIGNALS_BUILD = '2026-09-03-conversations-b';
+export const CONVERSATION_SIGNALS_BUILD = '2026-09-04-conversations-c';
 
 export interface ConversationSignalRecord {
   kind: 'session' | 'conversation';
@@ -48,7 +48,7 @@ export interface ConversationSignalRecord {
   typeLabel: string;
   /** London calendar date, 'YYYY-MM-DD'. */
   occurredOn: string;
-  /** ⚠ Plaud's UTC instant with no marker on it. Parse as UTC, render Europe/London. */
+  /** Plaud's UTC instant, normalised to carry the `Z`. Render in Europe/London. */
   startedAt: string | null;
   title: string | null;
   summaryExcerpt: string | null;
@@ -124,6 +124,27 @@ async function signal<T>(fn: () => Promise<T>): Promise<Signal<T>> {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Force a UTC instant to SAY it is one.
+ *
+ * CONVERT style 127 is documented as "ISO8601 with time zone Z" and I changed all of
+ * these to it on that basis. It does not do that for `datetime2`: SQL Server only appends
+ * the Z for `datetimeoffset`, so for every column here 127 emits byte-for-byte what 126
+ * did and the fix silently changed nothing. It looked right in code review, it looked
+ * right in a parsed response — `ConvertFrom-Json` re-renders an ISO string as a DateTime,
+ * so the marker's absence was invisible — and it only showed up reading the raw bytes off
+ * the wire.
+ *
+ * So the marker is appended here instead, where it cannot depend on a conversion style's
+ * fine print. Every value passed in is written with GETUTCDATE() or is a Plaud timestamp,
+ * both UTC; anything that already carries a zone is left alone.
+ */
+function utcIso(v: string | null | undefined): string | null {
+  const raw = String(v ?? '').trim();
+  if (!raw) return null;
+  return /[Zz]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`;
+}
+
 async function records(since: string | null, roster: RosterPerson[]): Promise<{
   records: ConversationSignalRecord[]; unmatchedNames: string[];
 }> {
@@ -177,13 +198,13 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
       conversationType: 'one_to_one',
       typeLabel: CONVERSATION_LABELS.one_to_one,
       occurredOn: r.occurred_on,
-      startedAt: r.started_at,
+      startedAt: utcIso(r.started_at),
       title: r.title,
       summaryExcerpt: null,
       hasTranscript: Number(r.tchars) > 0,
       peoplehrLogged: !!r.peoplehr_logged_at,
-      peoplehrLoggedAt: r.peoplehr_logged_at,
-      completedAt: r.completed_at,
+      peoplehrLoggedAt: utcIso(r.peoplehr_logged_at),
+      completedAt: utcIso(r.completed_at),
     })),
     ...conversations.map((r) => ({
       kind: 'conversation' as const,
@@ -193,12 +214,12 @@ async function records(since: string | null, roster: RosterPerson[]): Promise<{
       conversationType: r.conversation_type,
       typeLabel: CONVERSATION_LABELS[r.conversation_type] ?? r.conversation_type,
       occurredOn: r.occurred_on,
-      startedAt: r.started_at,
+      startedAt: utcIso(r.started_at),
       title: r.title,
       summaryExcerpt: r.summary_excerpt,
       hasTranscript: Number(r.tchars) > 0,
       peoplehrLogged: !!r.peoplehr_logged_at,
-      peoplehrLoggedAt: r.peoplehr_logged_at,
+      peoplehrLoggedAt: utcIso(r.peoplehr_logged_at),
       // No equivalent, and none is missing: occurredOn came off the recording.
       //
       // ⚠ NULL HERE IS A CONTRACT, NOT AN OVERSIGHT. VANTAGE branches on it: its clock is

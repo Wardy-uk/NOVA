@@ -65,14 +65,16 @@ import type { AgentKpiRow } from './kpi-agent/compute.js';
  *
  * Bump on any change to the shape of the response.
  *
- * `-b`: `capturedAt` and `lastSubmittedAt` now carry the `Z`. They are written with
+ * `-c`: `capturedAt` and `lastSubmittedAt` genuinely carry the `Z` now. `-b` claimed to
+ * and did not — see utcIso() below for why CONVERT style 127 was not the fix it looked
+ * like. They are written with
  * GETUTCDATE() and were serialised with CONVERT style 126, which emits a UTC instant with
  * no marker on it — the same unmarked-instant trap that cost two fixes in the Plaud path
  * on 3 Sep. Nothing consumed them yet, which is precisely why it was worth removing while
  * it was still free: the first caller to render "captured at 18:05" would have been an
  * hour early all summer, correct all winter, and unlikely to notice either.
  */
-export const PEOPLE_SIGNALS_BUILD = '2026-09-03-people-b';
+export const PEOPLE_SIGNALS_BUILD = '2026-09-04-people-c';
 
 /**
  * Department scope, matching the kpi-agent engine's roster query exactly
@@ -125,6 +127,26 @@ function num(v: unknown): number | null {
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * Force a UTC instant to SAY it is one.
+ *
+ * CONVERT style 127 is documented as "ISO8601 with time zone Z" and these columns were
+ * switched to it on that basis. It does not do that for `datetime2` — SQL Server only
+ * appends the Z for `datetimeoffset` — so 127 emitted byte-for-byte what 126 did and the
+ * change was a no-op. It survived code review and survived a parsed-response check,
+ * because a JSON parser re-renders an ISO string as a date object and the marker's absence
+ * is invisible there. Only the raw bytes off the wire showed it.
+ *
+ * So the marker is appended here, where it cannot depend on a conversion style's fine
+ * print. Both columns are written with GETUTCDATE(); anything already carrying a zone is
+ * left alone.
+ */
+function utcIso(v: string | null | undefined): string | null {
+  const raw = String(v ?? '').trim();
+  if (!raw) return null;
+  return /[Zz]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`;
 }
 
 /**
@@ -422,7 +444,7 @@ async function fetchFrozen(day?: string): Promise<FrozenRow[]> {
     // up as someone with `state: 'no-capture'`, which is honest: we did not read
     // a measurement for them.
     try {
-      out.push({ ...(JSON.parse(r.metrics_json) as AgentKpiRow), date: r.kpi_date, capturedAt: r.captured_at });
+      out.push({ ...(JSON.parse(r.metrics_json) as AgentKpiRow), date: r.kpi_date, capturedAt: utcIso(r.captured_at) ?? r.captured_at });
     } catch { /* skip */ }
   }
   return out;
@@ -540,7 +562,7 @@ async function standups(days: number, roster: RosterPerson[]): Promise<StandupDa
       // "Missed 0 of 0" is not a fact about the person, it is a fact about the
       // standup not having run. Null rather than a flattering zero.
       missed: sessionsEvidenced > 0 ? Math.max(sessionsEvidenced - submitted, 0) : null,
-      lastSubmittedAt: hit?.last_at ?? null,
+      lastSubmittedAt: utcIso(hit?.last_at),
     };
   });
 
@@ -680,7 +702,7 @@ export async function getPeopleSignals(
     return {
       asOf: {
         day: asOfDay,
-        capturedAt: frozen[0]?.capturedAt ?? null,
+        capturedAt: utcIso(frozen[0]?.capturedAt),
         ageDays: asOfDay
           ? Math.round((Date.now() - Date.parse(`${asOfDay}T00:00:00Z`)) / 86_400_000)
           : null,
