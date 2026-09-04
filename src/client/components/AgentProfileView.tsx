@@ -490,6 +490,11 @@ function GoalCard({ goal, currentValue, editing, onSave }: {
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
+interface AgedBucket {
+  count: number;
+  tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[];
+}
+
 export function AgentProfileView({ agentName, userRole, onNavigate }: {
   agentName?: string | null;
   userRole?: string;
@@ -514,9 +519,11 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
   const [transcriptText, setTranscriptText] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [agedTickets, setAgedTickets] = useState<{
-    incidents: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
-    serviceRequests: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
-    onboarding: { count: number; tickets: { issue_key: string; summary: string; age_days: number; priority_name: string }[] };
+    incidents: AgedBucket;
+    serviceRequests: AgedBucket;
+    onboarding: AgedBucket;
+    other: AgedBucket;
+    development: AgedBucket;
   } | null>(null);
 
   // Roles are a comma-separated string (e.g. "super_admin,admin") — parse, don't exact-match.
@@ -900,10 +907,11 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                   <MetricCard label="Tickets Per Hour" value={fmt(s.ticketsPerHourAvg, 2)} subtitle="Target: ≥1.5 TPH"
                     color={s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.5 ? C.green : s.ticketsPerHourAvg !== null && s.ticketsPerHourAvg >= 1.0 ? C.amber : C.teal}
                     target={goalTarget('TicketsPerHour')} />
-                  <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)} subtitle="Lower is better" />
+                  <MetricCard label="Avg Open Tickets" value={fmt(s.openTicketsAvg)}
+                    subtitle={agedTickets ? `Excludes ${agedTickets.development.count} now with Development` : 'Lower is better'} />
                   <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} subtitle="Target: 0" color={s.openOver2hAvg > 0 ? C.red : C.green} />
-                  <MetricCard label="Avg No Update" value={fmt(s.openNoUpdateAvg)} subtitle="Same-day; 7d for Dev/T3" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} />
-                  <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
+                  <MetricCard label="Avg No Update" value={fmt(s.openNoUpdateAvg)} subtitle="Same-day; 7d for T3 · excl. Development" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} />
+                  <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days · excl. Development" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
                 </div>
               </div>
 
@@ -976,7 +984,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
               {/* Aged Tickets */}
               {agedTickets && (
                 <div>
-                  <SectionTitle title="Aged Tickets" subtitle="Open tickets exceeding age thresholds" />
+                  <SectionTitle title="Aged Tickets" subtitle={`Open tickets exceeding age thresholds · excludes ${agedTickets.development.count} with Development`} />
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
                     <MetricCard label="Incidents" value={String(agedTickets.incidents.count)} subtitle="> 5 days old"
                       color={agedTickets.incidents.count > 0 ? C.red : C.green} />
@@ -984,6 +992,8 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                       color={agedTickets.serviceRequests.count > 0 ? C.amber : C.green} />
                     <MetricCard label="Onboarding" value={String(agedTickets.onboarding.count)} subtitle="> 15 days old"
                       color={agedTickets.onboarding.count > 0 ? C.amber : C.green} />
+                    <MetricCard label="Other" value={String(agedTickets.other.count)} subtitle="No request type · > 10 days"
+                      color={agedTickets.other.count > 0 ? C.amber : C.green} />
                   </div>
                 </div>
               )}

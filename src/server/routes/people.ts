@@ -957,44 +957,66 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
         return;
       }
 
+      // Bucket on request_type, NOT issuetype_name: every open NT ticket carries
+      // issuetype_name 'Support', so the old substring match on 'incident' / 'request' /
+      // 'onboarding' matched nothing and this section reported 0 across the board
+      // regardless of how aged the queue actually was.
+      //
+      // Tickets parked at tier Development are excluded for the same reason they are
+      // excluded from the open-ticket stocks — Dev owns the fix, not the agent — and are
+      // returned separately as `development` so the pile stays visible.
+      //
+      // Scoped to project NT to match the agent KPI stocks (compute.ts), so the two
+      // sections of the profile agree with each other.
       const rows = await query<{
-        issuetype_name: string;
+        request_type: string | null;
+        current_tier: string | null;
         age_days: number;
         issue_key: string;
         summary: string;
         priority_name: string;
       }>(`
-        SELECT issuetype_name,
+        SELECT request_type,
+               current_tier,
                DATEDIFF(day, jira_created, GETUTCDATE()) AS age_days,
                issue_key, summary, priority_name
         FROM jira_issue_cache
-        WHERE (assignee_display = ? OR assignee_display LIKE ? + '%' OR ? LIKE assignee_display + '%')
+        WHERE project_key = 'NT'
+          AND (assignee_display = ? OR assignee_display LIKE ? + '%' OR ? LIKE assignee_display + '%')
           AND status_category NOT IN ('Done', 'done')
           AND resolution_name IS NULL
         ORDER BY jira_created ASC
       `, [agentName, agentName, agentName]);
 
-      const incidents = rows.filter(r =>
-        r.issuetype_name?.toLowerCase().includes('incident') && r.age_days > 5
+      const isDev = (r: { current_tier: string | null }) => (r.current_tier || '').toLowerCase() === 'development';
+      const rt = (r: { request_type: string | null }) => (r.request_type || '').trim().toLowerCase();
+
+      const actionable = rows.filter(r => !isDev(r));
+      const development = rows.filter(isDev);
+
+      const incidents = actionable.filter(r => rt(r) === 'incident' && r.age_days > 5);
+      const serviceRequests = actionable.filter(
+        r => (rt(r) === 'service request' || rt(r) === 'tpj request' || rt(r) === 'emailed request') && r.age_days > 10,
       );
-      const serviceRequests = rows.filter(r =>
-        (r.issuetype_name?.toLowerCase().includes('service request') ||
-         r.issuetype_name?.toLowerCase().includes('request')) &&
-        !r.issuetype_name?.toLowerCase().includes('incident') &&
-        !r.issuetype_name?.toLowerCase().includes('onboarding') &&
-        r.age_days > 10
+      const onboarding = actionable.filter(
+        r => (rt(r) === 'onboarding' || rt(r) === 'delivery qa') && r.age_days > 15,
       );
-      const onboarding = rows.filter(r =>
-        r.issuetype_name?.toLowerCase().includes('onboarding') && r.age_days > 15
-      );
+      // Roughly 10% of open NT tickets have no request_type cached. Without a bucket of
+      // their own they would drop out of the section silently — an empty board that only
+      // looks clean.
+      const other = actionable.filter(r => rt(r) === '' && r.age_days > 10);
+
+      const bucket = (list: typeof rows) => ({ count: list.length, tickets: list.slice(0, 10) });
 
       res.json({
         ok: true,
         data: {
-          incidents: { count: incidents.length, tickets: incidents.slice(0, 10) },
-          serviceRequests: { count: serviceRequests.length, tickets: serviceRequests.slice(0, 10) },
-          onboarding: { count: onboarding.length, tickets: onboarding.slice(0, 10) },
-          _debug: { agentName, totalOpen: rows.length, issueTypes: [...new Set(rows.map(r => r.issuetype_name))] },
+          incidents: bucket(incidents),
+          serviceRequests: bucket(serviceRequests),
+          onboarding: bucket(onboarding),
+          other: bucket(other),
+          development: bucket(development),
+          _debug: { agentName, totalOpen: rows.length, requestTypes: [...new Set(rows.map(r => r.request_type))] },
         },
       });
     } catch (err: any) {

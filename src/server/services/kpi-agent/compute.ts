@@ -30,6 +30,7 @@ export interface AgentKpiRow {
   oldestKey: string | null;
   oldestSupportDays: number;   // oldest actionable ticket at tier CC / Tier 2
   oldestSupportKey: string | null;
+  withDevelopment: number;     // open tickets parked at tier Development — excluded from the stocks above
   solvedToday: number;
   solvedWeek: number;
   // tier 2
@@ -96,7 +97,7 @@ export function isNoReply(status: string | null, created: Date | null, lastUpd: 
 }
 
 const SUPPORT_TIERS = new Set(['customer care', 'tier 2']);
-interface Stat1 { open: number; overSla: number; noReply: number; oldestDays: number; oldestKey: string | null; oldestSupportDays: number; oldestSupportKey: string | null; }
+interface Stat1 { open: number; overSla: number; noReply: number; oldestDays: number; oldestKey: string | null; oldestSupportDays: number; oldestSupportKey: string | null; withDevelopment: number; }
 
 function ukWeekStart(now: Date): string {
   // Monday of the current week (UTC-ish; close enough for the EOD capture).
@@ -187,7 +188,19 @@ export async function computeAgentKpis(
   const stats1 = new Map<string, Stat1>();
   for (const t of openRows) {
     const acc = t.assignee_account_id!;
-    const s = stats1.get(acc) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null };
+    const s = stats1.get(acc) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null, withDevelopment: 0 };
+
+    // Tickets parked at tier Development are not the agent's to progress — Dev owns the
+    // fix. Counting them made every stock below a measure of Dev's backlog rather than
+    // the agent's actionable queue (30% of the open board, and the source of 200+ day
+    // "oldest ticket" figures in 1-2-1s). They are counted separately, not hidden, so a
+    // growing dev pile stays visible and cannot be used to park work out of sight.
+    if ((t.current_tier || '').toLowerCase() === 'development') {
+      s.withDevelopment++;
+      stats1.set(acc, s);
+      continue;
+    }
+
     s.open++;
     const status = (t.status_name || '').toLowerCase();
     const actionable = !NOT_ACTIONABLE.has(status);
@@ -283,7 +296,7 @@ export async function computeAgentKpis(
   // 5. Assemble per agent
   const round = (n: number) => Math.round(n * 100) / 100;
   return roster.map(a => {
-    const s1 = stats1.get(a.AccountId) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null };
+    const s1 = stats1.get(a.AccountId) ?? { open: 0, overSla: 0, noReply: 0, oldestDays: 0, oldestKey: null, oldestSupportDays: 0, oldestSupportKey: null, withDevelopment: 0 };
     const nameLower = (a.AgentName || '').trim().toLowerCase();
     const qa = qaByName.get(nameLower);
     const gr = grByName.get(nameLower);
@@ -316,6 +329,7 @@ export async function computeAgentKpis(
       accountId: a.AccountId, agentId: a.AgentId ?? null, agentName: a.AgentName, tierCode: a.TierCode, team: a.Team,
       open: s1.open, overSla: s1.overSla, noReply: s1.noReply, oldestDays: s1.oldestDays, oldestKey: s1.oldestKey,
       oldestSupportDays: s1.oldestSupportDays, oldestSupportKey: s1.oldestSupportKey,
+      withDevelopment: s1.withDevelopment,
       solvedToday: solvedT, solvedWeek: solvedWeek.get(a.AccountId) || 0,
       qaScored: qa?.scored || 0, qaOverall, qaAccuracy: qa?.accuracy != null ? round(qa.accuracy) : null,
       qaClarity: qa?.clarity != null ? round(qa.clarity) : null, qaTone: qa?.tone != null ? round(qa.tone) : null,
