@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { isNovaAi } from '../utils/agentFilters.js';
 
 interface AgentRow {
   AgentName: string;
@@ -80,7 +81,8 @@ export function KpiBreachedView({ isWallboard = false }: { isWallboard?: boolean
       const res = await fetch(url);
       const json = await res.json();
       if (json.ok) {
-        setAgents(json.data);
+        // NOVA AI is not a person and its queue is not a human's to breach.
+        setAgents((json.data ?? []).filter((a: AgentRow) => !isNovaAi(a.AgentName)));
         setLastUpdate(new Date().toLocaleTimeString('en-GB'));
       }
     } catch { /* ignore */ } finally {

@@ -2,6 +2,7 @@
 // This view's QA/GR agent-level scores overlap with QAView Overview tab and AgentCoachingView.
 // Consider replacing the QA/GR score columns with a link to the unified scorecard.
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { isNovaAi } from '../utils/agentFilters.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -184,10 +185,13 @@ function stddev(values: number[]): number {
 /* ------------------------------------------------------------------ */
 
 function aggregateAgents(rows: AgentDailyRow[]): AgentSummary[] {
-  // Group by AgentName
+  // Group by AgentName. NOVA AI is excluded: it is not a person, it works round the
+  // clock, and leaving it in skews every team average on this page as well as the
+  // ranking.
   const byAgent = new Map<string, AgentDailyRow[]>();
   for (const row of rows) {
     const name = row.AgentName;
+    if (isNovaAi(name)) continue;
     if (!byAgent.has(name)) byAgent.set(name, []);
     byAgent.get(name)!.push(row);
   }

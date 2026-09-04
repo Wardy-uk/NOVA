@@ -10,6 +10,9 @@ import { getRagThresholds, ragHigher, ragLower, type Rag } from './rag.js';
 
 export type Period = 'day' | 'week' | 'month';
 
+/** Resolved tickets an agent needs in the window before their SLA % is ranked on. */
+const MIN_SLA_SAMPLE = 5;
+
 function startOf(period: Period, anchor: string): string {
   if (period === 'day') return anchor;
   const d = new Date(`${anchor}T00:00:00Z`);
@@ -103,22 +106,13 @@ export async function getAgentPeriod(
     const ticketsPerHour = avg(nn(days.map(d => d.ticketsPerHour)));
     const solved = sum(days.map(d => d.solvedToday));
 
-    // Composite scoring (mirrors the legacy leaderboard): normalise each available
-    // metric to 0–100, average them. Tab scores keep the per-category 0–100 values.
+    // Per-category scores, kept for the Productivity / SLA / Quality tab sorts.
     const productivityScore = ticketsPerHour != null ? Math.min(ticketsPerHour * 20, 100) : null; // 5 tix/hr = 100
     const slaScore = slaCompliancePct;                                                             // already 0–100
-    // QA is scored 0-10, not 0-5. The x20 here (and the comment claiming 0-5) pushed
-    // every agent's quality contribution to double what it should be, and let the
-    // composite exceed its own maximum: an agent on leave with a 7.09 QA and no other
-    // metric scored 142 out of 100 and led the board.
+    // QA is scored 0-10, not 0-5. The old x20 doubled every agent's quality
+    // contribution and let the composite exceed its own maximum.
     const qualityScore = qaOverall != null ? qaOverall * 10 : null;                                 // 0–10 → 0–100
-    const norm: number[] = [];
-    if (productivityScore != null) norm.push(productivityScore);
-    if (slaScore != null) norm.push(slaScore);
-    if (qualityScore != null) norm.push(qualityScore);
-    if (csatAvg != null) norm.push(csatAvg * 20);                                                   // 1–5 → 0–100
-    if (goldenRulesAvg != null) norm.push((goldenRulesAvg / 3) * 100);                              // 1–3 → 0–100
-    const compositeScore = norm.length ? Math.round((norm.reduce((s, v) => s + v, 0) / norm.length) * 100) / 100 : 0;
+    const compositeScore = 0; // Model A, filled in below once the cohort max is known.
     const points = solved
       + (slaCompliancePct != null && slaCompliancePct >= 95 ? 2 * days.length : 0)
       + (qaOverall != null && qaOverall >= 4 ? 3 : 0);
@@ -140,6 +134,31 @@ export async function getAgentPeriod(
       },
     });
   }
+  // ── Model A composite (2026-07) — the same scheme the SLT board ranks on, so the
+  // two boards agree by construction instead of by coincidence.
+  //
+  // SLA 50 / throughput 30 / tickets-per-hour 20, redistributed over whichever
+  // dimensions are present. QA and CSAT are deliberately NOT scored: QA sampling is
+  // not comparable across agents and CSAT coverage is a fraction of a percent, so
+  // both are context, shown but not ranked on.
+  //
+  // Replaces a plain mean of normalised metrics, which gave a near-idle agent the
+  // same billing for a perfect SLA as a busy one: 1 ticket solved at 0.1/hr with
+  // 100% SLA and a good QA came second on the board.
+  const maxSolved = Math.max(1, ...agents.map(a => a.solved));
+  for (const a of agents) {
+    const parts: Array<[number, number]> = [];
+    // A percentage off one or two tickets is noise, not performance. Below the
+    // floor SLA simply does not count and its weight goes to the dimensions that
+    // do — which is what stops "100% of 1" outranking real throughput.
+    if (a.slaCompliancePct != null && a.solved >= MIN_SLA_SAMPLE) parts.push([50, a.slaCompliancePct]);
+    parts.push([30, (a.solved / maxSolved) * 100]);
+    if (a.ticketsPerHour != null) parts.push([20, Math.min(a.ticketsPerHour * 20, 100)]);
+    let sv = 0, sw = 0;
+    for (const [w, v] of parts) { sv += w * v; sw += w; }
+    a.compositeScore = sw > 0 ? Math.round((sv / sw) * 100) / 100 : 0;
+  }
+
   agents.sort((a, b) => b.solved - a.solved);
   return { period, from, to: anchor, agents, liveToday: useLive };
 }

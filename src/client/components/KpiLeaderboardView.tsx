@@ -1,6 +1,7 @@
 // TODO: Remove — duplicated by unified scorecard in QA dashboard (GET /api/kpi-data/agent-scorecard/:name)
 // The QA/GR quality columns in this leaderboard overlap with the QA Dashboard unified agent scorecard.
 import { useState, useEffect, useCallback } from 'react';
+import { isNovaAi } from '../utils/agentFilters.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -312,7 +313,10 @@ export function KpiLeaderboardView() {
       return null;
     };
 
-    return agents.map(a => {
+    // NOVA AI is not a person: it works round the clock and always tops a
+    // solve-based board. Excluded here as it is on the Leaderboard, Agent KPIs and
+    // Agent Breaches.
+    return agents.filter(a => !isNovaAi(`${a.AgentName} ${a.AgentSurname ?? ''}`.trim()) && !isNovaAi(a.AgentName)).map(a => {
       const fullName = `${a.AgentName} ${a.AgentSurname}`.trim();
       // Try full name first, then first name only, then lowercase fallbacks
       const rows = allDailyMap.get(fullName)
@@ -333,7 +337,10 @@ export function KpiLeaderboardView() {
       const scores: number[] = [];
       if (tph != null) scores.push(Math.min(tph * 20, 100)); // 5 tix/hr = 100
       if (slaPercent != null) scores.push(slaPercent);
-      if (qa != null) scores.push(qa * 20); // assume 0-5 scale → 0-100
+      // QA is scored 0-10, not 0-5 — the old x20 (and the "assume" in that comment)
+      // doubled every agent's quality contribution and let the composite exceed 100.
+      // Matches the Leaderboard's scoring so the two boards agree.
+      if (qa != null) scores.push(qa * 10); // 0-10 → 0-100
       if (csat != null) scores.push(csat * 20); // 1-5 scale → 0-100
       if (gr != null) scores.push((gr / 3) * 100); // 1-3 scale → 0-100
 

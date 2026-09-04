@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isNovaAi } from '../utils/agentFilters.js';
 
 // Layer-3 agent leaderboard (rebuild). Reads /api/kpi-agent/period — ranks agents by
 // a composite 0–100 score (mean of available normalised metrics) or by a single
@@ -58,7 +59,7 @@ export function LeaderboardRebuild() {
       default: return r.compositeScore;
     }
   };
-  const isNovaAi = (r: PeriodRow) => r.agentName === 'NOVA AI';
+  const isNova = (r: PeriodRow) => isNovaAi(r.agentName);
 
   // Ranked = people who actually worked in this window. Everyone else is shown
   // below, greyed and unranked: an agent on leave has null productivity and null
@@ -68,9 +69,9 @@ export function LeaderboardRebuild() {
     const filtered = rows.filter(r => (!team || r.team === team) && (!tier || r.tierCode === tier));
     const sortFn = (a: PeriodRow, b: PeriodRow) => key(b) - key(a) || b.solved - a.solved;
     return {
-      ranked: filtered.filter(r => r.hasActivity && !isNovaAi(r)).sort(sortFn),
-      reference: filtered.filter(r => !r.hasActivity || isNovaAi(r))
-        .filter(r => !isNovaAi(r) || showNovaAi)
+      ranked: filtered.filter(r => r.hasActivity && !isNova(r)).sort(sortFn),
+      reference: filtered.filter(r => !r.hasActivity || isNova(r))
+        .filter(r => !isNova(r) || showNovaAi)
         .sort(sortFn),
     };
   }, [rows, tab, team, tier, showNovaAi]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -92,7 +93,12 @@ export function LeaderboardRebuild() {
           ))}
         </div>
       </div>
-      <p className="text-xs text-slate-500 mb-4">Composite = mean of available normalised metrics (Productivity, SLA %, QA, CSAT, Golden Rules), 0–100 · ranked on agents with activity in the period; anyone without is listed below, unranked</p>
+      <p className="text-xs text-slate-500 mb-4">
+        Model A composite, 0–100: SLA 50 / throughput 30 / tickets-per-hour 20, redistributed over the dimensions present.
+        QA and CSAT are context, not ranked on — QA sampling is not comparable between agents and CSAT coverage is a fraction of a percent.
+        SLA % only counts once an agent has resolved 5+ in the period, so a perfect score off one ticket cannot outrank real throughput.
+        Agents with no activity are listed below, unranked.
+      </p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <TabBtn id="combined" label="Combined" />
