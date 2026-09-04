@@ -337,49 +337,18 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
   router.get('/agent-daily', async (req, res) => {
     try {
       const env = parseEnv(req);
-      const s = suffix(env);
-      const p = await getPool();
-      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
-      let deptJoin: string;
-      let deptWhere: string;
-      if (hasDept.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
-      } else if (hasDeptLive.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
-      } else {
-        deptJoin = '';
-        deptWhere = '';
-      }
+      // Rebuild store, in the legacy column shape — the last consumer of
+      // dbo.jira_agent_kpi_daily was the Gamification leaderboard reading this.
+      // The Department IN ('NT','NOVA_AI') filter the old query applied is already
+      // baked into the Rebuild roster at capture time, so it is not repeated here.
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
-      if (from && to) {
-        const request = p.request();
-        request.input('from', sql.Date, from);
-        request.input('to', sql.Date, to);
-        const result = await request.query(`
-          SELECT d.*
-          FROM dbo.jira_agent_kpi_daily${s} d
-          ${deptJoin}
-          WHERE d.ReportDate >= @from AND d.ReportDate <= @to
-            ${deptWhere}
-          ORDER BY d.ReportDate DESC, d.AgentName
-        `);
-        res.json({ ok: true, data: result.recordset, env });
-      } else {
-        const days = Math.min(parseInt(req.query.days as string) || 7, 730);
-        const result = await p.request().query(`
-          SELECT d.*
-          FROM dbo.jira_agent_kpi_daily${s} d
-          ${deptJoin}
-          WHERE d.ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
-            ${deptWhere}
-          ORDER BY d.ReportDate DESC, d.AgentName
-        `);
-        res.json({ ok: true, data: result.recordset, env });
-      }
+      const days = Math.min(parseInt(req.query.days as string) || 7, 730);
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const rows = (await getAllInRange(from ?? isoDaysAgo(days), to ?? todayUk))
+        .map(r => toLegacyAgentRow(r, r.date))
+        .sort((a, b) => b.ReportDate.localeCompare(a.ReportDate) || a.AgentName.localeCompare(b.AgentName));
+      res.json({ ok: true, data: rows, env });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
