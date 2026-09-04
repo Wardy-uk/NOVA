@@ -294,7 +294,10 @@ function aggregateAgent(rows: AgentDailyRow[]): AgentSummary | null {
     openTicketsAvg: avg(sorted.map(r => r.OpenTickets_Total)) ?? 0,
     openOver2hAvg: avg(sorted.map(r => r.OpenTickets_Over2Hours)) ?? 0,
     openNoUpdateAvg: avg(sorted.map(r => r.OpenTickets_NoUpdateToday)) ?? 0,
-    oldestTicketMax: Math.max(0, ...sorted.map(r => r.OldestTicketDays ?? 0)),
+    // The LATEST day's value, not the max across the range. A max can only ever go up:
+    // it kept reporting the worst single day the range had ever seen (253 days from a
+    // long-gone Development ticket) as if it were today's oldest ticket.
+    oldestTicketMax: latest.OldestTicketDays ?? 0,
     qaScored: sum(sorted.map(r => r.QATicketsScored)),
     qaOverallAvg: avg(sorted.map(r => r.QAOverallAvg)),
     qaAccuracyAvg: avg(sorted.map(r => r.QAAccuracyAvg)),
@@ -524,6 +527,7 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
     onboarding: AgedBucket;
     other: AgedBucket;
     development: AgedBucket;
+    oldest: { days: number; issue_key: string; summary: string } | null;
   } | null>(null);
 
   // Roles are a comma-separated string (e.g. "super_admin,admin") — parse, don't exact-match.
@@ -911,7 +915,16 @@ export function AgentProfileView({ agentName, userRole, onNavigate }: {
                     subtitle={agedTickets ? `Excludes ${agedTickets.development.count} now with Development` : 'Lower is better'} />
                   <MetricCard label="Avg >2h Overdue" value={fmt(s.openOver2hAvg)} subtitle="Target: 0" color={s.openOver2hAvg > 0 ? C.red : C.green} />
                   <MetricCard label="Avg No Update" value={fmt(s.openNoUpdateAvg)} subtitle="Same-day; 7d for T3 · excl. Development" color={s.openNoUpdateAvg > 1 ? C.amber : s.openNoUpdateAvg === 0 ? C.green : C.text3} />
-                  <MetricCard label="Oldest Ticket (days)" value={fmtInt(s.oldestTicketMax)} subtitle="Target: ≤3 days · excl. Development" color={s.oldestTicketMax <= 3 ? C.green : s.oldestTicketMax <= 7 ? C.amber : C.red} />
+                  {(() => {
+                    // Live figure from jira_issue_cache when we have it — the stored daily
+                    // column is unreliable (it lands as 0 for every agent some days).
+                    const oldestDays = agedTickets?.oldest ? agedTickets.oldest.days : s.oldestTicketMax;
+                    return (
+                      <MetricCard label="Oldest Ticket (days)" value={fmtInt(oldestDays)}
+                        subtitle={agedTickets?.oldest ? `${agedTickets.oldest.issue_key} · excl. Development` : 'Target: ≤3 days · excl. Development'}
+                        color={oldestDays <= 3 ? C.green : oldestDays <= 7 ? C.amber : C.red} />
+                    );
+                  })()}
                 </div>
               </div>
 

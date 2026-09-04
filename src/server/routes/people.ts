@@ -971,6 +971,7 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       const rows = await query<{
         request_type: string | null;
         current_tier: string | null;
+        status_name: string | null;
         age_days: number;
         issue_key: string;
         summary: string;
@@ -978,6 +979,7 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       }>(`
         SELECT request_type,
                current_tier,
+               status_name,
                DATEDIFF(day, jira_created, GETUTCDATE()) AS age_days,
                issue_key, summary, priority_name
         FROM jira_issue_cache
@@ -1006,6 +1008,19 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       // looks clean.
       const other = actionable.filter(r => rt(r) === '' && r.age_days > 10);
 
+      // The live oldest actionable ticket. The profile card used to take the MAX of
+      // jira_agent_kpi_daily.OldestTicketDays across the whole range, so it reported the
+      // worst any single day had ever been and could never come down — Hope showed 253
+      // days from a Development ticket last seen on 27 Aug while her real oldest was 19.
+      // That column is also unreliable (every agent's row for today is 0). Computing it
+      // here from the same live rows the buckets use keeps the whole section consistent.
+      //
+      // Mirrors compute.ts: statuses the agent cannot action do not count towards oldest.
+      const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
+      const oldestRow = actionable
+        .filter(r => !NOT_ACTIONABLE.has((r.status_name || '').toLowerCase()))
+        .reduce<typeof rows[number] | null>((best, r) => (best === null || r.age_days > best.age_days ? r : best), null);
+
       const bucket = (list: typeof rows) => ({ count: list.length, tickets: list.slice(0, 10) });
 
       res.json({
@@ -1016,6 +1031,9 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
           onboarding: bucket(onboarding),
           other: bucket(other),
           development: bucket(development),
+          oldest: oldestRow
+            ? { days: oldestRow.age_days, issue_key: oldestRow.issue_key, summary: oldestRow.summary }
+            : null,
           _debug: { agentName, totalOpen: rows.length, requestTypes: [...new Set(rows.map(r => r.request_type))] },
         },
       });

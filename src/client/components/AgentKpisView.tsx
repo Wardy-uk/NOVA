@@ -238,7 +238,9 @@ function aggregateAgents(rows: AgentDailyRow[]): AgentSummary[] {
       openTicketsAvg: avg(sorted.map(r => r.OpenTickets_Total)) ?? 0,
       openOver2hAvg: avg(sorted.map(r => r.OpenTickets_Over2Hours)) ?? 0,
       openNoUpdateAvg: avg(sorted.map(r => r.OpenTickets_NoUpdateToday)) ?? 0,
-      oldestTicketMax: Math.max(0, ...sorted.map(r => r.OldestTicketDays ?? 0)),
+      // Latest day, not the max across the range — a max only ever ratchets up, so it
+      // reported the worst day the range had ever seen as if it were the current oldest.
+      oldestTicketMax: latest.OldestTicketDays ?? 0,
       // Quality
       qaScored: sum(sorted.map(r => r.QATicketsScored)),
       qaOverallAvg: avg(sorted.map(r => r.QAOverallAvg)),
