@@ -26,6 +26,11 @@ const nn = (xs: Array<number | null>): number[] => xs.filter((v): v is number =>
 export interface AgentPeriodRow {
   accountId: string; agentName: string; tierCode: string; team: string; days: number;
   solved: number;                       // sum over period
+  /** Did this agent do any measurable work in the window? Absence leaves productivity
+   *  and SLA null, and a mean over "available metrics" then scores someone on leave
+   *  purely on QA carried over from tickets scored earlier — which ranked agents who
+   *  were on holiday all week above agents who worked it. */
+  hasActivity: boolean;
   open: number | null; overSla: number | null; noReply: number | null; oldestDays: number | null;
   qaOverall: number | null; goldenRulesAvg: number | null; csatAvg: number | null; slaCompliancePct: number | null; ticketsPerHour: number | null;
   // Leaderboard scoring (P3): each metric normalised to 0–100; composite = mean of available.
@@ -58,9 +63,24 @@ export async function getAgentHistoryGrid(from: string, to: string, metric: stri
   return { dates, metric: m, rows: out };
 }
 
-export async function getAgentPeriod(settings: SettingsQueries, period: Period, anchor: string): Promise<{ period: Period; from: string; to: string; agents: AgentPeriodRow[] }> {
+/**
+ * Roll up a period. `liveRows` (the 60s-cached recompute) stands in for today.
+ *
+ * The stored day is only written at the 18:00 freeze, so for most of the working
+ * day there IS no row for today and a "Daily" view silently fell back to the last
+ * stored day — yesterday. Agents who were in yesterday and off today still appeared,
+ * with yesterday's solves, under a column headed "Solved Today".
+ */
+export async function getAgentPeriod(
+  settings: SettingsQueries, period: Period, anchor: string, liveRows?: AgentKpiRow[],
+): Promise<{ period: Period; from: string; to: string; agents: AgentPeriodRow[]; liveToday: boolean }> {
   const from = startOf(period, anchor);
-  const rows = await getAllInRange(from, anchor);
+  const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const stored = await getAllInRange(from, anchor);
+  const useLive = liveRows != null && liveRows.length > 0 && anchor >= todayUk;
+  const rows = useLive
+    ? [...stored.filter(r => r.date !== todayUk), ...liveRows.map(r => ({ ...r, date: todayUk }))]
+    : stored;
   const t = getRagThresholds(settings);
 
   const byAgent = new Map<string, Array<AgentKpiRow & { date: string }>>();
@@ -87,7 +107,11 @@ export async function getAgentPeriod(settings: SettingsQueries, period: Period, 
     // metric to 0–100, average them. Tab scores keep the per-category 0–100 values.
     const productivityScore = ticketsPerHour != null ? Math.min(ticketsPerHour * 20, 100) : null; // 5 tix/hr = 100
     const slaScore = slaCompliancePct;                                                             // already 0–100
-    const qualityScore = qaOverall != null ? qaOverall * 20 : null;                                // 0–5 → 0–100
+    // QA is scored 0-10, not 0-5. The x20 here (and the comment claiming 0-5) pushed
+    // every agent's quality contribution to double what it should be, and let the
+    // composite exceed its own maximum: an agent on leave with a 7.09 QA and no other
+    // metric scored 142 out of 100 and led the board.
+    const qualityScore = qaOverall != null ? qaOverall * 10 : null;                                 // 0–10 → 0–100
     const norm: number[] = [];
     if (productivityScore != null) norm.push(productivityScore);
     if (slaScore != null) norm.push(slaScore);
@@ -102,6 +126,7 @@ export async function getAgentPeriod(settings: SettingsQueries, period: Period, 
     agents.push({
       accountId, agentName: last.agentName, tierCode: last.tierCode, team: last.team, days: days.length,
       solved,
+      hasActivity: solved > 0 || (ticketsPerHour != null && ticketsPerHour > 0),
       open, overSla, noReply, oldestDays, qaOverall, goldenRulesAvg, csatAvg, slaCompliancePct, ticketsPerHour,
       productivityScore, slaScore, qualityScore, compositeScore, points,
       rag: {
@@ -116,5 +141,5 @@ export async function getAgentPeriod(settings: SettingsQueries, period: Period, 
     });
   }
   agents.sort((a, b) => b.solved - a.solved);
-  return { period, from, to: anchor, agents };
+  return { period, from, to: anchor, agents, liveToday: useLive };
 }

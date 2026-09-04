@@ -50,7 +50,14 @@ export function createKpiAgentRoutes(deps: KpiAgentDeps): Router {
     const period = (q === 'month' ? 'month' : q === 'day' ? 'day' : 'week') as 'day' | 'week' | 'month';
     const anchor = (req.query.anchor as string) || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     try {
-      res.json({ ok: true, data: await getAgentPeriod(deps.settings, period, anchor) });
+      // Today has no stored row until the 18:00 freeze, so hand the rollup the live
+      // snapshot — otherwise "Daily" quietly means yesterday.
+      const jira = deps.getJiraClient();
+      let live;
+      if (jira) {
+        try { live = (await getAgentLiveSnapshot(deps.settings, jira)).agents; } catch { /* stored-only */ }
+      }
+      res.json({ ok: true, data: await getAgentPeriod(deps.settings, period, anchor, live) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'failed' });
     }

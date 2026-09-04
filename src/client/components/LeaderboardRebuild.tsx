@@ -9,6 +9,7 @@ interface PeriodRow {
   accountId: string; agentName: string; tierCode: string; team: string; days: number;
   solved: number; open: number | null; overSla: number | null; noReply: number | null;
   qaOverall: number | null; csatAvg: number | null; slaCompliancePct: number | null; ticketsPerHour: number | null;
+  hasActivity: boolean;
   productivityScore: number | null; slaScore: number | null; qualityScore: number | null;
   compositeScore: number; points: number;
   rag: Record<string, string | null>;
@@ -28,6 +29,10 @@ export function LeaderboardRebuild() {
   const [period, setPeriod] = useState<Period>('day');
   const [team, setTeam] = useState('');
   const [tier, setTier] = useState('');
+  // NOVA AI is not a person and always tops a solve-based board, which makes the
+  // human rankings hard to read. Off by default; when shown it appears greyed at the
+  // bottom for comparison WITHOUT taking a rank or shifting anyone else down.
+  const [showNovaAi, setShowNovaAi] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -45,18 +50,30 @@ export function LeaderboardRebuild() {
   const teams = useMemo(() => [...new Set(rows.map(r => r.team).filter(Boolean))].sort(), [rows]);
   const tiers = useMemo(() => [...new Set(rows.map(r => r.tierCode).filter(Boolean))].sort(), [rows]);
 
-  const ranked = useMemo(() => {
+  const key = (r: PeriodRow): number => {
+    switch (tab) {
+      case 'productivity': return r.productivityScore ?? -1;
+      case 'sla': return r.slaScore ?? -1;
+      case 'quality': return r.qualityScore ?? -1;
+      default: return r.compositeScore;
+    }
+  };
+  const isNovaAi = (r: PeriodRow) => r.agentName === 'NOVA AI';
+
+  // Ranked = people who actually worked in this window. Everyone else is shown
+  // below, greyed and unranked: an agent on leave has null productivity and null
+  // SLA, and a mean over "available metrics" then scores them on stale QA alone —
+  // which put people who were on holiday all week above people who worked it.
+  const { ranked, reference } = useMemo(() => {
     const filtered = rows.filter(r => (!team || r.team === team) && (!tier || r.tierCode === tier));
-    const key = (r: PeriodRow): number => {
-      switch (tab) {
-        case 'productivity': return r.productivityScore ?? -1;
-        case 'sla': return r.slaScore ?? -1;
-        case 'quality': return r.qualityScore ?? -1;
-        default: return r.compositeScore;
-      }
+    const sortFn = (a: PeriodRow, b: PeriodRow) => key(b) - key(a) || b.solved - a.solved;
+    return {
+      ranked: filtered.filter(r => r.hasActivity && !isNovaAi(r)).sort(sortFn),
+      reference: filtered.filter(r => !r.hasActivity || isNovaAi(r))
+        .filter(r => !isNovaAi(r) || showNovaAi)
+        .sort(sortFn),
     };
-    return [...filtered].sort((a, b) => key(b) - key(a) || b.solved - a.solved);
-  }, [rows, tab, team, tier]);
+  }, [rows, tab, team, tier, showNovaAi]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const th = (l: string, left = false) => <th className={`px-3 py-2 text-[11px] uppercase tracking-wide text-slate-400 ${left ? 'text-left' : 'text-center'}`}>{l}</th>;
   const TabBtn = ({ id, label }: { id: Tab; label: string }) => (
@@ -75,7 +92,7 @@ export function LeaderboardRebuild() {
           ))}
         </div>
       </div>
-      <p className="text-xs text-slate-500 mb-4">Composite = mean of available normalised metrics (Productivity, SLA %, QA, CSAT, Golden Rules), 0–100 · ranks from kpi_agent_daily</p>
+      <p className="text-xs text-slate-500 mb-4">Composite = mean of available normalised metrics (Productivity, SLA %, QA, CSAT, Golden Rules), 0–100 · ranked on agents with activity in the period; anyone without is listed below, unranked</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <TabBtn id="combined" label="Combined" />
@@ -91,6 +108,11 @@ export function LeaderboardRebuild() {
           <option value="">All tiers</option>
           {tiers.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+        <button
+          onClick={() => setShowNovaAi(v => !v)}
+          title="Show NOVA AI for comparison. It is listed unranked, so the human positions do not move."
+          className={`px-3 py-1.5 text-sm rounded-lg border ${showNovaAi ? 'bg-white/[0.12] border-white/20' : 'bg-white/[0.06] border-white/10 hover:bg-white/[0.1]'}`}
+        >{showNovaAi ? 'Hide NOVA AI' : 'Show NOVA AI'}</button>
       </div>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
@@ -120,6 +142,31 @@ export function LeaderboardRebuild() {
                 </tr>
               ))}
               {!ranked.length && <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">No agents</td></tr>}
+
+              {reference.length > 0 && (
+                <tr className="border-t border-white/10 bg-white/[0.02]">
+                  <td colSpan={10} className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-slate-500">
+                    Not ranked — no activity in this period
+                  </td>
+                </tr>
+              )}
+              {reference.map(a => (
+                <tr key={a.accountId} className="border-t border-white/5 opacity-45">
+                  <td className="px-3 py-2 text-center text-sm text-slate-600">—</td>
+                  <td className="px-3 py-2 text-sm text-slate-400">
+                    {a.agentName}
+                    <span className="text-[10px] text-slate-500 ml-1.5">{a.tierCode}{a.team ? ` · ${a.team}` : ''}</span>
+                  </td>
+                  <td className="px-3 py-2 text-center text-base font-bold text-slate-500">{Math.round(a.compositeScore)}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{a.solved}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{num(a.ticketsPerHour, 1)}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{a.slaCompliancePct == null ? '—' : `${Math.round(a.slaCompliancePct)}%`}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{num(a.qaOverall, 1)}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{num(a.csatAvg, 1)}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-400">{num(a.overSla)}</td>
+                  <td className="px-3 py-2 text-center text-sm text-slate-500">{a.points}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
