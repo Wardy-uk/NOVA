@@ -1487,6 +1487,79 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_agent_streaks_user_type')
      CREATE UNIQUE INDEX UX_agent_streaks_user_type ON agent_streaks (user_id, streak_type);`,
 
+    // ── Gamification: seasons, points ledger, reward catalogue ──
+    //
+    // Points accumulate within a SEASON and reset when a new one starts; badges are
+    // permanent. Without that, whoever has been here longest simply wins forever.
+    //
+    // Nothing here issues a prize. The ledger records what was earned and
+    // redemptions are raised as REQUESTS for a human to approve, because these
+    // convert to real money (vouchers, a WFH day, an early finish) and the metrics
+    // behind them are the same ones that have needed correcting all week.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'gam_seasons') AND type = 'U')
+     CREATE TABLE gam_seasons (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       name NVARCHAR(100) NOT NULL,
+       starts_on DATE NOT NULL,
+       ends_on DATE NULL,
+       is_active BIT NOT NULL DEFAULT 1,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    // One row per award. UNIQUE on (agent, type, period_key) is what makes an
+    // achievement repeatable in a controlled way: period_key is '' for earn-once
+    // milestones, a date for dailies, a year-week for weeklies. The index does the
+    // deduping so a re-run of the evaluator cannot double-award.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'gam_awards') AND type = 'U')
+     CREATE TABLE gam_awards (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       season_id INT NOT NULL,
+       agent_name NVARCHAR(200) NOT NULL,
+       achievement_key NVARCHAR(100) NOT NULL,
+       period_key NVARCHAR(20) NOT NULL DEFAULT '',
+       points INT NOT NULL DEFAULT 0,
+       detail NVARCHAR(500) NULL,
+       earned_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gam_awards_unique')
+     CREATE UNIQUE INDEX UX_gam_awards_unique ON gam_awards (agent_name, achievement_key, period_key);`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gam_awards_season')
+     CREATE INDEX IX_gam_awards_season ON gam_awards (season_id, agent_name);`,
+
+    // Reward catalogue. Deliberately data, not code: the actual prizes need a
+    // leadership decision, and they will change. cost_points = 0 means "not yet
+    // priced", so a reward can be listed before it is claimable.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'gam_rewards') AND type = 'U')
+     CREATE TABLE gam_rewards (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       name NVARCHAR(200) NOT NULL,
+       description NVARCHAR(500) NULL,
+       tier NVARCHAR(20) NOT NULL DEFAULT 'small',
+       cost_points INT NOT NULL DEFAULT 0,
+       stock INT NULL,
+       is_active BIT NOT NULL DEFAULT 1,
+       created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'gam_redemptions') AND type = 'U')
+     CREATE TABLE gam_redemptions (
+       id INT IDENTITY(1,1) PRIMARY KEY,
+       season_id INT NOT NULL,
+       agent_name NVARCHAR(200) NOT NULL,
+       reward_id INT NOT NULL,
+       cost_points INT NOT NULL,
+       status NVARCHAR(20) NOT NULL DEFAULT 'requested',
+       requested_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+       decided_at DATETIME2 NULL,
+       decided_by NVARCHAR(200) NULL,
+       note NVARCHAR(500) NULL
+     );`,
+
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gam_redemptions_agent')
+     CREATE INDEX IX_gam_redemptions_agent ON gam_redemptions (agent_name, status);`,
+
     // ── Processed comments dedup (survives restarts) ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'processed_comments') AND type = 'U')
      CREATE TABLE processed_comments (

@@ -58,6 +58,7 @@ import { createAiLearningRoutes } from './routes/ai-learnings.js';
 import { AiLearningService } from './services/ai-learning-service.js';
 import { createGamificationRoutes } from './routes/gamification.js';
 import { GamificationService } from './services/gamification.js';
+import { evaluateAchievements } from './services/gamification-engine.js';
 import { createEscalationRoutes } from './routes/escalation.js';
 import { EscalationLogService } from './services/escalation-log-service.js';
 import { DevReviewQueries } from './db/dev-review-queries.js';
@@ -1927,6 +1928,28 @@ async function main() {
         if (res.ok) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
       }
     }, 10 * 60 * 1000);
+
+    // Gamification: evaluate achievements once per UK day, mid-morning.
+    //
+    // Runs AFTER the overnight solve re-capture has corrected yesterday, and looks
+    // back 10 days rather than just yesterday so a late correction still earns what
+    // it should. Every award is idempotent on (agent, achievement, period), so
+    // re-covering the same days cannot double-pay.
+    //
+    // Deliberately not evaluating today: the day is not complete, and awarding off
+    // a partial day is how you end up taking a prize back.
+    jobRegistry.register('gamification-evaluate', 'Gamification achievement evaluation', async () => {
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (ukHour < 9 || settingsQueries.get('gamification_eval_day') === todayUk) return;
+      const from = new Date(); from.setUTCDate(from.getUTCDate() - 10);
+      const to = new Date(); to.setUTCDate(to.getUTCDate() - 1);
+      const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const r = await evaluateAchievements(key(from), key(to));
+      settingsQueries.set('gamification_eval_day', todayUk);
+      console.log(`[gamification] ${r.season}: ${r.granted} awards over ${r.days} days`);
+    }, 30 * 60 * 1000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00, derived KPIs 17:30
     jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + derived', async () => {
