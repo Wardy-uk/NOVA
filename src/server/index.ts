@@ -1592,7 +1592,7 @@ async function main() {
 
     // Gamification
     const gamificationService = new GamificationService();
-    app.use('/api/gamification', createGamificationRoutes(gamificationService));
+    app.use('/api/gamification', createGamificationRoutes(gamificationService, settingsQueries));
 
     // P5: Predictive Intelligence + Platform Hardening services
     const escalationPredictor = new EscalationPredictor(llmService, settingsQueries);

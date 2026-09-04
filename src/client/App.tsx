@@ -27,6 +27,7 @@ const KpiLeaderboardView = lazy(() => import('./components/KpiLeaderboardView.js
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
 const SupportKpiScorecard = lazy(() => import('./components/SupportKpiScorecard.js').then(m => ({ default: m.SupportKpiScorecard })));
 const AgentScorecardRebuild = lazy(() => import('./components/AgentScorecardRebuild.js').then(m => ({ default: m.AgentScorecardRebuild })));
+const GamificationView = lazy(() => import('./components/GamificationView.js').then(m => ({ default: m.GamificationView })));
 const LeaderboardRebuild = lazy(() => import('./components/LeaderboardRebuild.js').then(m => ({ default: m.LeaderboardRebuild })));
 const KpiRebuildHistory = lazy(() => import('./components/KpiRebuildHistory.js').then(m => ({ default: m.KpiRebuildHistory })));
 const KpiRebuildLegacy = lazy(() => import('./components/KpiRebuildLegacy.js').then(m => ({ default: m.KpiRebuildLegacy })));
@@ -115,7 +116,7 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
   | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
-  | 'kpi-rebuild-support'
+  | 'kpi-rebuild-support' | 'gamification'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
   | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'kpi-rebuild-tracker' | 'csat-adoption' | 'tpj-maintenance'
   | 'backfill-status'
@@ -146,6 +147,14 @@ interface AreaAccess { [areaId: string]: AccessLevel }
 const DEFAULT_AREA_ACCESS: AreaAccess = {
   nova_features: 'view',
   servicedesk: 'view', sales: 'hidden', onboarding: 'view', accounts: 'view', people: 'view', kpis: 'hidden', trends: 'hidden', qa: 'hidden', wallboards: 'view', training: 'edit', admin: 'hidden', mi: 'hidden', devreview: 'hidden', 'ai-agent': 'view', backlog: 'view', standup: 'hidden',
+};
+
+// Tabs restricted to a single named user. The rewards scheme runs as a quiet
+// preview while its thresholds settle and before any prize is agreed — the API
+// enforces this too and 404s everyone else, so hiding the tab is presentation,
+// not protection.
+const TAB_USER_GATE: Partial<Record<View, string>> = {
+  'gamification': 'nickw',
 };
 
 const TAB_AREA_GATE: Partial<Record<View, string>> = {
@@ -231,6 +240,7 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-escalations', label: 'Escalations' },
       { view: 'risk-intelligence', label: 'Risk Intelligence' },
       { view: 'kpi-leaderboard', label: 'Gamification' },
+      { view: 'gamification', label: 'Rewards' },
     ],
   },
   trends: {
@@ -353,7 +363,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-compare', 'kpi-leaderboard', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-compare', 'kpi-leaderboard', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'gamification', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -789,6 +799,8 @@ export function App() {
 
   const getVisibleTabs = (area: Area) => {
     return AREAS[area].tabs.filter(t => {
+      const gateUser = TAB_USER_GATE[t.view];
+      if (gateUser && (auth.user?.username ?? '').toLowerCase() !== gateUser) return false;
       const gateArea = TAB_AREA_GATE[t.view];
       if (gateArea && (areaAccess[gateArea] || 'hidden') === 'hidden') return false;
       const flag = FEATURE_FLAG_TABS[t.view];
@@ -1153,6 +1165,9 @@ export function App() {
           )}
           {view === 'kpi-rebuild-agents' && (
             <AgentScorecardRebuild />
+          )}
+          {view === 'gamification' && (
+            <GamificationView />
           )}
           {view === 'kpi-rebuild-leaderboard' && (
             <LeaderboardRebuild />

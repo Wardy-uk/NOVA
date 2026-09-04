@@ -3,9 +3,27 @@ import { query, queryOne, execute } from '../services/database.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import { ACHIEVEMENTS, getStandings } from '../services/gamification-engine.js';
 import type { GamificationService } from '../services/gamification.js';
+import type { SettingsQueries } from '../db/settings-store.js';
 
-export function createGamificationRoutes(service: GamificationService): Router {
+export function createGamificationRoutes(service: GamificationService, settings?: SettingsQueries): Router {
   const router = Router();
+
+  // ── Private-preview gate ──
+  //
+  // The rewards scheme runs quietly while the thresholds settle and before any
+  // prize is agreed, so the v2 endpoints answer to ONE person. Enforced here and
+  // not merely by hiding the tab: a hidden tab is not access control, and these
+  // endpoints expose a ranking of named colleagues.
+  //
+  // `gamification_owner` is the username allowed through — set it to empty to open
+  // the scheme up to everyone once it goes live.
+  const OWNER_DEFAULT = 'nickw';
+  const ownerOnly = (req: Request, res: Response, next: () => void) => {
+    const owner = (settings?.get('gamification_owner') ?? OWNER_DEFAULT).trim();
+    if (!owner) { next(); return; }                       // configured open
+    if (req.user && (req.user.username ?? '').toLowerCase() === owner.toLowerCase()) { next(); return; }
+    res.status(404).json({ ok: false, error: 'Not found' });  // 404, not 403 — do not advertise it
+  };
 
   router.get('/profile', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
@@ -36,7 +54,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
     }
   });
 
-  router.get('/achievements', async (_req: Request, res: Response) => {
+  router.get('/achievements', ownerOnly, async (_req: Request, res: Response) => {
     try {
       const data = await service.getAchievementDefs();
       res.json({ ok: true, data });
@@ -68,7 +86,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
   // ── v2: season standings, catalogue, redemptions ──
   // The v1 endpoints above stay so the existing profile panel keeps working.
 
-  router.get('/standings', async (_req: Request, res: Response) => {
+  router.get('/standings', ownerOnly, async (_req: Request, res: Response) => {
     try {
       res.json({ ok: true, data: await getStandings() });
     } catch (err) {
@@ -80,7 +98,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
     res.json({ ok: true, data: ACHIEVEMENTS });
   });
 
-  router.get('/rewards', async (_req: Request, res: Response) => {
+  router.get('/rewards', ownerOnly, async (_req: Request, res: Response) => {
     try {
       const rewards = await query(
         `SELECT id, name, description, tier, cost_points, stock, is_active
@@ -94,7 +112,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
 
   // Admin-maintained catalogue. Prizes are a leadership decision and will change,
   // so they are data rather than code — nothing here is hardcoded to a voucher.
-  router.post('/rewards', async (req: Request, res: Response) => {
+  router.post('/rewards', ownerOnly, async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     const { name, description, tier, cost_points, stock } = req.body ?? {};
     if (!name) { res.status(400).json({ ok: false, error: 'name required' }); return; }
@@ -113,7 +131,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
 
   // A redemption is a REQUEST, never an automatic issue. These convert to real
   // money and time off, so a human approves every one.
-  router.post('/redeem', async (req: Request, res: Response) => {
+  router.post('/redeem', ownerOnly, async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
     const { agentName, rewardId } = req.body ?? {};
     if (!agentName || !rewardId) { res.status(400).json({ ok: false, error: 'agentName and rewardId required' }); return; }
@@ -150,7 +168,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
     }
   });
 
-  router.get('/redemptions', async (_req: Request, res: Response) => {
+  router.get('/redemptions', ownerOnly, async (_req: Request, res: Response) => {
     try {
       const rows = await query(
         `SELECT r.id, r.agent_name, r.cost_points, r.status, r.requested_at, r.decided_at, r.decided_by, r.note,
@@ -164,7 +182,7 @@ export function createGamificationRoutes(service: GamificationService): Router {
     }
   });
 
-  router.post('/redemptions/:id/decide', async (req: Request, res: Response) => {
+  router.post('/redemptions/:id/decide', ownerOnly, async (req: Request, res: Response) => {
     if (!req.user || !isAdmin(req.user.role)) { res.status(403).json({ ok: false, error: 'Admin only' }); return; }
     const { decision, note } = req.body ?? {};
     if (!['approved', 'rejected', 'fulfilled'].includes(decision)) {
@@ -178,6 +196,30 @@ export function createGamificationRoutes(service: GamificationService): Router {
         [decision, req.user.username ?? String(req.user.id), note ? String(note).slice(0, 500) : null, Number(req.params.id)],
       );
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // Wipe the scheme back to zero and open a fresh season. Intended for the end of
+  // the quiet trial, once the thresholds have been judged against real behaviour.
+  // Destructive and deliberately explicit: requires confirm:'RESET' in the body.
+  router.post('/season/reset', ownerOnly, async (req: Request, res: Response) => {
+    if (req.body?.confirm !== 'RESET') {
+      res.status(400).json({ ok: false, error: "Send { confirm: 'RESET' } to wipe the scheme" });
+      return;
+    }
+    try {
+      const before = await queryOne<{ awards: number }>(`SELECT COUNT(*) AS awards FROM gam_awards`);
+      await execute(`DELETE FROM gam_redemptions`);
+      await execute(`DELETE FROM gam_awards`);
+      await execute(`UPDATE gam_seasons SET is_active = 0, ends_on = CAST(GETUTCDATE() AS DATE) WHERE is_active = 1`);
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const name = (req.body?.name && String(req.body.name).slice(0, 100)) || `Season ${today}`;
+      await execute(`INSERT INTO gam_seasons (name, starts_on, is_active) VALUES (?, ?, 1)`, [name, today]);
+      // Let the next scheduled evaluation run today rather than waiting a day.
+      settings?.set('gamification_eval_day', '');
+      res.json({ ok: true, data: { cleared: before?.awards ?? 0, season: name } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     }
