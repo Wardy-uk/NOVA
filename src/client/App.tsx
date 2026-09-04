@@ -22,11 +22,8 @@ import { ServiceDeskCalendar } from './components/ServiceDeskCalendar.js';
 import { NeedsAttentionView } from './components/NeedsAttentionView.js';
 import { ServiceDeskDashboard } from './components/ServiceDeskDashboard.js';
 const ApprovalQueueView = lazy(() => import('./components/ApprovalQueueView.js').then(m => ({ default: m.ApprovalQueueView })));
-const KpiDashboardView = lazy(() => import('./components/KpiDashboardView.js').then(m => ({ default: m.KpiDashboardView })));
-const KpiDataView = lazy(() => import('./components/KpiDataView.js').then(m => ({ default: m.KpiDataView })));
 const KpiComparisonView = lazy(() => import('./components/KpiComparisonView.js').then(m => ({ default: m.KpiComparisonView })));
 const KpiLeaderboardView = lazy(() => import('./components/KpiLeaderboardView.js').then(m => ({ default: m.KpiLeaderboardView })));
-const KpiDailyHistoryView = lazy(() => import('./components/KpiDailyHistoryView.js').then(m => ({ default: m.KpiDailyHistoryView })));
 const KpiBreachedView = lazy(() => import('./components/KpiBreachedView.js').then(m => ({ default: m.KpiBreachedView })));
 const SupportKpiScorecard = lazy(() => import('./components/SupportKpiScorecard.js').then(m => ({ default: m.SupportKpiScorecard })));
 const AgentScorecardRebuild = lazy(() => import('./components/AgentScorecardRebuild.js').then(m => ({ default: m.AgentScorecardRebuild })));
@@ -112,12 +109,12 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpis' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
+type Area = 'servicedesk' | 'sales' | 'onboarding' | 'accounts' | 'people' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
 type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
   | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue' | 'ob-guild'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'sales-hotbox'
-  | 'kpi-dashboard' | 'kpi-data' | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-daily-history' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
+  | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support'
   | 'wb-breached' | 'wb-team-kpis' | 'wb-cc' | 'wb-tech-support' | 'wb-key-accounts' | 'wb-customer-success' | 'wb-support' | 'wb-dev-review' | 'wb-ricky'
   | 'kpi-rebuild-agents' | 'kpi-rebuild-leaderboard' | 'kpi-rebuild-history' | 'kpi-rebuild-trends' | 'kpi-rebuild-operational' | 'kpi-rebuild-legacy' | 'kpi-rebuild-tracker' | 'csat-adoption' | 'tpj-maintenance'
@@ -209,23 +206,8 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'people-121-setup', label: '1-2-1 Setup' },
     ],
   },
-  kpis: {
-    label: 'Legacy KPIs (do not use)',
-    defaultView: 'kpi-dashboard',
-    tabs: [
-      { view: 'kpi-dashboard', label: 'Dashboard' },
-      { view: 'kpi-leaderboard', label: 'Leaderboard' },
-      { view: 'kpi-data', label: 'KPI Data' },
-      { view: 'kpi-daily-history', label: 'Daily History' },
-      { view: 'kpi-breached', label: 'Agent Breaches' },
-      { view: 'kpi-team-breached', label: 'Team Breaches' },
-      { view: 'kpi-escalations', label: 'Escalations' },
-      { view: 'risk-intelligence', label: 'Risk Intelligence' },
-      { view: 'agent-kpis', label: 'Agent KPIs' },
-    ],
-  },
   'kpi-rebuild': {
-    label: 'KPIs (Rebuild)',
+    label: 'KPIs',
     defaultView: 'kpi-rebuild-support',
     tabs: [
       { view: 'kpi-rebuild-support', label: 'Support' },
@@ -238,6 +220,17 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kpi-rebuild-tracker', label: 'Tracker Export' },
       { view: 'csat-adoption', label: 'CSAT Adoption' },
       { view: 'tpj-maintenance', label: 'TPJ Maintenance' },
+      // Rehomed from the old "Legacy KPIs (do not use)" area. Six of its nine tabs
+      // were never legacy — they only lived there. Team Breaches is an iframe of a
+      // Rebuild wallboard, Escalations and Risk Intelligence are their own live
+      // pipelines, Gamification is the points board, and Agent KPIs now reads the
+      // Rebuild store like everything else in this area.
+      { view: 'agent-kpis', label: 'Agent KPIs' },
+      { view: 'kpi-breached', label: 'Agent Breaches' },
+      { view: 'kpi-team-breached', label: 'Team Breaches' },
+      { view: 'kpi-escalations', label: 'Escalations' },
+      { view: 'risk-intelligence', label: 'Risk Intelligence' },
+      { view: 'kpi-leaderboard', label: 'Gamification' },
     ],
   },
   trends: {
@@ -348,7 +341,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpis', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog', 'standup'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'sales', 'onboarding', 'accounts', 'people', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog', 'standup'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -360,7 +353,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-dashboard', 'kpi-data', 'kpi-compare', 'kpi-leaderboard', 'kpi-daily-history', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-compare', 'kpi-leaderboard', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'tpj-maintenance', 'admin-panel', 'sales-hotbox', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -1119,20 +1112,11 @@ export function App() {
           )}
           {/* ai-approvals moved to NOVA AI Agent area */}
           {/* KPIs */}
-          {view === 'kpi-dashboard' && (
-            <KpiDashboardView />
-          )}
-          {view === 'kpi-data' && (
-            <KpiDataView />
-          )}
           {view === 'kpi-compare' && (
             <KpiComparisonView />
           )}
           {view === 'kpi-leaderboard' && (
             <KpiLeaderboardView />
-          )}
-          {view === 'kpi-daily-history' && (
-            <KpiDailyHistoryView />
           )}
           {view === 'kpi-breached' && (
             <KpiBreachedView />
