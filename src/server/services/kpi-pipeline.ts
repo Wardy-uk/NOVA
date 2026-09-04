@@ -641,6 +641,35 @@ export class KpiPipeline {
             (kpi, kpiGroup, [count], target, direction, rag, CreatedAt)
           VALUES (@kpi, @kpiGroup, @count, @target, @direction, @rag, @date);
         `);
+
+        // dbo.KpiSnapshot is the CURRENT value per KPI (unique on KPI, no date) —
+        // the live board reads it. It had exactly one writer, n8n, so it was the
+        // second of the two things that would have gone dark if the workflow were
+        // switched off. Same numbers as the daily row above, so it is written here
+        // rather than recomputed. Non-fatal: a failure here must not lose the
+        // daily history that has already been written.
+        try {
+          const snapReq = p.request();
+          snapReq.input('kpi', sql.NVarChar(200), m.kpi.slice(0, 200));
+          snapReq.input('kpiGroup', sql.NVarChar(100), group.slice(0, 100));
+          snapReq.input('count', sql.Decimal(18, 2), m.count);
+          snapReq.input('target', sql.Decimal(18, 2), target);
+          snapReq.input('direction', sql.NVarChar(20), direction.slice(0, 20));
+          snapReq.input('rag', sql.TinyInt, rag);
+          await snapReq.query(`
+            MERGE dbo.KpiSnapshot${s} AS t
+            USING (SELECT @kpi AS KPI) AS src ON t.KPI = src.KPI
+            WHEN MATCHED THEN UPDATE SET
+              KPIGroup = @kpiGroup, [Count] = @count, KPITarget = @target,
+              KPIDirection = @direction, RAG = @rag, CreatedAt = GETUTCDATE()
+            WHEN NOT MATCHED THEN INSERT
+              (KPI, KPIGroup, [Count], KPITarget, KPIDirection, RAG, CreatedAt)
+            VALUES (@kpi, @kpiGroup, @count, @target, @direction, @rag, GETUTCDATE());
+          `);
+        } catch (snapErr) {
+          console.warn('[kpi-pipeline] KpiSnapshot write failed for', m.kpi, '-', snapErr instanceof Error ? snapErr.message : snapErr);
+        }
+
         rowsAffected++;
       }
 

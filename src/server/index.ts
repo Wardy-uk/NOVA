@@ -226,6 +226,7 @@ import { syncCalyxKpisToNova } from './services/calyx-kpi-sync.js';
 import { createPeopleRoutes, generatePrepForAgent } from './routes/people.js';
 import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt, recaptureSupportFlows, recaptureSupportLateData, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
+import { captureEodSnapshot } from './services/kpi-eod-snapshot.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
@@ -1901,6 +1902,23 @@ async function main() {
         await recaptureSupportFlows(agentJiraClient, y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }));
         // Ratings keep arriving days after the solve, so re-run CSAT over the last week.
         await recaptureSupportLateData(agentJiraClient, todayUk, 7);
+      }
+    }, 10 * 60 * 1000);
+
+    // End-of-day ticket status snapshot at 17:00 UK, once per UK day. Instance-wide
+    // (27 projects), so it queries Jira directly rather than jira_issue_cache, which
+    // only holds NT/NTPJ/YO. Same first-tick-at-or-after pattern as the org freeze —
+    // a missed or slow tick still captures the day rather than losing it.
+    jobRegistry.register('kpi-eod-snapshot', 'EOD ticket status snapshot (instance-wide)', async () => {
+      if (!agentJiraClient) return;
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (ukHour >= 17 && settingsQueries.get('kpi_eod_snapshot_day') !== todayUk) {
+        const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
+        // Only mark the day done on success, so a failure retries on the next tick
+        // instead of silently skipping until tomorrow.
+        if (res.ok) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
       }
     }, 10 * 60 * 1000);
 
