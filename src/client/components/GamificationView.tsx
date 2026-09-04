@@ -54,11 +54,16 @@ export function GamificationView() {
         fetch('/api/gamification/redemptions').then(x => x.json()),
       ]);
       if (!s.ok) { setDenied(true); return; }
-      setStandings(s.data?.rows ?? []);
+      // Coerce every list. `?? []` is not enough: an endpoint returning an OBJECT
+      // still passes it, and then .map takes the whole UI down — which is exactly
+      // what happened when a v1 route shadowed the achievements one and returned a
+      // keyed record instead of an array.
+      const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? v as T[] : []);
+      setStandings(list<Standing>(s.data?.rows));
       setSeason(s.data?.season ?? null);
-      setAchievements(a.data ?? []);
-      setRewards(r.data ?? []);
-      setRedemptions(d.data ?? []);
+      setAchievements(list<Achievement>(a.data));
+      setRewards(list<Reward>(r.data));
+      setRedemptions(list<Redemption>(d.data));
     } catch { /* leave as-is */ } finally { setLoading(false); }
   }, []);
 
@@ -120,7 +125,7 @@ export function GamificationView() {
                 <td className="px-3 py-2 text-right font-bold text-teal-300">{s.seasonPoints}</td>
                 <td className="px-3 py-2 text-right text-slate-400">{s.lifetimePoints}</td>
                 <td className="px-3 py-2">
-                  {s.badges.map(b => (
+                  {(s.badges ?? []).map(b => (
                     <span key={b} title={byKey.get(b)?.name ?? b} className="mr-1">{byKey.get(b)?.icon ?? '•'}</span>
                   ))}
                 </td>

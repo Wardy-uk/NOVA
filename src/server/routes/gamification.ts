@@ -54,14 +54,6 @@ export function createGamificationRoutes(service: GamificationService, settings?
     }
   });
 
-  router.get('/achievements', ownerOnly, async (_req: Request, res: Response) => {
-    try {
-      const data = await service.getAchievementDefs();
-      res.json({ ok: true, data });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
-    }
-  });
 
   router.post('/check', async (req: Request, res: Response) => {
     if (!req.user) { res.status(401).json({ ok: false }); return; }
@@ -94,7 +86,11 @@ export function createGamificationRoutes(service: GamificationService, settings?
     }
   });
 
-  router.get('/achievements', async (_req: Request, res: Response) => {
+  // Single source for the achievement catalogue. v1 also had an /achievements
+  // route, registered EARLIER, returning ACHIEVEMENT_DEFS as an object keyed by
+  // type rather than an array — so it shadowed this one and the UI crashed on
+  // .map. v1's version is gone; nothing reads it since the v1 panel was removed.
+  router.get('/achievements', ownerOnly, async (_req: Request, res: Response) => {
     res.json({ ok: true, data: ACHIEVEMENTS });
   });
 
