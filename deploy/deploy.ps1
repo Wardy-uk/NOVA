@@ -55,7 +55,11 @@ try {
     # Force reinstall if devDeps are missing (e.g. previous deploy used --production)
     $tscExists = Test-Path "node_modules\.bin\tsc.cmd"
     if ($lockHash -ne $cachedHash -or -not $tscExists) {
-        Write-Host "[2/4] Installing dependencies (lockfile changed)..." -ForegroundColor Yellow
+        # Say WHICH condition fired. This line used to claim "lockfile changed" whatever
+        # the reason, and on 4 Sep that sent a five minute install - triggered by a missing
+        # tsc after the old prune step - looking like a lockfile problem for a good while.
+        $why = if ($lockHash -ne $cachedHash) { "lockfile changed" } else { "devDependencies missing" }
+        Write-Host "[2/4] Installing dependencies ($why)..." -ForegroundColor Yellow
         # --include=dev: build needs vite/tsc even if npm is configured production
         npm install --include=dev
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
