@@ -355,9 +355,9 @@ export function expAgentSlug(name: string): string {
 }
 
 /** The URL the agent gets, derived from the name unless one was entered. */
-export function expMicrositeUrl(agent: { name: string; hasMicrosite: boolean; micrositeUrl?: string }): string {
+export function expMicrositeUrl(agent: { name?: string; hasMicrosite?: boolean; micrositeUrl?: string }): string {
   if (agent.micrositeUrl && agent.micrositeUrl.trim()) return agent.micrositeUrl.trim();
-  const slug = expAgentSlug(agent.name);
+  const slug = expAgentSlug(agent.name || '');
   if (!slug) return '';
   return agent.hasMicrosite ? `valuation.${slug}.expuk.com` : `valuation.${slug}.lead.pro`;
 }
