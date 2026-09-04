@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import sql from 'mssql';
 import { query, queryOne, execute, executeAndGetId } from '../services/database.js';
+import { getAllInRange } from '../services/kpi-agent/store.js';
+import { toLegacyAgentRow, isoDaysAgo } from '../services/kpi-agent/legacy-shape.js';
 import type { UserQueries } from '../db/queries.js';
 import type { NotificationQueries } from '../db/notifications.js';
 import type { McpClientManager } from '../services/mcp-client.js';
@@ -53,15 +55,11 @@ export async function generatePrepForAgent(
 
   const kpiDb = await getKpiPool(settingsQueries);
 
-  const kpiReq = kpiDb.request();
-  kpiReq.input('agent', sql.NVarChar, agentName);
-  kpiReq.input('since', sql.NVarChar, sinceDate);
-  const kpiResult = await kpiReq.query(`
-    SELECT * FROM dbo.jira_agent_kpi_daily
-    WHERE AgentName = @agent AND ReportDate >= @since
-    ORDER BY ReportDate DESC
-  `);
-  const kpiRows = kpiResult.recordset;
+  // Rebuild store, mapped to the legacy column names this function already reads.
+  const kpiRows = (await getAllInRange(sinceDate, new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })))
+    .filter(x => x.agentName === agentName)
+    .sort((x, y) => y.date.localeCompare(x.date))
+    .map(x => toLegacyAgentRow(x, x.date)) as any[];
 
   const qaReq = kpiDb.request();
   qaReq.input('agent', sql.NVarChar, agentName);
@@ -103,11 +101,16 @@ export async function generatePrepForAgent(
 
   const kpiSummary: Record<string, number> = {};
   if (kpiRows.length > 0) {
-    const numericKeys = ['TicketsResolved', 'TicketsPerHour', 'AvgOpenTickets',
-      'AvgOver2hOverdue', 'AvgNoUpdateToday', 'OldestTicketDays',
+    // These are averaged by name straight off the row. Five of the old names —
+    // TicketsResolved, AvgOpenTickets, AvgOver2hOverdue, AvgNoUpdateToday and
+    // ResolutionSlaPercent — are not columns and never have been, so those five
+    // signals were silently absent from every 1-2-1 prep ever generated. Corrected
+    // to the real names.
+    const numericKeys = ['SolvedTickets_Today', 'TicketsPerHour', 'OpenTickets_Total',
+      'OpenTickets_Over2Hours', 'OpenTickets_NoUpdateToday', 'OldestTicketDays',
       'QAOverallAvg', 'QAAccuracyAvg', 'QAClarityAvg', 'QAToneAvg',
       'GoldenRulesAvg', 'OwnershipAvg', 'NextActionAvg', 'TimeframeAvg',
-      'FrtCompliancePercent', 'ResolutionSlaPercent'];
+      'SLACompliancePct'];
     for (const key of numericKeys) {
       const vals = kpiRows.map((r: any) => r[key]).filter((v: any) => v != null);
       if (vals.length > 0) {
@@ -824,21 +827,27 @@ export function createPeopleRoutes(deps: PeopleDeps): Router {
       const agentName = decodeURIComponent(String(req.params.agentName));
       const { notes, transcript_md } = req.body;
 
-      // Auto-freeze latest KPI row
-      const latestKpi = await queryOne<any>(`
-        SELECT TOP 1 * FROM jira_agent_kpi_daily
-        WHERE AgentName = ? ORDER BY ReportDate DESC
-      `, [agentName]);
+      // Auto-freeze the latest KPI row, from the Rebuild store.
+      //
+      // This used to SELECT * FROM jira_agent_kpi_daily against the NOVA database —
+      // where that table does not live — and then read TicketsResolved,
+      // AvgOpenTickets and ResolutionSlaPercent, none of which are columns of it
+      // anywhere. Every 1-2-1 snapshot has therefore frozen a row of nulls.
+      const recent = (await getAllInRange(isoDaysAgo(30), new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })))
+        .filter(x => x.agentName === agentName)
+        .sort((x, y) => y.date.localeCompare(x.date));
+      const latestKpi = recent.length > 0 ? toLegacyAgentRow(recent[0], recent[0].date) : null;
 
       const metricsJson = latestKpi ? {
         ReportDate: latestKpi.ReportDate,
-        TicketsResolved: latestKpi.TicketsResolved,
+        TicketsResolved: latestKpi.SolvedTickets_Today,
         TicketsPerHour: latestKpi.TicketsPerHour,
-        AvgOpenTickets: latestKpi.AvgOpenTickets,
+        AvgOpenTickets: latestKpi.OpenTickets_Total,
+        OldestTicketDays: latestKpi.OldestTicketDays,
         QAOverallAvg: latestKpi.QAOverallAvg,
         GoldenRulesAvg: latestKpi.GoldenRulesAvg,
         FrtCompliancePercent: latestKpi.FrtCompliancePercent,
-        ResolutionSlaPercent: latestKpi.ResolutionSlaPercent,
+        ResolutionSlaPercent: latestKpi.SLACompliancePct,
       } : null;
 
       // Auto-freeze current goal statuses

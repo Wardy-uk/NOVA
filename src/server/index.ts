@@ -232,7 +232,7 @@ import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } fr
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
-import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, recaptureAgentFlows, type AgentKpiRow } from './services/kpi-agent/index.js';
+import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, recaptureAgentFlows, getAllInRange as getAgentRowsInRange, type AgentKpiRow } from './services/kpi-agent/index.js';
 import { sendAllKpiEmails } from './services/kpi-email-digest.js';
 import { runFailedJobsTicket, isTicketDay, dueMinuteOfDay } from './services/failed-jobs-ticket.js';
 import cookieParser from 'cookie-parser';
@@ -3748,14 +3748,19 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // tickets-weighted average from the per-agent table (QAOverallAvg is 0–10:
       // ≥8 green, ≥6 amber, else red) and inject under a sentinel key.
       try {
-        const qaRows = (await pool.request().query(`
-          SELECT CAST(ReportDate AS DATE) AS d, SUM(QAOverallAvg * QATicketsScored) AS s, SUM(QATicketsScored) AS n
-          FROM dbo.jira_agent_kpi_daily
-          WHERE ReportDate >= DATEADD(day, -35, CAST(GETDATE() AS DATE))
-            AND ReportDate < CAST(GETDATE() AS DATE)
-            AND QAOverallAvg IS NOT NULL AND QATicketsScored > 0
-          GROUP BY CAST(ReportDate AS DATE)
-        `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
+        // Rebuild store, not dbo.jira_agent_kpi_daily.
+        const qaFrom = new Date(); qaFrom.setUTCDate(qaFrom.getUTCDate() - 35);
+        const qaTo = new Date(); qaTo.setUTCDate(qaTo.getUTCDate() - 1);
+        const qaDayKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+        const qaAgg = new Map<string, { s: number; n: number }>();
+        for (const r of await getAgentRowsInRange(qaDayKey(qaFrom), qaDayKey(qaTo))) {
+          if (r.qaOverall == null || !r.qaScored) continue;
+          const acc = qaAgg.get(r.date) ?? { s: 0, n: 0 };
+          acc.s += r.qaOverall * r.qaScored;
+          acc.n += r.qaScored;
+          qaAgg.set(r.date, acc);
+        }
+        const qaRows = [...qaAgg.entries()].map(([d, v]) => ({ d, s: v.s, n: v.n }));
         for (const r of qaRows) {
           const n = Number(r.n) || 0; if (!n) continue;
           const avg = Math.round((Number(r.s) / n) * 10) / 10;          // 1dp, 0–10
@@ -3771,27 +3776,25 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // each day shows the trailing-7-day, volume-weighted average instead.
       try {
         const CSAT_ROLL_DAYS = 7;
-        const csatRows = (await pool.request().query(`
-          SELECT CAST(ReportDate AS DATE) AS d, SUM(CSATAverage * CSATCount) AS s, SUM(CSATCount) AS n
-          FROM dbo.jira_agent_kpi_daily
-          WHERE ReportDate >= DATEADD(day, -42, CAST(GETDATE() AS DATE))
-            AND ReportDate < CAST(GETDATE() AS DATE)
-            AND CSATAverage IS NOT NULL AND CSATCount > 0
-          GROUP BY CAST(ReportDate AS DATE)
-        `)).recordset as Array<{ d: Date | string; s: number; n: number }>;
-        // Denominator for coverage = resolved tickets across all agents per day
-        // (independent of whether a survey came back). Coverage = responses ÷ solved.
-        const csatSolvedRows = (await pool.request().query(`
-          SELECT CAST(ReportDate AS DATE) AS d, SUM(SolvedTickets_Today) AS solved
-          FROM dbo.jira_agent_kpi_daily
-          WHERE ReportDate >= DATEADD(day, -42, CAST(GETDATE() AS DATE))
-            AND ReportDate < CAST(GETDATE() AS DATE)
-          GROUP BY CAST(ReportDate AS DATE)
-        `)).recordset as Array<{ d: Date | string; solved: number }>;
+        // Read from the Rebuild store (kpi_agent_daily), not dbo.jira_agent_kpi_daily:
+        // that table has two writers with different definitions and n8n usually wins.
+        const csatFrom = new Date(); csatFrom.setUTCDate(csatFrom.getUTCDate() - 42);
+        const csatTo = new Date(); csatTo.setUTCDate(csatTo.getUTCDate() - 1);
+        const ukKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+        const csatAgentRows = await getAgentRowsInRange(ukKey(csatFrom), ukKey(csatTo));
         const csatDaily = new Map<string, { s: number; n: number }>();
-        for (const r of csatRows) csatDaily.set(toDayKey(r.d), { s: Number(r.s) || 0, n: Number(r.n) || 0 });
+        // Coverage denominator = resolved tickets across all agents per day,
+        // independent of whether a survey came back. Coverage = responses ÷ solved.
         const csatSolvedDaily = new Map<string, number>();
-        for (const r of csatSolvedRows) csatSolvedDaily.set(toDayKey(r.d), Number(r.solved) || 0);
+        for (const r of csatAgentRows) {
+          if (r.csatAvg != null && r.csatCount > 0) {
+            const acc = csatDaily.get(r.date) ?? { s: 0, n: 0 };
+            acc.s += r.csatAvg * r.csatCount;
+            acc.n += r.csatCount;
+            csatDaily.set(r.date, acc);
+          }
+          csatSolvedDaily.set(r.date, (csatSolvedDaily.get(r.date) ?? 0) + (r.solvedToday || 0));
+        }
         for (const dayKey of byDay.keys()) {
           const end = new Date(dayKey + 'T00:00:00Z');
           let s = 0, n = 0, solved = 0;
@@ -4248,19 +4251,23 @@ h1{font-size:24px;font-weight:800;letter-spacing:-0.5px}
       // to an "insufficient data" bucket, shown but unranked. Leadership-only board.
       let agentViewHtml = '';
       try {
-        const agRows = (await pool.request().query(`
-          SELECT a.AccountId AS accountId, d.AgentName AS name, d.TierCode AS tier, a.Team AS team,
-                 d.OpenTickets_Total AS openT, d.SolvedTickets_Today AS solved,
-                 d.SLACompliancePct AS sla, d.TicketsPerHour AS tph, d.CSATAverage AS csat, d.CSATCount AS csatN
-          FROM dbo.jira_agent_kpi_daily d
-          JOIN dbo.Agent a ON a.AgentId = d.AgentId
-          WHERE d.ReportDate >= DATEADD(day, -7, CAST(GETDATE() AS DATE))
-            AND d.ReportDate < CAST(GETDATE() AS DATE)
-            AND a.IsActive = 1
-            AND a.Team IN ('CustomerCare', 'DigitalDesign', 'Support')
-            AND d.AgentName NOT IN ('Nick Ward', 'NOVA AI')
-          ORDER BY d.ReportDate
-        `)).recordset as Array<{ accountId: string; name: string; tier: string | null; team: string | null; openT: number | null; solved: number | null; sla: number | null; tph: number | null; csat: number | null; csatN: number | null }>;
+        const LEAGUE_TEAMS = new Set(['CustomerCare', 'DigitalDesign', 'Support']);
+        const LEAGUE_EXCLUDE = new Set(['Nick Ward', 'NOVA AI']);
+        // Rebuild store, not dbo.jira_agent_kpi_daily. This league is SLT-facing and
+        // was ranking agents on numbers n8n overwrote every three minutes with the
+        // old all-tiers definition — the same fault as the 1-2-1 cards, in front of
+        // a more senior audience.
+        const leagueFrom = new Date(); leagueFrom.setUTCDate(leagueFrom.getUTCDate() - 7);
+        const leagueTo = new Date(); leagueTo.setUTCDate(leagueTo.getUTCDate() - 1);
+        const leagueKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+        const agRows = (await getAgentRowsInRange(leagueKey(leagueFrom), leagueKey(leagueTo)))
+          .filter(r => LEAGUE_TEAMS.has(r.team) && !LEAGUE_EXCLUDE.has(r.agentName))
+          .sort((x, y) => x.date.localeCompare(y.date))
+          .map(r => ({
+            accountId: r.accountId, name: r.agentName, tier: r.tierCode, team: r.team,
+            openT: r.open, solved: r.solvedToday, sla: r.slaCompliancePct,
+            tph: r.ticketsPerHour, csat: r.csatAvg, csatN: r.csatCount,
+          }));
         // Honest QA context: DISTINCT tickets per assignee (dedupes the ~66% re-score
         // inflation in QATicketsScored) + avg score, from the raw QA table, same window.
         const qaByName = new Map<string, { n: number; avg: number | null }>();

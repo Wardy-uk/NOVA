@@ -1,6 +1,7 @@
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, execute, executeAndGetId } from './database.js';
 import { getKpiPool } from './kpi-pipeline.js';
+import { getAllInRange } from './kpi-agent/store.js';
 
 export interface DayForecast {
   forecast_date: string;
@@ -165,20 +166,20 @@ export class CapacityPlanner {
 
     try {
       const kpiPool = await getKpiPool(this.settings);
-      const result = await kpiPool.request().query(`
-        SELECT
-          CAST(ReportDate AS DATE) AS dt,
-          DATEPART(WEEKDAY, CAST(ReportDate AS DATE)) AS dow,
-          AgentName,
-          CAST(SolvedTickets_Today AS FLOAT) AS solved
-        FROM dbo.jira_agent_kpi_daily
-        WHERE ReportDate >= DATEADD(day, -42, GETUTCDATE())
-          AND SolvedTickets_Today IS NOT NULL
-          AND SolvedTickets_Today >= 0
-      `);
+      // Rebuild store, not dbo.jira_agent_kpi_daily.
+      const capFrom = new Date(); capFrom.setUTCDate(capFrom.getUTCDate() - 42);
+      const capKey = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const rows = (await getAllInRange(capKey(capFrom), capKey(new Date())))
+        .filter(r => r.solvedToday != null && r.solvedToday >= 0)
+        .map(r => ({
+          dt: r.date,
+          dow: ((new Date(`${r.date}T00:00:00Z`).getUTCDay() + 1)),  // SQL DATEPART(WEEKDAY): Sunday = 1
+          AgentName: r.agentName,
+          solved: r.solvedToday,
+        }));
 
       const totalsByDate = new Map<string, { dow: number; total: number }>();
-      for (const row of result.recordset as Array<{ dt: string; dow: number; AgentName: string | null; solved: number | null }>) {
+      for (const row of rows as Array<{ dt: string; dow: number; AgentName: string | null; solved: number | null }>) {
         const agentName = row.AgentName?.trim().toLowerCase();
         if (!agentName || !activeNames.has(agentName)) continue;
         const dt = String(row.dt).slice(0, 10);

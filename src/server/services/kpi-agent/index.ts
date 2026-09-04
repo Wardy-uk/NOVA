@@ -7,7 +7,7 @@ import { computeAgentKpis, type AgentKpiRow } from './compute.js';
 import { ensureAgentTable, saveDay, getDay } from './store.js';
 import { recomputeSolvedForDay } from './compute.js';
 
-export { getLatestDay, getDay, getAgentHistory, ensureAgentTable } from './store.js';
+export { getLatestDay, getDay, getAgentHistory, getAllInRange, ensureAgentTable } from './store.js';
 export { getAgentPeriod, getAgentHistoryGrid } from './period.js';
 export { backfillAgentFromLegacy } from './backfill.js';
 export { syncAgentRosterStats } from './roster-sync.js';

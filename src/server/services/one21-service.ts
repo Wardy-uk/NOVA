@@ -8,6 +8,8 @@
 import { randomBytes } from 'node:crypto';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { getKpiPool } from './kpi-pipeline.js';
+import { getAllInRange } from './kpi-agent/store.js';
+import { toLegacyAgentRow, isoDaysAgo } from './kpi-agent/legacy-shape.js';
 import { generatePrepForAgent } from '../routes/people.js';
 import { getPrepQuestions, prepEmailIntro, managerSummaryIntro } from '../config/one21-config.js';
 import { one21PrepAgentHtml, one21PrepManagerHtml, one21WeeklyKpiHtml } from './email-templates.js';
@@ -178,16 +180,14 @@ async function getAgentKpis(settings: FileSettingsQueries, agentName: string): P
   trend: Array<Record<string, any>>;
 } | null> {
   try {
-    const pool = await getKpiPool(settings);
-    const r = await pool.request().input('agent', agentName).query(`
-      SELECT TOP 30 ReportDate, TierCode, Team, TicketsPerHour, SolvedTickets_Today,
-             QAOverallAvg, GoldenRulesAvg, SLABreachedCount, SLACompliancePct,
-             CSATAverage, OldestTicketDays
-      FROM dbo.jira_agent_kpi_daily
-      WHERE AgentName = @agent
-      ORDER BY ReportDate DESC
-    `);
-    const rows = r.recordset as any[];
+    // Rebuild store, not dbo.jira_agent_kpi_daily — that table was written by both
+    // NOVA and n8n with different definitions, so the 1-2-1 summary moved depending
+    // on which had written last. Mapped to the same column names it already used.
+    const rows = (await getAllInRange(isoDaysAgo(30), new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' })))
+      .filter(x => x.agentName === agentName)
+      .sort((x, y) => y.date.localeCompare(x.date))
+      .slice(0, 30)
+      .map(x => toLegacyAgentRow(x, x.date)) as any[];
     if (!rows.length) return { summary: {}, trend: [] };
     const avg = (key: string) => {
       const vals = rows.map((x) => x[key]).filter((v) => v != null && !isNaN(v));
