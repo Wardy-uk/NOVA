@@ -232,7 +232,7 @@ import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } fr
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
 import { createRiskRoutes } from './routes/risk.js';
-import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, type AgentKpiRow } from './services/kpi-agent/index.js';
+import { captureAgentKpis, getAgentLiveSnapshot, syncAgentRosterStats, recaptureAgentFlows, type AgentKpiRow } from './services/kpi-agent/index.js';
 import { sendAllKpiEmails } from './services/kpi-email-digest.js';
 import { runFailedJobsTicket, isTicketDay, dueMinuteOfDay } from './services/failed-jobs-ticket.js';
 import cookieParser from 'cookie-parser';
@@ -1899,7 +1899,12 @@ async function main() {
         // Yesterday is now fully complete — re-capture its flow KPIs (New Tickets /
         // Solved) so their columns reflect the whole day, not the 18:00-partial freeze.
         const y = new Date(); y.setUTCDate(y.getUTCDate() - 1);
-        await recaptureSupportFlows(agentJiraClient, y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }));
+        const yDay = y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+        await recaptureSupportFlows(agentJiraClient, yDay);
+        // Same treatment for the agent rows: the 18:00 freeze misses every evening
+        // and overnight resolve, which is a permanent undercount for anyone working
+        // outside 9-6 (NOVA AI most of all). Stocks stay frozen; only solves refresh.
+        await recaptureAgentFlows(agentJiraClient, yDay);
         // Ratings keep arriving days after the solve, so re-run CSAT over the last week.
         await recaptureSupportLateData(agentJiraClient, todayUk, 7);
       }

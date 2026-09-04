@@ -4,7 +4,8 @@
 import type { JiraRestClient } from '../jira-client.js';
 import type { SettingsQueries } from '../../db/settings-store.js';
 import { computeAgentKpis, type AgentKpiRow } from './compute.js';
-import { ensureAgentTable, saveDay } from './store.js';
+import { ensureAgentTable, saveDay, getDay } from './store.js';
+import { recomputeSolvedForDay } from './compute.js';
 
 export { getLatestDay, getDay, getAgentHistory, ensureAgentTable } from './store.js';
 export { getAgentPeriod, getAgentHistoryGrid } from './period.js';
@@ -48,4 +49,36 @@ export async function getAgentLiveSnapshot(settings: SettingsQueries, jira: Jira
     .then(agents => { cache = { updatedAt: Date.now(), agents }; return cache; })
     .finally(() => { inflight = null; });
   return inflight;
+}
+
+/**
+ * Re-capture a completed day's SOLVE counts. The 18:00 freeze catches the day
+ * mid-flight, so anything resolved that evening or overnight never made it into
+ * the stored row — a permanent undercount that hit round-the-clock work hardest.
+ *
+ * Only the flow figures are touched. The tier-1 stocks (open, over-SLA, no-reply,
+ * oldest) are point-in-time by nature and cannot be reconstructed for a past day,
+ * so they keep their 18:00 values — the same split the org flow re-capture makes.
+ */
+export async function recaptureAgentFlows(
+  jira: JiraRestClient, day: string,
+): Promise<{ day: string; updated: number; added: number }> {
+  const stored = await getDay(day);
+  if (stored.length === 0) return { day, updated: 0, added: 0 };
+
+  const solved = await recomputeSolvedForDay(jira, day);
+  let updated = 0, added = 0;
+  const rows: AgentKpiRow[] = stored.map(({ date: _d, capturedAt: _c, ...row }) => {
+    const fresh = solved.get(row.accountId) ?? 0;
+    if (fresh !== row.solvedToday) {
+      added += fresh - row.solvedToday;
+      updated++;
+      return { ...row, solvedToday: fresh };
+    }
+    return row;
+  });
+
+  if (updated > 0) await saveDay(day, rows);
+  console.log(`[kpi-agent] flow re-capture ${day}: ${updated} agents updated, ${added >= 0 ? '+' : ''}${added} solves recovered`);
+  return { day, updated, added };
 }

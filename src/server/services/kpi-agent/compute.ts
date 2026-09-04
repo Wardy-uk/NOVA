@@ -157,6 +157,22 @@ async function solvedByAssignee(
   return map;
 }
 
+/**
+ * Recompute solves for a COMPLETED day, keyed by account.
+ *
+ * The daily capture freezes at 18:00, but the day is not over: on 3 Sep the JQL
+ * returned 125 solves and the stored rows held 120, the missing 5 being every
+ * resolve at or after 18:00. Evening and overnight work was therefore lost for
+ * good, worst of all for NOVA AI, which resolves around the clock (01:00, 02:00,
+ * 22:00, 23:00 on that day alone). The org KPIs already re-capture their flow
+ * metrics the next morning for exactly this reason; this is the agent equivalent.
+ */
+export async function recomputeSolvedForDay(
+  jira: JiraRestClient, day: string,
+): Promise<Map<string, number>> {
+  return solvedByAssignee(jira, day, addDay(day), true);
+}
+
 export async function computeAgentKpis(
   settings: SettingsQueries, jira: JiraRestClient, now: Date = new Date(),
   opts: { attributeResolver?: boolean } = {},
