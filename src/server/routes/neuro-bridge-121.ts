@@ -38,6 +38,17 @@ export function createNeuroBridge121Routes(settings: FileSettingsQueries): Route
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   /**
+   * What counts as an action still owed.
+   *
+   * ONE list, used by both `/121/state`'s count and `/121/completed`'s split, because the
+   * count on NEURO's People card and the checkboxes written into the vault note have to be
+   * describing the same set. `delivered` and `missed` are both CLOSED — a missed action was
+   * reviewed and judged, and re-opening it here would make the card nag about a
+   * conversation that has already been had.
+   */
+  const OPEN_ACTION_STATUSES = ['pending', 'open', 'in_progress', 'carried_over'];
+
+  /**
    * POST /121/booking — NEURO booked (or moved) a 1-2-1; make NOVA agree.
    *
    * Idempotent. NEURO's reconciliation sweep replays every booking each morning, so the
@@ -164,6 +175,19 @@ export function createNeuroBridge121Routes(settings: FileSettingsQueries): Route
          WHERE status = 'complete' GROUP BY agent_name`);
       const lastByAgent = new Map(last.map((r) => [r.agent_name, String(r.last_date).slice(0, 10)]));
 
+      // Actions still owed, per agent — what NEURO's People card counts.
+      //
+      // ⚠ This is the ONLY honest source for that number. NEURO's card used to count its
+      // own open tasks whose text happened to mention the person's name, which is a
+      // fuzzy match over Nick's todo list wearing the words "actions owed" on a 1-2-1
+      // card. The commitments made IN a 1-2-1 live here and nowhere else.
+      const openActions = await query<{ agent_name: string; n: number }>(`
+        SELECT agent_name, COUNT(*) AS n FROM agent_121_actions
+        WHERE status IN (${OPEN_ACTION_STATUSES.map(() => '?').join(',')})
+        GROUP BY agent_name
+      `, OPEN_ACTION_STATUSES);
+      const openByName = new Map(openActions.map((r) => [r.agent_name, Number(r.n)]));
+
       res.json({
         ok: true,
         data: {
@@ -179,6 +203,10 @@ export function createNeuroBridge121Routes(settings: FileSettingsQueries): Route
               sessionStatus: o?.status ?? null,
               outlookEventId: o?.outlook_event_id ?? null,
               lastHeld: lastByAgent.get(p.agent_name) ?? null,
+              // 0 is a real answer here — NOVA knows this agent and they owe nothing.
+              // A name NOVA does not know never reaches this list at all, so the caller
+              // can still tell "none owed" from "not tracked".
+              openActions: openByName.get(p.agent_name) ?? 0,
             };
           }),
         },
@@ -266,7 +294,7 @@ export function createNeuroBridge121Routes(settings: FileSettingsQueries): Route
               notesText: s.notes_text,
               // Split by what the vault does with them: commitments become checkboxes,
               // reviewed items are already-closed history and must not reappear as open.
-              actions: list.filter((a) => ['pending', 'open', 'in_progress', 'carried_over'].includes(a.status))
+              actions: list.filter((a) => OPEN_ACTION_STATUSES.includes(a.status))
                 .map((a) => ({ id: a.id, description: a.description, owner: a.owner, dueDate: iso(a.due_date), status: a.status })),
               reviewedActions: list.filter((a) => ['delivered', 'missed'].includes(a.status))
                 .map((a) => ({ id: a.id, description: a.description, status: a.status })),
