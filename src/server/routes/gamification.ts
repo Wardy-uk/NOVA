@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query, queryOne, execute } from '../services/database.js';
 import { isAdmin } from '../utils/role-helpers.js';
-import { ACHIEVEMENTS, getStandings } from '../services/gamification-engine.js';
+import { ACHIEVEMENTS, getStandings, evaluateAchievements } from '../services/gamification-engine.js';
 import type { GamificationService } from '../services/gamification.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
@@ -192,6 +192,25 @@ export function createGamificationRoutes(service: GamificationService, settings?
         [decision, req.user.username ?? String(req.user.id), note ? String(note).slice(0, 500) : null, Number(req.params.id)],
       );
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
+    }
+  });
+
+  // Run the evaluator on demand. The scheduled job only fires on its interval —
+  // job-registry's startTimer sets a setInterval with no immediate call — so after
+  // a deploy the board sits empty for half an hour with no way to prompt it. Also
+  // what you want after moving a threshold: re-run and see the effect at once.
+  // Awards are idempotent on (agent, achievement, period), so running it repeatedly
+  // is safe and only ever adds what was newly qualified.
+  router.post('/evaluate', ownerOnly, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(Number(req.body?.days) || 10, 1), 120);
+      const from = new Date(); from.setUTCDate(from.getUTCDate() - days);
+      const to = new Date(); to.setUTCDate(to.getUTCDate() - 1);
+      const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const result = await evaluateAchievements(key(from), key(to));
+      res.json({ ok: true, data: { ...result, from: key(from), to: key(to) } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });
     }

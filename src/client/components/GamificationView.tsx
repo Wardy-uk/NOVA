@@ -87,6 +87,20 @@ export function GamificationView() {
     load();
   };
 
+  const [running, setRunning] = useState(false);
+  const runNow = async () => {
+    setRunning(true);
+    const r = await fetch('/api/gamification/evaluate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: 28 }),
+    }).then(x => x.json()).catch(() => ({ ok: false, error: 'Request failed' }));
+    setMsg(r.ok
+      ? `Evaluated ${r.data.from} to ${r.data.to} — ${r.data.granted} new awards across ${r.data.days} days`
+      : (r.error ?? 'Evaluation failed'));
+    setRunning(false);
+    load();
+  };
+
   const resetSeason = async () => {
     if (!confirm('Wipe every award and redemption and start a fresh season? This cannot be undone.')) return;
     const r = await fetch('/api/gamification/season/reset', {
@@ -148,9 +162,15 @@ export function GamificationView() {
             {' '}visible only to you; the API returns 404 to everyone else
           </p>
         </div>
-        <button onClick={resetSeason} className="px-3 py-1.5 text-sm rounded-lg bg-red-900/40 border border-red-700/50 hover:bg-red-900/60">
-          Reset to zero
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={runNow} disabled={running}
+            className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+            {running ? 'Evaluating…' : 'Run now'}
+          </button>
+          <button onClick={resetSeason} className="px-3 py-1.5 text-sm rounded-lg bg-red-900/40 border border-red-700/50 hover:bg-red-900/60">
+            Reset to zero
+          </button>
+        </div>
       </div>
       {msg && <div className="my-3 p-3 rounded-lg bg-white/[0.06] border border-white/10 text-sm">{msg}</div>}
 

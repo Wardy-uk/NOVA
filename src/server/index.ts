@@ -1950,6 +1950,18 @@ async function main() {
       settingsQueries.set('gamification_eval_day', todayUk);
       console.log(`[gamification] ${r.season}: ${r.granted} awards over ${r.days} days`);
     }, 30 * 60 * 1000);
+    // jobRegistry only sets an interval — the first run is 30 minutes away — so kick
+    // it shortly after boot, otherwise a deploy leaves the board blank for half an hour.
+    setTimeout(() => {
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (settingsQueries.get('gamification_eval_day') === todayUk) return;
+      const from = new Date(); from.setUTCDate(from.getUTCDate() - 10);
+      const to = new Date(); to.setUTCDate(to.getUTCDate() - 1);
+      const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      evaluateAchievements(key(from), key(to))
+        .then(r => { settingsQueries.set('gamification_eval_day', todayUk); console.log(`[gamification] startup: ${r.granted} awards over ${r.days} days`); })
+        .catch(err => console.error('[gamification] startup evaluation failed:', err instanceof Error ? err.message : err));
+    }, 180_000);
 
     // Daily digest at 17:30, weekly digest Monday 09:00, derived KPIs 17:30
     jobRegistry.register('kpi-daily-rollup', 'KPI daily/weekly digest + derived', async () => {
