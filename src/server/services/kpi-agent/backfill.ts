@@ -25,7 +25,8 @@ export async function backfillAgentFromLegacy(settings: SettingsQueries, fromDay
     SELECT CONVERT(varchar(10), d.ReportDate, 23) AS d, a.AccountId, d.AgentId, d.AgentName, d.TierCode, d.Team,
            d.OpenTickets_Total, d.OpenTickets_Over2Hours, d.OpenTickets_NoUpdateToday,
            d.SolvedTickets_Today, d.SolvedTickets_ThisWeek, d.OldestTicketDays,
-           d.SLACompliancePct, d.TicketsPerHour, d.CSATAverage, d.CSATCount,
+           d.SLACompliancePct, d.SLAResolvedCount, d.SLABreachedCount,
+           d.TicketsPerHour, d.CSATAverage, d.CSATCount,
            d.QATicketsScored, d.QAOverallAvg, d.QAAccuracyAvg, d.QAClarityAvg, d.QAToneAvg,
            d.QAGreenCount, d.QAAmberCount, d.QARedCount, d.QAConcerningCount,
            d.GoldenRulesScored, d.GoldenRulesAvg, d.OwnershipAvg, d.NextActionAvg, d.TimeframeAvg,
@@ -43,6 +44,7 @@ export async function backfillAgentFromLegacy(settings: SettingsQueries, fromDay
       oldestDays: n(r.OldestTicketDays), oldestKey: null,
       oldestSupportDays: 0, oldestSupportKey: null, // not in legacy snapshot
       withDevelopment: 0,                            // not in legacy snapshot
+      slaResolved: n(r.SLAResolvedCount), slaBreached: n(r.SLABreachedCount),
 
       solvedToday: n(r.SolvedTickets_Today), solvedWeek: n(r.SolvedTickets_ThisWeek),
       qaScored: n(r.QATicketsScored), qaOverall: nOrNull(r.QAOverallAvg), qaAccuracy: nOrNull(r.QAAccuracyAvg),

@@ -8,6 +8,72 @@ import { isAdmin } from '../utils/role-helpers.js';
 import { ssoLogger } from '../services/sso-logger.js';
 import { TEAM_AGENTS } from './trends.js';
 import { applyTargetFallbacks } from '../services/kpi-targets.js';
+import { getAllInRange } from '../services/kpi-agent/store.js';
+import { getAgentLiveSnapshot, type AgentKpiRow } from '../services/kpi-agent/index.js';
+import type { JiraRestClient } from '../services/jira-client.js';
+
+/** YYYY-MM-DD for N days before today (UK). */
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}
+
+/**
+ * Map a Rebuild agent row into the legacy jira_agent_kpi_daily column shape that
+ * this endpoint has always returned. Keeping the shape is what lets the source
+ * swap underneath every consumer at once.
+ *
+ * AvailableHours and FrtCompliancePercent are null: the Rebuild engine does not
+ * compute them. Neither did anything else — nothing has written FrtCompliancePercent
+ * for the whole life of the legacy table, which is why that card reads "—".
+ */
+function toLegacyAgentRow(a: AgentKpiRow, date: string) {
+  const rag = (r: string | null | undefined) => (r == null ? null : r.charAt(0).toUpperCase() + r.slice(1));
+  return {
+    ReportDate: date,
+    AgentName: a.agentName,
+    TierCode: a.tierCode,
+    Team: a.team,
+    OpenTickets_Total: a.open,
+    OpenTickets_Over2Hours: a.overSla,
+    OpenTickets_NoUpdateToday: a.noReply,
+    SolvedTickets_Today: a.solvedToday,
+    SolvedTickets_ThisWeek: a.solvedWeek,
+    OldestTicketDays: a.oldestDays,
+    OldestTicketKey: a.oldestKey,
+    AvailableHours: null,
+    TicketsPerHour: a.ticketsPerHour,
+    SLAResolvedCount: a.slaResolved,
+    SLABreachedCount: a.slaBreached,
+    SLACompliancePct: a.slaCompliancePct,
+    CSATCount: a.csatCount,
+    CSATAverage: a.csatAvg,
+    QATicketsScored: a.qaScored,
+    QAOverallAvg: a.qaOverall,
+    QAAccuracyAvg: a.qaAccuracy,
+    QAClarityAvg: a.qaClarity,
+    QAToneAvg: a.qaTone,
+    QAGreenCount: a.qaGreen,
+    QAAmberCount: a.qaAmber,
+    QARedCount: a.qaRed,
+    QAConcerningCount: a.qaConcerning,
+    GoldenRulesScored: a.grScored,
+    GoldenRulesAvg: a.grOverall,
+    OwnershipAvg: a.grOwnership,
+    NextActionAvg: a.grNextAction,
+    TimeframeAvg: a.grTimeframe,
+    FrtCompliancePercent: null,
+    FrtAvgMinutes: null,
+    ragProductivity: rag(a.rag?.productivity), ragCSAT: rag(a.rag?.csat), ragQA: rag(a.rag?.qa),
+    ragGoldenRules: rag(a.rag?.goldenRules), ragOver2h: rag(a.rag?.over2h), ragStale: rag(a.rag?.stale),
+    ragSLA: rag(a.rag?.sla), ragOldestTicket: rag(a.rag?.oldest),
+    // Rebuild-only extras. Additive, so existing consumers are unaffected.
+    OldestSupportDays: a.oldestSupportDays,
+    OldestSupportKey: a.oldestSupportKey,
+    WithDevelopment: a.withDevelopment,
+  };
+}
 
 // Expected future KPI names in dbo.KpiSnapshot (will render automatically once data flows):
 // - "CSAT" or "Customer Satisfaction" — CSAT score, direction: higher is better
@@ -20,7 +86,7 @@ function suffix(env: Env): string {
   return env === 'uat' ? 'UAT' : '';
 }
 
-export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQueries: UserQueries): Router {
+export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQueries: UserQueries, getJira?: () => JiraRestClient | null): Router {
   const router = Router();
 
 
@@ -285,132 +351,43 @@ export function createKpiDataRoutes(settingsQueries: SettingsQueries, userQuerie
       const to = req.query.to as string | undefined;
       const days = Math.min(parseInt(req.query.days as string) || 30, 730);
 
-      // Department filter
-      const hasDept = await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent${s}') AND name = 'Department'`);
-      const hasDeptLive = s ? await p.request().query(`SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Agent') AND name = 'Department'`) : hasDept;
-      let deptJoin: string;
-      let deptWhere: string;
-      if (hasDept.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent${s} a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
-      } else if (hasDeptLive.recordset.length > 0) {
-        deptJoin = `INNER JOIN dbo.Agent a ON LTRIM(RTRIM(a.AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(a.AgentSurname,''))) = d.AgentName OR a.AgentName = d.AgentName`;
-        deptWhere = "AND a.Department IN ('NT', 'NOVA_AI')";
-      } else {
-        deptJoin = '';
-        deptWhere = '';
-      }
+      // ── Source: the Rebuild store (kpi_agent_daily), NOT dbo.jira_agent_kpi_daily ──
+      //
+      // The response shape is unchanged, so every consumer of this endpoint — the
+      // 1-2-1 cards, the team Agent KPIs view — moves across without a client edit.
+      //
+      // The legacy table had TWO writers with different definitions: NOVA every 30
+      // minutes and n8n every 3, so the numbers it served flickered between them and
+      // n8n usually won. The Rebuild store has a single writer and the corrected
+      // definitions — Development-tier tickets excluded from the open stocks, and a
+      // tier-aware oldest — so those numbers stop moving on their own.
+      //
+      // `env` is still accepted but ignored: the Rebuild store has no UAT twin.
+      const todayUk = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      const fromDay = from ?? isoDaysAgo(days);
+      const toDay = to ?? todayUk;
 
-      const agentFilter = scopedAgent ? `AND d.AgentName = '${scopedAgent.replace(/'/g, "''")}'` : '';
+      const stored = await getAllInRange(fromDay, toDay);
+      let rows = stored.map(r => toLegacyAgentRow(r, r.date));
 
-      let result;
-      if (from && to) {
-        const request = p.request();
-        request.input('from', sql.Date, from);
-        request.input('to', sql.Date, to);
-        result = await request.query(`
-          SELECT d.*
-          FROM dbo.jira_agent_kpi_daily${s} d
-          ${deptJoin}
-          WHERE d.ReportDate >= @from AND d.ReportDate <= @to
-            ${deptWhere} ${agentFilter}
-          ORDER BY d.ReportDate DESC, d.AgentName
-        `);
-      } else {
-        result = await p.request().query(`
-          SELECT d.*
-          FROM dbo.jira_agent_kpi_daily${s} d
-          ${deptJoin}
-          WHERE d.ReportDate >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))
-            ${deptWhere} ${agentFilter}
-          ORDER BY d.ReportDate DESC, d.AgentName
-        `);
-      }
-
-      // Enrich with QA + Golden Rules from source tables (jira_qa_results, Jira_QA_GoldenRules)
-      // The agent daily table only captures today's QA at write time, so historical rows have 0.
-      // Querying the source tables directly gives accurate per-agent per-day aggregates.
-      const dateFilter = from && to
-        ? `CAST(CreatedAt AS DATE) >= '${from}' AND CAST(CreatedAt AS DATE) <= '${to}'`
-        : `CAST(CreatedAt AS DATE) >= DATEADD(day, -${days}, CAST(GETDATE() AS DATE))`;
-      const agentNameFilter = scopedAgent ? `AND assigneeName = '${scopedAgent.replace(/'/g, "''")}'` : '';
-
-      const [qaResult, grResult] = await Promise.all([
-        p.request().query(`
-          SELECT CAST(CreatedAt AS DATE) AS ReportDate, assigneeName AS AgentName,
-            COUNT(*) AS QATicketsScored,
-            AVG(CAST(overallScore AS FLOAT)) AS QAOverallAvg,
-            AVG(CAST(accuracyScore AS FLOAT)) AS QAAccuracyAvg,
-            AVG(CAST(clarityScore AS FLOAT)) AS QAClarityAvg,
-            AVG(CAST(toneScore AS FLOAT)) AS QAToneAvg,
-            SUM(CASE WHEN grade = 'RED' THEN 1 ELSE 0 END) AS QARedCount,
-            SUM(CASE WHEN grade = 'AMBER' THEN 1 ELSE 0 END) AS QAAmberCount,
-            SUM(CASE WHEN grade = 'GREEN' THEN 1 ELSE 0 END) AS QAGreenCount,
-            SUM(CAST(isConcerning AS INT)) AS QAConcerningCount
-          FROM dbo.jira_qa_results${s}
-          WHERE ${dateFilter} AND ISNULL(qaType, '') <> 'excluded'
-            AND assigneeName IS NOT NULL AND assigneeName <> '' ${agentNameFilter}
-          GROUP BY CAST(CreatedAt AS DATE), assigneeName
-        `).catch(() => ({ recordset: [] })),
-        p.request().query(`
-          -- Updater, not Assignee — the comment's author owns the score.
-          SELECT CAST(CreatedAt AS DATE) AS ReportDate, Updater AS AgentName,
-            COUNT(*) AS GoldenRulesScored,
-            AVG(CAST(OverallScore AS FLOAT)) AS GoldenRulesAvg,
-            AVG(CAST(Rule1Score AS FLOAT)) AS OwnershipAvg,
-            AVG(CAST(Rule2Score AS FLOAT)) AS NextActionAvg,
-            AVG(CAST(Rule3Score AS FLOAT)) AS TimeframeAvg
-          FROM dbo.Jira_QA_GoldenRules${s}
-          WHERE ${dateFilter}
-            AND Updater IS NOT NULL AND Updater <> '' ${agentNameFilter.replace('assigneeName', 'Updater')}
-          GROUP BY CAST(CreatedAt AS DATE), Updater
-        `).catch(() => ({ recordset: [] })),
-      ]);
-
-      // Build lookup maps: "AgentName|YYYY-MM-DD" → QA/GR data
-      const qaMap: Record<string, any> = {};
-      for (const r of qaResult.recordset) {
-        const dateStr = r.ReportDate instanceof Date ? r.ReportDate.toISOString().slice(0, 10) : String(r.ReportDate).slice(0, 10);
-        qaMap[`${r.AgentName}|${dateStr}`] = r;
-      }
-      const grMap: Record<string, any> = {};
-      for (const r of grResult.recordset) {
-        const dateStr = r.ReportDate instanceof Date ? r.ReportDate.toISOString().slice(0, 10) : String(r.ReportDate).slice(0, 10);
-        grMap[`${r.AgentName}|${dateStr}`] = r;
-      }
-
-      // Merge into agent daily rows
-      for (const row of result.recordset) {
-        const dateStr = row.ReportDate instanceof Date ? row.ReportDate.toISOString().slice(0, 10) : String(row.ReportDate).slice(0, 10);
-        const key = `${row.AgentName}|${dateStr}`;
-        const qa = qaMap[key];
-        const gr = grMap[key];
-        if (qa) {
-          row.QATicketsScored = qa.QATicketsScored;
-          row.QAOverallAvg = qa.QAOverallAvg != null ? Math.round(qa.QAOverallAvg * 10) / 10 : null;
-          row.QAAccuracyAvg = qa.QAAccuracyAvg != null ? Math.round(qa.QAAccuracyAvg * 10) / 10 : null;
-          row.QAClarityAvg = qa.QAClarityAvg != null ? Math.round(qa.QAClarityAvg * 10) / 10 : null;
-          row.QAToneAvg = qa.QAToneAvg != null ? Math.round(qa.QAToneAvg * 10) / 10 : null;
-          row.QARedCount = qa.QARedCount;
-          row.QAAmberCount = qa.QAAmberCount;
-          row.QAGreenCount = qa.QAGreenCount;
-          row.QAConcerningCount = qa.QAConcerningCount;
-        }
-        if (gr) {
-          row.GoldenRulesScored = gr.GoldenRulesScored;
-          row.GoldenRulesAvg = gr.GoldenRulesAvg != null ? Math.round(gr.GoldenRulesAvg * 10) / 10 : null;
-          row.OwnershipAvg = gr.OwnershipAvg != null ? Math.round(gr.OwnershipAvg * 10) / 10 : null;
-          row.NextActionAvg = gr.NextActionAvg != null ? Math.round(gr.NextActionAvg * 10) / 10 : null;
-          row.TimeframeAvg = gr.TimeframeAvg != null ? Math.round(gr.TimeframeAvg * 10) / 10 : null;
+      // The stored row freezes at 18:00, so overlay a live recompute when the range
+      // includes today. Without this the cards would lose today's column, which the
+      // legacy table — rewritten every few minutes — always had.
+      if (fromDay <= todayUk && todayUk <= toDay) {
+        const jira = getJira?.();
+        if (jira) {
+          try {
+            const snap = await getAgentLiveSnapshot(settingsQueries, jira);
+            rows = rows.filter(r => r.ReportDate !== todayUk);
+            rows.push(...snap.agents.map(a => toLegacyAgentRow(a, todayUk)));
+          } catch { /* keep the stored rows if Jira is unavailable */ }
         }
       }
 
-      res.json({
-        ok: true,
-        data: result.recordset,
-        scopedAgent: scopedAgent ?? null,
-        env,
-      });
+      if (scopedAgent) rows = rows.filter(r => r.AgentName === scopedAgent);
+      rows.sort((a, b) => b.ReportDate.localeCompare(a.ReportDate) || a.AgentName.localeCompare(b.AgentName));
+
+      res.json({ ok: true, data: rows, scopedAgent: scopedAgent ?? null, env });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }

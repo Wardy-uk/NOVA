@@ -1288,7 +1288,7 @@ async function main() {
     }
   });
 
-  app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries));
+  app.use('/api/kpi-data', requireAreaAccess(['kpis', 'qa'], 'view'), createKpiDataRoutes(settingsQueries, userQueries, () => agentJiraClient));
   app.use('/api/pipeline', requireRole('admin'), createPipelineUatRoutes({ settings: settingsQueries }));
   app.use('/api/errors', requireRole('admin', 'super_admin'), createErrorRoutes());
   let boardMiLlm: import('./services/llm-service.js').LlmService | null = null;

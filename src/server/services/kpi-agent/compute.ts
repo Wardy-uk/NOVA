@@ -43,6 +43,10 @@ export interface AgentKpiRow {
   csatAvg: number | null; csatCount: number;
   // tier 3
   slaCompliancePct: number | null;
+  // Numerators behind slaCompliancePct. Stored because the agent scorecard shows
+  // "Resolved / within SLA / Breached" as counts, not just the percentage.
+  slaResolved: number;
+  slaBreached: number;
   ticketsPerHour: number | null;
   rag: Record<string, Rag | null>;
 }
@@ -339,7 +343,8 @@ export async function computeAgentKpis(
       grNextAction: gr?.nextAction != null ? round(gr.nextAction) : null, grTimeframe: gr?.timeframe != null ? round(gr.timeframe) : null,
       grScored7d: gr?.scored7d || 0, grOverall7d,
       csatAvg, csatCount: csat?.count || 0,
-      slaCompliancePct, ticketsPerHour, rag,
+      slaCompliancePct, slaResolved: sla?.resolved ?? 0, slaBreached: sla?.breached ?? 0,
+      ticketsPerHour, rag,
     };
   });
 }
