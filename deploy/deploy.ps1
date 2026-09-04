@@ -113,10 +113,23 @@ try {
     }
     Write-Host "Build output verified (fresh): client + server" -ForegroundColor Green
 
-    # Prune devDependencies after build to save disk space in production
-    Write-Host "Pruning devDependencies..." -ForegroundColor DarkGray
-    npm prune --omit=dev 2>$null
-    Write-Host ""
+    # NOTE: there is deliberately no "npm prune --omit=dev" here. Do not add one back.
+    #
+    # It used to sit on this line and on 2026-09-04 it hung, with the service already
+    # stopped at [0/4] and the restart not until [4/4]. NOVA was down for about twenty
+    # minutes. The catch block below would have recovered it, but a process that never
+    # returns throws nothing, so ErrorActionPreference never fired and the recovery never
+    # ran. An unbounded operation inside the downtime window has no safety net here.
+    #
+    # It was also self-defeating. Pruning deletes node_modules\.bin\tsc.cmd, so the
+    # $tscExists check in step [2/4] is false on the NEXT deploy and forces a full
+    # "npm install --include=dev" every time, whether the lockfile moved or not. The
+    # 4 Sep run measured it: 467 top-level packages pruned down to 249, then reinstalled
+    # straight back to 467 on the following deploy. It freed disk until the next deploy
+    # and bought a slow install every deploy.
+    #
+    # If disk on this box ever genuinely gets tight, prune AFTER the restart below and
+    # give it a timeout, so a hang costs a slow deploy rather than an outage.
 
     # -- Restart service ------------------------------------------------------
     Write-Host "[4/4] Restarting $ServiceName service..." -ForegroundColor Yellow
