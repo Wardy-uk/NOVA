@@ -1917,15 +1917,23 @@ async function main() {
     // only holds NT/NTPJ/YO. Same first-tick-at-or-after pattern as the org freeze —
     // a missed or slow tick still captures the day rather than losing it.
     jobRegistry.register('kpi-eod-snapshot', 'EOD ticket status snapshot (instance-wide)', async () => {
-      if (!agentJiraClient) return;
+      if (!agentJiraClient) { console.warn('[kpi-eod] skipped — no Jira client'); return; }
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
       const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-      if (ukHour >= 18 && settingsQueries.get('kpi_eod_snapshot_day') !== todayUk) {
-        const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
-        // Only mark the day done on success, so a failure retries on the next tick
-        // instead of silently skipping until tomorrow.
-        if (res.ok) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
+      // `kpi_eod_snapshot_force` lets the day be captured on demand — set it to the
+      // date to capture and the next tick runs regardless of the hour. The first
+      // production run produced no output at all, and a job whose only outcome is
+      // silence cannot be diagnosed; this makes it triggerable without a deploy.
+      const forced = (settingsQueries.get('kpi_eod_snapshot_force') ?? '').trim() === todayUk;
+      if (settingsQueries.get('kpi_eod_snapshot_day') === todayUk) return;   // already done
+      if (ukHour < 18 && !forced) return;                                    // not yet due
+      const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
+      // Only mark the day done on success, so a failure retries on the next tick
+      // instead of silently skipping until tomorrow.
+      if (res.ok) {
+        settingsQueries.set('kpi_eod_snapshot_day', todayUk);
+        if (forced) settingsQueries.set('kpi_eod_snapshot_force', '');
       }
     }, 10 * 60 * 1000);
 
