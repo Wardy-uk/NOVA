@@ -11,15 +11,21 @@ export interface RegisteredJob {
   running: boolean;
 }
 
+/** Context a job receives when it runs. `manual` is true only for an operator
+ *  pressing Run now in the admin panel — jobs that normally gate themselves on a
+ *  time of day can use it to run on demand instead of needing a hidden setting. */
+export interface JobRunContext { manual: boolean }
+export type JobFn = (ctx: JobRunContext) => Promise<void>;
+
 interface JobEntry extends RegisteredJob {
-  fn: () => Promise<void>;
+  fn: JobFn;
   timer: ReturnType<typeof setInterval> | null;
 }
 
 export class JobRegistry {
   private jobs = new Map<string, JobEntry>();
 
-  register(id: string, name: string, fn: () => Promise<void>, intervalMs: number): void {
+  register(id: string, name: string, fn: JobFn, intervalMs: number): void {
     if (this.jobs.has(id)) {
       console.warn(`[job-registry] Job "${id}" already registered — skipping`);
       return;
@@ -79,7 +85,7 @@ export class JobRegistry {
   async runNow(id: string): Promise<void> {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`Job "${id}" not found`);
-    await this.executeJob(job);
+    await this.executeJob(job, { manual: true });
   }
 
   getStatus(): RegisteredJob[] {
@@ -96,16 +102,16 @@ export class JobRegistry {
   private startTimer(entry: JobEntry): void {
     entry.timer = setInterval(() => {
       if (!entry.enabled || entry.running) return;
-      this.executeJob(entry).catch(() => {});
+      this.executeJob(entry, { manual: false }).catch(() => {});
     }, entry.intervalMs);
   }
 
-  private async executeJob(entry: JobEntry): Promise<void> {
+  private async executeJob(entry: JobEntry, ctx: JobRunContext = { manual: false }): Promise<void> {
     if (entry.running) return;
     entry.running = true;
     const start = Date.now();
     try {
-      await entry.fn();
+      await entry.fn(ctx);
       entry.lastRun = new Date();
       entry.lastDurationMs = Date.now() - start;
       entry.lastError = null;

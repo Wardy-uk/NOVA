@@ -1916,25 +1916,22 @@ async function main() {
     // (~23 projects), so it queries Jira directly rather than jira_issue_cache, which
     // only holds NT/NTPJ/YO. Same first-tick-at-or-after pattern as the org freeze —
     // a missed or slow tick still captures the day rather than losing it.
-    jobRegistry.register('kpi-eod-snapshot', 'EOD ticket status snapshot (instance-wide)', async () => {
+    jobRegistry.register('kpi-eod-snapshot', 'EOD ticket status snapshot (instance-wide)', async ({ manual }) => {
       if (!agentJiraClient) { console.warn('[kpi-eod] skipped — no Jira client'); return; }
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
       const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-      // `kpi_eod_snapshot_force` lets the day be captured on demand — set it to the
-      // date to capture and the next tick runs regardless of the hour. The first
-      // production run produced no output at all, and a job whose only outcome is
-      // silence cannot be diagnosed; this makes it triggerable without a deploy.
-      const forced = (settingsQueries.get('kpi_eod_snapshot_force') ?? '').trim() === todayUk;
-      if (settingsQueries.get('kpi_eod_snapshot_day') === todayUk) return;   // already done
-      if (ukHour < 18 && !forced) return;                                    // not yet due
+      // Run now in Admin > Background Jobs bypasses both guards, so the day can be
+      // captured on demand — for a re-run after a failure, or to prove the job works
+      // without waiting until 18:00. Scheduled ticks still only fire once, after 18:00.
+      if (!manual) {
+        if (settingsQueries.get('kpi_eod_snapshot_day') === todayUk) return;  // already done
+        if (ukHour < 18) return;                                              // not yet due
+      }
       const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
       // Only mark the day done on success, so a failure retries on the next tick
       // instead of silently skipping until tomorrow.
-      if (res.ok) {
-        settingsQueries.set('kpi_eod_snapshot_day', todayUk);
-        if (forced) settingsQueries.set('kpi_eod_snapshot_force', '');
-      }
+      if (res.ok) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
     }, 10 * 60 * 1000);
 
     // Gamification: evaluate achievements once per UK day, mid-morning.
@@ -1946,11 +1943,11 @@ async function main() {
     //
     // Deliberately not evaluating today: the day is not complete, and awarding off
     // a partial day is how you end up taking a prize back.
-    jobRegistry.register('gamification-evaluate', 'Gamification achievement evaluation', async () => {
+    jobRegistry.register('gamification-evaluate', 'Gamification achievement evaluation', async ({ manual }) => {
       const now = new Date();
       const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
       const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-      if (ukHour < 9 || settingsQueries.get('gamification_eval_day') === todayUk) return;
+      if (!manual && (ukHour < 9 || settingsQueries.get('gamification_eval_day') === todayUk)) return;
       const from = new Date(); from.setUTCDate(from.getUTCDate() - 10);
       const to = new Date(); to.setUTCDate(to.getUTCDate() - 1);
       const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
