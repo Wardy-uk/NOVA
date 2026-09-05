@@ -1912,7 +1912,15 @@ async function main() {
     }, 10 * 60 * 1000);
 
     // End-of-day ticket status snapshot at 18:00 UK, once per UK day (every day,
-    // weekends included — the queue does not stop). Instance-wide
+    // weekends included — the queue does not stop).
+    //
+    // The 10-minute interval is a POLL, not a schedule: the body returns straight
+    // away unless it is past 18:00 and the day is not yet captured, so it does real
+    // work once a day. It polls rather than firing at a fixed time because a precise
+    // timer loses the whole day if the process happens to be restarting at 18:00 —
+    // and evening deploys are when that is most likely. Same pattern as kpi-org-capture.
+    //
+    // Instance-wide
     // (~23 projects), so it queries Jira directly rather than jira_issue_cache, which
     // only holds NT/NTPJ/YO. Same first-tick-at-or-after pattern as the org freeze —
     // a missed or slow tick still captures the day rather than losing it.
@@ -1929,9 +1937,16 @@ async function main() {
         if (ukHour < 18) return;                                              // not yet due
       }
       const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
-      // Only mark the day done on success, so a failure retries on the next tick
-      // instead of silently skipping until tomorrow.
-      if (res.ok) { settingsQueries.set('kpi_eod_snapshot_day', todayUk); return; }
+      // Mark the day done only on success, so a failure retries on the next tick
+      // instead of silently skipping until tomorrow — and only when the capture
+      // actually reflects end of day. A manual run at lunchtime is for testing; if
+      // it claimed the day, the evening capture would skip and today's "end of day"
+      // snapshot would permanently be a midday reading of the queue.
+      if (res.ok) {
+        if (ukHour >= 18) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
+        else console.log(`[kpi-eod] captured at ${ukHour}:00 on request — the 18:00 run will still take the real end-of-day snapshot`);
+        return;
+      }
       // Re-throw so the failure reaches the job registry and shows in Admin >
       // Background Jobs. Swallowing it reported "1 run, 0 errors, 281ms" while the
       // capture had actually failed on every attempt for two days — the panel said
