@@ -1931,7 +1931,12 @@ async function main() {
       const res = await captureEodSnapshot(settingsQueries, agentJiraClient, now);
       // Only mark the day done on success, so a failure retries on the next tick
       // instead of silently skipping until tomorrow.
-      if (res.ok) settingsQueries.set('kpi_eod_snapshot_day', todayUk);
+      if (res.ok) { settingsQueries.set('kpi_eod_snapshot_day', todayUk); return; }
+      // Re-throw so the failure reaches the job registry and shows in Admin >
+      // Background Jobs. Swallowing it reported "1 run, 0 errors, 281ms" while the
+      // capture had actually failed on every attempt for two days — the panel said
+      // healthy and only stderr knew otherwise.
+      throw new Error(res.error ?? 'EOD snapshot failed');
     }, 10 * 60 * 1000);
 
     // Gamification: evaluate achievements once per UK day, mid-morning.
