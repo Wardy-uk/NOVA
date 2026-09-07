@@ -281,8 +281,6 @@ export const PortalOnboardingRequestSchema = z.object({
   salesPhone: z.string().max(60).optional(),
   lettingsPhone: z.string().max(60).optional(),
   // Marketing
-  portals: z.array(z.string().max(60)).max(10).optional(),
-  portalsOther: z.string().max(200).optional(),
   websiteProvider: z.string().max(200).optional(),
   // Users to set up
   users: z.array(OnboardingUserSchema).max(30).optional(),
@@ -291,7 +289,6 @@ export const PortalOnboardingRequestSchema = z.object({
   // The customer's designated (free) Lead Pro user — captured so it isn't assumed at setup.
   leadProUser: z.string().max(200).optional(),
   // Magazine
-  magazineReminderEmails: z.string().max(1000).optional(),
   magazineRegion: z.string().max(150).optional(),
   // Digital interactive magazine
   dimSales: z.boolean().optional(),
@@ -308,12 +305,6 @@ export const PortalOnboardingRequestSchema = z.object({
   leadContactPhone: z.string().max(60).optional(),
   // Valuation lead notifications default to the office email on the form.
   valuationNotificationEmails: z.string().max(500).optional(),
-  // New agent joining (NT-24880)
-  newAgentName: z.string().max(200).optional(),
-  newAgentEmail: z.string().max(200).optional(),
-  newAgentPhone: z.string().max(60).optional(),
-  newAgentAddress: z.string().max(400).optional(),
-  micrositeUrl: z.string().max(500).optional(),
   // Free text
   notes: z.string().max(5000).optional(),
 });

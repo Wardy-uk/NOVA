@@ -55,7 +55,7 @@ export async function importGuildForm(
     `IMPORTANT layout note: the document text lists blank field LABELS first, and the user's ENTERED VALUES appear grouped together separately — often at the end of the page or section, or right after a "Docusign Envelope ID" line — NOT next to each label. Associate each value to its label by order, position and context.`,
     `Ignore the Membership Terms & Conditions / legal boilerplate, page headers/footers, "Docusign Envelope ID" lines, and signatures — none of that is form data.`,
     `Only output these keys (omit any you genuinely cannot find): ${keys.join(', ')}.`,
-    `Rules: booleans as true/false (a ticked checkbox = true); dates as YYYY-MM-DD; list fields (e.g. directors, users, portals) as JSON arrays; emails, names, phone numbers and addresses verbatim.`,
+    `Rules: booleans as true/false (a ticked checkbox = true); dates as YYYY-MM-DD; list fields (e.g. directors, users) as JSON arrays; emails, names, phone numbers and addresses verbatim.`,
     `For "users", each item is { name, email, accessLevel, jobTitle }. Do not invent values — omit unknowns.`,
   ].join(' ');
 

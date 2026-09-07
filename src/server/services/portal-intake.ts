@@ -731,7 +731,7 @@ export class PortalIntakeService {
   }
 
   /** List application-stage records for the org, for the setup form's picker. */
-  async listOpenApplications(orgId: number): Promise<Array<{ id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string }>> {
+  async listOpenApplications(orgId: number): Promise<Array<{ id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string; prefill: Record<string, unknown> | null }>> {
     if (!this.records) return [];
     const rows = await this.records.listOpenApplications(orgId);
     return rows.map(r => ({
@@ -739,7 +739,35 @@ export class PortalIntakeService {
       office: [r.office_name, r.branch_name].filter(Boolean).join(' — ') || '(unnamed)',
       brand: r.office_name, branch: r.branch_name,
       submittedAt: r.submission_date,
+      prefill: this.setupPrefillFromApplication(r.application_data),
     }));
+  }
+
+  /** The setup-form fields Guild marked "populated from the form" on their
+   *  dashboard review (Sep 2026) — carried off the membership application so
+   *  linking one fills them instead of the customer retyping. The lead responder
+   *  contact deliberately mirrors the office details ("should always be the
+   *  same"). Blank values are dropped so the form's own defaults still apply. */
+  private setupPrefillFromApplication(raw: string | null | undefined): Record<string, unknown> | null {
+    if (!raw) return null;
+    let a: Record<string, unknown>;
+    try { a = JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+    const s = (k: string) => (typeof a[k] === 'string' ? (a[k] as string).trim() : '');
+    const officeEmail = s('contactEmail');
+    const officePhone = s('contactPhone');
+    const sales = a.offersSales === true, lettings = a.offersLettings === true;
+    const out: Record<string, unknown> = {
+      brand: s('brand'), branch: s('branch'),
+      registeredCompanyName: s('companyName'), membershipArea: s('membershipArea'),
+      addressLine: s('addressLine'), town: s('town'), county: s('county'), postcode: s('postcode'),
+      offersSales: sales, offersLettings: lettings,
+      salesEmail: sales ? officeEmail : '', salesPhone: sales ? officePhone : '',
+      lettingsEmail: lettings ? officeEmail : '', lettingsPhone: lettings ? officePhone : '',
+      leadContactName: s('contactName'), leadContactEmail: officeEmail, leadContactPhone: officePhone,
+      invoiceCommencementDate: s('invoiceCommencementDate'),
+    };
+    for (const k of Object.keys(out)) if (out[k] === '' || out[k] === false) delete out[k];
+    return Object.keys(out).length ? out : null;
   }
 
   /** R2 — alert the onboarding inbox that a new Guild onboarding was submitted,

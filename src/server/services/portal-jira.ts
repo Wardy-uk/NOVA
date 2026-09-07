@@ -772,7 +772,6 @@ export class PortalJiraService {
 
     sections.push([
       'MARKETING',
-      line('Portals', [...(f.portals || []), f.portalsOther].filter(Boolean).join(', ') || null),
       line('Current website provider', f.websiteProvider),
     ].filter(Boolean).join('\n'));
 
@@ -794,7 +793,6 @@ export class PortalJiraService {
       'PRODUCTS & SET-UP',
       line('CRM / referral account name', f.crmAccountName),
       line('Lead Pro user', f.leadProUser),
-      line('Magazine reminder emails', f.magazineReminderEmails),
       line('Magazine region', f.magazineRegion),
       line('Digital magazine — properties', [f.dimSales ? 'Sales' : null, f.dimLettings ? 'Lettings' : null].filter(Boolean).join(', ') || null),
       f.dimIncludeSoldLet !== undefined ? `Digital magazine — include sold/let: ${yn(f.dimIncludeSoldLet)}` : null,
@@ -809,15 +807,6 @@ export class PortalJiraService {
       line('Lead responder contact', [f.leadContactName, f.leadContactEmail, f.leadContactPhone].filter(Boolean).join(' | ') || null),
       line('Valuation notification emails', f.valuationNotificationEmails),
     ].filter(Boolean).join('\n'));
-
-    const newAgent = [
-      line('New agent name', f.newAgentName),
-      line('New agent email', f.newAgentEmail),
-      line('New agent phone', f.newAgentPhone),
-      line('New agent address', f.newAgentAddress),
-      line('Microsite / IVT URL', f.micrositeUrl),
-    ].filter(Boolean);
-    if (newAgent.length) sections.push(['NEW AGENT JOINING', ...newAgent].join('\n'));
 
     if (f.notes && f.notes.trim()) sections.push(['NOTES', f.notes.trim()].join('\n'));
 

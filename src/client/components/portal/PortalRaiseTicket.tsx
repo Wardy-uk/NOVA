@@ -27,7 +27,11 @@ const OB_FORM_LABELS: Record<ObFormType, string> = {
   standard: 'Raise Standard Onboarding',
   multi: 'Raise Multi Branch Onboarding',
 };
-interface OpenApplication { id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string }
+interface OpenApplication {
+  id: number; ref: string; office: string; brand: string | null; branch: string | null; submittedAt: string;
+  /** Setup-form fields carried over from the application (see the prefill effect). */
+  prefill?: Record<string, unknown>;
+}
 
 const pf = (window as any).__portalFetch as (path: string, opts?: RequestInit) => Promise<Response>;
 
@@ -96,9 +100,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
         }
         return next;
       });
-      if (Array.isArray(data.portals)) {
-        setPortalsSel(prev => { const n = { ...prev }; for (const p of Object.keys(n)) n[p] = (data.portals as unknown[]).some(x => String(x).toLowerCase() === p.toLowerCase()); return n; });
-      }
       if (Array.isArray(data.users) && data.users.length) {
         setObUsers((data.users as Array<Record<string, unknown>>).map(u => ({
           name: str(u.name), email: str(u.email), accessLevel: str(u.accessLevel), jobTitle: str(u.jobTitle),
@@ -153,13 +154,12 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
     addressLine: '', town: '', county: '', postcode: '',
     offersSales: false, offersLettings: false,
     salesEmail: '', lettingsEmail: '', salesPhone: '', lettingsPhone: '',
-    portalsOther: '', websiteProvider: '',
-    crmAccountName: '', leadProUser: '', magazineReminderEmails: '', magazineRegion: '',
+    websiteProvider: '',
+    crmAccountName: '', leadProUser: '', magazineRegion: '',
     dimSales: false, dimLettings: false, dimIncludeSoldLet: false, dimOrderBy: '', dimApprovalEmail: '',
     marketReportRegion: '',
     leadResponderPostcodes: '', leadContactName: '', leadContactEmail: '', leadContactPhone: '',
     valuationNotificationEmails: '',
-    newAgentName: '', newAgentEmail: '', newAgentPhone: '', newAgentAddress: '', micrositeUrl: '',
     notes: '',
   });
   const setObField = (k: keyof typeof ob, v: string | boolean) => setOb(prev => ({ ...prev, [k]: v }));
@@ -176,7 +176,26 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
     valuationDefault.current = officeEmail;
     setObField('valuationNotificationEmails', officeEmail);
   }, [ob.salesEmail, ob.lettingsEmail, ob.valuationNotificationEmails, valuationTouched]);
-  const [portalsSel, setPortalsSel] = useState<Record<string, boolean>>({ Rightmove: false, Zoopla: false, 'On The Market': false });
+  // Guild: "should always be the same as the office details" (form review, Sep
+  // 2026). Same rule as the valuation default above — fills a blank field or one
+  // we defaulted ourselves, never a typed or imported value.
+  const leadContactDefault = React.useRef({ email: '', phone: '' });
+  React.useEffect(() => {
+    const officeEmail = ob.salesEmail.trim() || ob.lettingsEmail.trim();
+    const officePhone = ob.salesPhone.trim() || ob.lettingsPhone.trim();
+    setOb(prev => {
+      const next = { ...prev };
+      if (officeEmail && (!prev.leadContactEmail.trim() || prev.leadContactEmail === leadContactDefault.current.email)) {
+        leadContactDefault.current.email = officeEmail;
+        next.leadContactEmail = officeEmail;
+      }
+      if (officePhone && (!prev.leadContactPhone.trim() || prev.leadContactPhone === leadContactDefault.current.phone)) {
+        leadContactDefault.current.phone = officePhone;
+        next.leadContactPhone = officePhone;
+      }
+      return next.leadContactEmail === prev.leadContactEmail && next.leadContactPhone === prev.leadContactPhone ? prev : next;
+    });
+  }, [ob.salesEmail, ob.lettingsEmail, ob.salesPhone, ob.lettingsPhone]);
   const [obUsers, setObUsers] = useState<OnboardingUser[]>([{ name: '', email: '', accessLevel: '', jobTitle: '' }]);
   const [usersPrefilled, setUsersPrefilled] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -210,6 +229,28 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
     setApplicationId(match ? match.id : '');
   }, [openApps, ob.brand, ob.branch, guildOb, obFormType, applicationTouched]);
   const autoMatched = !applicationTouched && applicationId !== '';
+
+  // Linking an application carries its details onto the setup form — the fields
+  // Guild marked "populated from the form" on their review (Sep 2026), so the
+  // customer isn't retyping what they already told us at application stage.
+  // Only ever fills a blank field: an import or a typed value wins.
+  const prefilledFrom = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (!guildOb || obFormType === 'application' || !applicationId) return;
+    if (prefilledFrom.current === applicationId) return;
+    const pre = openApps.find(a => a.id === applicationId)?.prefill;
+    if (!pre) return;
+    prefilledFrom.current = applicationId;
+    setOb(prev => {
+      const next: Record<string, unknown> = { ...prev };
+      for (const [k, v] of Object.entries(pre)) {
+        if (!(k in next) || v == null) continue;
+        if (typeof next[k] === 'boolean') { if (!next[k]) next[k] = !!v; }
+        else if (!String(next[k]).trim()) next[k] = String(v);
+      }
+      return next as typeof prev;
+    });
+  }, [applicationId, openApps, guildOb, obFormType]);
 
   const canSubmitStandard = !!summary && !!detail && (!gpeaForm || (!!network && !!agentNameBranch));
   const canSubmitOnboarding = !!ob.brand.trim() && !!ob.branch.trim() && !!ob.hexCode.trim();
@@ -265,7 +306,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
     setSubmitting(true);
     setError(null);
     try {
-      const portals = Object.keys(portalsSel).filter(k => portalsSel[k]);
       const users = obUsers.filter(u => u.name.trim() || u.email.trim());
       const res = await pf('/api/portal/onboarding-requests', {
         method: 'POST',
@@ -288,13 +328,10 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
           lettingsEmail: ob.lettingsEmail || undefined,
           salesPhone: ob.salesPhone || undefined,
           lettingsPhone: ob.lettingsPhone || undefined,
-          portals: portals.length ? portals : undefined,
-          portalsOther: ob.portalsOther || undefined,
           websiteProvider: ob.websiteProvider || undefined,
           users: users.length ? users : undefined,
           crmAccountName: ob.crmAccountName || undefined,
           leadProUser: ob.leadProUser || undefined,
-          magazineReminderEmails: ob.magazineReminderEmails || undefined,
           magazineRegion: ob.magazineRegion || undefined,
           dimSales: ob.dimSales,
           dimLettings: ob.dimLettings,
@@ -307,11 +344,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
           leadContactEmail: ob.leadContactEmail || undefined,
           leadContactPhone: ob.leadContactPhone || undefined,
           valuationNotificationEmails: ob.valuationNotificationEmails || undefined,
-          newAgentName: ob.newAgentName || undefined,
-          newAgentEmail: ob.newAgentEmail || undefined,
-          newAgentPhone: ob.newAgentPhone || undefined,
-          newAgentAddress: ob.newAgentAddress || undefined,
-          micrositeUrl: ob.micrositeUrl || undefined,
           notes: ob.notes || undefined,
         }),
       });
@@ -353,14 +385,12 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
     if (!canSubmitOnboarding) { setError('Brand, Branch and Brand hex colour are required.'); return; }
     setSubmitting(true); setError(null);
     try {
-      const portals = Object.keys(portalsSel).filter(k => portalsSel[k]);
       const users = obUsers.filter(u => u.name.trim() || u.email.trim());
       const payload = {
         ...ob,
         planType,
         applicationId: applicationId || undefined,
         branches: planType === 'multi' ? branches.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
-        portals,
         users,
         invoiceCommencementDate: ob.invoiceCommencementDate || undefined,
       };
@@ -534,8 +564,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
                   ob={ob}
                   setObField={setObField}
                   onValuationEdit={() => setValuationTouched(true)}
-                  portalsSel={portalsSel}
-                  setPortalsSel={setPortalsSel}
                   users={obUsers}
                   setUsers={setObUsers}
                   files={files}
@@ -549,8 +577,6 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
             ob={ob}
             setObField={setObField}
             onValuationEdit={() => setValuationTouched(true)}
-            portalsSel={portalsSel}
-            setPortalsSel={setPortalsSel}
             users={obUsers}
             setUsers={setObUsers}
             files={files}
@@ -657,17 +683,14 @@ export default function PortalRaiseTicket({ onCreated, routes, guildOnboarding, 
 // ── Onboarding sub-form ──────────────────────────────────────────────────────
 
 const ACCESS_LEVELS = ['Client Admin', 'Office Admin', 'Agent'];
-const PORTAL_OPTIONS = ['Rightmove', 'Zoopla', 'On The Market'];
 
 function OnboardingForm({
-  ob, setObField, onValuationEdit, portalsSel, setPortalsSel, users, setUsers, files, setFiles,
+  ob, setObField, onValuationEdit, users, setUsers, files, setFiles,
 }: {
   ob: any;
   setObField: (k: any, v: string | boolean) => void;
   /** Stops the office-email default from overwriting a hand-typed value. */
   onValuationEdit: () => void;
-  portalsSel: Record<string, boolean>;
-  setPortalsSel: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   users: OnboardingUser[];
   setUsers: React.Dispatch<React.SetStateAction<OnboardingUser[]>>;
   files: File[];
@@ -746,18 +769,6 @@ function OnboardingForm({
       </Section>
 
       <Section title="Marketing">
-        <div>
-          <label className={labelCls}>Portals advertised on</label>
-          <div className="flex flex-wrap gap-4">
-            {PORTAL_OPTIONS.map(p => (
-              <label key={p} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={!!portalsSel[p]} onChange={e => setPortalsSel(prev => ({ ...prev, [p]: e.target.checked }))} className="rounded border-gray-300 text-brand focus:ring-brand" />
-                {p}
-              </label>
-            ))}
-          </div>
-        </div>
-        {text('portalsOther', 'Other portals')}
         {text('websiteProvider', 'Current website provider')}
       </Section>
 
@@ -814,17 +825,6 @@ function OnboardingForm({
             placeholder="Comma-separated" className={inputCls} />
           <p className="mt-1 text-xs text-gray-500">Pre-filled with the office email above — change it if valuation leads go elsewhere.</p>
         </div>
-        {text('magazineReminderEmails', 'Magazine reminder email(s)', 'Comma-separated')}
-      </Section>
-
-      <Section title="New agent joining (if applicable)">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {text('newAgentName', 'Agent full name')}
-          {text('newAgentEmail', 'Agent email')}
-          {text('newAgentPhone', 'Agent phone')}
-          {text('micrositeUrl', 'Microsite / IVT URL')}
-        </div>
-        {text('newAgentAddress', 'Agent registered address')}
       </Section>
 
       <Section title="Build & QA">
