@@ -88,10 +88,22 @@ function ragStatus(value: number, target: number, lowerIsBetter: boolean): 'gree
   return 'red';
 }
 
-// The NOVA KPI endpoints cap `days`, but honour an uncapped from/to range.
-// Prefer from/to whenever both are supplied so long lookbacks aren't clamped.
+// Daily KPI history comes from the kpi-org engine (kpi_org_daily), NOT the retired
+// dbo.jira_kpi_daily that /api/kpi-data/daily-history still serves. That table's only
+// remaining writer is NOVA's legacy cache pipeline, whose definitions diverge from the
+// ones every NOVA screen shows — e.g. it strips request_type='Onboarding' out of the
+// tier volumes, which ran "Number of Tickets in Production" ~19 tickets light every day.
+const DAILY_HISTORY = '/api/kpi-org/support/legacy-history';
+
+// legacy-history requires an explicit from/to, so a `days` lookback is resolved to a
+// date range here rather than passed through.
 function rangeParams(days: number, fallback: number, from?: string, to?: string): Record<string, string | number> {
-  return from && to ? { from, to } : { days: num(days, fallback) };
+  if (from && to) return { from, to };
+  const iso = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - (num(days, fallback) - 1));
+  return { from: iso(start), to: iso(end) };
 }
 
 function rangeLabel(days: number, fallback: number, from?: string, to?: string): string {
@@ -139,7 +151,7 @@ server.tool(
   },
   async ({ metric, days, from, to, granularity }) => {
     try {
-      const rows = await api<any[]>('/api/kpi-data/daily-history', rangeParams(days, 90, from, to));
+      const rows = await api<any[]>(DAILY_HISTORY, rangeParams(days, 90, from, to));
       const re = likeToRegex(metric);
       const matched = rows.filter((r: any) => re.test(r.kpi || r.KPI || ''));
 
@@ -159,7 +171,10 @@ server.tool(
         entries.sort((a: any, b: any) => new Date(a.CreatedAt || a.createdAt).getTime() - new Date(b.CreatedAt || b.createdAt).getTime());
         const target = entries[0]?.target ?? entries[0]?.KPITarget ?? null;
         const direction = entries[0]?.direction ?? entries[0]?.KPIDirection ?? 'higher_is_better';
-        const lowerIsBetter = direction === 'lower_is_better';
+        // The API says "Lower is better", never the snake_case this used to test for,
+        // so every lower-better KPI was scored as higher-better and its breach periods
+        // came out inverted. Match on the word, not on one spelling of it.
+        const lowerIsBetter = /lower/i.test(String(direction));
 
         let timeSeries: { period: string; value: number }[];
         if (granularity === 'weekly') {
@@ -473,7 +488,7 @@ server.tool(
   },
   async ({ tier, days }) => {
     try {
-      const rows = await api<any[]>('/api/kpi-data/daily-history', { days });
+      const rows = await api<any[]>(DAILY_HISTORY, rangeParams(days, 30));
 
       const tierSuffix = tier === 'all' ? '' : (() => {
         const map: Record<string, string> = { customer_care: '_CC', production: '_Prod', tier2: '_T2', tier3: '_T3', development: '_Dev' };
@@ -548,7 +563,7 @@ server.tool(
   },
   async ({ kpi_pattern, days, from, to }) => {
     try {
-      const rows = await api<any[]>('/api/kpi-data/daily-history', rangeParams(days, 30, from, to));
+      const rows = await api<any[]>(DAILY_HISTORY, rangeParams(days, 30, from, to));
       const re = likeToRegex(kpi_pattern);
       const matched = rows.filter((r: any) => re.test(r.kpi || r.KPI || ''));
 
