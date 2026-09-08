@@ -49,10 +49,16 @@ const Conditional = z.discriminatedUnion('type', [DuplicateConditional, PreEmpti
 
 // ── Actions ──
 
+const BcAccountNumber = z.string().regex(/^CU\d{7}$/, 'BC account must match ^CU\d{7}$');
+
 const CloseAction = z.object({
   type: z.literal('close'),
   resolution: z.string(),
   note: z.string(),
+  /** JSM request type to stamp before closing. Defaults to 'Emailed request'. */
+  requestType: z.string().optional(),
+  /** Fixed BC Account Number to write before the resolve validator runs. */
+  bcAccount: BcAccountNumber.optional(),
 });
 
 const SetTierAction = z.object({
@@ -62,6 +68,8 @@ const SetTierAction = z.object({
   requestType: z.string().optional(),
   priority: z.string().optional(),
   assignToPool: z.string().optional(),
+  /** Fixed BC Account Number to stamp on the ticket. */
+  bcAccount: BcAccountNumber.optional(),
 });
 
 const PluginToTpjAction = z.object({
@@ -197,14 +205,28 @@ const RULES_RAW: unknown[] = [
     action: { type: 'close', resolution: 'No Fault Found', note: 'Automated Digival usage report — informational, no action required.' },
   },
   {
-    id: 'mwu-tier-2',
+    // The daily MWU Live Morning Report is informational when every agent synced —
+    // close it as a Service Request against the MWU BC account. MUST stay before
+    // mwu-live-morning-report (same subject) or the tier rule intercepts it.
+    id: 'mwu-live-morning-report-ok',
     match: {
-      subject: {
-        startsWithAny: [
-          'MWU Live Morning Report',
-          'BriefYourMarket Scheduled Report: DW check',
-        ],
-      },
+      subject: { startsWith: 'MWU Live Morning Report' },
+      description: { containsAll: ['synchronised to Azure successfully', 'Ready for MWU Pull'] },
+    },
+    action: {
+      type: 'close',
+      resolution: 'No Fault Found',
+      requestType: 'Service Request',
+      bcAccount: 'CU0001691',
+      note: 'MWU Live Morning Report — all agents synchronised to Azure successfully, ready for MWU Pull. Informational, no action required.',
+    },
+  },
+  {
+    // Any other MWU morning report content means something did not sync — Tier 2 as
+    // a Critical Incident, on the MWU BC account.
+    id: 'mwu-live-morning-report',
+    match: {
+      subject: { startsWith: 'MWU Live Morning Report' },
     },
     action: {
       type: 'set_tier',
@@ -212,7 +234,22 @@ const RULES_RAW: unknown[] = [
       requestType: 'Incident',
       priority: 'Critical',
       assignToPool: 't2',
-      note: 'MWU/DW check report routed to Tier 2 as Critical Incident.',
+      bcAccount: 'CU0001691',
+      note: 'MWU Live Morning Report did not confirm a clean Azure sync — routed to Tier 2 as a Critical Incident.',
+    },
+  },
+  {
+    id: 'mwu-tier-2',
+    match: {
+      subject: { startsWith: 'BriefYourMarket Scheduled Report: DW check' },
+    },
+    action: {
+      type: 'set_tier',
+      tier: 'Tier 2',
+      requestType: 'Incident',
+      priority: 'Critical',
+      assignToPool: 't2',
+      note: 'DW check report routed to Tier 2 as Critical Incident.',
     },
   },
   {

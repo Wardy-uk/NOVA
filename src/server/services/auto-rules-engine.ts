@@ -14,6 +14,10 @@ import { extractText } from './shared/adf-utils.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_CURRENT_TIER = 'customfield_12981';
+const CF_BC_ACCOUNT = 'customfield_14626';
+
+type CloseActionShape = { type: 'close'; resolution: string; note: string; requestType?: string; bcAccount?: string };
+type SetTierActionShape = { type: 'set_tier'; tier: string; note: string; requestType?: string; priority?: string; assignToPool?: string; bcAccount?: string };
 
 const TIER_IDS: Record<string, string> = {
   'Customer Care': '13061',
@@ -480,9 +484,9 @@ export class AutoRulesEngine {
 
     try {
       if (action.type === 'close') {
-        await this.handleClose(ticketKey, action as { type: 'close'; resolution: string; note: string }, rule);
+        await this.handleClose(ticketKey, action as CloseActionShape, rule);
       } else if (action.type === 'set_tier') {
-        await this.handleSetTier(ticketKey, action as { type: 'set_tier'; tier: string; note: string }, rule);
+        await this.handleSetTier(ticketKey, action as SetTierActionShape, rule);
       } else if (action.type === 'plugin_to_tpj') {
         if (ticketKey.startsWith('NTPJ-')) {
           console.log(`[auto-rules] Skipping plugin_to_tpj on ${ticketKey}: already an NTPJ ticket`);
@@ -528,7 +532,7 @@ export class AutoRulesEngine {
 
   private async handleClose(
     ticketKey: string,
-    action: { type: 'close'; resolution: string; note: string },
+    action: CloseActionShape,
     rule: AutoRule,
   ): Promise<void> {
     try {
@@ -556,7 +560,12 @@ export class AutoRulesEngine {
     }
 
     // Update request type from "AI Request" to correct type
-    await setRequestType(this.jiraClient, this.settings, ticketKey, undefined, 'Emailed request');
+    await setRequestType(this.jiraClient, this.settings, ticketKey, undefined, action.requestType ?? 'Emailed request');
+
+    // Rules that know their customer stamp the BC account up front, so the mandatory
+    // resolve validator is satisfied without the resolver guessing (or falling back
+    // to Nurtur's own account).
+    await this.setBcAccount(ticketKey, action.bcAccount);
 
     // Validate transition is available before attempting
     try {
@@ -586,9 +595,21 @@ export class AutoRulesEngine {
     await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment, bcInfraFallback: true });
   }
 
+  /** Write a rule's fixed BC Account Number. Best effort — a failure here must never
+   *  block the tier move or the close (the resolve validator still has its own retry). */
+  private async setBcAccount(ticketKey: string, bcAccount?: string): Promise<void> {
+    if (!bcAccount) return;
+    try {
+      await this.jiraClient.updateFields(ticketKey, { [CF_BC_ACCOUNT]: bcAccount });
+      console.log(`[auto-rules] Set BC Account number '${bcAccount}' on ${ticketKey}`);
+    } catch (err) {
+      console.warn(`[auto-rules] Failed to set BC Account number on ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   private async handleSetTier(
     ticketKey: string,
-    action: { type: 'set_tier'; tier: string; note: string; requestType?: string; priority?: string; assignToPool?: string },
+    action: SetTierActionShape,
     rule: AutoRule,
   ): Promise<void> {
     const tierId = TIER_IDS[action.tier];
@@ -611,6 +632,9 @@ export class AutoRulesEngine {
     if (action.requestType) {
       await setRequestType(this.jiraClient, this.settings, ticketKey, undefined, action.requestType);
     }
+
+    // Same reasoning as the request type — its own call, so a rejection can't roll back the tier.
+    await this.setBcAccount(ticketKey, action.bcAccount);
 
     // Assign via round-robin if a pool is specified
     if (action.assignToPool && this.assignmentEngine) {
