@@ -87,6 +87,14 @@ interface TicketDetail {
   claimed_by_display: string | null;
 }
 
+interface Routing {
+  ticketTeam: string;
+  projectKey: string | null;
+  teamName: string | null;
+  source: 'ticket' | 'user-team' | 'override' | 'none';
+  projects: Array<{ team: string; projectKey: string }>;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -230,11 +238,92 @@ function DevReviewRow({ item, selected, focused, isMine }: { item: QueueItem; se
   );
 }
 
+/** Nurtur Product chip — prominent because it decides which dev team's Jira
+ *  project the work item lands in, and editable because it is often wrong on
+ *  the incoming ticket. Read-only until the reviewer holds the claim. */
+function ProductChip({
+  product, editable, busy, onChange,
+}: {
+  product: string | undefined;
+  editable: boolean;
+  busy: boolean;
+  onChange: (p: string) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [options, setOptions] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const startEdit = () => {
+    setError(null);
+    setEditing(true);
+    if (options.length === 0) {
+      setLoading(true);
+      api<string[]>('/products')
+        .then(setOptions)
+        .catch(e => setError(e instanceof Error ? e.message : 'Could not load products'))
+        .finally(() => setLoading(false));
+    }
+  };
+
+  const pick = async (value: string) => {
+    if (!value || value === product) { setEditing(false); return; }
+    const r = await onChange(value);
+    if (r.ok) setEditing(false);
+    else setError(r.error || 'Update failed');
+  };
+
+  const missing = !product;
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <select
+          autoFocus
+          disabled={busy || loading}
+          defaultValue={product || ''}
+          onChange={e => { void pick(e.target.value); }}
+          className="px-2 py-1 text-[11px] rounded-lg border text-neutral-50"
+          style={{ background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(94,193,202,0.45)' }}
+        >
+          <option value="" disabled>{loading ? 'Loading products…' : 'Select product…'}</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <button onClick={() => { setEditing(false); setError(null); }} className="text-[10px] text-neutral-400 hover:text-neutral-200">cancel</button>
+        {error && <span className="text-[10px] text-red-400">{error}</span>}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        title={missing ? 'No Nurtur Product set — the work item cannot be routed to a dev team' : `Nurtur Product — routes the work item to this team's Jira project`}
+        className="text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full"
+        style={missing
+          ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }
+          : { background: 'rgba(94,193,202,0.18)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.45)' }}
+      >
+        {missing ? '⚠ No product' : product}
+      </span>
+      {editable && (
+        <button
+          onClick={startEdit}
+          disabled={busy}
+          title="Change the Nurtur Product"
+          className="text-[10px] px-1.5 py-0.5 rounded text-neutral-400 hover:text-[#5ec1ca] hover:bg-white/5 disabled:opacity-40"
+        >✎</button>
+      )}
+      {error && <span className="text-[10px] text-red-400">{error}</span>}
+    </span>
+  );
+}
+
 // ── Detail panel ───────────────────────────────────────────────────────────
 
 function DevReviewDetail({
   detail, item, busy, currentUserId, isAdmin, queueActions,
-  onClaim, onUnclaim, onFastTrack, onComment, onAcceptClick, onReturnClick, onLinkExistingClick,
+  onClaim, onUnclaim, onFastTrack, onComment, onProductChange, onAcceptClick, onReturnClick, onLinkExistingClick,
 }: {
   detail: TicketDetail;
   item: QueueItem | undefined;
@@ -246,6 +335,7 @@ function DevReviewDetail({
   onUnclaim: () => void;
   onFastTrack: (on: boolean) => void;
   onComment: (text: string) => Promise<{ ok: boolean; error?: string }>;
+  onProductChange: (product: string) => Promise<{ ok: boolean; error?: string }>;
   onAcceptClick: () => void;
   onReturnClick: () => void;
   onLinkExistingClick: () => void;
@@ -268,9 +358,12 @@ function DevReviewDetail({
     <>
       <StatusPill status={state?.status} />
       {state?.fast_track ? <FastTrackFlame /> : null}
-      {product && (
-        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: 'rgba(94,193,202,0.15)', color: '#5ec1ca', border: '1px solid rgba(94,193,202,0.3)' }}>{product}</span>
-      )}
+      <ProductChip
+        product={product}
+        editable={isMine && !terminal}
+        busy={busy}
+        onChange={onProductChange}
+      />
       {fields.status?.name && <span className="text-[10px] text-neutral-500">· Jira: {fields.status.name}</span>}
       {state?.claimed_by_user_id && (
         <span className="text-[10px] text-[#c4b5fd] font-semibold">
@@ -405,6 +498,12 @@ export function DevReviewQueueView() {
   const [busy, setBusy] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [jumpKey, setJumpKey] = useState('');
+  // Where the work item will be created. Resolved server-side from the
+  // ticket's Nurtur Product, shown in the Accept modal so the destination is
+  // never a surprise, and overridable when the auto-route is wrong.
+  const [routing, setRouting] = useState<Routing | null>(null);
+  const [projectOverride, setProjectOverride] = useState('');
+  const [products, setProducts] = useState<string[]>([]);
 
   const currentUserId = user?.id ?? 0;
   const isAdminUser = !!user?.role?.includes('admin');
@@ -515,8 +614,31 @@ export function DevReviewQueueView() {
     }
   };
 
+  // Correcting the product re-routes the work item, so refresh both the queue
+  // (its team chip) and the detail (its product chip) once Jira has taken it.
+  const onProductChange = async (product: string): Promise<{ ok: boolean; error?: string }> => {
+    if (!selectedKey || !product) return { ok: false };
+    setBusy(true);
+    try {
+      const json = await apiFull(`/ticket/${selectedKey}/product`, {
+        method: 'POST',
+        body: JSON.stringify({ product }),
+      });
+      if (!json.ok) return { ok: false, error: json.error || 'Product update failed' };
+      await Promise.all([loadQueue(), loadDetail(selectedKey)]);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Product update failed' };
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const openAcceptModal = () => {
     if (!detail) return;
+    setRouting(null);
+    setProjectOverride('');
+    api<Routing>(`/ticket/${detail.key}/routing`).then(setRouting).catch(() => setRouting(null));
     setAcceptTldr(adfToText(detail.fields.customfield_13184));
     setAcceptDevDetails(adfToText(detail.fields.customfield_13215));
     setAcceptNote('');
@@ -534,7 +656,7 @@ export function DevReviewQueueView() {
     try {
       const json = await apiFull(`/ticket/${selectedKey}/accept`, {
         method: 'POST',
-        body: JSON.stringify({ note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment, storyType: acceptStoryType, bcAccount: acceptBcAccount.trim() }),
+        body: JSON.stringify({ note: acceptNote, tldr: acceptTldr, developmentDetails: acceptDevDetails, workItemComment: acceptWorkItemComment, storyType: acceptStoryType, bcAccount: acceptBcAccount.trim(), projectKey: projectOverride || undefined }),
       });
       if (json.ok) {
         setItems(prev => prev.map(i => i.key === selectedKey
@@ -725,6 +847,7 @@ export function DevReviewQueueView() {
           onUnclaim={onUnclaim}
           onFastTrack={onFastTrack}
           onComment={onComment}
+          onProductChange={onProductChange}
           onAcceptClick={openAcceptModal}
           onReturnClick={() => setShowReturnModal(true)}
           onLinkExistingClick={openLinkExistingModal}
@@ -762,6 +885,45 @@ export function DevReviewQueueView() {
           </div>
           <h3 className="text-lg font-bold text-neutral-50 mb-1" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>Accept to Development backlog</h3>
           <p className="text-[12px] text-neutral-300 mb-5">Sets <span className="text-neutral-100 font-semibold">CurrentTier = Development</span>, populates the Escalate-to-Development screen fields below, and posts an internal Jira comment.</p>
+          {/* Destination — routed from the ticket's Nurtur Product. Shown up
+              front so a mis-routed work item is caught before it is created. */}
+          <div className="mb-4 p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 block">Work item destination</label>
+            {!routing ? (
+              <div className="text-[12px] text-neutral-500">Resolving…</div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 flex-wrap text-[12px]">
+                  <span className="text-neutral-400">Product</span>
+                  <span className="font-semibold text-[#5ec1ca]">{routing.ticketTeam}</span>
+                  <span className="text-neutral-600">→</span>
+                  <select
+                    value={projectOverride || routing.projectKey || ''}
+                    onChange={e => setProjectOverride(e.target.value)}
+                    className="px-2 py-1 text-[12px] rounded-lg border text-neutral-50 font-mono font-bold"
+                    style={{ background: 'rgba(255,255,255,0.06)', borderColor: routing.projectKey || projectOverride ? 'rgba(94,193,202,0.45)' : 'rgba(239,68,68,0.4)' }}
+                  >
+                    <option value="" disabled>No project…</option>
+                    {routing.projects.map(pr => (
+                      <option key={pr.projectKey} value={pr.projectKey}>{pr.projectKey} — {pr.team}</option>
+                    ))}
+                  </select>
+                </div>
+                {routing.source === 'ticket' && !projectOverride && (
+                  <p className="text-[10px] text-neutral-500 mt-1.5">Routed from the ticket's Nurtur Product, owned by <span className="text-neutral-300">{routing.teamName}</span>. Change the product on the ticket if this is wrong.</p>
+                )}
+                {routing.source === 'user-team' && !projectOverride && (
+                  <p className="text-[10px] text-amber-400 mt-1.5">⚠ No team owns "{routing.ticketTeam}" — falling back to your own team ({routing.teamName}). Fix the product on the ticket, or map it to a team in Settings.</p>
+                )}
+                {routing.source === 'none' && !projectOverride && (
+                  <p className="text-[10px] text-red-400 mt-1.5">⚠ No Jira project resolved — pick one, or no work item will be created.</p>
+                )}
+                {projectOverride && projectOverride !== routing.projectKey && (
+                  <p className="text-[10px] text-amber-400 mt-1.5">⚠ Overriding the automatic route ({routing.projectKey || 'none'}).</p>
+                )}
+              </>
+            )}
+          </div>
           <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2"><span>TL;DR</span><span className="text-red-400">*</span></label>
             <textarea value={acceptTldr} onChange={e => setAcceptTldr(e.target.value)} placeholder="e.g. Email sends are queueing more than once…" rows={2} className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50 placeholder-neutral-600" style={{ ...drTheme.input, borderColor: acceptTldr.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)' }} autoFocus />

@@ -9,6 +9,7 @@ import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
 import { isAdmin } from '../utils/role-helpers.js';
+import { getNurturProducts, resolveProductOptionValue } from '../services/nurtur-products.js';
 
 /**
  * Dev Review Queue routes.
@@ -592,6 +593,159 @@ export function createDevReviewRoutes(
     }
   });
 
+  // ── Dev work item routing ──────────────────────────────────────────────
+  //
+  // Which Jira project does the Bug get created in? The answer is a property
+  // of the TICKET (its Nurtur Product → owning team → that team's project
+  // key), NOT of the reviewer. Routing off the reviewer's own team is how a
+  // TPJ ticket ended up as a Members Hub work item.
+  //
+  // The reviewer's team is only a fallback for tickets whose product maps to
+  // no team (or a team with no project key configured), and an explicit
+  // override in the Accept modal beats both.
+
+  interface RoutingResolution {
+    /** productToTeam() value for the ticket — the team bucket it belongs to. */
+    ticketTeam: string;
+    /** Resolved destination project key, or null if nothing is configured. */
+    projectKey: string | null;
+    /** Name of the team the project key came from. */
+    teamName: string | null;
+    /** Where the key came from, so the UI can warn on a non-obvious route. */
+    source: 'ticket' | 'user-team' | 'override' | 'none';
+  }
+
+  function teamOwnsProduct(t: { name: string; jira_products: string[] | null }, product: string): boolean {
+    const p = product.toLowerCase();
+    if (t.name.toLowerCase() === p) return true;
+    return !!t.jira_products?.some((x) => x.toLowerCase() === p);
+  }
+
+  async function resolveTargetProject(
+    jiraKey: string,
+    userId: number | null,
+  ): Promise<RoutingResolution> {
+    const state = await devQueries.getState(jiraKey);
+    const ticketTeam = state?.team || 'Unassigned';
+
+    // 1 — The ticket's own product decides. This is the normal path.
+    if (ticketTeam && ticketTeam !== 'Unassigned') {
+      const allTeams = await teamQueries.getAll();
+      const owner = allTeams.find((t) => teamOwnsProduct(t, ticketTeam));
+      const key = owner?.jira_project_key?.trim() || null;
+      if (key) return { ticketTeam, projectKey: key, teamName: owner!.name, source: 'ticket' };
+    }
+
+    // 2 — Unmapped product: fall back to the reviewer's own team. Prefer a
+    //     team that claims this product, else the first with a project key.
+    if (userId != null) {
+      let userTeams = userTeamQueries
+        ? await userTeamQueries.getTeamsForUser(userId, teamQueries)
+        : [];
+      if (userTeams.length === 0) {
+        const user = await userQueries.getById(userId);
+        if (user?.team_id) {
+          const t = await teamQueries.getById(user.team_id);
+          if (t) userTeams.push(t);
+        }
+      }
+      const withKey = userTeams.filter((t) => t.jira_project_key?.trim());
+      const pick = withKey.find((t) => teamOwnsProduct(t, ticketTeam)) ?? withKey[0];
+      if (pick) {
+        return {
+          ticketTeam,
+          projectKey: pick.jira_project_key!.trim(),
+          teamName: pick.name,
+          source: 'user-team',
+        };
+      }
+    }
+
+    return { ticketTeam, projectKey: null, teamName: null, source: 'none' };
+  }
+
+  /** Nurtur Product option list, for the product editor in the detail panel.
+   *  Same process-wide cache the admin Team picker uses. */
+  router.get('/products', async (_req: Request, res: Response) => {
+    try {
+      const client = getJiraClient();
+      if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+      const { products } = await getNurturProducts(client);
+      res.json({ ok: true, data: products });
+    } catch (err) {
+      res.status(502).json({ ok: false, error: err instanceof Error ? err.message : 'Product fetch failed' });
+    }
+  });
+
+  /** Correct the ticket's Nurtur Product.
+   *
+   *  The product is what routes the work item, so a wrong one sends the Bug to
+   *  the wrong dev team. Writing it back to Jira (rather than only to NOVA)
+   *  keeps the source of truth in one place — the queue re-derives team from
+   *  the product on every sync, so a NOVA-only edit would be undone.
+   */
+  router.post('/ticket/:key/product', async (req: Request, res: Response) => {
+    if (!req.user) { res.status(401).json({ ok: false }); return; }
+    if (!await requireClaim(req, res)) return;
+    const key = String(req.params.key);
+    const product = String(req.body?.product || '').trim();
+    if (!product) { res.status(400).json({ ok: false, error: 'Product is required' }); return; }
+
+    const client = getJiraClient();
+    if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
+
+    try {
+      // 'TPJ' is a NOVA-side collapse of several Jira options — map it back to
+      // a real option value before writing, or Jira rejects the update.
+      const optionValue = await resolveProductOptionValue(client, product);
+      if (!optionValue) {
+        res.status(400).json({ ok: false, error: `"${product}" is not a valid Nurtur Product option` });
+        return;
+      }
+
+      const before = (await devQueries.getState(key))?.team || 'Unassigned';
+      await client.updateFields(key, { [CF_NURTUR_PRODUCT]: { value: optionValue } });
+
+      const team = productToTeam(optionValue);
+      await devQueries.setTeam(key, team);
+      if (cache) await syncService?.syncSingleIssue(key).catch(() => {});
+
+      const display = await userDisplay(req);
+      await devQueries.addThreadEntry({
+        jira_key: key,
+        user_id: req.user.id,
+        user_display: display,
+        kind: 'comment',
+        body: `${display} changed Nurtur Product from "${before}" to "${optionValue}" — work item routing now targets ${team}.`,
+        syncState: 'skip',
+      });
+
+      const routing = await resolveTargetProject(key, req.user.id);
+      console.log(`[DevReview/product] ${key}: '${before}' → '${optionValue}' (team=${team}, project=${routing.projectKey ?? 'none'})`);
+      res.json({ ok: true, data: { product: optionValue, team, routing } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Product update failed';
+      console.error(`[DevReview/product] ${key} failed: ${msg}`);
+      res.status(502).json({ ok: false, error: msg });
+    }
+  });
+
+  /** Where would this ticket's work item land, and what are the alternatives?
+   *  Drives the destination line in the Accept modal. */
+  router.get('/ticket/:key/routing', async (req: Request, res: Response) => {
+    if (!req.user) { res.status(401).json({ ok: false }); return; }
+    try {
+      const routing = await resolveTargetProject(String(req.params.key), req.user.id);
+      const projects = (await teamQueries.getAll())
+        .filter((t) => t.jira_project_key?.trim())
+        .map((t) => ({ team: t.name, projectKey: t.jira_project_key!.trim() }))
+        .sort((a, b) => a.team.localeCompare(b.team));
+      res.json({ ok: true, data: { ...routing, projects } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'routing failed' });
+    }
+  });
+
   // ── Claim guard — actions require the requesting user to hold the claim ──
 
   async function requireClaim(req: Request, res: Response): Promise<boolean> {
@@ -727,6 +881,7 @@ export function createDevReviewRoutes(
     const workItemComment = String(req.body?.workItemComment || '').trim();
     const storyType = String(req.body?.storyType || '').trim();
     const bcAccount = String(req.body?.bcAccount || '').trim();
+    const projectKeyOverride = String(req.body?.projectKey || '').trim().toUpperCase() || null;
     const display = await userDisplay(req);
 
     if (!tldr) {
@@ -907,49 +1062,26 @@ export function createDevReviewRoutes(
       console.warn(`[DevReview/accept] Failed to post agent-notice comment for ${key}: ${noticeErr instanceof Error ? noticeErr.message : noticeErr}`);
     });
 
-    // Step 4 — Create linked Bug work item in the dev team's Jira project
+    // Step 4 — Create linked Bug work item in the OWNING TEAM's Jira project.
+    // Resolved from the ticket's Nurtur Product first (see resolveTargetProject);
+    // the reviewer's own team is only a fallback, and projectKeyOverride from
+    // the Accept modal beats both.
     let workItemKey: string | null = null;
-    let targetProjectKey: string | null = null;
-    if (req.user) {
-      // Find the best project key from the user's teams
-      const userTeams = userTeamQueries
-        ? await userTeamQueries.getTeamsForUser(req.user.id, teamQueries)
-        : [];
-      // Fallback to legacy team_id
-      if (userTeams.length === 0) {
-        const user = await userQueries.getById(req.user.id);
-        if (user?.team_id) {
-          const t = await teamQueries.getById(user.team_id);
-          if (t) userTeams.push(t);
-        }
-      }
-      if (userTeams.length === 1) {
-        targetProjectKey = userTeams[0].jira_project_key?.trim() || null;
-      } else if (userTeams.length > 1) {
-        const ticketState = await devQueries.getState(key);
-        const ticketTeam = ticketState?.team || 'Unassigned';
-        const match = userTeams.find(t => t.jira_products?.includes(ticketTeam));
-        targetProjectKey = (match ?? userTeams[0]).jira_project_key?.trim() || null;
-      }
-    }
-
-    // Fallback: use the ticket's assigned team project key
-    if (!targetProjectKey) {
-      const ticketState = await devQueries.getState(key);
-      const ticketTeam = ticketState?.team;
-      if (ticketTeam) {
-        const allTeams = await teamQueries.getAll();
-        const teamMatch = allTeams.find(t =>
-          t.name.toLowerCase() === ticketTeam.toLowerCase() ||
-          t.jira_products?.some(p => p.toLowerCase() === ticketTeam.toLowerCase()),
-        );
-        targetProjectKey = teamMatch?.jira_project_key?.trim() || null;
+    const routing = await resolveTargetProject(key, req.user.id);
+    let targetProjectKey: string | null = routing.projectKey;
+    if (projectKeyOverride) {
+      targetProjectKey = projectKeyOverride;
+      console.log(`[DevReview/accept] ${key}: reviewer overrode destination → ${projectKeyOverride} (auto-resolved ${routing.projectKey ?? 'none'} via ${routing.source})`);
+    } else {
+      console.log(`[DevReview/accept] ${key}: product='${routing.ticketTeam}' → ${targetProjectKey ?? 'none'} (source=${routing.source}, team=${routing.teamName ?? '-'})`);
+      if (routing.source === 'user-team') {
+        warnings.push(`No team owns product "${routing.ticketTeam}" — work item routed to your own team's project (${targetProjectKey}). Set the product on the ticket, or add it to a team in Settings.`);
       }
     }
 
     if (!targetProjectKey) {
-      console.warn(`[DevReview/accept] No jira_project_key for user or ticket team — skipping Bug creation for ${key}`);
-      warnings.push('No Jira project key configured for your team — work item not created');
+      console.warn(`[DevReview/accept] No jira_project_key for product '${routing.ticketTeam}' or reviewer's team — skipping Bug creation for ${key}`);
+      warnings.push(`No Jira project key configured for product "${routing.ticketTeam}" or your own team — work item not created. Set one against the owning team in Settings → Teams.`);
     } else {
       try {
         // Build the same brief Link Existing posts to its work item, so both
@@ -957,33 +1089,47 @@ export function createDevReviewRoutes(
         const brief = await buildWorkItemBrief(client, key, tldr, developmentDetails, workItemComment);
         const nurturProduct = brief.nurturProduct;
 
+        // Optional fields — dropped one at a time if the target project's Bug
+        // create screen doesn't carry them. Story Type and Work Classification
+        // are mandatory on EP/APPS but a newly configured team's project may
+        // not have either, and losing a field beats failing the whole accept.
+        const OPTIONAL_FIELDS: Record<string, unknown> = {
+          customfield_14147: { id: '13596' },              // Work Classification: General Maintenance
+          [CF_STORY_TYPE]: { id: storyType },              // Story Type — reviewer-selected
+          ...(nurturProduct ? { [CF_NURTUR_PRODUCT]: { value: nurturProduct } } : {}),
+        };
+        const FIELD_LABELS: Record<string, string> = {
+          customfield_14147: 'Work Classification',
+          [CF_STORY_TYPE]: 'Story Type',
+          [CF_NURTUR_PRODUCT]: 'Nurtur Product',
+        };
+
         const baseFields = {
           project: { key: targetProjectKey },
           issuetype: { name: 'Bug' },
           summary: `[Support] ${brief.summary}`,
           description: adfDoc(brief.text),
-          customfield_14147: { id: '13596' }, // Work Classification: General Maintenance
-          [CF_STORY_TYPE]: { id: storyType }, // Story Type — reviewer-selected, mandatory on dev Bug screen
         };
-        // Mirror the support ticket's Nurtur Product onto the Bug when set.
-        // If the field/option isn't valid for the target project, fall back to
-        // creating the Bug without it rather than failing the whole accept.
+
+        // Jira names the offending field(s) in the error body, so strip exactly
+        // those and retry rather than guessing. Bounded by the field count so a
+        // persistent error can never loop.
+        const optional = { ...OPTIONAL_FIELDS };
         let createdBug;
-        try {
-          createdBug = await client.createIssue({
-            fields: {
-              ...baseFields,
-              ...(nurturProduct ? { [CF_NURTUR_PRODUCT]: { value: nurturProduct } } : {}),
-            },
-          });
-        } catch (createErr: unknown) {
-          const createMsg = createErr instanceof Error ? createErr.message : String(createErr);
-          if (nurturProduct && (createMsg.includes('cannot be set') || createMsg.includes('not on the appropriate screen') || createMsg.includes('customfield_13183'))) {
-            console.warn(`[DevReview/accept] Nurtur Product rejected for ${targetProjectKey}, creating Bug without it: ${createMsg}`);
-            warnings.push(`Bug created without Nurtur Product (not valid for ${targetProjectKey})`);
-            createdBug = await client.createIssue({ fields: baseFields });
-          } else {
-            throw createErr;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            createdBug = await client.createIssue({ fields: { ...baseFields, ...optional } });
+            break;
+          } catch (createErr: unknown) {
+            const msg = createErr instanceof Error ? createErr.message : String(createErr);
+            const offending = Object.keys(optional).filter((f) => msg.includes(f));
+            if (offending.length === 0 || attempt >= Object.keys(OPTIONAL_FIELDS).length) throw createErr;
+            for (const f of offending) {
+              delete optional[f];
+              const label = FIELD_LABELS[f] || f;
+              console.warn(`[DevReview/accept] ${label} rejected by ${targetProjectKey}, retrying without it: ${msg}`);
+              warnings.push(`Bug created without ${label} (not on ${targetProjectKey}'s Bug screen)`);
+            }
           }
         }
         workItemKey = createdBug.key;
