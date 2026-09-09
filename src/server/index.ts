@@ -1897,8 +1897,27 @@ async function main() {
         await captureSupportNt(agentJiraClient);
         await captureAgentKpis(settingsQueries, agentJiraClient);
         settingsQueries.set('kpi_org_freeze_day', todayUk);
-        // Yesterday is now fully complete — re-capture its flow KPIs (New Tickets /
-        // Solved) so their columns reflect the whole day, not the 18:00-partial freeze.
+        // Ratings keep arriving days after the solve, so re-run CSAT over the last week.
+        await recaptureSupportLateData(agentJiraClient, todayUk, 7);
+      }
+    }, 10 * 60 * 1000);
+
+    // Settle yesterday's FLOW KPIs (New Tickets / Solved) first thing in the morning.
+    //
+    // The 18:00 freeze only sees 00:00-18:00, so every flow row starts life ~5-8%
+    // short and is later corrected by a re-capture. That correction used to hang off
+    // the NEXT day's 18:00 freeze, which left a ~15-hour window where the stored value
+    // was still provisional — exactly when the team copies the board into the KPI
+    // spreadsheet each morning. The sheet got the partial, the board later showed the
+    // full day, and the two disagreed permanently. Running the settle at 06:00 UK means
+    // yesterday is final before anyone reads it. Stocks are point-in-time and are NOT
+    // touched — only flows. Same once-per-UK-day settings guard as the freeze.
+    jobRegistry.register('kpi-org-flow-settle', 'Org KPI flow settle (yesterday, 06:00 UK)', async () => {
+      if (!agentJiraClient) return;
+      const now = new Date();
+      const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
+      const todayUk = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+      if (ukHour >= 6 && settingsQueries.get('kpi_org_flow_settle_day') !== todayUk) {
         const y = new Date(); y.setUTCDate(y.getUTCDate() - 1);
         const yDay = y.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
         await recaptureSupportFlows(agentJiraClient, yDay);
@@ -1906,8 +1925,7 @@ async function main() {
         // and overnight resolve, which is a permanent undercount for anyone working
         // outside 9-6 (NOVA AI most of all). Stocks stay frozen; only solves refresh.
         await recaptureAgentFlows(agentJiraClient, yDay);
-        // Ratings keep arriving days after the solve, so re-run CSAT over the last week.
-        await recaptureSupportLateData(agentJiraClient, todayUk, 7);
+        settingsQueries.set('kpi_org_flow_settle_day', todayUk);
       }
     }, 10 * 60 * 1000);
 

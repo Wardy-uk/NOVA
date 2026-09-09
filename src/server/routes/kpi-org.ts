@@ -221,6 +221,7 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
       const rows = await getTeamRange('Support', from, to);
       let data = rows.map(row => {
         const def = getKpi(row.kpi_key);
+        const day = typeof row.kpi_date === 'string' ? row.kpi_date : new Date(row.kpi_date as unknown as string).toISOString().slice(0, 10);
         return {
           kpi: def?.label ?? row.kpi_key,
           kpiGroup: def?.colA ?? 'Other',
@@ -228,7 +229,11 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
           target: row.target,
           direction: dir(def?.direction),
           rag: ragNum(row.rag),
-          CreatedAt: typeof row.kpi_date === 'string' ? row.kpi_date : new Date(row.kpi_date as unknown as string).toISOString().slice(0, 10),
+          CreatedAt: day,
+          // A flow KPI captured on its own day only counts up to the 18:00 freeze —
+          // the evening is still missing and the 06:00 settle will raise it. Flag it so
+          // nobody copies a partial number into the KPI spreadsheet as if it were final.
+          provisional: def?.rollup === 'sum' && (row.captured_at ?? '').slice(0, 10) <= day,
         };
       });
 
@@ -253,6 +258,7 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
                 direction: dir(def?.direction),
                 rag: ragNum(it.rag),
                 CreatedAt: todayUk,
+                provisional: def?.rollup === 'sum', // today's flows are always mid-day
               });
             }
           } catch { /* keep stored today rows on live-compute failure */ }

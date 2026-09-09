@@ -13,6 +13,7 @@ interface DailyKpi {
   direction: string | null;
   rag: number | null; // 1 = green, 2 = amber, 3 = red
   CreatedAt: string;
+  provisional?: boolean; // flow KPI still on its 18:00 partial — settles at 06:00 next day
 }
 
 const RAG: Record<number, string> = { 1: '#10b981', 2: '#eab308', 3: '#ef4444' };
@@ -206,6 +207,11 @@ export function KpiRebuildLegacy() {
         >Reportable only</button>
       </div>
 
+      {rows.some(r => r.provisional) && (
+        <div className="mb-3 text-xs text-amber-300/80">
+          <span className="text-amber-400/70">*</span> Provisional — a daily-volume KPI frozen at 18:00 UK, so the evening is not in it yet. It settles at 06:00 the next morning. Don't copy a starred number into the KPI spreadsheet.
+        </div>
+      )}
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
       {loading && <div className="text-slate-400">Loading…</div>}
 
@@ -229,7 +235,15 @@ export function KpiRebuildLegacy() {
                       <td className="px-3 py-2 text-center text-slate-500">{targetOf(kpi) ?? ''}</td>
                       {dates.map(d => {
                         const c = cellMap.get(`${kpi}|${d}`);
-                        return <td key={d} className="px-3 py-2 text-center whitespace-nowrap">{c && c.count != null ? <>{c.count}<Dot rag={c.rag} /></> : <span className="text-slate-700">·</span>}</td>;
+                        if (!c || c.count == null) return <td key={d} className="px-3 py-2 text-center whitespace-nowrap"><span className="text-slate-700">·</span></td>;
+                        return (
+                          <td key={d} className="px-3 py-2 text-center whitespace-nowrap">
+                            <span className={c.provisional ? 'text-amber-300/90' : undefined} title={c.provisional ? 'Provisional — frozen at 18:00, still missing the evening. Settles at 06:00 tomorrow.' : undefined}>
+                              {c.count}{c.provisional && <span className="text-amber-400/70">*</span>}
+                            </span>
+                            <Dot rag={c.rag} />
+                          </td>
+                        );
                       })}
                     </tr>
                   ))}
