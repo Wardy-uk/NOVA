@@ -17,6 +17,8 @@ export interface AgentAvailability {
   set_by?: string | null;
   display_name?: string;
   pool?: string;
+  /** dbo.Agent.Department — 'NT' (tech support) or 'TPJ'/'NTPJ' (TPJ maintenance). */
+  department?: string | null;
 }
 
 export interface DaySnapshot {
@@ -216,6 +218,7 @@ export class AgentAvailabilityService {
         set_by: avail?.set_by ?? null,
         display_name: agent.display_name,
         pool: agent.pool,
+        department: agent.department,
       };
 
       if (!avail?.status || avail.status === 'available' || avail.status === 'wfh') {
