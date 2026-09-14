@@ -61,8 +61,25 @@ interface GoldenRulesScore {
 
 // ── Helpers ──
 
-function api(path: string) {
-  return fetch(`/api/agent${path}`).then(r => r.json());
+/**
+ * The queue endpoint is heavy enough to hit the proxy timeout, and a timed-out
+ * request arrives as a non-JSON (usually empty) body — r.json() then throws
+ * "Unexpected end of JSON input", which tells you nothing about what happened.
+ * Report the status and how long it took instead.
+ */
+async function api(path: string) {
+  const started = Date.now();
+  const r = await fetch(`/api/agent${path}`);
+  const text = await r.text();
+  const secs = Math.round((Date.now() - started) / 1000);
+  if (!text.trim()) {
+    throw new Error(`${path} returned an empty response (HTTP ${r.status}) after ${secs}s — the request timed out upstream`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${path} returned a non-JSON response (HTTP ${r.status}) after ${secs}s: ${text.slice(0, 120)}`);
+  }
 }
 
 function apiJson(path: string, method: string, body?: unknown) {
