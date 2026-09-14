@@ -1,3 +1,4 @@
+import { captureError } from './error-log.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AgentAvailabilityService, AvailabilityStatus } from './agent-availability.js';
 import type { KpiAgent } from './agent-availability.js';
@@ -158,7 +159,14 @@ function mapAbsenceType(absence: PeopleHRAbsence): AvailabilityStatus {
   return 'annual_leave';
 }
 
-type SyncResult = { synced: number; skipped: number; errors: string[] };
+type SyncResult = {
+  synced: number;
+  skipped: number;
+  errors: string[];
+  /** Named agents skipped because dbo.Agent.PeopleHrId is blank — they can never
+   *  be marked on leave, so round-robin will keep assigning to them. */
+  skippedAgents: string[];
+};
 
 // A manual sync firing while the scheduled one is still running just doubles the
 // call volume into a 50/min cap and rate-limits both. Share the in-flight run.
@@ -184,8 +192,21 @@ async function runSync(
 ): Promise<SyncResult> {
   const today = new Date();
   const end = new Date(today.getTime() + 14 * 86400000);
-  return runWindow(settings, availabilityService, kpiAgents, today.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+  const result = await runWindow(settings, availabilityService, kpiAgents, today.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+
+  // Heartbeat for the assignment side. "No leave rows today" is not a usable
+  // failure signal — on a day when nobody is off it's the correct answer — so
+  // record when the sync last actually reached People HR instead.
+  const reached = result.errors.length === 0
+    || result.errors.length < Math.max(1, kpiAgents.filter(a => a.PeopleHrId).length);
+  if (reached) {
+    try { settings.set(PEOPLE_HR_LAST_OK_KEY, new Date().toISOString()); } catch { /* non-fatal */ }
+  }
+  return result;
 }
+
+/** ISO timestamp of the last sync that reached People HR for at least one agent. */
+export const PEOPLE_HR_LAST_OK_KEY = 'people_hr_last_sync_ok_at';
 
 /**
  * Pull leave for an arbitrary past window and write it to agent_availability.
@@ -208,10 +229,10 @@ export async function backfillPeopleHR(
   endDate: string,
 ): Promise<SyncResult> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return { synced: 0, skipped: 0, errors: ['startDate and endDate must be YYYY-MM-DD'] };
+    return { synced: 0, skipped: 0, errors: ['startDate and endDate must be YYYY-MM-DD'], skippedAgents: [] };
   }
   if (startDate > endDate) {
-    return { synced: 0, skipped: 0, errors: ['startDate must not be after endDate'] };
+    return { synced: 0, skipped: 0, errors: ['startDate must not be after endDate'], skippedAgents: [] };
   }
   console.log(`[people-hr] Backfill ${startDate} → ${endDate}`);
   return runWindow(settings, availabilityService, kpiAgents, startDate, endDate);
@@ -225,15 +246,28 @@ async function runWindow(
   endStr: string,
 ): Promise<SyncResult> {
   const config = getConfig(settings);
-  if (!config) return { synced: 0, skipped: 0, errors: ['People HR not configured or disabled'] };
+  if (!config) return { synced: 0, skipped: 0, errors: ['People HR not configured or disabled'], skippedAgents: [] };
 
   const errors: string[] = [];
   let synced = 0;
 
   // Only process agents that have a People HR ID configured
   const agentsWithHrId = kpiAgents.filter(a => a.PeopleHrId);
-  const skipped = kpiAgents.length - agentsWithHrId.length;
+  const skippedAgents = kpiAgents
+    .filter(a => !a.PeopleHrId)
+    .map(a => `${a.display_name}${a.department ? ` (${a.department})` : ''}`);
+  const skipped = skippedAgents.length;
   console.log(`[people-hr] ${agentsWithHrId.length} agents have People HR IDs (${skipped} without)`);
+
+  // An agent with no People HR ID is invisible to leave: they read as available
+  // every day and round-robin keeps assigning to them while they're off. Surface
+  // it rather than letting it sit silently in a counter.
+  if (skippedAgents.length > 0) {
+    console.warn(`[people-hr] No People HR ID — leave will never be seen for: ${skippedAgents.join(', ')}`);
+    captureError('people-hr-sync', `${skippedAgents.length} active agent(s) have no People HR ID — their leave is invisible to round-robin`, {
+      context: { agents: skippedAgents },
+    });
+  }
 
   const leaveEntries: { rosterId: number; date: string; status: AvailabilityStatus; reason: string }[] = [];
 
@@ -278,6 +312,18 @@ async function runWindow(
     }
   }
 
+  // Fail loud on a total wipeout. Every agent erroring still leaves
+  // agent_availability empty, which reads downstream as "everyone is in" — the
+  // exact shape of the July 2026 incident, where a bad base URL 404'd all 13
+  // agents and round-robin carried on assigning into annual leave.
+  if (agentsWithHrId.length > 0 && errors.length >= agentsWithHrId.length) {
+    captureError(
+      'people-hr-sync',
+      `People HR sync failed for all ${agentsWithHrId.length} agent(s) — availability is stale and round-robin will treat everyone as available`,
+      { severity: 'critical', context: { errors: errors.slice(0, 10) } },
+    );
+  }
+
   console.log(`[people-hr] Sync complete: ${synced} entries written, ${errors.length} errors`);
-  return { synced, skipped, errors };
+  return { synced, skipped, errors, skippedAgents };
 }

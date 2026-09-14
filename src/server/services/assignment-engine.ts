@@ -3,6 +3,8 @@ import { query, queryOne, execute, executeAndGetId } from './database.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { createWorkingDayClock, type WorkingDayClock } from '../../shared/utils/workingDayClock.js';
+import { captureError } from './error-log.js';
+import { PEOPLE_HR_LAST_OK_KEY } from './people-hr-sync.js';
 
 export type Pool = 'cc' | 't2' | 'tpj' | 'digital' | 'production';
 
@@ -87,6 +89,8 @@ export class AssignmentEngine {
   // workload snapshot so a batch/sweep can't pile every ticket onto whoever was lowest at the
   // start — the snapshot (KPI/cache) lags behind by minutes, so we track in-flight here.
   private recentAssignments = new Map<string, number[]>();
+  // Dates we've already alerted on for stale availability — one alert a day, not one per ticket.
+  private staleAvailabilityAlerted = new Set<string>();
 
   constructor(
     private jiraClient: JiraRestClient,
@@ -435,12 +439,34 @@ export class AssignmentEngine {
     }
   }
 
+  /**
+   * Availability is fail-open by design: an agent with no row for today is
+   * treated as in. That keeps the desk running when People HR is down, but it
+   * means a broken sync is indistinguishable from a full attendance — which is
+   * how round-robin assigned into annual leave in July 2026 without a word.
+   * Alert (once a day) when the sync hasn't reached People HR in over a day.
+   */
+  private checkAvailabilityFreshness(today: string): void {
+    if (this.staleAvailabilityAlerted.has(today)) return;
+    const lastOk = this.settingsQueries.get(PEOPLE_HR_LAST_OK_KEY);
+    const ageMs = lastOk ? Date.now() - new Date(lastOk).getTime() : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(ageMs) || ageMs > 24 * 60 * 60 * 1000) {
+      this.staleAvailabilityAlerted.add(today);
+      captureError(
+        'assignment-engine',
+        `Agent availability is stale — People HR last synced ${lastOk ?? 'never'}. Round-robin is assigning as if everyone is in.`,
+        { severity: 'critical', context: { lastSyncOk: lastOk ?? null } },
+      );
+    }
+  }
+
   async getAvailableAgents(pool: Pool): Promise<RosterAgent[]> {
     const agents = await this.getAllAgents(pool);
     const active = agents.filter(a => a.active);
     if (active.length === 0) return [];
 
     const today = new Date().toISOString().slice(0, 10);
+    this.checkAvailabilityFreshness(today);
     const availRows = await query<{ roster_id: number; status: string }>(
       `SELECT roster_id, status FROM agent_availability
        WHERE available_date = ? AND roster_id IN (${active.map(() => '?').join(',')})`,

@@ -3752,6 +3752,23 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     }
   });
 
+  // Who on the assignable roster has no People HR ID. Those agents can never be
+  // marked on leave, so round-robin keeps assigning to them while they're off —
+  // cheap read of dbo.Agent only, no People HR calls, unlike the 60s sync below.
+  router.get('/availability/peoplehr-coverage', async (_req, res) => {
+    try {
+      const svc = deps?.availabilityService;
+      if (!svc) { res.json({ ok: false, error: 'Availability service not available' }); return; }
+      const agents = await svc.getAgentsFromKpiPublic();
+      const missing = agents
+        .filter(a => !a.PeopleHrId)
+        .map(a => ({ agentId: a.AgentId, name: a.display_name, department: a.department, pool: a.pool }));
+      res.json({ ok: true, data: { total: agents.length, withPeopleHrId: agents.length - missing.length, missing } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Coverage check failed' });
+    }
+  });
+
   router.post('/availability/sync-peoplehr', async (_req, res) => {
     try {
       const svc = deps?.availabilityService;

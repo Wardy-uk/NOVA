@@ -32,6 +32,7 @@ export interface KpiAgent {
   display_name: string;
   pool: string;
   PeopleHrId: string | null;
+  department: string | null;
 }
 
 export class AgentAvailabilityService {
@@ -87,13 +88,21 @@ export class AgentAvailabilityService {
     return this.getAgentsFromKpi();
   }
 
+  /**
+   * The roster availability is tracked for. This MUST stay in step with the
+   * departments AssignmentEngine.getAllAgentsFromKpi() assigns to — when this
+   * was NT-only, TPJ/NTPJ agents were never synced from People HR, so they had
+   * no agent_availability row, and round-robin reads "no row" as available and
+   * handed tickets to people on annual leave.
+   */
   private async getAgentsFromKpi(): Promise<KpiAgent[]> {
     const recordset = await this.runKpiQuery(`
       SELECT AgentId,
              LTRIM(RTRIM(AgentName)) + ' ' + LTRIM(RTRIM(ISNULL(AgentSurname, ''))) AS display_name,
              LOWER(Team) AS pool,
-             PeopleHrId
-      FROM dbo.Agent WHERE IsActive = 1 AND Department = 'NT'
+             PeopleHrId,
+             LTRIM(RTRIM(Department)) AS department
+      FROM dbo.Agent WHERE IsActive = 1 AND Department IN ('NT', 'NTPJ', 'TPJ')
       ORDER BY AgentName
     `);
     return recordset ?? [];
