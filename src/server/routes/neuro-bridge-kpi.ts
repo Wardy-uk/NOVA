@@ -5,6 +5,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import { query } from '../services/database.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { JiraRestClient } from '../services/jira-client.js';
+import { getKpi } from '../services/kpi-org/registry.js';
 import { applyTargetFallbacks } from '../services/kpi-targets.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
@@ -310,6 +311,95 @@ export function createNeuroBridgeKpiRoutes(
     }
   });
 
+
+  /**
+   * GET /kpi-org-trend?weeks=6
+   *
+   * The SAME shape as /kpi-trend, from the table that is still being written.
+   *
+   * WARNING: `jira_kpi_daily` is the LEGACY n8n-written table and it stopped
+   * producing 39 KPIs on 5 Sep 2026 — weekday runs went 113 rows to 74, taking
+   * every per-tier FRT and Resolution compliance row with them. NOVA's own
+   * screens never noticed because they read `kpi_org_daily`, written daily by
+   * the `kpi-org-capture` job, which has the same KPIs under the same labels
+   * (`nt_sla_<tier>_compliance` renders as "FRT Compliance % (Tier 2)").
+   *
+   * So NEURO's weekly risk report was rendering "not measured" for eight of its
+   * fourteen compliance rows over data NOVA had all along. It was reading the
+   * dead table.
+   *
+   * Labels come from the registry rather than being stored, so this and the
+   * wallboard cannot drift on what a KPI is called. A key the registry does not
+   * know is SKIPPED rather than emitted under its raw slug — a report is not
+   * the place to debut `nt_sla_t2_compliance` as a queue name.
+   *
+   * Week buckets and their Monday-plus-one labels are IDENTICAL to /kpi-trend,
+   * because NEURO matches a bucket to a week by span; a different label here
+   * would match nothing and read as "not measured", which is the bug being
+   * fixed.
+   *
+   * Strictly SELECT.
+   */
+  router.get('/kpi-org-trend', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      const weeks = Math.min(Math.max(Number(req.query.weeks) || 6, 1), 52);
+      const team = typeof req.query.team === 'string' && req.query.team ? req.query.team : 'Support';
+      const rows = await query<{
+        period: Date | string;
+        kpi_key: string;
+        avgValue: number;
+        samples: number;
+        targetMin: number | null;
+        targetMax: number | null;
+      }>(
+        `SELECT
+           DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, kpi_date)), 1) AS period,
+           kpi_key,
+           AVG(CAST(value AS FLOAT)) AS avgValue,
+           COUNT(value) AS samples,
+           MIN(CAST(target AS FLOAT)) AS targetMin,
+           MAX(CAST(target AS FLOAT)) AS targetMax
+         FROM kpi_org_daily
+         WHERE team_key = ?
+           AND value IS NOT NULL
+           AND kpi_date >= DATEADD(DAY, ?, CAST(GETDATE() AS DATE))
+         GROUP BY DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, kpi_date)), 1), kpi_key
+         ORDER BY period, kpi_key`,
+        [team, -(weeks * 7)],
+      );
+
+      const out: unknown[] = [];
+      const unknown = new Set<string>();
+      for (const r of rows) {
+        const meta = getKpi(r.kpi_key);
+        if (!meta) { unknown.add(r.kpi_key); continue; }
+        out.push({
+          period: r.period instanceof Date ? r.period.toISOString() : String(r.period),
+          KPI: meta.label,
+          KPIGroup: meta.colA ?? null,
+          avgValue: r.avgValue,
+          samples: r.samples,
+          targetMin: r.targetMin,
+          targetMax: r.targetMax,
+        });
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          weeks,
+          team,
+          rows: out,
+          // Named rather than swallowed: a KPI the registry has forgotten is a
+          // row silently missing from a compliance report.
+          unknownKeys: [...unknown].sort(),
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
   return router;
 }
-
