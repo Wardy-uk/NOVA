@@ -118,13 +118,25 @@ export function createNeuroBridgeKpiRoutes(
       const weeks = Math.min(Math.max(Number(req.query.weeks) || 6, 1), 52);
       const r = p.request();
       r.input('days', sql.Int, weeks * 7);
+      // targetMin/targetMax travel with the average because the CONSUMER cannot
+      // guess them: compliance targets are NOT uniform — the cross-queue KPIs
+      // (Open Queue, Resolved Today) are measured against 90 and the per-tier
+      // ones against 95, so a report applying one number to the whole table is
+      // wrong about part of it whichever number it picks. NEURO's weekly risk
+      // report had been RAGging every row against a hardcoded 95.
+      //
+      // Both ends are returned rather than one: a target that MOVED inside the
+      // week is a real fact about the week, and picking MIN or MAX would hide it
+      // behind a figure that was only true for part of it.
       const result = await r.query(`
         SELECT
           DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1) AS period,
           kpi AS KPI,
           kpiGroup AS KPIGroup,
           AVG(CAST([Count] AS FLOAT)) AS avgValue,
-          COUNT(*) AS samples
+          COUNT(*) AS samples,
+          MIN(CAST(target AS FLOAT)) AS targetMin,
+          MAX(CAST(target AS FLOAT)) AS targetMax
         FROM dbo.jira_kpi_daily
         WHERE CreatedAt >= DATEADD(DAY, -@days, GETDATE())
         GROUP BY DATEADD(WEEK, DATEDIFF(WEEK, 0, DATEADD(DAY, -1, CreatedAt)), 1), kpi, kpiGroup
