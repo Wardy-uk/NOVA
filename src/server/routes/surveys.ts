@@ -366,7 +366,7 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
 
       // Get the most recent completed survey in this category
       const latest = await queryOne<SurveyRow>(
-        `SELECT TOP(1) * FROM surveys WHERE category = ? AND status IN ('active', 'closed') ORDER BY COALESCE(closed_at, start_date, created_at) DESC`, [cat]
+        `SELECT TOP(1) * FROM surveys WHERE category = ? AND status IN ('active', 'closed') ORDER BY COALESCE(closed_at, TRY_CONVERT(DATETIME2, start_date), created_at) DESC`, [cat]
       );
       if (!latest) { scores[cat] = { average: null, response_count: 0, survey_count: surveys.length }; continue; }
 
@@ -618,7 +618,11 @@ export function createSurveyRoutes(settingsQueries: FileSettingsQueries, userQue
       res.status(400).json({ ok: false, error: 'Only draft or scheduled surveys can be activated' }); return;
     }
 
-    await execute(`UPDATE surveys SET status = 'active', start_date = COALESCE(start_date, GETUTCDATE()) WHERE id = ?`, [survey.id]);
+    // start_date is NVARCHAR — COALESCE with GETUTCDATE() would force SQL Server to
+    // convert the stored string to datetime, which fails for the seconds-less values
+    // the datetime-local input writes (2026-09-14T10:00). Default it in JS instead.
+    const startDate = survey.start_date || new Date().toISOString();
+    await execute(`UPDATE surveys SET status = 'active', start_date = ? WHERE id = ?`, [startDate, survey.id]);
 
     const baseUrl = getSurveyBaseUrl(settingsQueries, req.get('host'));
     const sent = await sendInvites(survey.id, emailService, baseUrl);
