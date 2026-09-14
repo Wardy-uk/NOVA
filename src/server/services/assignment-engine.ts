@@ -20,6 +20,9 @@ export interface RosterAgent {
   max_tickets_cc: number | null;
   max_tickets_t2t3: number | null;
   active: boolean;
+  /** dbo.Agent.IsAvailable — on the roster but not in the assignment rota (managers,
+   *  long-term absence). n8n's Daily Agent Selection already honours this flag. */
+  takes_tickets: boolean;
   is_current_agent: boolean;
   last_assigned_at: Date | null;
 }
@@ -462,8 +465,27 @@ export class AssignmentEngine {
 
   async getAvailableAgents(pool: Pool): Promise<RosterAgent[]> {
     const agents = await this.getAllAgents(pool);
-    const active = agents.filter(a => a.active);
+    let active = agents.filter(a => a.active);
     if (active.length === 0) return [];
+
+    // IsActive says "on the roster"; IsAvailable says "in the rota". Managers sit on
+    // the roster so they show in Team Availability, but must never be handed tickets.
+    // Guard against a pool whose flags are all off — better to assign to someone than
+    // to strand the queue — but say so loudly, because it means the data is wrong.
+    const inRota = active.filter(a => a.takes_tickets);
+    if (inRota.length > 0) {
+      const benched = active.filter(a => !a.takes_tickets).map(a => a.display_name);
+      if (benched.length > 0) {
+        console.log(`[assignment] Pool ${pool}: not in rota (IsAvailable off): ${benched.join(', ')}`);
+      }
+      active = inRota;
+    } else {
+      captureError(
+        'assignment-engine',
+        `Every active agent in pool ${pool} has IsAvailable off — ignoring the flag so the queue still moves. Check Agent Admin.`,
+        { severity: 'critical', context: { pool, agents: active.map(a => a.display_name) } },
+      );
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     this.checkAvailabilityFreshness(today);
@@ -499,7 +521,7 @@ export class AssignmentEngine {
     const p = await this.getKpiPool();
     const result = await p.request().query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
-             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(IsAvailable, 1) AS IsAvailable, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE Department IN ('NT', 'NTPJ', 'TPJ')
@@ -524,7 +546,7 @@ export class AssignmentEngine {
     req.input('agentId', sql.Int, id);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
-             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(IsAvailable, 1) AS IsAvailable, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AgentId = @agentId
@@ -548,7 +570,7 @@ export class AssignmentEngine {
     req.input('accountId', sql.NVarChar, jiraAccountId);
     const result = await req.query(`
       SELECT AgentId, AccountId, AgentName, AgentSurname, AgentKey, Team, TierCode,
-             Department, IsActive, ISNULL(MaxTickets, 10) AS MaxTickets,
+             Department, IsActive, ISNULL(IsAvailable, 1) AS IsAvailable, ISNULL(MaxTickets, 10) AS MaxTickets,
              MaxTicketsCustomerCare, MaxTicketsT2T3
       FROM dbo.Agent
       WHERE AccountId = @accountId
@@ -905,6 +927,7 @@ export class AssignmentEngine {
       max_tickets_cc: row.MaxTicketsCustomerCare ?? null,
       max_tickets_t2t3: row.MaxTicketsT2T3 ?? null,
       active: !!row.IsActive,
+      takes_tickets: row.IsAvailable === undefined ? true : !!row.IsAvailable,
       is_current_agent: !!(state?.is_current_agent),
       last_assigned_at: state?.last_assigned_at ? new Date(state.last_assigned_at) : null,
     };

@@ -158,7 +158,7 @@ export function TeamAvailabilityWidget() {
     const capacityColor = capacityPct >= 70 ? 'text-emerald-400' : capacityPct >= 50 ? 'text-amber-400' : 'text-red-400';
 
     return (
-      <div className="bg-neutral-900/40 border border-neutral-700/50 rounded-lg p-3">
+      <div className="h-full bg-neutral-900/40 border border-neutral-700/50 rounded-lg p-3">
         <div className="text-xs font-medium text-neutral-300 mb-3">{title}</div>
 
         {team.totalRoster === 0 ? (
@@ -289,9 +289,9 @@ export function TeamAvailabilityWidget() {
         <div className="mb-3 px-2 py-1.5 text-xs bg-red-500/10 text-red-400 border border-red-500/20 rounded">{error}</div>
       )}
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 items-stretch">
         {TEAMS.map(t => (
-          <div key={t.key}>
+          <div key={t.key} className="h-full">
             {renderTeam(t.title, sliceTeam(data, t.departments)!, sliceTeam(tomorrow, t.departments))}
           </div>
         ))}
