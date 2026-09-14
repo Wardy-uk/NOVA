@@ -1015,6 +1015,10 @@ async function main() {
   app.use('/api/neuro-bridge', createNeuroBridgeKpiRoutes(
     settingsQueries,
     () => bridgeEscalationLog,
+    // /csat-summary pools Jira's native Satisfaction field alongside the portal
+    // survey; lazy, like the client above, because this mounts ahead of the JWT
+    // middleware and so ahead of the Jira client existing.
+    () => bridgeJiraClient,
   ));
   // Flow half — how tickets MOVE (handbacks, ping-pong, breach-by-queue,
   // unowned, stalled). Reads NOVA's own MSSQL directly rather than taking a
