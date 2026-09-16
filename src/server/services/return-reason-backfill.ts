@@ -116,16 +116,27 @@ export async function backfillReturnReasons(
   const dryRun = opts.dryRun !== false;   // writes only when explicitly asked for
   const limit = Math.min(Math.max(opts.limit ?? 600, 1), 2000);
 
-  const rows = await query<ReturnRow>(
-    `SELECT TOP (?) id, jira_key, ISNULL(body, '') AS body,
+  // Both the "is the body non-empty" and "has it already been classified" tests
+  // are done in JS, and that is not laziness. `LEN(LTRIM(RTRIM(body))) > 0` in the
+  // WHERE clause forces SQL Server to read the NVARCHAR(MAX) body of every row it
+  // considers, purely to measure it: measured at 32s cold against 21ms for the
+  // same count without it, which put this straight through the pool's 30s request
+  // timeout on the first run. There are only ~520 of these rows; filtering them
+  // here costs nothing.
+  const raw = await query<ReturnRow & { meta_json: string }>(
+    `SELECT TOP (?) id, jira_key, ISNULL(body, '') AS body, ISNULL(meta_json, '') AS meta_json,
             CONVERT(varchar(33), created_at, 126) AS created_at
        FROM dev_review_thread
-      WHERE kind = 'return'
-        AND body IS NOT NULL AND LEN(LTRIM(RTRIM(body))) > 0
-        AND (meta_json IS NULL OR JSON_VALUE(meta_json, '$.reason') IS NULL)
+      WHERE kind = 'return' AND body IS NOT NULL
       ORDER BY created_at DESC`,
     [limit],
   );
+
+  const alreadyClassified = (metaJson: string): boolean => {
+    if (!metaJson) return false;
+    try { return !!(JSON.parse(metaJson) as { reason?: string }).reason; } catch { return false; }
+  };
+  const rows = raw.filter(r => r.body.trim().length > 0 && !alreadyClassified(r.meta_json));
 
   const result: BackfillResult = {
     examined: rows.length, classified: 0, unclear: 0,

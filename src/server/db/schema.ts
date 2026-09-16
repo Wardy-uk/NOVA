@@ -1374,6 +1374,11 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_dev_review_state_status ON dev_review_state (status)
        INCLUDE (claimed_by_user_id, fast_track, team, first_seen_at);`,
 
+    // 22k rows, of which ~520 are returns. Without this, finding them is a
+    // clustered scan; the reason backfill measured 1.3s just to count them cold.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_dev_review_thread_kind')
+     CREATE INDEX IX_dev_review_thread_kind ON dev_review_thread (kind, created_at DESC);`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_dev_review_thread_comment_lookup')
      CREATE INDEX IX_dev_review_thread_comment_lookup ON dev_review_thread (jira_key, jira_comment_id)
        WHERE jira_comment_id IS NOT NULL;`,
