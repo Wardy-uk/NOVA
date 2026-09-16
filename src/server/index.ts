@@ -25,7 +25,7 @@ import { createCommentReviewRoutes } from './routes/comment-review.js';
 import { createStandupRoutes } from './routes/standups.js';
 import { createTeamStandupRoutes, createTeamStandupPublicRoutes } from './routes/team-standup.js';
 import { createOne21PublicRoutes, createOne21Routes } from './routes/one21-public.js';
-import { runDayBeforePrep as runOne21Prep, runWeeklyKpiEmail as runOne21WeeklyKpi, ukTomorrow as one21UkTomorrow, type One21Deps } from './services/one21-service.js';
+import { runDayBeforePrep as runOne21Prep, runWeeklyKpiEmail as runOne21WeeklyKpi, ukTomorrow as one21UkTomorrow, ukToday as one21UkToday, type One21Deps } from './services/one21-service.js';
 import { TeamStandupQueries } from './db/team-standup-queries.js';
 import { PlaudService } from './services/plaud-service.js';
 import { sendMorningPrompts as runStandupPrompts, runAccountabilityReport as runStandupReport, ukToday as standupUkToday, ukDaysAgo as standupUkDaysAgo, type StandupDeps } from './services/standup-service.js';
@@ -1187,16 +1187,26 @@ async function main() {
     }
   }, 5 * 60 * 1000);
 
-  jobRegistry.register('one21-day-before-prep', '1-2-1 day-before prep + emails (daily 07:00)', async () => {
+  jobRegistry.register('one21-day-before-prep', '1-2-1 day-before prep + emails (hourly 07:00–19:00)', async () => {
     const now = new Date();
     const ukHour = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }), 10);
     const ukMin = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/London', minute: 'numeric' }), 10);
-    if (ukHour === 7 && ukMin < 5) {
-      const r = await runOne21Prep(one21Deps, one21UkTomorrow());
-      // Always log, including the no-op. This job silently returned "processed 0" every
-      // morning for two months while every session sat in 'in_progress' and no prep email
-      // was ever sent — a quiet zero is exactly what hid it.
-      console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}, no-email ${r.noEmail.length}, prep-failed ${r.prepFailed.length}`);
+    // Hourly, not once at 07:00. A single shot for tomorrow only meant any booking made
+    // after 7am the day before, a restart across 07:00–07:05, or one failed send, lost
+    // that person's prep email for good. Today is included so those still go out, late.
+    if (ukHour >= 7 && ukHour <= 19 && ukMin < 5) {
+      for (const date of [one21UkTomorrow(), one21UkToday()]) {
+        const r = await runOne21Prep(one21Deps, date);
+        // Always log the 07:00 run, including the no-op. This job silently returned
+        // "processed 0" every morning for two months while every session sat in
+        // 'in_progress' and no prep email was ever sent — a quiet zero is what hid it.
+        if (ukHour === 7 || r.processed > 0) {
+          console.log(`[121] day-before prep for ${r.date}: processed ${r.processed}, agent emails ${r.agentEmails}, manager emails ${r.managerEmails}` +
+            `, no-email ${r.noEmail.length}${r.noEmail.length ? ` (${r.noEmail.join(', ')})` : ''}` +
+            `, send-failed ${r.sendFailed.length}${r.sendFailed.length ? ` (${r.sendFailed.join(', ')})` : ''}, prep-failed ${r.prepFailed.length}` +
+            (one21Deps.emailService.isConfigured() ? '' : ' — EMAIL NOT CONFIGURED, nothing sent'));
+        }
+      }
     }
   }, 5 * 60 * 1000);
 

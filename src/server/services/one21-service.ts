@@ -44,6 +44,11 @@ export function ukTomorrow(): string {
   return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 }
 
+/** YYYY-MM-DD for "today" in UK time. */
+export function ukToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}
+
 /** Human display date, e.g. "Monday 15 June". */
 export function displayDate(isoDate: string): string {
   const d = new Date(`${isoDate}T12:00:00Z`);
@@ -1083,21 +1088,28 @@ export interface DayBeforeResult {
   managerEmails: number;
   noEmail: string[];
   prepFailed: string[];
+  /** Agents whose send threw — retried on the next run, because nothing was logged. */
+  sendFailed: string[];
 }
 
 /**
- * For every session scheduled for `date` (default tomorrow) still in 'scheduled':
- * generate the prep snapshot, email the agent their questions (form link) and the
- * manager the summary, and move the session to 'awaiting_agent'. Idempotent — each
- * email is logged once per session and never repeated.
+ * For every session scheduled for `date` (default tomorrow): if still 'scheduled', generate
+ * the prep snapshot and move it to 'awaiting_agent'; then send whichever prep emails have
+ * not been sent yet. Idempotent — each email is logged once per session and never repeated.
+ *
+ * Sessions already at 'awaiting_agent'/'ready' are included on purpose. This used to take
+ * only 'scheduled', and the status moved BEFORE the emails went, so a failed send (or a run
+ * with email unconfigured) advanced the session and the email was never tried again. The
+ * email log, not the status, is what says whether an email went. 'in_progress' is left out:
+ * the 1-2-1 is underway and the form would refuse the answers anyway.
  */
 export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorrow()): Promise<DayBeforeResult> {
-  const result: DayBeforeResult = { date, processed: 0, agentEmails: 0, managerEmails: 0, noEmail: [], prepFailed: [] };
+  const result: DayBeforeResult = { date, processed: 0, agentEmails: 0, managerEmails: 0, noEmail: [], prepFailed: [], sendFailed: [] };
 
-  const sessions = await query<{ id: number; agent_name: string; scheduled_date: string; submit_token: string | null }>(`
-    SELECT id, agent_name, scheduled_date, submit_token
+  const sessions = await query<{ id: number; agent_name: string; scheduled_date: string; status: string; submit_token: string | null }>(`
+    SELECT id, agent_name, scheduled_date, status, submit_token
     FROM agent_121_sessions
-    WHERE scheduled_date = ? AND status = 'scheduled'
+    WHERE LEFT(scheduled_date, 10) = ? AND status IN ('scheduled', 'awaiting_agent', 'ready')
   `, [date]);
 
   if (sessions.length === 0) return result;
@@ -1107,31 +1119,36 @@ export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorro
   const dateDisplay = displayDate(date);
 
   for (const session of sessions) {
+    const dedupKey = String(session.id);
+    const managerSent = await emailAlreadySent('prep_manager', dedupKey);
+    if (session.status !== 'scheduled' && managerSent && await emailAlreadySent('prep_agent', dedupKey)) continue;
     result.processed++;
 
     // 1. Generate the prep snapshot (best-effort — emails still go out if this fails).
+    //    Also on a retry whose manager email is still owed, which needs the summary.
     let prep: any = null;
     let prepSnapshotId: number | null = null;
-    try {
-      const r = await generatePrepForAgent(session.agent_name, deps.settingsQueries, deps.notificationQueries);
-      prep = r.prep;
-      prepSnapshotId = r.snapshotId;
-    } catch (err) {
-      result.prepFailed.push(session.agent_name);
-      console.warn(`[121] prep generation failed for ${session.agent_name}:`, err instanceof Error ? err.message : err);
+    if (session.status === 'scheduled' || !managerSent) {
+      try {
+        const r = await generatePrepForAgent(session.agent_name, deps.settingsQueries, deps.notificationQueries);
+        prep = r.prep;
+        prepSnapshotId = r.snapshotId;
+      } catch (err) {
+        result.prepFailed.push(session.agent_name);
+        console.warn(`[121] prep generation failed for ${session.agent_name}:`, err instanceof Error ? err.message : err);
+      }
     }
 
     // 2. Persist prep link + token and advance status.
     const token = session.submit_token || randomBytes(32).toString('hex');
     await execute(`
       UPDATE agent_121_sessions
-      SET status = 'awaiting_agent', submit_token = ?, prep_snapshot_id = COALESCE(?, prep_snapshot_id)
+      SET status = CASE WHEN status = 'scheduled' THEN 'awaiting_agent' ELSE status END, submit_token = ?, prep_snapshot_id = COALESCE(?, prep_snapshot_id)
       WHERE id = ?
     `, [token, prepSnapshotId, session.id]);
 
     if (!emailOk) continue;
     const submitUrl = `${novaBaseUrl()}/121/submit/${token}`;
-    const dedupKey = String(session.id);
 
     // 3. Email the agent their prep questions.
     const to = await getAgentEmail(deps.settingsQueries, session.agent_name);
@@ -1148,12 +1165,13 @@ export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorro
         await logEmailSent(session.id, session.agent_name, 'prep_agent', dedupKey);
         result.agentEmails++;
       } catch (err) {
+        result.sendFailed.push(session.agent_name);
         console.warn(`[121] agent prep email to ${session.agent_name} failed:`, err instanceof Error ? err.message : err);
       }
     }
 
     // 4. Email the manager the prep summary.
-    if (!(await emailAlreadySent('prep_manager', dedupKey))) {
+    if (!managerSent) {
       try {
         await deps.emailService.send({
           to: nickEmail(),
@@ -1174,6 +1192,7 @@ export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorro
         await logEmailSent(session.id, session.agent_name, 'prep_manager', dedupKey);
         result.managerEmails++;
       } catch (err) {
+        result.sendFailed.push(`${session.agent_name} (manager)`);
         console.warn(`[121] manager prep email for ${session.agent_name} failed:`, err instanceof Error ? err.message : err);
       }
     }
