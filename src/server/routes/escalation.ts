@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import { ManualEscalationService } from '../services/manual-escalation-service.js';
+import { backfillReturnReasons } from '../services/return-reason-backfill.js';
+import type { LlmService } from '../services/llm-service.js';
 import { requireRole } from '../middleware/auth.js';
 
 interface EscalationRouteDeps {
@@ -9,6 +11,8 @@ interface EscalationRouteDeps {
   jiraClient: JiraRestClient | null;
   /** Flat settings.json accessor — used for escalation_attribution. */
   getSettings?: () => Record<string, unknown>;
+  /** Only needed by the historical reason backfill. */
+  llmService?: LlmService;
 }
 
 /**
@@ -34,7 +38,7 @@ function attributionFor(username: string, getSettings?: () => Record<string, unk
 
 export function createEscalationRoutes(deps: EscalationRouteDeps): Router {
   const router = Router();
-  const { escalationLog, jiraClient, getSettings } = deps;
+  const { escalationLog, jiraClient, getSettings, llmService } = deps;
   const manualEscalation = jiraClient ? new ManualEscalationService(jiraClient, escalationLog) : null;
 
   router.get('/', async (req: Request, res: Response) => {
@@ -165,6 +169,28 @@ export function createEscalationRoutes(deps: EscalationRouteDeps): Router {
       res.json({ ok: true, data: { id, disputes: escalationId } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to record dispute' });
+    }
+  });
+
+  // Historical reason recovery: classify the free-text Dev Review returns written
+  // since Apr 2026 against the same vocabulary the picker now uses, so the
+  // rejection trend has a past. Dry-run unless `apply` is explicitly true —
+  // this rewrites reason_code on live reporting rows, and the first thing anyone
+  // should do is look at what it WOULD say.
+  router.post('/backfill-return-reasons', requireRole('admin', 'super_admin'), async (req: Request, res: Response) => {
+    if (!llmService) {
+      res.status(503).json({ ok: false, error: 'LLM service not available' });
+      return;
+    }
+    try {
+      const { apply, limit } = req.body ?? {};
+      const data = await backfillReturnReasons(llmService, {
+        dryRun: apply !== true,
+        limit: typeof limit === 'number' ? limit : undefined,
+      });
+      res.json({ ok: true, data });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
     }
   });
 

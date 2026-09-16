@@ -116,6 +116,12 @@ export function EscalationReportView() {
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState<string | null>(null);
+  const [reasonRun, setReasonRun] = useState<null | {
+    examined: number; classified: number; unclear: number;
+    escalationRowsUpdated: number; byReason: Record<string, number>;
+    errors: string[]; dryRun: boolean;
+  }>(null);
+  const [reasonBusy, setReasonBusy] = useState(false);
   const [tierFilter, setTierFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
 
@@ -156,6 +162,30 @@ export function EscalationReportView() {
     setBackfilling(false);
   };
 
+  // Two-step by design: the dry run shows what it WOULD say, and only then is
+  // there a button that rewrites reporting rows. Nobody should be one click away
+  // from having an LLM relabel six months of history.
+  const runReasonBackfill = async (apply: boolean) => {
+    setReasonBusy(true);
+    try {
+      const res = await fetch('/api/escalations/backfill-return-reasons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setReasonRun(json.data);
+        if (apply) fetchData();
+      } else {
+        setBackfillResult(`Error: ${json.error}`);
+      }
+    } catch (e) {
+      setBackfillResult(`Failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    }
+    setReasonBusy(false);
+  };
+
   if (loading) {
     return (
       <div style={{ padding: 32, background: C.bg0, minHeight: '100vh' }}>
@@ -193,6 +223,11 @@ export function EscalationReportView() {
             background: `${C.purple}10`, color: C.purple, cursor: 'pointer',
             fontSize: 11, fontWeight: 600, opacity: backfilling ? 0.5 : 1,
           }}>{backfilling ? 'Backfilling...' : 'Jira Backfill'}</button>
+          <button onClick={() => runReasonBackfill(false)} disabled={reasonBusy} style={{
+            padding: '5px 14px', borderRadius: 16, border: `1px solid ${C.teal}40`,
+            background: `${C.teal}10`, color: C.teal, cursor: 'pointer',
+            fontSize: 11, fontWeight: 600, opacity: reasonBusy ? 0.5 : 1,
+          }}>{reasonBusy ? 'Classifying...' : 'Classify Return Reasons'}</button>
         </div>
       </div>
 
@@ -203,6 +238,49 @@ export function EscalationReportView() {
           color: backfillResult.startsWith('Error') ? C.red : C.green,
           fontSize: 12,
         }}>{backfillResult}</div>
+      )}
+
+      {reasonRun && (
+        <div style={{
+          padding: 16, marginBottom: 16, borderRadius: 12,
+          background: C.glass, border: `1px solid ${C.border}`,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, margin: 0, color: C.text1 }}>
+              Return reason classification {reasonRun.dryRun ? '— preview only, nothing written' : '— applied'}
+            </h3>
+            <button onClick={() => setReasonRun(null)} style={{
+              background: 'none', border: 'none', color: C.text3, cursor: 'pointer', fontSize: 16,
+            }}>×</button>
+          </div>
+          <div style={{ fontSize: 12, color: C.text2, marginBottom: 10 }}>
+            {reasonRun.examined} returns read · <strong style={{ color: C.text1 }}>{reasonRun.classified}</strong> classified
+            {' · '}<strong style={{ color: C.amber }}>{reasonRun.unclear}</strong> left unclear
+            {!reasonRun.dryRun && ` · ${reasonRun.escalationRowsUpdated} escalation rows updated`}
+          </div>
+          {Object.entries(reasonRun.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
+            <div key={reason} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12 }}>
+              <span style={{ color: C.text2 }}>{reason}</span>
+              <span style={{ fontWeight: 700, color: C.text1 }}>{n}</span>
+            </div>
+          ))}
+          {reasonRun.errors.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: C.red }}>
+              {reasonRun.errors.length} batch error(s): {reasonRun.errors[0]}
+            </div>
+          )}
+          {reasonRun.dryRun && reasonRun.classified > 0 && (
+            <button onClick={() => runReasonBackfill(true)} disabled={reasonBusy} style={{
+              marginTop: 12, padding: '6px 14px', borderRadius: 16, border: `1px solid ${C.green}50`,
+              background: `${C.green}15`, color: C.green, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              opacity: reasonBusy ? 0.5 : 1,
+            }}>Apply these {reasonRun.classified} classifications</button>
+          )}
+          <div style={{ marginTop: 8, fontSize: 10, color: C.text3 }}>
+            Inferred from the free-text notes, not chosen by the engineer at the time — stored as
+            <code style={{ margin: '0 4px' }}>llm_backfill</code>so it stays distinguishable from a real selection.
+          </div>
+        </div>
       )}
 
       {/* Summary Stats */}

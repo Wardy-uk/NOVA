@@ -209,6 +209,12 @@ export const DEFAULT_TOKEN_BUDGETS: Record<string, number> = {
   // non-comparable sample. QA is NT-only (see the QaPipeline construction).
   qa_scoring: 1_200_000,
   kpi_daily_digest: 25_000,
+  // One-off history repair over ~520 dev-review returns, batched 10 at a time:
+  // roughly 70k tokens a full run. 500k leaves room to re-run after a prompt
+  // change without the budget being the thing that stops it. An unlisted call
+  // type defaults to 0, which means UNLIMITED here, and an unbounded LLM loop
+  // over a table is not something to leave to a default.
+  return_reason_backfill: 500_000,
 };
 
 // ── Budget suppression (in-memory, resets at UTC midnight) ──

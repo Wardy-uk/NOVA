@@ -4092,6 +4092,16 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('escalation_log', 'minutes_in_from_tier') IS NULL
      ALTER TABLE escalation_log ADD minutes_in_from_tier INT NULL;`,
 
+    // WHERE the reason came from, because an LLM reading someone's free text
+    // months later is not the same evidence as the person picking an option at
+    // the time, and a report that cannot tell them apart will eventually be used
+    // to make a decision it cannot support.
+    //   'jira_field'  — cf15286, chosen by a human on the transition screen
+    //   'dev_review'  — chosen by a human in NOVA's Dev Review return modal
+    //   'llm_backfill'— inferred from historical free text. Reported as inferred.
+    `IF COL_LENGTH('escalation_log', 'reason_source') IS NULL
+     ALTER TABLE escalation_log ADD reason_source NVARCHAR(20) NULL;`,
+
     // Daily failed-jobs ticket. One row per UK day — the unique constraint on
     // ticket_date is what makes the job idempotent, so a restart or an overlapping
     // tick can't raise a second ticket for the same day.
