@@ -58,11 +58,15 @@ const TIER_COLORS: Record<string, string> = {
 function StatCard({ value, label, color, sub }: { value: string | number; label: string; color: string; sub?: string }) {
   return (
     <div style={{
-      padding: '16px 20px', borderRadius: 12, flex: 1, minWidth: 140,
+      padding: '16px 20px', borderRadius: 12, minWidth: 0,
       background: `${color}08`, border: `1px solid ${color}20`,
     }}>
       <div style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 10, fontWeight: 600, color: C.text3, marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+      <div style={{
+        fontSize: 10, fontWeight: 600, color: C.text3, marginTop: 6,
+        textTransform: 'uppercase', letterSpacing: '0.5px',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }} title={label}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: C.text2, marginTop: 2 }}>{sub}</div>}
     </div>
   );
@@ -286,7 +290,13 @@ export function EscalationReportView() {
       {/* Summary Stats */}
       {stats && (
         <>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+          {/* Grid, not flex. Six cards at minWidth 140 cannot fit on one row on a
+              laptop, and flex children refuse to shrink past minWidth, so the last
+              card ran off the edge. auto-fit wraps to a second row instead. */}
+          <div style={{
+            display: 'grid', gap: 12, marginBottom: 24,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          }}>
             <StatCard value={stats.total} label="Total Escalations" color={C.teal} />
             <StatCard
               value={stats.escalation_rate != null ? `${stats.escalation_rate}%` : '-'}
