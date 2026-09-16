@@ -52,6 +52,12 @@ const ALL_FIELDS = [
   // how often work is returned but never why, which is the half the Support
   // Review actually complained about.
   'customfield_13216',
+  // Tier 2 Rejection Reason — the PICKER (Duplicate Issue, Guidance provided,
+  // Insufficient information, Known Issue, Resolvable in Customer Care, Technical
+  // fix applied, Wrong tier, Other). This is the field the team fills in; cf13216
+  // above is set on 5 NT tickets ever. Omitting it here is why the classifier saw
+  // no evidence and 206 handbacks a month fell through as unclassified.
+  'customfield_15286',
   'customfield_13212', // Troubleshooting
   'customfield_13213', // Issue Environment
   'customfield_13214', // Expected Outcome
@@ -489,10 +495,15 @@ export class JiraSyncService {
     const rejectionReasonText = typeof f.customfield_13216 === 'string'
       ? f.customfield_13216.trim().slice(0, 500) || null
       : null;
+    // A select field arrives as { value, id, self }, not a string.
+    const rejectionReasonOption = ((f.customfield_15286 as { value?: unknown } | null | undefined)?.value);
+    const rejectionReasonOptionText = typeof rejectionReasonOption === 'string'
+      ? rejectionReasonOption.trim().slice(0, 200) || null
+      : null;
 
     // Detect changes for portal SSE broadcast
-    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null; current_tier: string | null; rejection_reason_text: string | null }>(
-      `SELECT status_name, assignee_display, reporter_email, current_tier, rejection_reason_text FROM jira_issue_cache WHERE issue_key = ?`,
+    const oldRow = await queryOne<{ status_name: string | null; assignee_display: string | null; reporter_email: string | null; current_tier: string | null; rejection_reason_text: string | null; rejection_reason_option: string | null }>(
+      `SELECT status_name, assignee_display, reporter_email, current_tier, rejection_reason_text, rejection_reason_option FROM jira_issue_cache WHERE issue_key = ?`,
       [issue.key],
     );
 
@@ -511,7 +522,7 @@ export class JiraSyncService {
         development_details_text = ?, resolution_type = ?,
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
-        issue_links_json = ?, rejection_reason_text = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
+        issue_links_json = ?, rejection_reason_text = ?, rejection_reason_option = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
         resolved_at = ?, status_category_changed_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
@@ -525,7 +536,7 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, no_reply, labels,
-        issue_links_json, rejection_reason_text, fields_json, organisation_name, bc_account_number, resolved_at,
+        issue_links_json, rejection_reason_text, rejection_reason_option, fields_json, organisation_name, bc_account_number, resolved_at,
         status_category_changed_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
@@ -539,7 +550,7 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?,
         ?
       );`,
       [
@@ -562,7 +573,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
+        issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
         // INSERT values (same order as columns)
@@ -582,7 +593,7 @@ export class JiraSyncService {
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
-        issueLinksJson, rejectionReasonText, fieldsJson, organisationName, bcAccountNumber,
+        issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
       ],
@@ -616,6 +627,9 @@ export class JiraSyncService {
         reasonChanged: (rejectionReasonText ?? null) !== ((oldRow.rejection_reason_text as string | null) ?? null),
         currentReason: rejectionReasonText,
         issueLinksJson,
+        reasonOption: rejectionReasonOptionText,
+        reasonOptionChanged: (rejectionReasonOptionText ?? null)
+          !== ((oldRow.rejection_reason_option as string | null) ?? null),
       });
 
       const escalationType = move.kind === 'rejection' ? 'rejection' : 'jira_transition';

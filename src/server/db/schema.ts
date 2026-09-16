@@ -1000,6 +1000,19 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'rejection_reason_text') IS NULL
      ALTER TABLE jira_issue_cache ADD rejection_reason_text NVARCHAR(500) NULL;`,
 
+    // Tier 2 Rejection Reason (customfield_15286) — the PICKER, and the field the
+    // team actually uses. cf13216 above is free text and is set on 5 NT tickets in
+    // the entire history; cf15286 was never fetched at all, which is why 206
+    // handbacks a month classified as `jira_unclassified` and exactly one row in
+    // escalation_log has ever read `rejection`.
+    //
+    // Cached for the same change-detection reason, but the classifier reads the
+    // VALUE as well: "Technical fix applied" and "Insufficient information" are
+    // both downward moves with a fresh reason, and only the option separates the
+    // flow working from the flow failing.
+    `IF COL_LENGTH('jira_issue_cache', 'rejection_reason_option') IS NULL
+     ALTER TABLE jira_issue_cache ADD rejection_reason_option NVARCHAR(200) NULL;`,
+
     // last_public_comment on jira_issue_cache — populated by jira sync from comment cache
     `IF COL_LENGTH('jira_issue_cache', 'last_public_comment') IS NULL
      ALTER TABLE jira_issue_cache ADD last_public_comment NVARCHAR(MAX) NULL;`,

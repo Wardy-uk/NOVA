@@ -29,6 +29,57 @@ import { tierRank } from './tier-rank.js';
  */
 export type TierMoveKind = 'rejection' | 'return_after_fix' | 'unclassified' | 'escalation' | 'lateral';
 
+/**
+ * What each "Tier 2 Rejection Reason" (customfield_15286) option MEANS.
+ *
+ * The field is a picker, and the picker already knows the answer — a handback
+ * saying "Technical fix applied" is the higher tier having done the work, while
+ * one saying "Insufficient information" is the escalation being sent back as not
+ * good enough. Both are downward moves. Only the option tells them apart.
+ *
+ * This is the reason the classifier cannot simply treat "the reason field
+ * changed" as proof of a rejection, the way it does for the older free-text
+ * cf13216. Once NOVA starts writing this field on every Dev Review return, a
+ * change-based test would mark every returned fix as a rejection and rebuild the
+ * exact over-counting the classifier was written to prevent.
+ *
+ * Keyed lowercase because Jira option text is edited by hand in admin.
+ * Deliberately NOT exhaustive-by-type: an option added in Jira that nobody has
+ * mapped here falls through to `unclassified`, which is the honest answer. A
+ * default of either outcome would silently mis-bucket it.
+ */
+export interface RejectionReasonOption {
+  /** EXACTLY as the option reads in Jira. Sent back on updateFields, where a
+   *  select value must match character for character — "Insufficient Information"
+   *  is not the same option as "Insufficient information". */
+  value: string;
+  outcome: 'rejection' | 'return';
+}
+
+export const REJECTION_REASON_OPTIONS: RejectionReasonOption[] = [
+  // The escalation should not have been made, or not in the state it arrived in.
+  { value: 'Insufficient information',   outcome: 'rejection' },
+  { value: 'Resolvable in Customer Care', outcome: 'rejection' },
+  { value: 'Wrong tier',                 outcome: 'rejection' },
+  { value: 'Duplicate Issue',            outcome: 'rejection' },
+  // The higher tier did the work and is handing it back. The system working.
+  { value: 'Guidance provided',          outcome: 'return' },
+  { value: 'Technical fix applied',      outcome: 'return' },
+  { value: 'Known Issue',                outcome: 'return' },
+  // 'Other: State reason in comments' is deliberately absent — it carries no
+  // classification by design, and the comment is where the answer lives.
+];
+
+const OUTCOME_BY_LOWER = new Map(REJECTION_REASON_OPTIONS.map(o => [o.value.toLowerCase(), o.outcome]));
+
+/** Matching is case- and whitespace-insensitive because the option text is
+ *  maintained by hand in Jira admin; the canonical spelling above is what gets
+ *  written back. */
+export function rejectionReasonOutcome(option: string | null | undefined): 'rejection' | 'return' | null {
+  if (!option) return null;
+  return OUTCOME_BY_LOWER.get(option.trim().toLowerCase()) ?? null;
+}
+
 export interface TierMoveClassification {
   kind: TierMoveKind;
   /** What the decision rested on, carried through to the log row. */
@@ -95,6 +146,11 @@ export function classifyTierMove(input: {
   reasonChanged: boolean;
   currentReason: string | null | undefined;
   issueLinksJson: string | null | undefined;
+  /** cf15286 "Tier 2 Rejection Reason" — the picker, as selected right now. */
+  reasonOption?: string | null;
+  /** Did that picker change on this pass? Same reasoning as `reasonChanged`:
+   *  the value persists, so presence proves history and a change proves now. */
+  reasonOptionChanged?: boolean;
 }): TierMoveClassification {
   const from = tierRank(input.fromTier);
   const to = tierRank(input.toTier);
@@ -108,7 +164,33 @@ export function classifyTierMove(input: {
 
   // Downward from here. Direction alone decides nothing.
 
-  // Strongest evidence first: the rejection screen was used on this pass.
+  // Strongest evidence first: the reason PICKER was set on this pass. Stronger
+  // than the free-text field below because it says which of the two kinds of
+  // handback this was, rather than merely that somebody typed something.
+  if (input.reasonOptionChanged) {
+    const option = typeof input.reasonOption === 'string' ? input.reasonOption.trim() : '';
+    const outcome = rejectionReasonOutcome(option);
+    if (outcome === 'rejection') {
+      return { kind: 'rejection', evidence: `Rejection Reason: ${option}`, reason: option || null, linkedKey: null };
+    }
+    if (outcome === 'return') {
+      // Counted as the flow working, exactly like a closed delivery item. Same
+      // reason_code downstream, so nothing has to learn a new category to keep
+      // these out of the friction numbers.
+      return { kind: 'return_after_fix', evidence: `Reason given: ${option}`, reason: option || null, linkedKey: null };
+    }
+    // "Other: State reason in comments", or an option added in Jira that nobody
+    // has mapped. Reported as unknown rather than guessed at.
+    return {
+      kind: 'unclassified',
+      evidence: option ? `reason "${option}" has no mapped outcome` : 'reason picker cleared',
+      reason: option || null,
+      linkedKey: null,
+    };
+  }
+
+  // Older free-text Rejection Reason (cf13216). Change-based, because the field
+  // carries no categories to read.
   if (input.reasonChanged) {
     const reason = typeof input.currentReason === 'string' ? input.currentReason.trim() : null;
     return {

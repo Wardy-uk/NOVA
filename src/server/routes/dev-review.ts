@@ -9,6 +9,7 @@ import type { JiraCacheQueries } from '../services/jira-cache-queries.js';
 import type { JiraSyncService } from '../services/jira-sync-service.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
 import { isAdmin } from '../utils/role-helpers.js';
+import { REJECTION_REASON_OPTIONS, rejectionReasonOutcome } from '../services/tier-move-classifier.js';
 import { getNurturProducts, resolveProductOptionValue } from '../services/nurtur-products.js';
 
 /**
@@ -39,6 +40,11 @@ const CF_ISSUE_ENVIRONMENT = 'customfield_13213';
 const CF_NURTUR_PRODUCT = 'customfield_13183';
 const CF_DEVELOPMENT_DETAILS = 'customfield_13215';
 const CF_STORY_TYPE = 'customfield_15014';
+// Tier 2 Rejection Reason — the same picker Jira puts on the T2 rejection screen.
+// Reused here deliberately: one vocabulary across both handback routes means the
+// rejected/returned split is a lookup rather than a guess, and T3 stops being a
+// blind spot just because its returns happen in NOVA instead of on a Jira screen.
+const CF_REJECTION_REASON = 'customfield_15286';
 const CF_BC_ACCOUNT = 'customfield_14626';
 
 // Story Type — mandatory on the dev Bug create screen (EP, APPS). The
@@ -1399,6 +1405,13 @@ export function createDevReviewRoutes(
     res.json({ ok: true, workItemKey, warnings: warnings.length > 0 ? warnings : undefined });
   });
 
+  // The reason vocabulary, for the return picker. Served from the same mapping
+  // the classifier uses, so the dropdown can never offer an option that the
+  // reporting would then fail to classify.
+  router.get('/return-reasons', async (_req: Request, res: Response) => {
+    res.json({ ok: true, data: REJECTION_REASON_OPTIONS });
+  });
+
   // ── Return (back to T2 with mandatory next steps) ─────────────────────
 
   router.post('/ticket/:key/return', async (req: Request, res: Response) => {
@@ -1407,6 +1420,17 @@ export function createDevReviewRoutes(
     const nextSteps = String(req.body?.nextSteps || '').trim();
     if (nextSteps.length < 10) {
       res.status(400).json({ ok: false, error: 'Next steps required (min 10 chars)' }); return;
+    }
+    // The reason is what makes this measurable. Validated against the outcome
+    // mapping rather than a list copied out of Jira admin, so an option nobody has
+    // classified is refused here instead of being filed as unclassified and
+    // quietly dropping out of the numbers.
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      res.status(400).json({ ok: false, error: 'Reason required' }); return;
+    }
+    if (!rejectionReasonOutcome(reason)) {
+      res.status(400).json({ ok: false, error: `Unknown or unmapped reason: ${reason}` }); return;
     }
     const client = getJiraClient();
     if (!client) { res.status(503).json({ ok: false, error: 'Jira not configured' }); return; }
@@ -1421,11 +1445,11 @@ export function createDevReviewRoutes(
       user_display: display,
       kind: 'return',
       body: nextSteps,
-      meta: { returnTransitionId: returnTransitionId || 'field-update' },
+      meta: { returnTransitionId: returnTransitionId || 'field-update', reason },
       syncState: 'pending',
     });
 
-    const commentText = `↩️ Returned to Customer Care by ${display}\n\nNext steps:\n${nextSteps}`;
+    const commentText = `↩️ Returned to Customer Care by ${display}\n\nReason: ${reason}\n\nNext steps:\n${nextSteps}`;
     const commentAdf = {
       body: {
         type: 'doc', version: 1,
@@ -1439,6 +1463,12 @@ export function createDevReviewRoutes(
     const submitter = state?.submitted_by_username || null;
 
     try {
+      // Set the reason BEFORE the tier moves. The sync classifies a tier change by
+      // comparing the cached reason against the current one, so a reason written
+      // after the move would only land on the following pass — too late to explain
+      // the move it belongs to, leaving it unclassified for good.
+      await client.updateFields(String(req.params.key), { [CF_REJECTION_REASON]: { value: reason } });
+
       if (returnTransitionId) {
         await client.transitionIssue(String(req.params.key), returnTransitionId, { comment: commentAdf });
       } else {

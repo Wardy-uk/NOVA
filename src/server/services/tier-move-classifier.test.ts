@@ -121,4 +121,63 @@ describe('classifyTierMove', () => {
     });
     assert.equal(r.kind, 'unclassified');
   });
+
+  // ── cf15286 "Tier 2 Rejection Reason" picker ──
+
+  const down = { fromTier: 'Tier 3', toTier: 'Tier 2', ownProject: 'NT',
+                 reasonChanged: false, currentReason: null, issueLinksJson: null };
+
+  it('a rejection option makes the move a rejection', () => {
+    for (const opt of ['Insufficient information', 'Resolvable in Customer Care', 'Wrong tier', 'Duplicate Issue']) {
+      const r = classifyTierMove({ ...down, reasonOption: opt, reasonOptionChanged: true });
+      assert.equal(r.kind, 'rejection', opt);
+      assert.equal(r.reason, opt);
+    }
+  });
+
+  it('a work-done option is NOT a rejection', () => {
+    // The whole point of reading the value: these are downward moves with the
+    // reason field freshly set, which the change-based test would have called
+    // rejections.
+    for (const opt of ['Guidance provided', 'Technical fix applied', 'Known Issue']) {
+      const r = classifyTierMove({ ...down, reasonOption: opt, reasonOptionChanged: true });
+      assert.equal(r.kind, 'return_after_fix', opt);
+    }
+  });
+
+  it('option matching ignores case and stray whitespace', () => {
+    const r = classifyTierMove({ ...down, reasonOption: '  WRONG TIER ', reasonOptionChanged: true });
+    assert.equal(r.kind, 'rejection');
+  });
+
+  it('"Other" and unmapped options are unclassified, never defaulted', () => {
+    for (const opt of ['Other: State reason in comments', 'Some option added next year']) {
+      const r = classifyTierMove({ ...down, reasonOption: opt, reasonOptionChanged: true });
+      assert.equal(r.kind, 'unclassified', opt);
+    }
+  });
+
+  it('an unchanged picker proves nothing about THIS move', () => {
+    // The value persists once set, so a ticket rejected in June must not read as
+    // rejected again every time it moves tier thereafter.
+    const r = classifyTierMove({ ...down, reasonOption: 'Wrong tier', reasonOptionChanged: false });
+    assert.notEqual(r.kind, 'rejection');
+  });
+
+  it('the picker outranks the older free-text field', () => {
+    const r = classifyTierMove({
+      ...down, reasonChanged: true, currentReason: 'some free text',
+      reasonOption: 'Technical fix applied', reasonOptionChanged: true,
+    });
+    assert.equal(r.kind, 'return_after_fix');
+  });
+
+  it('an upward move is still an escalation whatever the picker says', () => {
+    const r = classifyTierMove({
+      fromTier: 'Customer Care', toTier: 'Tier 2', ownProject: 'NT',
+      reasonChanged: false, currentReason: null, issueLinksJson: null,
+      reasonOption: 'Wrong tier', reasonOptionChanged: true,
+    });
+    assert.equal(r.kind, 'escalation');
+  });
 });

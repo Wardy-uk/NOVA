@@ -230,6 +230,11 @@ export function DevReviewView() {
   const [queueMeta, setQueueMeta] = useState<{ userTeamFilterActive: boolean; userTeamName: string | null; showingAll: boolean } | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [returnDraft, setReturnDraft] = useState('');
+  const [returnReason, setReturnReason] = useState('');
+  // Fetched rather than hardcoded so the picker cannot offer an option the
+  // classifier has no outcome for — the server serves the same list it validates
+  // against, and the reporting splits on `outcome`.
+  const [returnReasons, setReturnReasons] = useState<Array<{ value: string; outcome: 'rejection' | 'return' }>>([]);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [acceptNote, setAcceptNote] = useState('');
   const [acceptTldr, setAcceptTldr] = useState('');
@@ -292,6 +297,14 @@ export function DevReviewView() {
   };
 
   useEffect(() => { loadQueue({ silent: true }); }, [loadQueue]);
+  // Load once. An empty list leaves the picker unusable and the Return button
+  // disabled, which is the right failure: better a blocked return than one
+  // recorded with no reason.
+  useEffect(() => {
+    api('/return-reasons')
+      .then((j) => setReturnReasons((j as { data?: Array<{ value: string; outcome: 'rejection' | 'return' }> })?.data ?? []))
+      .catch(() => setReturnReasons([]));
+  }, []);
   useEffect(() => {
     if (selectedKey) loadDetail(selectedKey);
     else setDetail(null);
@@ -530,15 +543,21 @@ export function DevReviewView() {
       fireToast('err', 'Next steps must be at least 10 characters');
       return;
     }
+    if (!returnReason) {
+      fireToast('err', 'Pick a reason');
+      return;
+    }
     setBusy(true);
     try {
       await api(`/ticket/${selectedKey}/return`, {
-        method: 'POST', body: JSON.stringify({ nextSteps: returnDraft }),
+        method: 'POST', body: JSON.stringify({ nextSteps: returnDraft, reason: returnReason }),
       });
       fireToast('ok', 'Returned to Customer Care');
       setItems(prev => prev.filter(i => i.key !== selectedKey));
       setSelectedKey(null);
       setDetail(null);
+      setReturnDraft('');
+      setReturnReason('');
     } catch (e) {
       fireToast('err', e instanceof Error ? e.message : 'Return failed');
     } finally {
@@ -1049,6 +1068,29 @@ export function DevReviewView() {
             Write clear next steps for the agent — this is mandatory. The ticket will drop back to Tier 2
             and reassign to the original submitter. The comment will be posted to Jira.
           </p>
+          <label className="block text-[11px] font-semibold text-neutral-400 mb-1">Reason</label>
+          <select
+            value={returnReason}
+            onChange={(e) => setReturnReason(e.target.value)}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 mb-1"
+            style={drTheme.input}
+          >
+            <option value="">Select a reason…</option>
+            {returnReasons.map(r => (
+              <option key={r.value} value={r.value}>{r.value}</option>
+            ))}
+          </select>
+          {/* Say which way it will be counted BEFORE they commit to it. A picker
+              that silently decides whether this lands in the rejection numbers is
+              how people stop trusting the numbers. */}
+          <div className="text-[10px] text-neutral-500 mb-4 h-4">
+            {returnReason && (
+              returnReasons.find(r => r.value === returnReason)?.outcome === 'rejection'
+                ? 'Counts as a rejection.'
+                : 'Counts as work done and returned, not a rejection.'
+            )}
+          </div>
+          <label className="block text-[11px] font-semibold text-neutral-400 mb-1">Next steps</label>
           <textarea
             value={returnDraft}
             onChange={(e) => setReturnDraft(e.target.value)}
@@ -1070,7 +1112,7 @@ export function DevReviewView() {
             </button>
             <button
               onClick={onReturn}
-              disabled={busy || returnDraft.trim().length < 10}
+              disabled={busy || returnDraft.trim().length < 10 || !returnReason}
               className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}
             >
