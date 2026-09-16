@@ -14,6 +14,8 @@ export interface EscalationLogEntry {
   decision_id: number | null;
   source: string;
   created_at: string;
+  /** Minutes the ticket spent in `from_tier` before this move. NULL when unknown. */
+  minutes_in_from_tier: number | null;
 }
 
 export interface LogEscalationInput {
@@ -29,6 +31,8 @@ export interface LogEscalationInput {
   decision_id?: number;
   /** Set on escalation_type='dispute' rows: the escalation being contested. */
   disputes_escalation_id?: number;
+  /** How long the ticket sat in `from_tier` before this move. */
+  minutes_in_from_tier?: number | null;
   source?: string;
   created_at?: string;
 }
@@ -56,6 +60,27 @@ export interface LogRejectionInput {
   created_at?: string;
 }
 
+export interface RejectionStats {
+  total: number;
+  /** Which way work is coming back, busiest route first. */
+  by_route: Array<{ from_tier: string; to_tier: string; count: number }>;
+  /** Free text as written on the rejection screen — never bucketed. */
+  by_reason: Array<{ reason: string; count: number }>;
+  /** Rejections carrying no reason at all. Shown, not hidden: a reason
+   *  breakdown over a third of the data, presented as if it were the whole,
+   *  is worse than no breakdown. */
+  without_reason: number;
+}
+
+/** Where the time actually goes. Median and p90 rather than mean — one ticket
+ *  parked for six weeks drags an average somewhere no real ticket has ever been. */
+export interface TierDwell {
+  tier: string;
+  moves: number;
+  median_minutes: number | null;
+  p90_minutes: number | null;
+}
+
 export interface EscalationStats {
   total: number;
   by_type: Array<{ escalation_type: string; count: number }>;
@@ -63,6 +88,13 @@ export interface EscalationStats {
   by_reason: Array<{ reason_code: string; reason_label: string | null; count: number }>;
   daily: Array<{ date: string; count: number }>;
   escalation_rate: number | null;
+  /** Rejections, counted SEPARATELY rather than filtered away. Every aggregate
+   *  above excludes `escalation_type = 'rejection'` — right for measuring
+   *  escalation volume, and the reason handbacks were invisible on this screen. */
+  rejections: RejectionStats;
+  /** Null when the measurement is unavailable, never an empty list dressed up
+   *  as "nothing waited" — the rows predating the column genuinely cannot say. */
+  dwell: TierDwell[] | null;
 }
 
 const TIER_PATTERNS: Record<string, string> = {
@@ -81,14 +113,23 @@ export function detectTierFromStatus(status: string): string | null {
   return TIER_PATTERNS[status.toLowerCase()] ?? null;
 }
 
+/** Minutes between the previous tier move and this one. NULL for the first move,
+ *  or if the history is out of order despite the sort. */
+function dwellSince(lastMoveAt: number | null, movedAt: string): number | null {
+  if (lastMoveAt == null) return null;
+  const mins = Math.round((new Date(movedAt).getTime() - lastMoveAt) / 60000);
+  return mins >= 0 ? mins : null;
+}
+
 export class EscalationLogService {
 
   async log(input: LogEscalationInput): Promise<number> {
     return executeAndGetId(
       `INSERT INTO escalation_log
        (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
-        escalated_by, assigned_to, notes, decision_id, disputes_escalation_id, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        escalated_by, assigned_to, notes, decision_id, disputes_escalation_id, source, created_at,
+        minutes_in_from_tier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.ticket_key,
         input.escalation_type,
@@ -103,6 +144,7 @@ export class EscalationLogService {
         input.disputes_escalation_id ?? null,
         input.source ?? 'manual',
         input.created_at ?? new Date().toISOString(),
+        input.minutes_in_from_tier ?? null,
       ],
     );
   }
@@ -202,7 +244,72 @@ export class EscalationLogService {
       by_reason: byReason,
       daily,
       escalation_rate: tickets > 0 ? Math.round((total / tickets) * 100 * 10) / 10 : null,
+      rejections: await this.getRejectionStats(days),
+      dwell: await this.getTierDwell(days),
     };
+  }
+
+  /**
+   * Rejections over the window: how many, along which routes, and why.
+   *
+   * Only `escalation_type = 'rejection'`, which the sync sets solely when the
+   * Rejection Reason field changed on the same transition. Downward moves with
+   * no such evidence are NOT swept in here — most Development → Tier 3 moves are
+   * a shipped fix returning for test, and counting those as rejections would
+   * report the working part of the flow as the broken one.
+   */
+  async getRejectionStats(days = 30): Promise<RejectionStats> {
+    const [routes, reasons] = await Promise.all([
+      query<{ from_tier: string; to_tier: string; count: number }>(
+        `SELECT ISNULL(from_tier, 'Unknown') AS from_tier, ISNULL(to_tier, 'Unknown') AS to_tier, COUNT(*) AS count
+           FROM escalation_log
+          WHERE escalation_type = 'rejection' AND created_at >= DATEADD(day, ?, GETUTCDATE())
+          GROUP BY from_tier, to_tier ORDER BY COUNT(*) DESC`,
+        [-days],
+      ),
+      query<{ reason: string | null; count: number }>(
+        `SELECT reason_label AS reason, COUNT(*) AS count
+           FROM escalation_log
+          WHERE escalation_type = 'rejection' AND created_at >= DATEADD(day, ?, GETUTCDATE())
+          GROUP BY reason_label ORDER BY COUNT(*) DESC`,
+        [-days],
+      ),
+    ]);
+
+    return {
+      total: routes.reduce((sum, r) => sum + r.count, 0),
+      by_route: routes,
+      by_reason: reasons
+        .filter(r => r.reason && r.reason.trim())
+        .map(r => ({ reason: (r.reason as string).trim(), count: r.count })),
+      without_reason: reasons
+        .filter(r => !r.reason || !r.reason.trim())
+        .reduce((sum, r) => sum + r.count, 0),
+    };
+  }
+
+  /** Median/p90 minutes spent in each tier before leaving it. */
+  async getTierDwell(days = 30): Promise<TierDwell[] | null> {
+    try {
+      return await query<TierDwell>(
+        `SELECT DISTINCT from_tier AS tier,
+                COUNT(*) OVER (PARTITION BY from_tier) AS moves,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY minutes_in_from_tier)
+                  OVER (PARTITION BY from_tier) AS median_minutes,
+                PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY minutes_in_from_tier)
+                  OVER (PARTITION BY from_tier) AS p90_minutes
+           FROM escalation_log
+          WHERE created_at >= DATEADD(day, ?, GETUTCDATE())
+            AND from_tier IS NOT NULL
+            AND minutes_in_from_tier IS NOT NULL`,
+        [-days],
+      );
+    } catch {
+      // Older rows carry no duration and a freshly-migrated database carries
+      // none at all. Null says "not measured"; an empty array would read as
+      // "nothing waited anywhere", which is the one thing it cannot mean.
+      return null;
+    }
   }
 
   async backfillFromChangelog(
@@ -214,7 +321,17 @@ export class EscalationLogService {
     }>,
   ): Promise<number> {
     let inserted = 0;
-    for (const entry of changelog) {
+    // Ascending, defensively. Dwell is the gap between CONSECUTIVE moves, so an
+    // out-of-order history would produce negative durations — and Jira's ordering
+    // is a default, not a guarantee.
+    const ordered = [...changelog].sort(
+      (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime(),
+    );
+    // When the ticket last moved tier. The first move of a ticket's life has no
+    // predecessor here — the changelog does not record creation — so its dwell is
+    // left NULL rather than measured from an arbitrary start.
+    let lastMoveAt: number | null = null;
+    for (const entry of ordered) {
       // Detect tier changes from Current Tier field (customfield_12981) or status transitions
       const tierChanges = entry.items.filter(i =>
         i.fieldId === 'customfield_12981' || i.field === 'Current Tier',
@@ -243,9 +360,11 @@ export class EscalationLogService {
           to_tier: toTier,
           escalated_by: entry.author.displayName,
           notes: `Tier change: ${fromTier} → ${toTier}`,
+          minutes_in_from_tier: dwellSince(lastMoveAt, entry.created),
           source: 'jira_backfill',
           created_at: entry.created,
         });
+        lastMoveAt = new Date(entry.created).getTime();
         inserted++;
       }
 
@@ -272,9 +391,11 @@ export class EscalationLogService {
             to_tier: toTier,
             escalated_by: entry.author.displayName,
             notes: `${change.fromString} → ${change.toString}`,
+            minutes_in_from_tier: dwellSince(lastMoveAt, entry.created),
             source: 'jira_backfill',
             created_at: entry.created,
           });
+          lastMoveAt = new Date(entry.created).getTime();
           inserted++;
         }
       }

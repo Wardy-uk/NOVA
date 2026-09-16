@@ -4066,6 +4066,19 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('escalation_log', 'disputes_escalation_id') IS NULL
      ALTER TABLE escalation_log ADD disputes_escalation_id INT NULL;`,
 
+    // How long the ticket sat in the tier it just LEFT. `minutes_to_resolve`
+    // already answers "did escalating change anything"; this answers the question
+    // underneath it — where the time actually goes. A queue can look healthy on
+    // volume while every ticket entering it waits three days for a first look, and
+    // nothing in the log could previously show that.
+    //
+    // Stamped on the row that records the move OUT of the tier, so the duration
+    // belongs to `from_tier`. NULL where it could not be established: the first
+    // move on a ticket whose creation time is unknown, or a row written before
+    // this existed.
+    `IF COL_LENGTH('escalation_log', 'minutes_in_from_tier') IS NULL
+     ALTER TABLE escalation_log ADD minutes_in_from_tier INT NULL;`,
+
     // Daily failed-jobs ticket. One row per UK day — the unique constraint on
     // ticket_date is what makes the job idempotent, so a restart or an overlapping
     // tick can't raise a second ticket for the same day.

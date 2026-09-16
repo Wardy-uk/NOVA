@@ -18,7 +18,7 @@
  * inventing a rank for them would manufacture handbacks that never happened.
  * Moves involving them return null and are counted separately.
  */
-const TIER_RANK: Record<string, number> = {
+export const TIER_RANK: Record<string, number> = {
   't1': 1, 'tier 1': 1, 'customer care': 1, 'first line': 1, 'cc': 1,
   't2': 2, 'tier 2': 2, 'second line': 2,
   't3': 3, 'tier 3': 3, 'third line': 3,

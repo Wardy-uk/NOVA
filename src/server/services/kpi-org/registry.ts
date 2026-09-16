@@ -47,7 +47,14 @@ export type ComputeSpec =
   // Distinct NT tickets in escalation_log for the day (rejection flag splits #13/#14).
   | { kind: 'escalation_log'; rejection: boolean }
   // escalation_log rows for the day filtered by from/to tier (escalated-to / rejected-by).
-  | { kind: 'escalation_tier'; fromTiers?: string[]; toTiers: string[] }
+  // `rejection` picks the predicate: true counts only EVIDENCED rejections, false
+  // counts only genuine (upward) escalations. Without it the tier filter alone
+  // counted every move in the matching direction, so "rejected by Development"
+  // swept in released fixes coming back to be verified.
+  | { kind: 'escalation_tier'; fromTiers?: string[]; toTiers: string[]; rejection: boolean }
+  // Rejection rate % for the tier that SENT the escalation: of the escalations
+  // raised FROM these tiers, how many came back as evidenced rejections TO them.
+  | { kind: 'rejection_rate_tier'; sourceTiers: string[] }
   // Outcome derived from tickets solved during the day: SLA compliance % / CSAT.
   | { kind: 'resolved_outcome'; metric: 'frt' | 'res' | 'csat' }
   // First Contact Resolution % — comment scan over CC tickets solved today.
@@ -454,32 +461,32 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_legacy_esc_t2', label: 'Tickets escalated to Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', toTiers: ['T2', 'Tier 2'] },
+    compute: { kind: 'escalation_tier', toTiers: ['T2', 'Tier 2'], rejection: false },
   },
   {
     key: 'nt_legacy_esc_t3', label: 'Tickets escalated to Tier 3', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', toTiers: ['T3', 'Tier 3'] },
+    compute: { kind: 'escalation_tier', toTiers: ['T3', 'Tier 3'], rejection: false },
   },
   {
     key: 'nt_legacy_esc_dev', label: 'Tickets escalated to Development', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', toTiers: ['Dev', 'Development'] },
+    compute: { kind: 'escalation_tier', toTiers: ['Dev', 'Development'], rejection: false },
   },
   {
     key: 'nt_legacy_rej_t2', label: 'Tickets rejected by Tier 2', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', fromTiers: ['T2', 'Tier 2'], toTiers: ['T1', 'Customer Care'] },
+    compute: { kind: 'escalation_tier', fromTiers: ['T2', 'Tier 2'], toTiers: ['T1', 'Customer Care'], rejection: true },
   },
   {
     key: 'nt_legacy_rej_t3', label: 'Tickets rejected by Tier 3', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', fromTiers: ['T3', 'Tier 3'], toTiers: ['T2', 'Tier 2', 'T1', 'Customer Care'] },
+    compute: { kind: 'escalation_tier', fromTiers: ['T3', 'Tier 3'], toTiers: ['T2', 'Tier 2', 'T1', 'Customer Care'], rejection: true },
   },
   {
     key: 'nt_legacy_rej_dev', label: 'Tickets rejected by Development', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 0, monthlyTarget: null, rollup: 'sum', rag: { greenMax: 0, amberMax: 5 },
-    compute: { kind: 'escalation_tier', fromTiers: ['Dev', 'Development'], toTiers: ['T3', 'Tier 3', 'T2', 'Tier 2'] },
+    compute: { kind: 'escalation_tier', fromTiers: ['Dev', 'Development'], toTiers: ['T3', 'Tier 3', 'T2', 'Tier 2'], rejection: true },
   },
 ];
 
@@ -575,6 +582,34 @@ SUPPORT_NT_KPIS.push(
     unit: 'percent', direction: 'higher-better', dailyTarget: 90, monthlyTarget: null, rollup: 'latest', rag: { greenMin: 90, amberMin: 72 },
     compute: { kind: 'escalation_accuracy', allTime: true } },
 );
+
+// ── Rejection rate by SOURCE tier ──
+// "Of the escalations this tier raised, how many came back?" — which is the
+// question the six count KPIs above cannot answer, because a count of rejections
+// with no matching denominator says nothing about whether the tier escalates
+// badly or merely escalates a lot. The numbers were already both present; nobody
+// divided them.
+//
+// Attributed to the tier that SENT the work, not the one that returned it: a
+// rejection Tier 2 → Customer Care is evidence about Customer Care's escalation,
+// and `nt_legacy_rej_t2` already covers the rejecting side.
+//
+// Daily denominators here are small (single figures on a quiet day), so a single
+// rejection swings the day's figure hard. Read the weekly/monthly rollup, not the
+// daily point — same caveat as every other small-denominator rate in this registry.
+for (const [suffix, label, tiers] of [
+  ['cc', 'Customer Care', ['T1', 'Tier 1', 'Customer Care']],
+  ['t2', 'Tier 2', ['T2', 'Tier 2']],
+  ['t3', 'Tier 3', ['T3', 'Tier 3']],
+] as Array<[string, string, string[]]>) {
+  SUPPORT_NT_KPIS.push({
+    key: `nt_rej_rate_${suffix}`, label: `Rejection Rate % (escalated by ${label})`,
+    team: 'Support', colA: 'Escalation', jiraSpace: 'NT',
+    unit: 'percent', direction: 'lower-better', dailyTarget: 10, monthlyTarget: null,
+    rollup: 'average', rag: { greenMax: 10, amberMax: 25 },
+    compute: { kind: 'rejection_rate_tier', sourceTiers: tiers },
+  });
+}
 
 /** All registered org KPIs (only Support/NT for now). */
 export const ORG_KPIS: OrgKpi[] = [...SUPPORT_NT_KPIS];

@@ -6,6 +6,7 @@
 import type { JiraRestClient } from '../jira-client.js';
 import { query } from '../database.js';
 import { noReplyCutoff } from '../shared/no-reply.js';
+import { GENUINE_ESCALATION, GENUINE_REJECTION } from '../escalation-sql.js';
 import type { OrgKpi, DayCtx } from './registry.js';
 import {
   NOT_ACTIONABLE_STATUSES, NT_OPEN, NT_OPEN_ASOF, NOVA_SOLVED_ON_DAY,
@@ -374,8 +375,43 @@ export async function computeNtKpi(
       }
       where += ` AND to_tier IN (${c.toTiers.map(() => '?').join(', ')})`;
       params.push(...c.toTiers);
+      // The tier filter gives DIRECTION. It does not give MEANING, and this used
+      // to stop here — so "Tickets rejected by Development" counted every
+      // Development → Tier 3 move, most of which are a shipped fix coming back to
+      // be verified. classifyTierMove() already decided which was which at write
+      // time; this is where that decision finally gets read.
+      where += ` AND ${c.rejection ? GENUINE_REJECTION : GENUINE_ESCALATION}`;
       const rows = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where}`, params);
       return { value: rows[0]?.n ?? 0, failed: false };
+    }
+
+    case 'rejection_rate_tier': {
+      // Of what this tier sent up, how much came back. Denominator is escalations
+      // raised FROM the tier; numerator is evidenced rejections landing back ON it.
+      const window = 'created_at >= ? AND created_at < ?';
+      const bounds = [`${ctx.day}T00:00:00.000Z`, `${ctx.nextDay}T00:00:00.000Z`];
+      const list = c.sourceTiers.map(() => '?').join(', ');
+      const [escRows, rejRows] = await Promise.all([
+        query<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM escalation_log
+            WHERE ${window} AND ticket_key LIKE 'NT-%'
+              AND from_tier IN (${list}) AND ${GENUINE_ESCALATION}`,
+          [...bounds, ...c.sourceTiers],
+        ),
+        query<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM escalation_log
+            WHERE ${window} AND ticket_key LIKE 'NT-%'
+              AND to_tier IN (${list}) AND ${GENUINE_REJECTION}`,
+          [...bounds, ...c.sourceTiers],
+        ),
+      ]);
+      const esc = escRows[0]?.n ?? 0;
+      const rej = rejRows[0]?.n ?? 0;
+      // No escalations means no rate, not a perfect score. A 0% that means "this
+      // tier escalated nothing today" reads on a wallboard as "this tier escalates
+      // flawlessly", and the RAG band would paint it green.
+      if (esc === 0) return { value: null, failed: false };
+      return { value: Math.min(100, Math.round((rej / esc) * 100)), failed: false };
     }
 
     case 'no_reply':
@@ -478,10 +514,22 @@ export async function computeNtKpi(
         ? `ticket_key LIKE 'NT-%'`
         : `ticket_key LIKE 'NT-%' AND created_at >= ? AND created_at < ?`;
       const params = c.allTime ? [] : [`${ctx.day}T00:00:00.000Z`, `${ctx.nextDay}T00:00:00.000Z`];
-      const esc = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND escalation_type <> 'rejection'`, params);
-      const rej = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND escalation_type = 'rejection'`, params);
+      // The denominator used to be `escalation_type <> 'rejection'`, i.e. every row
+      // in the log that was not a rejection: lateral moves, returns-after-fix,
+      // unclassified downward moves and disputes all counted as escalations. Each
+      // one enlarged the denominator and shrank the rejection share, so the metric
+      // flattered itself — and the more the queues churned sideways, the better it
+      // scored. GENUINE_ESCALATION counts upward moves and deliberate escalations
+      // only.
+      const esc = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND ${GENUINE_ESCALATION}`, params);
+      const rej = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where} AND ${GENUINE_REJECTION}`, params);
       const e = esc[0]?.n ?? 0, r = rej[0]?.n ?? 0;
-      return { value: e > 0 ? Math.round(((e - r) / e) * 100) : 100, failed: false };
+      // Null, not 100. "No escalations today" is not "every escalation was correct",
+      // and a manufactured 100 lands in a green RAG band on the trends chart.
+      if (e === 0) return { value: null, failed: false };
+      // Rejections can outrun same-window escalations (a ticket escalated on Monday
+      // bounces on Thursday), which would otherwise print a negative accuracy.
+      return { value: Math.max(0, Math.round(((e - r) / e) * 100)), failed: false };
     }
   }
 }

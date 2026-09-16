@@ -7,6 +7,13 @@ interface EscalationStats {
   by_reason: Array<{ reason_code: string; reason_label: string | null; count: number }>;
   daily: Array<{ date: string; count: number }>;
   escalation_rate: number | null;
+  rejections: {
+    total: number;
+    by_route: Array<{ from_tier: string; to_tier: string; count: number }>;
+    by_reason: Array<{ reason: string; count: number }>;
+    without_reason: number;
+  };
+  dwell: Array<{ tier: string; moves: number; median_minutes: number | null; p90_minutes: number | null }> | null;
 }
 
 interface EscalationEntry {
@@ -33,7 +40,16 @@ const C = {
 
 const TYPE_COLORS: Record<string, string> = {
   manual: C.amber, ai_agent: C.purple, jira_transition: C.teal, sla_risk: C.red,
+  rejection: C.red, dispute: C.amber,
 };
+
+/** Durations read as durations. 2870 minutes is not a number anyone can feel. */
+function fmtMins(m: number | null): string {
+  if (m == null) return '-';
+  if (m < 60) return `${Math.round(m)}m`;
+  if (m < 60 * 24) return `${(m / 60).toFixed(1)}h`;
+  return `${(m / 1440).toFixed(1)}d`;
+}
 
 const TIER_COLORS: Record<string, string> = {
   T1: C.text3, T2: C.amber, T3: C.red, Dev: C.purple,
@@ -200,7 +216,14 @@ export function EscalationReportView() {
               color={C.amber}
               sub="% of tickets escalated"
             />
-            {stats.by_tier.slice(0, 3).map(t => (
+            <StatCard value={stats.rejections.total} label="Rejections" color={C.red} sub="handed back to a lower tier" />
+            <StatCard
+              value={stats.total > 0 ? `${Math.round((stats.rejections.total / stats.total) * 100)}%` : '-'}
+              label="Rejection Rate"
+              color={C.red}
+              sub="of escalations bounced"
+            />
+            {stats.by_tier.slice(0, 2).map(t => (
               <StatCard key={t.to_tier} value={t.count} label={`To ${t.to_tier}`} color={TIER_COLORS[t.to_tier] || C.text3} />
             ))}
           </div>
@@ -241,6 +264,79 @@ export function EscalationReportView() {
               ))}
             </div>
           </div>
+
+          {/* Rejections — counted separately because every aggregate above
+              deliberately excludes them, which is what made handbacks invisible
+              on this screen while they were the loudest complaint in the review. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+            <div style={{ padding: 16, borderRadius: 12, background: C.glass, border: `1px solid ${C.border}` }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: C.text2, margin: '0 0 4px' }}>Rejection Routes</h3>
+              <p style={{ fontSize: 10, color: C.text3, margin: '0 0 10px' }}>
+                Evidenced handbacks only — a released fix returning for test is not counted here.
+              </p>
+              {stats.rejections.by_route.length === 0 && (
+                <div style={{ fontSize: 12, color: C.text3, padding: '8px 0' }}>No rejections recorded in this period.</div>
+              )}
+              {stats.rejections.by_route.map(r => (
+                <div key={`${r.from_tier}->${r.to_tier}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: 12 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <TierBadge tier={r.from_tier} />
+                    <span style={{ color: C.text3 }}>&rarr;</span>
+                    <TierBadge tier={r.to_tier} />
+                  </span>
+                  <span style={{ fontWeight: 700, color: C.text1 }}>{r.count}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: 16, borderRadius: 12, background: C.glass, border: `1px solid ${C.border}` }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: C.text2, margin: '0 0 4px' }}>Rejection Reasons</h3>
+              <p style={{ fontSize: 10, color: C.text3, margin: '0 0 10px' }}>As written on the rejection screen, unbucketed.</p>
+              {stats.rejections.by_reason.slice(0, 8).map(r => (
+                <div key={r.reason} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '4px 0', fontSize: 12 }}>
+                  <span style={{ color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.reason}</span>
+                  <span style={{ fontWeight: 700, color: C.text1 }}>{r.count}</span>
+                </div>
+              ))}
+              {/* Shown, never hidden: a reason breakdown covering a third of the
+                  rejections would otherwise read as covering all of them. */}
+              {stats.rejections.without_reason > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', padding: '8px 0 0', marginTop: 6,
+                  borderTop: `1px solid ${C.border}`, fontSize: 12, color: C.amber,
+                }}>
+                  <span>No reason given</span>
+                  <span style={{ fontWeight: 700 }}>{stats.rejections.without_reason}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Where the time goes. Median and p90, never the mean. */}
+          <div style={{ padding: 16, marginBottom: 24, borderRadius: 12, background: C.glass, border: `1px solid ${C.border}` }}>
+            <h3 style={{ fontSize: 12, fontWeight: 600, color: C.text2, margin: '0 0 4px' }}>Time in Tier Before Moving On</h3>
+            <p style={{ fontSize: 10, color: C.text3, margin: '0 0 10px' }}>
+              Measured between consecutive tier transitions. Moves recorded before this was captured are excluded.
+            </p>
+            {stats.dwell == null && (
+              <div style={{ fontSize: 12, color: C.amber, padding: '8px 0' }}>
+                Not measured — no transition durations recorded yet. Run the Jira Backfill to populate history.
+              </div>
+            )}
+            {stats.dwell != null && stats.dwell.length === 0 && (
+              <div style={{ fontSize: 12, color: C.text3, padding: '8px 0' }}>No timed transitions in this period.</div>
+            )}
+            {(stats.dwell ?? []).map(d => (
+              <div key={d.tier} style={{
+                display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 16,
+                padding: '6px 0', fontSize: 12, alignItems: 'center',
+              }}>
+                <TierBadge tier={d.tier} />
+                <span style={{ color: C.text3, fontSize: 11 }}>{d.moves} move{d.moves === 1 ? '' : 's'}</span>
+                <span style={{ color: C.text2 }}>median <strong style={{ color: C.text1 }}>{fmtMins(d.median_minutes)}</strong></span>
+                <span style={{ color: C.text2 }}>p90 <strong style={{ color: C.text1 }}>{fmtMins(d.p90_minutes)}</strong></span>
+              </div>
+            ))}
+          </div>
         </>
       )}
 
@@ -263,6 +359,8 @@ export function EscalationReportView() {
           <option value="manual">Manual</option>
           <option value="ai_agent">AI Agent</option>
           <option value="jira_transition">Jira Transition</option>
+          <option value="rejection">Rejection</option>
+          <option value="dispute">Dispute</option>
         </select>
       </div>
 

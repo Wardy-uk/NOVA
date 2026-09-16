@@ -627,12 +627,36 @@ export class JiraSyncService {
         lateral: `Tier change: ${oldRow.current_tier} → ${currentTier}`,
       };
 
+      // How long it sat in the tier it is leaving. Measured from the last recorded
+      // tier MOVE for this ticket — not merely the last log row, which would be
+      // shortened by any manual escalation or dispute recorded in between, neither
+      // of which moves the ticket anywhere. Falls back to ticket creation for the
+      // first move of a ticket's life.
+      let minutesInFromTier: number | null = null;
+      try {
+        const prev = await query<{ last_move: string | null; jira_created: string | null }>(
+          `SELECT
+             (SELECT MAX(created_at) FROM escalation_log
+               WHERE ticket_key = ?
+                 AND from_tier IS NOT NULL AND to_tier IS NOT NULL AND from_tier <> to_tier) AS last_move,
+             (SELECT jira_created FROM jira_issue_cache WHERE issue_key = ?) AS jira_created`,
+          [issue.key, issue.key],
+        );
+        const since = prev[0]?.last_move ?? prev[0]?.jira_created ?? null;
+        if (since) {
+          const mins = Math.round((Date.now() - new Date(since).getTime()) / 60000);
+          // A negative gap means the clocks disagree, not that the ticket moved
+          // before it arrived. Left NULL rather than recorded as a lie.
+          if (mins >= 0) minutesInFromTier = mins;
+        }
+      } catch { /* dwell is enrichment — never let it stop the move being logged */ }
+
       try {
         await execute(`
           INSERT INTO escalation_log
             (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
-             escalated_by, notes, source, created_at)
-          SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'jira_sync', GETUTCDATE()
+             escalated_by, notes, source, created_at, minutes_in_from_tier)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'jira_sync', GETUTCDATE(), ?
           WHERE NOT EXISTS (
             SELECT 1 FROM escalation_log
             WHERE ticket_key = ? AND from_tier = ? AND to_tier = ? AND source = 'jira_sync'
@@ -649,6 +673,7 @@ export class JiraSyncService {
             move.reason,
             (assignee?.displayName as string) ?? 'system',
             noteFor[move.kind],
+            minutesInFromTier,
             issue.key, oldRow.current_tier, currentTier,
           ],
         );
