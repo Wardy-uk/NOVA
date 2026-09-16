@@ -8,11 +8,18 @@
  * written, because both have failed silently in this estate before:
  *
  *   GATE 1 — does `kpi_org_daily` actually hold the days it appears to?
- *            The historic reconstruction deliberately did NOT rebuild the
- *            over-SLA / FRT-breach / no-reply KPIs, and a day NOVA was down at
- *            18:00 is simply absent. Both look like a healthy series until you
- *            count. A detector reading a missing day as zero fires on an outage
- *            and calls it an improvement.
+ *            A day NOVA was down at 18:00 is simply absent, and an absent day
+ *            looks like a healthy series until you count. A detector reading a
+ *            missing day as zero fires on an outage and calls it an improvement.
+ *
+ *            ⚠ Do NOT take `backfill.ts`'s header for this. It states that the
+ *            over-SLA and FRT-breach stocks were left blank by the historic
+ *            reconstruction; measured on 16 Sep 2026 they carry 72 days of
+ *            `source='reconstruct'` with no zeros, so the comment is stale and
+ *            was repeated as fact in a report before anyone counted. That is
+ *            the whole reason this script exists rather than a reading of the
+ *            code: a comment says what someone meant, a COUNT says what is
+ *            there.
  *
  *   GATE 2 — are `agent_queue_snapshots`, `agent_capacity_forecasts` and
  *            `ticket_trend_snapshots` being WRITTEN? Writers exist in the code.
@@ -92,7 +99,10 @@ const DETECTORS: Array<{ id: string; name: string; keys: string[] }> = [
   },
   {
     id: 'D', name: 'Dev-owned drift',
-    keys: ['nt_development', 'nt_oldest_development', 'nt_tpj_dev_t3', 'nt_incidents', 'nt_production'],
+    // Matches what detectDevDrift actually reads. An earlier draft also gated
+    // on nt_tpj_dev_t3, which the detector does not touch — a gate that blocks
+    // on a source nothing reads is a gate describing a system that is not there.
+    keys: ['nt_development', 'nt_oldest_development', 'nt_incidents', 'nt_production'],
   },
   {
     id: 'E', name: 'Capacity collision',
@@ -266,8 +276,10 @@ async function main(): Promise<void> {
     if (series.absent.length) {
       console.log(`\n  ${series.absent.length} registry KPI(s) for ${team} have NO row in this window:`);
       console.log(`    ${series.absent.join(', ')}`);
-      console.log(`  Named, not hidden — several of these are the over-SLA / FRT / no-reply KPIs the`);
-      console.log(`  historic reconstruction deliberately left blank. Absent is not zero.`);
+      console.log(`  Named rather than omitted — a KPI silently missing from a list of KPIs reads as`);
+      console.log(`  one that is fine. Check each: a MANUAL KPI with no rows is nobody entering it, a`);
+      console.log(`  computed one with no rows is a capture that is not running. Absent is not zero,`);
+      console.log(`  and those two do not have the same fix.`);
     }
     if (series.unknownKeys.length) {
       console.log(`\n  ⚠ ${series.unknownKeys.length} key(s) in the table the registry does not know: ${series.unknownKeys.join(', ')}`);
