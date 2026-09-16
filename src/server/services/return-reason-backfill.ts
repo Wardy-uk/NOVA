@@ -35,10 +35,15 @@ import { REJECTION_REASON_OPTIONS, rejectionReasonOutcome } from './tier-move-cl
  *  confusing note cannot drag the rest, large enough to be worth batching. */
 const BATCH_SIZE = 10;
 
+// `label`, matching the word the prompt uses throughout. The first live run
+// failed all 52 batches on validation because the schema wanted `reason` while
+// the prompt only ever said "label" and never stated the output shape at all —
+// 152 attempts and 265k tokens for zero classifications. The shape is now spelled
+// out in the prompt, and the field name agrees with the vocabulary around it.
 const ClassificationSchema = z.object({
   results: z.array(z.object({
     id: z.number(),
-    reason: z.string(),
+    label: z.string(),
   })),
 });
 
@@ -87,7 +92,20 @@ function buildSystemPrompt(): string {
     '- A note asking for information, saying the customer never replied, saying the',
     '  work belongs to another team, or saying it could have been handled without',
     '  escalating, IS a rejection.',
-    '- Reply with one entry per input id. Use the label text exactly as written above.',
+    // Added after a sample run labelled "I have tidied up the 7 listings from 2016"
+    // as Resolvable in Customer Care — work plainly done by the senior tier, scored
+    // as a rejection because it sounded easy. A stricter, longer version of this
+    // rule made matters worse, pushing two correct labels to "unclear"; this
+    // wording is the one that held.
+    '- Judge what was DONE, not how hard it sounds. "Resolvable in Customer Care"',
+    '  means the senior tier declined the work and sent it back to be done by someone',
+    '  else; it never applies to work the note says has already been carried out.',
+    '',
+    // Stating the shape is not optional. Without these two lines every batch came
+    // back with the right ids and no usable label field.
+    'OUTPUT FORMAT - reply with exactly this JSON shape and no other keys:',
+    '{"results":[{"id":<the id from the input>,"label":"<one label, copied exactly>"}]}',
+    'One entry per input id. Copy the label text character for character.',
   ].join('\n');
 }
 
@@ -147,7 +165,7 @@ export async function backfillReturnReasons(
     const batch = rows.slice(i, i + BATCH_SIZE);
     // Loosely typed on purpose: this is model output, so every field is treated
     // as possibly missing and checked below rather than trusted by the type.
-    let classified: Array<{ id?: number; reason?: string }>;
+    let classified: Array<{ id?: number; label?: string }>;
     try {
       const res = await llm.call<z.infer<typeof ClassificationSchema>>(
         buildSystemPrompt(),
@@ -163,7 +181,7 @@ export async function backfillReturnReasons(
     }
 
     for (const row of batch) {
-      const raw = classified.find(c => c.id === row.id)?.reason;
+      const raw = classified.find(c => c.id === row.id)?.label;
       const outcome = rejectionReasonOutcome(raw);
       if (!raw || !outcome) {
         // 'unclear', a label the model invented, or a row it silently dropped.
