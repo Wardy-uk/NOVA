@@ -376,11 +376,16 @@ export async function computeNtKpi(
       where += ` AND to_tier IN (${c.toTiers.map(() => '?').join(', ')})`;
       params.push(...c.toTiers);
       // The tier filter gives DIRECTION. It does not give MEANING, and this used
-      // to stop here — so "Tickets rejected by Development" counted every
-      // Development → Tier 3 move, most of which are a shipped fix coming back to
-      // be verified. classifyTierMove() already decided which was which at write
-      // time; this is where that decision finally gets read.
-      where += ` AND ${c.rejection ? GENUINE_REJECTION : GENUINE_ESCALATION}`;
+      // to stop here — so "escalated to Tier 2" counted moves DOWN into Tier 2 from
+      // Tier 3 and Dev. classifyTierMove() already decided which was which at write
+      // time; this is where that decision gets read.
+      //
+      // 'direction-only' reads neither, deliberately. The rejected-by KPIs keep the
+      // old behaviour until the reason capture behind GENUINE_REJECTION actually
+      // works: a wallboard reading 0 rejections is a worse lie than one reading too
+      // many, and right now the evidence field is one nobody fills in.
+      if (c.predicate === 'escalation') where += ` AND ${GENUINE_ESCALATION}`;
+      else if (c.predicate === 'rejection') where += ` AND ${GENUINE_REJECTION}`;
       const rows = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM escalation_log WHERE ${where}`, params);
       return { value: rows[0]?.n ?? 0, failed: false };
     }
