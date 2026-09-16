@@ -142,8 +142,11 @@ export async function backfillReturnReasons(
   // timeout on the first run. There are only ~520 of these rows; filtering them
   // here costs nothing.
   const raw = await query<ReturnRow & { meta_json: string }>(
+    // The 'Z' is load-bearing. created_at is datetime2 with no offset, so the
+    // converted string has no zone and `new Date(...)` would read it as LOCAL
+    // time — an hour out under BST, silently shifting every match window.
     `SELECT TOP (?) id, jira_key, ISNULL(body, '') AS body, ISNULL(meta_json, '') AS meta_json,
-            CONVERT(varchar(33), created_at, 126) AS created_at
+            CONVERT(varchar(33), created_at, 126) + 'Z' AS created_at
        FROM dev_review_thread
       WHERE kind = 'return' AND body IS NOT NULL
       ORDER BY created_at DESC`,
@@ -197,36 +200,50 @@ export async function backfillReturnReasons(
       result.byReason[label] = (result.byReason[label] ?? 0) + 1;
       if (dryRun) continue;
 
-      await execute(
-        `UPDATE dev_review_thread
-            SET meta_json = JSON_MODIFY(JSON_MODIFY(ISNULL(meta_json, '{}'),
-                              '$.reason', ?), '$.reason_source', 'llm_backfill')
-          WHERE id = ?`,
-        [label, row.id],
-      );
+      // Per row, so one awkward row cannot abandon the other 517. The first apply
+      // run died on row one and took the whole pass with it.
+      try {
+        // As a Date, never a string. The converted datetime2 string carries seven
+        // fractional digits and SQL Server's implicit varchar->datetime conversion
+        // accepts three, so passing the string fails outright with "Conversion
+        // failed when converting date and/or time from character string".
+        const at = new Date(row.created_at);
+        const match = await query<{ id: number }>(
+          MATCHING_MOVE, [row.jira_key, at, at, at],
+        );
+        const moveId = match[0]?.id;
+        if (moveId) {
+          await execute(
+            `UPDATE escalation_log
+                SET escalation_type = ?, reason_code = ?, reason_label = ?, reason_source = 'llm_backfill'
+              WHERE id = ?`,
+            [
+              outcome === 'rejection' ? 'rejection' : 'jira_transition',
+              // The codes downstream already understands. flow-signals excludes
+              // jira_return_after_fix from the friction numbers, and a new code
+              // here would quietly stop that working.
+              outcome === 'rejection' ? 'jira_rejection' : 'jira_return_after_fix',
+              label,
+              moveId,
+            ],
+          );
+          result.escalationRowsUpdated++;
+        }
 
-      const match = await query<{ id: number }>(
-        MATCHING_MOVE,
-        [row.jira_key, row.created_at, row.created_at, row.created_at],
-      );
-      const moveId = match[0]?.id;
-      if (!moveId) continue;
-
-      await execute(
-        `UPDATE escalation_log
-            SET escalation_type = ?, reason_code = ?, reason_label = ?, reason_source = 'llm_backfill'
-          WHERE id = ?`,
-        [
-          outcome === 'rejection' ? 'rejection' : 'jira_transition',
-          // The codes downstream already understands. flow-signals excludes
-          // jira_return_after_fix from the friction numbers, and a new code here
-          // would quietly stop that working.
-          outcome === 'rejection' ? 'jira_rejection' : 'jira_return_after_fix',
-          label,
-          moveId,
-        ],
-      );
-      result.escalationRowsUpdated++;
+        // LAST, deliberately. This marker is what makes a row skipped next time,
+        // so writing it before the work means a crash in between leaves a row
+        // flagged as done that never was — which is exactly what the first apply
+        // run did to NT-29610.
+        await execute(
+          `UPDATE dev_review_thread
+              SET meta_json = JSON_MODIFY(JSON_MODIFY(ISNULL(meta_json, '{}'),
+                                '$.reason', ?), '$.reason_source', 'llm_backfill')
+            WHERE id = ?`,
+          [label, row.id],
+        );
+      } catch (err) {
+        result.errors.push(`row ${row.id} (${row.jira_key}): ${err instanceof Error ? err.message : 'unknown'}`);
+      }
     }
   }
 
