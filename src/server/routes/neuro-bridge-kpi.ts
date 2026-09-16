@@ -6,6 +6,7 @@ import { query } from '../services/database.js';
 import type { EscalationLogService } from '../services/escalation-log-service.js';
 import type { JiraRestClient } from '../services/jira-client.js';
 import { getKpi } from '../services/kpi-org/registry.js';
+import { getKpiOrgSeries, MAX_DAYS as SERIES_MAX_DAYS } from '../services/kpi-org/series.js';
 import { applyTargetFallbacks } from '../services/kpi-targets.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
@@ -396,6 +397,56 @@ export function createNeuroBridgeKpiRoutes(
           unknownKeys: [...unknown].sort(),
         },
       });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  /**
+   * GET /kpi-org-series?days=90&team=Support&keys=nt_new_tickets,nt_solved_team&to=YYYY-MM-DD
+   *
+   * DAILY history from `kpi_org_daily` — the same live table `/kpi-org-trend`
+   * reads, at the granularity it averages away.
+   *
+   * It exists because VANTAGE's early-warning detectors are first derivatives:
+   * a week-average cannot say which day something turned, and by the time a
+   * weekly bucket moves, the thing it describes is already on a wallboard.
+   *
+   * ⚠ The response is mostly about what is MISSING. `kpi_org_daily` has two
+   * kinds of hole that look identical if you only read `value` — the historic
+   * reconstruction never rebuilt the over-SLA / FRT-breach / no-reply KPIs, and
+   * a day when NOVA was down at 18:00 is simply not there. Every series
+   * therefore carries `coverage`, points exist only for days with a value, and
+   * the gaps are listed. A consumer that treats a missing day as zero will see
+   * an outage as a collapse in ticket volume and warn about the wrong thing.
+   *
+   * Thin by design: all of the logic, and all of the SQL, lives in
+   * `kpi-org/series.ts` so `scripts/validate-kpi-org-series.ts` can exercise
+   * the exact same function on AAPP01 without standing up Express.
+   *
+   * Reads only — see the note in `series.ts` about `ensureOrgKpiTable()`, the
+   * one inherited non-SELECT, which creates nothing that already exists.
+   */
+  router.get('/kpi-org-series', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      const days = Math.min(Math.max(Number(req.query.days) || 90, 2), SERIES_MAX_DAYS);
+      const team = typeof req.query.team === 'string' && req.query.team ? req.query.team : 'Support';
+      const keys = typeof req.query.keys === 'string' && req.query.keys
+        ? req.query.keys.split(',').map(k => k.trim()).filter(Boolean)
+        : undefined;
+      // Only accepted in the documented shape. A malformed date silently
+      // becoming "today" would make a replay run look like it covered a
+      // historic window when it covered this one.
+      const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+        ? req.query.to
+        : undefined;
+      if (req.query.to && !to) {
+        res.status(400).json({ ok: false, error: '`to` must be YYYY-MM-DD' });
+        return;
+      }
+
+      res.json({ ok: true, data: await getKpiOrgSeries({ days, team, keys, to }) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }
