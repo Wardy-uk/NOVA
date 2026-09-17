@@ -229,6 +229,7 @@ import { createKpiOrgRoutes } from './routes/kpi-org.js';
 import { captureSupportNt, recaptureSupportFlows, recaptureSupportLateData, runKpiOrgStartupTasks } from './services/kpi-org/index.js';
 import { captureEodSnapshot } from './services/kpi-eod-snapshot.js';
 import { getSupportLiveSnapshot } from './services/kpi-org/live.js';
+import { captureIntraday, pruneIntraday } from './services/kpi-org/intraday.js';
 import { getTierSnapshot, type TierSnapshot, type Cohort, type TierStatKind } from './services/kpi-org/wallboard-tiers.js';
 import { createKpiAgentRoutes } from './routes/kpi-agent.js';
 import { createTpjMaintenanceRoutes } from './routes/tpj-maintenance.js';
@@ -1916,6 +1917,38 @@ async function main() {
         await recaptureSupportLateData(agentJiraClient, todayUk, 7);
       }
     }, 10 * 60 * 1000);
+
+    // Hourly intraday KPI readings — the history nobody was keeping.
+    //
+    // The 18:00 freeze answers "how did yesterday go". It cannot answer "is this
+    // slipping right now, faster than it normally would by this hour", because
+    // nothing has ever recorded what a given hour normally looks like. This
+    // records it, from the SAME live snapshot the wallboard renders, so the
+    // intraday numbers and the board cannot drift apart.
+    //
+    // A poll on a 10-minute tick rather than an hourly schedule, for the reason
+    // the 18:00 freeze is also a poll: a precise timer loses the hour entirely if
+    // the process happens to be restarting when it fires. The (date, hour)
+    // primary key is what makes running it six times an hour harmless.
+    jobRegistry.register('kpi-org-intraday', 'Org KPI intraday reading (hourly)', async () => {
+      if (!agentJiraClient) return;
+      try {
+        const r = await captureIntraday(agentJiraClient);
+        if (r.wrote) {
+          console.log(`[kpi-intraday] ${r.day} ${String(r.hour).padStart(2, '0')}:00 — ${r.capturedKpis} KPIs`
+            + (r.skipped.length ? `, ${r.skipped.length} not captured` : ''));
+        }
+      } catch (e) {
+        // Loud but never fatal. A failed hour is a gap, and a gap is visible in
+        // the readings count; a crashed job would be neither.
+        console.warn('[kpi-intraday] capture failed:', e instanceof Error ? e.message : e);
+      }
+    }, 10 * 60 * 1000);
+
+    // Prune once a day, on the same poll. Cheap, and it keeps the table boring.
+    jobRegistry.register('kpi-org-intraday-prune', 'Org KPI intraday prune', async () => {
+      try { await pruneIntraday(); } catch { /* retention is not worth an alert */ }
+    }, 12 * 60 * 60 * 1000);
 
     // Settle yesterday's FLOW KPIs (New Tickets / Solved) first thing in the morning.
     //

@@ -7,6 +7,9 @@ import type { EscalationLogService } from '../services/escalation-log-service.js
 import type { JiraRestClient } from '../services/jira-client.js';
 import { getKpi } from '../services/kpi-org/registry.js';
 import { getKpiOrgSeries, MAX_DAYS as SERIES_MAX_DAYS } from '../services/kpi-org/series.js';
+import { getIntraday, KPI_INTRADAY_BUILD } from '../services/kpi-org/intraday.js';
+import { getSupportLiveSnapshot } from '../services/kpi-org/live.js';
+import { TRACKER_ROWS } from './kpi-org.js';
 import { applyTargetFallbacks } from '../services/kpi-targets.js';
 import { bridgeAuth } from './neuro-bridge.js';
 
@@ -447,6 +450,85 @@ export function createNeuroBridgeKpiRoutes(
       }
 
       res.json({ ok: true, data: await getKpiOrgSeries({ days, team, keys, to }) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
+
+  /**
+   * GET /kpi-tracker?days=28
+   *
+   * The Daily KPI Tracker — the thirty-four rows Nick reports to the business
+   * every day — in the three forms an early-warning system needs:
+   *
+   *   rows      the canonical row order and key mapping, served from
+   *             `TRACKER_ROWS` rather than a copy. A second list would be a
+   *             second thing to forget to update, and a drift monitor watching
+   *             33 of 34 rows looks exactly like one watching all of them.
+   *   live      what every KPI is RIGHT NOW, from the same 60s-cached snapshot
+   *             the wallboard renders. This is the tactical half.
+   *   intraday  the hourly readings kept since `kpi-org-intraday` started. This
+   *             is what makes "unusual for eleven o'clock" a statement about
+   *             evidence rather than a feeling.
+   *
+   * Daily history is deliberately NOT repeated here — `kpi-org-series` already
+   * serves it and a second path to the same numbers is how two screens come to
+   * disagree.
+   *
+   * ⚠ `rows` carries THREE entries with `kpiKey: null`. They are blank in the
+   * spec and are passed through as blank rather than dropped, so a consumer can
+   * see that the tracker has 34 rows and 31 of them are measurable. Dropping
+   * them would silently redefine the tracker as the subset NOVA happens to
+   * compute.
+   *
+   * Reads only.
+   */
+  router.get('/kpi-tracker', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      const days = Math.min(Math.max(Number(req.query.days) || 28, 1), 400);
+      const keys = TRACKER_ROWS.map(r => r.kpiKey).filter((k): k is string => Boolean(k));
+
+      // Each half fails independently. A missing live snapshot must not cost the
+      // intraday history, and neither must cost the row definition — which is
+      // static and is the one thing a caller can always be given.
+      let live: unknown = null;
+      let liveError: string | null = null;
+      try {
+        const jira = getJiraClient();
+        if (!jira) throw new Error('Jira client not available');
+        const snap = await getSupportLiveSnapshot(jira);
+        live = {
+          day: snap.day,
+          updatedAt: new Date(snap.updatedAt).toISOString(),
+          ageSeconds: Math.round((Date.now() - snap.updatedAt) / 1000),
+          items: snap.items.filter(i => keys.includes(i.key)),
+        };
+      } catch (err) {
+        liveError = err instanceof Error ? err.message : 'live snapshot failed';
+      }
+
+      let intraday: unknown = null;
+      let intradayError: string | null = null;
+      try {
+        intraday = await getIntraday(days, keys);
+      } catch (err) {
+        intradayError = err instanceof Error ? err.message : 'intraday read failed';
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          build: KPI_INTRADAY_BUILD,
+          rows: TRACKER_ROWS,
+          measurableRows: keys.length,
+          totalRows: TRACKER_ROWS.length,
+          live,
+          liveError,
+          intraday,
+          intradayError,
+        },
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
     }

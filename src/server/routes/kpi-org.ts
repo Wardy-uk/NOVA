@@ -44,7 +44,17 @@ function enrich(row: OrgKpiDailyRow) {
 // registry KPI keys. kpiKey === null → rendered as a blank row (kept so the block
 // pastes into the sheet in exact row alignment). Column metadata (Daily/Monthly KPI,
 // People, Individual Responsible) is intentionally excluded — it lives in the sheet.
-const TRACKER_ROWS: { label: string; kpiKey: string | null; extra?: boolean }[] = [
+export interface TrackerRow { label: string; kpiKey: string | null; extra?: boolean }
+
+/**
+ * EXPORTED so the NEURO bridge serves the same list rather than a copy.
+ *
+ * This is the definition of what Nick reports to the business every day. A
+ * second copy of it in another file is a second thing to forget to update, and
+ * the failure would be silent: a drift monitor watching 33 of 34 rows looks
+ * exactly like one watching all of them.
+ */
+export const TRACKER_ROWS: TrackerRow[] = [
   { label: 'New Tickets', kpiKey: 'nt_legacy_new_tickets' },
   { label: 'Total Solved', kpiKey: 'nt_legacy_solved_today' },
   { label: 'Solved by NOVA', kpiKey: 'nt_solved_nova' },
