@@ -28,6 +28,14 @@ export function OneToOneSetupView() {
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // TEMPORARY test-send panel — remove once the email delivery question is settled.
+  const [agents, setAgents] = useState<string[]>([]);
+  const [testAgent, setTestAgent] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [testKind, setTestKind] = useState<'prep' | 'receipt'>('prep');
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -44,6 +52,31 @@ export function OneToOneSetupView() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    fetch('/api/121/overview')
+      .then((r) => r.json())
+      .then((j) => {
+        const names: string[] = j.ok ? (j.data?.agents ?? []).map((a: { agent_name: string }) => a.agent_name) : [];
+        setAgents(names);
+        setTestAgent((cur) => cur || names[0] || '');
+      })
+      .catch(() => { /* picker stays empty; the panel says so */ });
+  }, []);
+
+  const sendTest = async () => {
+    if (!testAgent) return;
+    setTesting(true); setTestMsg(null);
+    try {
+      const res = await fetch('/api/121/test-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: testKind, agentName: testAgent, to: testTo.trim() || undefined }),
+      });
+      const json = await res.json();
+      setTestMsg(json.ok ? `Sent to ${json.data.to}.` : `Failed: ${json.error}`);
+    } catch { setTestMsg('Failed: network error.'); }
+    setTesting(false);
+  };
 
   const putSetting = (key: string, value: string) =>
     fetch(`/api/settings/${key}`, {
@@ -113,6 +146,32 @@ export function OneToOneSetupView() {
         <textarea value={prepIntro} onChange={(e) => setPrepIntro(e.target.value)} rows={2} placeholder="Leave blank to use the default wording." style={{ ...input, marginBottom: 14, resize: 'vertical' }} />
         <label style={{ fontSize: 12, color: C.text3, display: 'block', marginBottom: 4 }}>Manager summary email — intro line</label>
         <textarea value={mgrIntro} onChange={(e) => setMgrIntro(e.target.value)} rows={2} placeholder="Leave blank to use the default wording." style={{ ...input, resize: 'vertical' }} />
+      </div>
+
+      {/* TEMPORARY — fires the real email at one address so we can see where it lands. */}
+      <div style={{ background: C.bg1, border: `1px dashed ${C.amber}`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.amber, marginBottom: 4 }}>Test send (temporary)</div>
+        <p style={{ fontSize: 12, color: C.text3, margin: '0 0 12px' }}>
+          Sends the real email — that agent's live KPI numbers and the questions above — to you instead of them.
+          Nothing is booked, no session changes, and the agent gets nothing. Subject is prefixed [TEST].
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={testKind} onChange={(e) => setTestKind(e.target.value as 'prep' | 'receipt')} style={{ ...input, width: 'auto' }}>
+            <option value="prep">Prep request (day before)</option>
+            <option value="receipt">Submission receipt</option>
+          </select>
+          <select value={testAgent} onChange={(e) => setTestAgent(e.target.value)} style={{ ...input, width: 'auto' }}>
+            {agents.length === 0 && <option value="">No agents loaded</option>}
+            {agents.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="Send to (blank = you)" style={{ ...input, width: 220 }} />
+          <button onClick={sendTest} disabled={testing || !testAgent} style={{
+            padding: '9px 16px', borderRadius: 8, border: `1px solid ${C.amber}`, background: 'transparent',
+            color: C.amber, fontSize: 13, fontWeight: 700, cursor: testing || !testAgent ? 'default' : 'pointer',
+            opacity: testing || !testAgent ? 0.5 : 1,
+          }}>{testing ? 'Sending…' : 'Send test'}</button>
+          {testMsg && <span style={{ fontSize: 12, color: testMsg.startsWith('Sent') ? '#10b981' : '#ef4444' }}>{testMsg}</span>}
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

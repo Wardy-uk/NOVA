@@ -900,6 +900,69 @@ export async function runWeeklyKpiEmail(deps: One21Deps): Promise<WeeklyKpiResul
   return result;
 }
 
+/**
+ * TEMPORARY — fire a real 1-2-1 email at one address, to see what lands.
+ *
+ * Built from the live pipeline (that agent's real KPIs, the configured questions), so it
+ * proves the thing that actually goes out rather than a lookalike. It touches no session
+ * and writes no row to `agent_121_email_log`: a test must not make the real email think
+ * it has already been sent. The subject carries [TEST] so nobody mistakes it for theirs.
+ *
+ * Remove once the delivery question is settled.
+ */
+export async function sendTestOne21Email(
+  deps: One21Deps,
+  opts: { kind: 'prep' | 'receipt'; agentName: string; to: string },
+): Promise<{ ok: boolean; to: string; error?: string }> {
+  if (!deps.emailService.isConfigured()) return { ok: false, to: opts.to, error: 'Email is not configured on this server.' };
+  const to = opts.to.trim();
+  if (!/^[^@\s]+@[^@\s]+$/.test(to)) return { ok: false, to, error: 'That does not look like an email address.' };
+
+  const dateDisplay = displayDate(ukTomorrow());
+  const submitUrl = `${novaBaseUrl()}/121/submit/test-link-not-a-real-session`;
+  try {
+    if (opts.kind === 'prep') {
+      const kpi = await getPerformanceKpiRows(opts.agentName);
+      await deps.emailService.send({
+        to,
+        subject: `[TEST] Your 1-2-1 prep — ${dateDisplay}`,
+        text: `[TEST] Prep email for ${opts.agentName}.`
+          + (kpi ? `\n\nYour numbers (${kpi.period}):\n` + kpi.rows.map((r) => `${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`).join('\n') : '')
+          + `\n\n${submitUrl}`,
+        html: one21PrepAgentHtml({
+          name: opts.agentName.split(' ')[0], dateDisplay, intro: prepEmailIntro(deps.settingsQueries),
+          questions: getPrepQuestions(deps.settingsQueries), submitUrl, kpis: kpi?.rows, kpiPeriod: kpi?.period,
+        }),
+      });
+    } else {
+      // Their real last submission where there is one, so the layout is tested against
+      // actual answers rather than tidy one-liners that never wrap.
+      const row = await queryOne<{ agent_submission_json: string | null }>(`
+        SELECT TOP 1 agent_submission_json FROM agent_121_sessions
+        WHERE agent_name = ? AND agent_submission_json IS NOT NULL
+        ORDER BY agent_submitted_at DESC
+      `, [opts.agentName]);
+      let answers: Array<{ question: string; answer: string }> = [];
+      if (row?.agent_submission_json) { try { answers = JSON.parse(row.agent_submission_json); } catch { /* fall through */ } }
+      if (answers.length === 0) {
+        answers = getPrepQuestions(deps.settingsQueries).map((q) => ({ question: q, answer: 'Sample answer — this agent has not submitted prep yet.' }));
+      }
+      await deps.emailService.send({
+        to,
+        subject: `[TEST] Your 1-2-1 prep — copy of your answers (${dateDisplay})`,
+        text: `[TEST] Submission receipt for ${opts.agentName}.\n\n`
+          + answers.map((a) => `${a.question}\n${a.answer}`).join('\n\n'),
+        html: one21SubmissionReceiptHtml({
+          name: opts.agentName.split(' ')[0], dateDisplay, answers, submitUrl, editable: true,
+        }),
+      });
+    }
+    return { ok: true, to };
+  } catch (err) {
+    return { ok: false, to, error: err instanceof Error ? err.message : 'Send failed' };
+  }
+}
+
 // ── Plaud attach (Phase 4) — list matching notes, manager picks (no auto-bind) ──
 
 export interface PlaudCandidate {

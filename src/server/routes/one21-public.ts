@@ -5,7 +5,7 @@ import {
   getSessionDetail, updateActionStatus, addSessionAction, updateSessionNotes,
   completeSession, getPlaudCandidates, attachPlaudNote, runWeeklyKpiEmail, getOne21Overview, getRosterDrift,
   getPlaudCandidatesForAgent, attachPlaudForAgent, scanPlaudForOneToOnes, assignPlaudToAgent,
-  dismissRecording, setPeopleHrLogged, ACTION_REVIEW_STATUSES, type One21Deps,
+  dismissRecording, setPeopleHrLogged, sendTestOne21Email, ACTION_REVIEW_STATUSES, type One21Deps,
 } from '../services/one21-service.js';
 import { extractSessionOutcomes, resolveClaim } from '../services/one21-transcript.js';
 import {
@@ -13,6 +13,7 @@ import {
   listConversations, setConversationPeopleHrLogged, CONVERSATION_TYPES,
 } from '../services/one21-candidates.js';
 import { getPrepQuestions } from '../config/one21-config.js';
+import { nickEmail } from '../config/standup-config.js';
 import { isAdmin } from '../utils/role-helpers.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
@@ -149,6 +150,26 @@ export function createOne21Routes(deps: One21Deps): Router {
       const date = typeof req.body?.date === 'string' && DATE_RE.test(req.body.date) ? req.body.date : undefined;
       const result = await runDayBeforePrep(deps, date);
       res.json({ ok: true, data: result });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  /**
+   * TEMPORARY — POST /test-email { kind, agentName, to? }
+   *
+   * Sends a real prep or receipt email for a real agent to one address (Nick's unless
+   * `to` says otherwise), so we can see where it lands. No session is touched and no
+   * send is logged. Admin-only, like everything else on this router.
+   */
+  router.post('/test-email', async (req, res) => {
+    try {
+      const kind = req.body?.kind === 'receipt' ? 'receipt' : 'prep';
+      const agentName = String(req.body?.agentName ?? '').trim();
+      if (!agentName) { res.status(400).json({ ok: false, error: 'agentName required' }); return; }
+      const to = String(req.body?.to ?? '').trim() || nickEmail();
+      const result = await sendTestOne21Email(deps, { kind, agentName, to });
+      res.status(result.ok ? 200 : 502).json(result.ok ? { ok: true, data: result } : { ok: false, error: result.error });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
     }
