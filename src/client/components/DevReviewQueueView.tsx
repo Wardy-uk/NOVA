@@ -482,6 +482,8 @@ export function DevReviewQueueView() {
   const [queueMeta, setQueueMeta] = useState<{ userTeamFilterActive: boolean; userTeamName: string | null; showingAll: boolean } | null>(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnDraft, setReturnDraft] = useState('');
+  const [returnReason, setReturnReason] = useState('');
+  const [returnReasons, setReturnReasons] = useState<Array<{ value: string; outcome: 'rejection' | 'return' }>>([]);
   const [returnError, setReturnError] = useState<string | null>(null);
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [showLinkExistingModal, setShowLinkExistingModal] = useState(false);
@@ -532,6 +534,13 @@ export function DevReviewQueueView() {
   }, []);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
+  // Served from the same list the API validates against, so the picker can never
+  // offer an option the reporting would fail to classify.
+  useEffect(() => {
+    api('/return-reasons')
+      .then((j) => setReturnReasons((j as { data?: Array<{ value: string; outcome: 'rejection' | 'return' }> })?.data ?? []))
+      .catch(() => setReturnReasons([]));
+  }, []);
   useEffect(() => {
     const i = setInterval(loadQueue, 60_000);
     return () => clearInterval(i);
@@ -719,15 +728,17 @@ export function DevReviewQueueView() {
 
   const onReturn = async () => {
     if (returnDraft.trim().length < 10 || !selectedKey) return;
+    if (!returnReason) { setReturnError('Pick a reason.'); return; }
     setBusy(true);
     setReturnError(null);
     try {
-      await api(`/ticket/${selectedKey}/return`, { method: 'POST', body: JSON.stringify({ nextSteps: returnDraft }) });
+      await api(`/ticket/${selectedKey}/return`, { method: 'POST', body: JSON.stringify({ nextSteps: returnDraft, reason: returnReason }) });
       // Success — drop the ticket and close the modal.
       setItems(prev => prev.filter(i => i.key !== selectedKey));
       setSelectedKey(null);
       setDetail(null);
       setReturnDraft('');
+      setReturnReason('');
       setShowReturnModal(false);
     } catch (e) {
       // Keep the modal open and the next-steps text intact so the dev can retry.
@@ -1030,6 +1041,27 @@ export function DevReviewQueueView() {
         <Modal onClose={() => setShowReturnModal(false)}>
           <h3 className="text-lg font-bold text-neutral-100 mb-3">Return to Customer Care</h3>
           <p className="text-[12px] text-neutral-400 mb-4">Write clear next steps for the agent — this is mandatory. The ticket will drop back to Tier 2 and reassign to the original submitter.</p>
+          <label className="block text-[11px] font-semibold text-neutral-400 mb-1">Reason</label>
+          <select
+            value={returnReason}
+            onChange={e => setReturnReason(e.target.value)}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 mb-1"
+            style={drTheme.input}
+          >
+            <option value="">Select a reason…</option>
+            {returnReasons.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
+          </select>
+          {/* Say which way it will be counted BEFORE they commit. A picker that
+              silently decides whether this lands in the rejection numbers is how
+              people stop trusting the numbers. */}
+          <div className="text-[10px] text-neutral-500 mb-4 h-4">
+            {returnReason && (
+              returnReasons.find(r => r.value === returnReason)?.outcome === 'rejection'
+                ? 'Counts as a rejection.'
+                : 'Counts as work done and returned, not a rejection.'
+            )}
+          </div>
+          <label className="block text-[11px] font-semibold text-neutral-400 mb-1">Next steps</label>
           <textarea value={returnDraft} onChange={e => setReturnDraft(e.target.value)} placeholder="Clear next steps for the agent…" rows={6} className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 placeholder-neutral-600 mb-2" style={drTheme.input} autoFocus />
           <div className="flex items-center justify-between mb-4">
             <div className="text-[10px] text-neutral-600">{returnDraft.length} chars (min 10)</div>
@@ -1037,7 +1069,7 @@ export function DevReviewQueueView() {
           </div>
           <div className="flex justify-end gap-2">
             <button onClick={() => { setShowReturnModal(false); setReturnError(null); }} className="px-4 py-2 text-xs rounded-lg font-semibold text-neutral-300 border border-white/10 hover:bg-white/5">Cancel</button>
-            <button onClick={onReturn} disabled={busy || returnDraft.trim().length < 10} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}>{busy ? 'Returning…' : 'Return with next steps'}</button>
+            <button onClick={onReturn} disabled={busy || returnDraft.trim().length < 10 || !returnReason} className="px-4 py-2 text-xs rounded-lg font-bold text-[#0f172a] disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #9b6aed, #c4b5fd)', boxShadow: '0 4px 16px rgba(155,106,237,0.35)' }}>{busy ? 'Returning…' : 'Return with next steps'}</button>
           </div>
         </Modal>
       )}
