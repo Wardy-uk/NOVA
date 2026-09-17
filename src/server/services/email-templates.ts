@@ -156,20 +156,51 @@ export function standupAccountabilityHtml(opts: {
   `);
 }
 
+export interface PrepKpiRow {
+  label: string;
+  value: string;
+  /** Target or context, shown small under the value. */
+  note?: string;
+  rag?: 'green' | 'amber' | 'red' | 'grey';
+}
+
 export function one21PrepAgentHtml(opts: {
   name: string;
   dateDisplay: string;
   intro: string;
   questions: string[];
   submitUrl: string;
+  /** The My Performance figures, last 30 days. Omitted when the KPI store has nothing. */
+  kpis?: PrepKpiRow[];
+  kpiPeriod?: string;
 }): string {
   const questionRows = opts.questions
     .map((q) => `<tr><td style="padding:6px 0;color:#a0a0a0;font-size:13px">• ${q}</td></tr>`)
     .join('');
+  const ragColor = { green: '#10b981', amber: '#f59e0b', red: '#ef4444', grey: '#e5e5e5' };
+  // Two per row: the questions ask what they are proud of and what they want to improve,
+  // and on a phone a single column of eight numbers pushes the questions off the screen.
+  const cells = (opts.kpis ?? []).map((k) => `
+    <td width="50%" style="padding:8px 8px 8px 0;vertical-align:top">
+      <p style="margin:0;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:1px">${k.label}</p>
+      <p style="margin:2px 0 0;color:${ragColor[k.rag ?? 'grey']};font-size:18px;font-weight:700">${k.value}</p>
+      ${k.note ? `<p style="margin:1px 0 0;color:#6b7280;font-size:11px">${k.note}</p>` : ''}
+    </td>`);
+  const kpiRows: string[] = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    kpiRows.push(`<tr>${cells[i]}${cells[i + 1] ?? '<td width="50%"></td>'}</tr>`);
+  }
+  const kpiBlock = kpiRows.length
+    ? `<p style="margin:0 0 6px;color:#5ec1ca;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Your numbers${opts.kpiPeriod ? ` — ${opts.kpiPeriod}` : ''}</p>
+       <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:8px 16px">
+         ${kpiRows.join('')}
+       </table>`
+    : '';
   return wrap(`
     <p style="margin:0 0 16px;color:#e5e5e5;font-size:15px">Hi ${opts.name},</p>
     <p style="margin:0 0 12px;color:#a0a0a0;font-size:13px">Your 1-2-1 is on <strong style="color:#e5e5e5">${opts.dateDisplay}</strong>.</p>
     <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">${opts.intro}</p>
+    ${kpiBlock}
     <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:12px 16px;width:100%">
       ${questionRows}
     </table>

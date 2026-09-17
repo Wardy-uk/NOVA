@@ -12,7 +12,8 @@ import { getAllInRange } from './kpi-agent/store.js';
 import { toLegacyAgentRow, isoDaysAgo } from './kpi-agent/legacy-shape.js';
 import { generatePrepForAgent } from '../routes/people.js';
 import { getPrepQuestions, prepEmailIntro, managerSummaryIntro } from '../config/one21-config.js';
-import { one21PrepAgentHtml, one21PrepManagerHtml, one21SubmissionReceiptHtml, one21WeeklyKpiHtml } from './email-templates.js';
+import { one21PrepAgentHtml, one21PrepManagerHtml, one21SubmissionReceiptHtml, one21WeeklyKpiHtml, type PrepKpiRow } from './email-templates.js';
+import { aggregateAgent, type AgentDailyRow } from '../../shared/agent-kpi-summary.js';
 import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 import { getStandupRoster } from './standup-roster.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -1106,6 +1107,43 @@ export async function attachPlaudNote(deps: One21Deps, sessionId: number, record
   }
 }
 
+/**
+ * The agent's My Performance cards, as email rows.
+ *
+ * Same store, same 30-day window and the same `aggregateAgent` the page runs, so the
+ * numbers quoted in the prep email are the ones they see when they open NOVA. Questions 5
+ * and 6 ask them about their KPIs, and until now the email named none of them.
+ *
+ * No live-Jira overlay for today (the endpoint adds one): this runs at 07:00 about a
+ * conversation tomorrow, where the month is the point, not the last hour.
+ */
+async function getPerformanceKpiRows(agentName: string, days = 30): Promise<{ rows: PrepKpiRow[]; period: string } | null> {
+  try {
+    const daily = (await getAllInRange(isoDaysAgo(days), ukToday()))
+      .filter((r) => r.agentName === agentName)
+      .map((r) => toLegacyAgentRow(r, r.date)) as unknown as AgentDailyRow[];
+    const s = aggregateAgent(daily);
+    if (!s) return null;
+
+    const n = (v: number | null | undefined, dp = 1) => (v == null || isNaN(v) ? '—' : v.toFixed(dp));
+    const band = (v: number | null, good: number, ok: number): PrepKpiRow['rag'] =>
+      v == null ? 'grey' : v >= good ? 'green' : v >= ok ? 'amber' : 'red';
+    const rows: PrepKpiRow[] = [
+      { label: 'Tickets resolved', value: String(s.solvedTotal), note: `${n(s.solvedAvgPerDay)} avg/day` },
+      { label: 'Tickets per hour', value: n(s.ticketsPerHourAvg, 2), note: 'Target: ≥1.5', rag: band(s.ticketsPerHourAvg, 1.5, 1) },
+      { label: 'QA score overall', value: n(s.qaOverallAvg), note: `Target: ≥8.0 · ${s.qaScored} scored`, rag: band(s.qaOverallAvg, 8, 6.5) },
+      { label: 'Golden rules', value: n(s.goldenRulesAvg), note: 'Target: ≥2.5 / 3', rag: band(s.goldenRulesAvg, 2.5, 2) },
+      { label: 'SLA compliance', value: s.slaCompliancePct == null ? '—' : `${n(s.slaCompliancePct)}%`, note: `Target: ≥95% · ${s.slaBreached} breached`, rag: band(s.slaCompliancePct, 95, 85) },
+      { label: 'Avg >2h overdue', value: n(s.openOver2hAvg), note: 'Target: 0', rag: s.openOver2hAvg > 0 ? 'red' : 'green' },
+      { label: 'Avg open tickets', value: n(s.openTicketsAvg), note: 'Excl. Development' },
+      { label: 'Oldest ticket', value: `${n(s.oldestTicketMax, 0)} days`, note: 'Excl. Development' },
+    ];
+    return { rows, period: `last ${s.daysInRange} days` };
+  } catch {
+    return null; // KPI store unreachable — the email still goes, just without the numbers
+  }
+}
+
 // ── Day-before prep job ──
 
 export interface DayBeforeResult {
@@ -1183,11 +1221,17 @@ export async function runDayBeforePrep(deps: One21Deps, date: string = ukTomorro
       result.noEmail.push(session.agent_name);
     } else if (!(await emailAlreadySent('prep_agent', dedupKey))) {
       try {
+        const kpi = await getPerformanceKpiRows(session.agent_name);
         await deps.emailService.send({
           to,
           subject: `Your 1-2-1 prep — ${dateDisplay}`,
-          text: `Your 1-2-1 is on ${dateDisplay}. Please add your answers before we meet:\n\n${submitUrl}`,
-          html: one21PrepAgentHtml({ name: session.agent_name.split(' ')[0], dateDisplay, intro: prepEmailIntro(deps.settingsQueries), questions, submitUrl }),
+          text: `Your 1-2-1 is on ${dateDisplay}.`
+            + (kpi ? `\n\nYour numbers (${kpi.period}):\n` + kpi.rows.map((r) => `${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`).join('\n') : '')
+            + `\n\nPlease add your answers before we meet:\n\n${submitUrl}`,
+          html: one21PrepAgentHtml({
+            name: session.agent_name.split(' ')[0], dateDisplay, intro: prepEmailIntro(deps.settingsQueries),
+            questions, submitUrl, kpis: kpi?.rows, kpiPeriod: kpi?.period,
+          }),
         });
         await logEmailSent(session.id, session.agent_name, 'prep_agent', dedupKey);
         result.agentEmails++;
