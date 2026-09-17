@@ -214,13 +214,16 @@ export function EscalationReportView() {
           <p style={{ fontSize: 11, color: C.text3, margin: 0 }}>Tracking escalations across manual, AI, and Jira transitions</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {([7, 14, 30, 90] as const).map(d => (
+          {/* 180d and All exist because the backfilled history runs from late April:
+              at 14d the screen showed 8 of 183 rejections, which reads as "we barely
+              reject anything" rather than "you are looking at a fortnight". */}
+          {([7, 14, 30, 90, 180, 3650] as const).map(d => (
             <button key={d} onClick={() => setDays(d)} style={{
               padding: '5px 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
               fontSize: 11, fontWeight: 600,
               background: days === d ? `${C.teal}20` : 'transparent',
               color: days === d ? C.teal : C.text3,
-            }}>{d}d</button>
+            }}>{d === 3650 ? 'All' : `${d}d`}</button>
           ))}
           <button onClick={runBackfill} disabled={backfilling} style={{
             padding: '5px 14px', borderRadius: 16, border: `1px solid ${C.purple}40`,

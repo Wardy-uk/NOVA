@@ -1,4 +1,5 @@
 import { query, execute, executeAndGetId } from './database.js';
+import { GENUINE_ESCALATION } from './escalation-sql.js';
 
 export interface EscalationLogEntry {
   id: number;
@@ -197,33 +198,47 @@ export class EscalationLogService {
     );
   }
 
+  /**
+   * Escalation volume over the window.
+   *
+   * Counts GENUINE escalations — upward tier moves and deliberate escalations —
+   * not merely "everything that was not a rejection", which is what these
+   * aggregates used to do. That older test put every downward move into the tier
+   * it landed in, so the screen reported 168 escalations TO Customer Care. Nothing
+   * escalates into the bottom tier; those were handbacks. The same rows inflated
+   * the total and, through it, the escalation rate.
+   *
+   * Rejections are still excluded here and counted separately by
+   * getRejectionStats(), because escalation volume and handback volume are
+   * different questions.
+   */
   async getStats(days = 30): Promise<EscalationStats> {
     const [totalRows, byType, byTier, byReason, daily, ticketCount] = await Promise.all([
       query<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'`,
+        `SELECT COUNT(*) as cnt FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND ${GENUINE_ESCALATION}`,
         [-days],
       ),
       query<{ escalation_type: string; count: number }>(
         `SELECT escalation_type, COUNT(*) as count FROM escalation_log
-         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND ${GENUINE_ESCALATION}
          GROUP BY escalation_type ORDER BY count DESC`,
         [-days],
       ),
       query<{ to_tier: string; count: number }>(
         `SELECT ISNULL(to_tier, 'Unknown') as to_tier, COUNT(*) as count FROM escalation_log
-         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
+         WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND ${GENUINE_ESCALATION}
          GROUP BY to_tier ORDER BY count DESC`,
         [-days],
       ),
       query<{ reason_code: string; reason_label: string | null; count: number }>(
         `SELECT ISNULL(reason_code, 'unknown') as reason_code, MAX(reason_label) as reason_label, COUNT(*) as count
-         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND ${GENUINE_ESCALATION}
          GROUP BY reason_code ORDER BY count DESC`,
         [-days],
       ),
       query<{ date: string; count: number }>(
         `SELECT CONVERT(VARCHAR(10), created_at, 120) as date, COUNT(*) as count
-         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND escalation_type <> 'rejection'
+         FROM escalation_log WHERE created_at >= DATEADD(day, ?, GETUTCDATE()) AND ${GENUINE_ESCALATION}
          GROUP BY CONVERT(VARCHAR(10), created_at, 120) ORDER BY date`,
         [-days],
       ),
