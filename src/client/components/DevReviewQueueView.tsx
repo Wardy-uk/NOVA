@@ -537,10 +537,10 @@ export function DevReviewQueueView() {
   // Served from the same list the API validates against, so the picker can never
   // offer an option the reporting would fail to classify.
   //
-  // NOTE: api() here already unwraps `json.data` and hands back the array — unlike
-  // the helper in DevReviewView.tsx, which returns the whole envelope. Reaching for
-  // `.data` again yielded undefined and an empty dropdown, and the catch-all below
-  // swallowed the evidence. Errors now surface in the modal instead.
+  // NOTE: api() here already unwraps `json.data` and hands back the array. Code
+  // moved in from elsewhere reached for `.data` a second time, got undefined, and
+  // rendered an empty dropdown — with a catch-all that swallowed the evidence.
+  // Errors now surface in the modal instead.
   useEffect(() => {
     api<Array<{ value: string; outcome: 'rejection' | 'return' }>>('/return-reasons')
       .then(rs => setReturnReasons(rs ?? []))
