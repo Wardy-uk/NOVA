@@ -536,10 +536,16 @@ export function DevReviewQueueView() {
   useEffect(() => { loadQueue(); }, [loadQueue]);
   // Served from the same list the API validates against, so the picker can never
   // offer an option the reporting would fail to classify.
+  //
+  // NOTE: api() here already unwraps `json.data` and hands back the array — unlike
+  // the helper in DevReviewView.tsx, which returns the whole envelope. Reaching for
+  // `.data` again yielded undefined and an empty dropdown, and the catch-all below
+  // swallowed the evidence. Errors now surface in the modal instead.
   useEffect(() => {
-    api('/return-reasons')
-      .then((j) => setReturnReasons((j as { data?: Array<{ value: string; outcome: 'rejection' | 'return' }> })?.data ?? []))
-      .catch(() => setReturnReasons([]));
+    api<Array<{ value: string; outcome: 'rejection' | 'return' }>>('/return-reasons')
+      .then(rs => setReturnReasons(rs ?? []))
+      .catch(e => setReturnError(
+        `Could not load reasons: ${e instanceof Error ? e.message : 'unknown'}`));
   }, []);
   useEffect(() => {
     const i = setInterval(loadQueue, 60_000);
@@ -1048,7 +1054,7 @@ export function DevReviewQueueView() {
             className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 mb-1"
             style={drTheme.input}
           >
-            <option value="">Select a reason…</option>
+            <option value="">{returnReasons.length ? 'Select a reason…' : 'Reasons unavailable — reload the page'}</option>
             {returnReasons.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
           </select>
           {/* Say which way it will be counted BEFORE they commit. A picker that
