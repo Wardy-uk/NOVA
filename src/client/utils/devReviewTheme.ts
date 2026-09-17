@@ -18,6 +18,12 @@ interface DevReviewStyleSet {
   filterPill: (active: boolean) => CSSProperties;
   queueRow: (selected: boolean) => CSSProperties;
   selectBg: string;                // option className background
+  /** Native <option> rows. The dropdown list a browser pops up is an OS widget:
+   *  it ignores the <select>'s own background and paints options white, while
+   *  still inheriting the select's light text colour. The result is pale grey on
+   *  white and effectively unreadable in dark mode, so BOTH colours have to be
+   *  stated on the option itself. */
+  selectOption: CSSProperties;
 }
 
 const dark: DevReviewStyleSet = {
@@ -92,6 +98,7 @@ const dark: DevReviewStyleSet = {
     boxShadow: selected ? '0 4px 20px rgba(155,106,237,0.15)' : 'none',
   }),
   selectBg: 'bg-[#272C33]',
+  selectOption: { background: '#272C33', color: '#e2e8f0' },
 };
 
 const light: DevReviewStyleSet = {
@@ -161,6 +168,7 @@ const light: DevReviewStyleSet = {
     boxShadow: selected ? '0 4px 20px rgba(155,106,237,0.1)' : 'none',
   }),
   selectBg: 'bg-white',
+  selectOption: { background: '#ffffff', color: '#0f172a' },
 };
 
 export const devReviewStyles = { dark, light } as const;

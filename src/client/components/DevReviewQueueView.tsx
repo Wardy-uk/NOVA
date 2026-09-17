@@ -249,6 +249,7 @@ function ProductChip({
   busy: boolean;
   onChange: (p: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
+  const drTheme = useDevReviewTheme();
   const [editing, setEditing] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -286,8 +287,8 @@ function ProductChip({
           className="px-2 py-1 text-[11px] rounded-lg border text-neutral-50"
           style={{ background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(94,193,202,0.45)' }}
         >
-          <option value="" disabled>{loading ? 'Loading products…' : 'Select product…'}</option>
-          {options.map(o => <option key={o} value={o}>{o}</option>)}
+          <option value="" disabled style={drTheme.selectOption}>{loading ? 'Loading products…' : 'Select product…'}</option>
+          {options.map(o => <option key={o} value={o} style={drTheme.selectOption}>{o}</option>)}
         </select>
         <button onClick={() => { setEditing(false); setError(null); }} className="text-[10px] text-neutral-400 hover:text-neutral-200">cancel</button>
         {error && <span className="text-[10px] text-red-400">{error}</span>}
@@ -786,8 +787,8 @@ export function DevReviewQueueView() {
         onChange={e => setTeamFilter(e.target.value)}
         className="px-2 py-1 text-[10px] rounded-lg border border-[#2f353d] text-neutral-300 bg-[#1a1e24]"
       >
-        <option value="all">All teams ({items.length})</option>
-        {teamOptions.map(t => <option key={t.team} value={t.team}>{t.team} ({t.count})</option>)}
+        <option value="all" style={drTheme.selectOption}>All teams ({items.length})</option>
+        {teamOptions.map(t => <option key={t.team} value={t.team} style={drTheme.selectOption}>{t.team} ({t.count})</option>)}
       </select>
       {queueMeta?.userTeamFilterActive && (
         <button
@@ -920,9 +921,9 @@ export function DevReviewQueueView() {
                     className="px-2 py-1 text-[12px] rounded-lg border text-neutral-50 font-mono font-bold"
                     style={{ background: 'rgba(255,255,255,0.06)', borderColor: routing.projectKey || projectOverride ? 'rgba(94,193,202,0.45)' : 'rgba(239,68,68,0.4)' }}
                   >
-                    <option value="" disabled>No project…</option>
+                    <option value="" disabled style={drTheme.selectOption}>No project…</option>
                     {routing.projects.map(pr => (
-                      <option key={pr.projectKey} value={pr.projectKey}>{pr.projectKey} — {pr.team}</option>
+                      <option key={pr.projectKey} value={pr.projectKey} style={drTheme.selectOption}>{pr.projectKey} — {pr.team}</option>
                     ))}
                   </select>
                 </div>
@@ -948,11 +949,11 @@ export function DevReviewQueueView() {
           <div className="mb-4">
             <label className="text-[10px] uppercase tracking-wider text-[#94a3b8] font-bold mb-1.5 flex items-center gap-2"><span>Story Type</span><span className="text-red-400">*</span></label>
             <select value={acceptStoryType} onChange={e => setAcceptStoryType(e.target.value)} className="w-full px-3 py-2 text-[13px] rounded-lg border text-neutral-50" style={{ ...drTheme.input, borderColor: acceptStoryType ? 'rgba(255,255,255,0.12)' : 'rgba(239,68,68,0.4)' }}>
-              <option value="" disabled>Select story type…</option>
-              <option value="14233">Keeping Lights On</option>
-              <option value="14232">Tech Debt</option>
-              <option value="14231">New Feature</option>
-              <option value="14234">Discovery / Spike</option>
+              <option value="" disabled style={drTheme.selectOption}>Select story type…</option>
+              <option value="14233" style={drTheme.selectOption}>Keeping Lights On</option>
+              <option value="14232" style={drTheme.selectOption}>Tech Debt</option>
+              <option value="14231" style={drTheme.selectOption}>New Feature</option>
+              <option value="14234" style={drTheme.selectOption}>Discovery / Spike</option>
             </select>
           </div>
           <div className="mb-4">
@@ -1054,8 +1055,12 @@ export function DevReviewQueueView() {
             className="w-full px-3 py-2 text-sm rounded-lg border border-white/10 text-neutral-200 mb-1"
             style={drTheme.input}
           >
-            <option value="">{returnReasons.length ? 'Select a reason…' : 'Reasons unavailable — reload the page'}</option>
-            {returnReasons.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
+            <option value="" style={drTheme.selectOption}>
+              {returnReasons.length ? 'Select a reason…' : 'Reasons unavailable — reload the page'}
+            </option>
+            {returnReasons.map(r => (
+              <option key={r.value} value={r.value} style={drTheme.selectOption}>{r.value}</option>
+            ))}
           </select>
           {/* Say which way it will be counted BEFORE they commit. A picker that
               silently decides whether this lands in the rejection numbers is how
