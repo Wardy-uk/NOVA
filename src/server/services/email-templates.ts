@@ -178,6 +178,41 @@ export function one21PrepAgentHtml(opts: {
   `);
 }
 
+/**
+ * Receipt for the agent's own prep answers, sent back to them on submit.
+ *
+ * Their words, quoted verbatim and escaped — this is the one template rendering free text
+ * typed by someone else, so an unescaped `<` in an answer would eat the rest of the email.
+ */
+export function one21SubmissionReceiptHtml(opts: {
+  name: string;
+  dateDisplay: string;
+  answers: Array<{ question: string; answer: string }>;
+  submitUrl: string;
+  editable: boolean;
+}): string {
+  const esc = (t: string) => t
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const rows = opts.answers
+    .map((a) => `<tr><td style="padding:0 0 16px">
+        <p style="margin:0 0 4px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">${esc(a.question)}</p>
+        <p style="margin:0;color:#e5e5e5;font-size:13px;white-space:pre-wrap">${esc(a.answer) || '<span style="color:#6b7280">— no answer —</span>'}</p>
+      </td></tr>`)
+    .join('');
+  return wrap(`
+    <p style="margin:0 0 16px;color:#e5e5e5;font-size:15px">Hi ${esc(opts.name)},</p>
+    <p style="margin:0 0 20px;color:#a0a0a0;font-size:13px">Thank you — here is a copy of what you submitted for your 1-2-1 on <strong style="color:#e5e5e5">${opts.dateDisplay}</strong>.</p>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background-color:#272C33;border:1px solid #3a424d;border-radius:8px;padding:16px;width:100%">
+      ${rows}
+    </table>
+    ${opts.editable ? button(opts.submitUrl, 'Change my answers') : ''}
+    <p style="margin:16px 0 0;color:#a0a0a0;font-size:13px">${opts.editable
+      ? 'You can still change your answers up until we sit down together.'
+      : 'Your answers are now locked in ahead of our 1-2-1.'}</p>
+  `);
+}
+
 export function one21PrepManagerHtml(opts: {
   agentName: string;
   dateDisplay: string;

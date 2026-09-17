@@ -20,7 +20,7 @@ import type { FileSettingsQueries } from '../db/settings-store.js';
  * PUBLIC 1-2-1 routes — mounted at /api/121 BEFORE the auth middleware. The agent
  * reaches their prep form via an unguessable per-session token emailed the day before.
  */
-export function createOne21PublicRoutes(settings: FileSettingsQueries): Router {
+export function createOne21PublicRoutes(settings: FileSettingsQueries, deps: One21Deps): Router {
   const router = Router();
 
   // Bootstrap the agent's prep form for a token.
@@ -58,7 +58,7 @@ export function createOne21PublicRoutes(settings: FileSettingsQueries): Router {
       const answers = rawAnswers
         .map((a) => ({ question: String(a?.question ?? '').trim(), answer: String(a?.answer ?? '').trim() }))
         .filter((a) => a.question);
-      const result = await saveAgentSubmission(token, answers);
+      const result = await saveAgentSubmission(token, answers, deps);
       if (!result.ok) { res.status(409).json({ ok: false, error: result.error }); return; }
       res.json({ ok: true, data: {} });
     } catch (err) {

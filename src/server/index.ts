@@ -712,7 +712,7 @@ async function main() {
 
   // 1-2-1 prep — public agent submission form (token-gated, no NOVA login).
   // Mounted before auth; unmatched paths fall through to the authed router below.
-  app.use('/api/121', createOne21PublicRoutes(settingsQueries));
+  app.use('/api/121', createOne21PublicRoutes(settingsQueries, one21Deps));
 
   // Plaud hosted-MCP OAuth callback — public (browser redirect carries no NOVA JWT).
   app.get('/api/public/plaud/oauth/callback', async (req, res) => {

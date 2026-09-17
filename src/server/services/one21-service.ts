@@ -12,7 +12,7 @@ import { getAllInRange } from './kpi-agent/store.js';
 import { toLegacyAgentRow, isoDaysAgo } from './kpi-agent/legacy-shape.js';
 import { generatePrepForAgent } from '../routes/people.js';
 import { getPrepQuestions, prepEmailIntro, managerSummaryIntro } from '../config/one21-config.js';
-import { one21PrepAgentHtml, one21PrepManagerHtml, one21WeeklyKpiHtml } from './email-templates.js';
+import { one21PrepAgentHtml, one21PrepManagerHtml, one21SubmissionReceiptHtml, one21WeeklyKpiHtml } from './email-templates.js';
 import { nickEmail, novaBaseUrl } from '../config/standup-config.js';
 import { getStandupRoster } from './standup-roster.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
@@ -115,6 +115,7 @@ export function isSubmissionEditable(status: string): boolean {
 export async function saveAgentSubmission(
   token: string,
   answers: Array<{ question: string; answer: string }>,
+  deps?: One21Deps,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await getSessionByToken(token);
   if (!session) return { ok: false, error: 'This 1-2-1 prep link is not valid.' };
@@ -126,6 +127,32 @@ export async function saveAgentSubmission(
     SET agent_submission_json = ?, agent_submitted_at = GETUTCDATE(), status = 'ready'
     WHERE id = ?
   `, [JSON.stringify(answers), session.id]);
+
+  // Send the agent a copy of their own answers. Best-effort and after the save: a mail
+  // failure must never lose what they just typed, and they can resubmit, so every
+  // submission gets its own receipt rather than being deduped away as "already sent".
+  if (deps?.emailService.isConfigured()) {
+    try {
+      const to = await getAgentEmail(deps.settingsQueries, session.agent_name);
+      if (to) {
+        const submitUrl = `${novaBaseUrl()}/121/submit/${token}`;
+        const dateDisplay = displayDate(session.scheduled_date);
+        await deps.emailService.send({
+          to,
+          subject: `Your 1-2-1 prep — copy of your answers (${dateDisplay})`,
+          text: `Here is a copy of what you submitted for your 1-2-1 on ${dateDisplay}.\n\n`
+            + answers.map((a) => `${a.question}\n${a.answer || '— no answer —'}`).join('\n\n')
+            + `\n\nYou can change your answers until we meet: ${submitUrl}`,
+          html: one21SubmissionReceiptHtml({
+            name: session.agent_name.split(' ')[0], dateDisplay, answers, submitUrl, editable: true,
+          }),
+        });
+        await logEmailSent(session.id, session.agent_name, 'submission_receipt', `${session.id}:${Date.now()}`);
+      }
+    } catch (err) {
+      console.warn(`[121] submission receipt to ${session.agent_name} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
   return { ok: true };
 }
 
