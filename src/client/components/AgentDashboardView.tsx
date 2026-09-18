@@ -3774,7 +3774,7 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
     content: string; token_count: number;
   }>>>({});
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   const fetchDocs = async (p = 1) => {
     setLoading(true);
@@ -3836,7 +3836,7 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
         onClick={() => setOpen(true)}
         className="text-xs text-[#5ec1ca] hover:text-[#7dd3d8] flex items-center gap-1"
       >
-        <i className="fas fa-database" /> Browse Chunks
+        <i className="fas fa-database" /> Show every article NOVA can see
       </button>
     );
   }
@@ -3844,8 +3844,13 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
   return (
     <div className="border border-[#3a424d] rounded-lg bg-[#2f353d] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-neutral-200">Chunk Browser</span>
-        <button onClick={() => setOpen(false)} className="text-xs text-neutral-500 hover:text-neutral-300">Close</button>
+        <div>
+          <span className="text-sm font-medium text-neutral-200">Every article NOVA can see</span>
+          <span className="ml-2 text-xs text-neutral-500">
+            {total} document{total === 1 ? '' : 's'} indexed{searchQuery || sourceFilter ? ' (filtered)' : ''}
+          </span>
+        </div>
+        <button onClick={() => setOpen(false)} className="text-xs text-neutral-500 hover:text-neutral-300">Hide</button>
       </div>
 
       <div className="flex gap-2 items-center">
@@ -4583,21 +4588,34 @@ function KbHealthTab() {
   const [stats, setStats] = useState<{ total: number; current: number; stale: number; unused: number; drifted: number; gap_closure_rate: number } | null>(null);
   const [articles, setArticles] = useState<Array<{ id: number; article_id: string; article_title: string | null; status: string; usage_count_30d: number | null; drift_score: number | null }>>([]);
   const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // NB: kb-health lives at /api/kb-health, NOT under /api/agent — the local
+  // api() helper prefixes /api/agent, so this tab must fetch absolutely.
+  const kbApi = async (path: string, opts?: RequestInit) => {
+    const r = await fetch(`/api/kb-health${path}`, {
+      ...opts,
+      headers: { Authorization: `Bearer ${localStorage.getItem('nova_auth_token') || ''}` },
+    });
+    const text = await r.text();
+    try { return JSON.parse(text); } catch { return { ok: false, error: `Non-JSON response (${r.status})` }; }
+  };
 
   const load = async () => {
     const [s, a] = await Promise.all([
-      api('/kb-health/stats'), api('/kb-health/articles'),
+      kbApi('/stats'), kbApi('/articles'),
     ]);
-    if (s.ok) setStats(s.data);
+    if (s.ok) setStats(s.data); else setError(s.error ?? 'Failed to load KB health stats');
     if (a.ok) setArticles(a.data ?? []);
   };
   useEffect(() => { load(); }, []);
 
-  const scan = async () => { setScanning(true); await api('/kb-health/scan', { method: 'POST' }); await load(); setScanning(false); };
+  const scan = async () => { setScanning(true); await kbApi('/scan', { method: 'POST' }); await load(); setScanning(false); };
   const statusColor = (s: string) => s === 'current' ? 'text-green-400' : s === 'stale' ? 'text-amber-400' : s === 'drifted' ? 'text-red-400' : 'text-neutral-500';
 
   return (
     <div className="space-y-4">
+      {error && <div className="bg-red-900/20 text-red-400 text-xs rounded px-3 py-2">{error}</div>}
       {stats && (
         <div className="grid grid-cols-5 gap-3">
           {[

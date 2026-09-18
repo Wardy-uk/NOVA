@@ -34,16 +34,27 @@ export function KbHealthView() {
   const [coverage, setCoverage] = useState<CoverageItem[]>([]);
   const [filter, setFilter] = useState<string>('');
   const [scanning, setScanning] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
 
+  // allSettled, not all: one slow/failing panel (coverage is the usual suspect)
+  // must not leave the whole screen blank forever.
   const load = async () => {
-    const [s, a, c, cov] = await Promise.all([
+    const [s, a, c, cov] = await Promise.allSettled([
       api('/stats'), api(`/articles${filter ? `?status=${filter}` : ''}`),
       api('/closure-stats'), api('/coverage'),
     ]);
-    if (s.ok) setStats(s.data);
-    if (a.ok) setArticles(a.data);
-    if (c.ok) setClosure(c.data);
-    if (cov.ok) setCoverage(cov.data);
+    const val = (r: PromiseSettledResult<any>) => (r.status === 'fulfilled' ? r.value : null);
+    const errs: string[] = [];
+    const take = <T,>(r: PromiseSettledResult<any>, set: (v: T) => void, label: string) => {
+      const v = val(r);
+      if (v?.ok) set(v.data);
+      else errs.push(`${label}: ${v?.error ?? 'request failed'}`);
+    };
+    take<HealthStats>(s, setStats, 'stats');
+    take<ArticleHealth[]>(a, setArticles, 'articles');
+    take<ClosureStats>(c, setClosure, 'closure');
+    take<CoverageItem[]>(cov, setCoverage, 'coverage');
+    setErrors(errs);
   };
 
   useEffect(() => { load(); }, [filter]);
@@ -72,6 +83,11 @@ export function KbHealthView() {
 
   return (
     <div className="space-y-6">
+      {errors.length > 0 && (
+        <div className="bg-red-900/20 text-red-400 text-xs rounded px-3 py-2 space-y-0.5">
+          {errors.map(e => <div key={e}>{e}</div>)}
+        </div>
+      )}
       {/* Stats Grid */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

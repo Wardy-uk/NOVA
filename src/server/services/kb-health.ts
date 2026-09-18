@@ -115,6 +115,14 @@ export class KbHealthService {
       }
     }
 
+    // Drop health rows for docs that are no longer indexed. Without this the
+    // table only ever grows — every re-sync that changes a doc_url strands the
+    // old row, which is why "total articles" read 814 against 262 real docs.
+    await execute(
+      `DELETE FROM kb_article_health
+       WHERE article_id NOT IN (SELECT DISTINCT doc_url FROM kb_chunks WHERE doc_url IS NOT NULL)`,
+    );
+
     return processed;
   }
 
@@ -221,15 +229,24 @@ Are agents resolving these differently from what a KB article on "${articleTitle
 
   async getCoverageHeatmap(): Promise<Array<{ request_type: string; gap_count: number; article_count: number }>> {
     return query<{ request_type: string; gap_count: number; article_count: number }>(
-      `SELECT
-         COALESCE(g.category, h.article_title) AS request_type,
-         COUNT(DISTINCT g.id) AS gap_count,
-         COUNT(DISTINCT h.id) AS article_count
-       FROM kb_gap_log g
-       FULL OUTER JOIN kb_article_health h ON h.article_title LIKE '%' + g.category + '%'
-       WHERE g.category IS NOT NULL OR h.article_id IS NOT NULL
-       GROUP BY COALESCE(g.category, h.article_title)
-       ORDER BY gap_count DESC`,
+      // Aggregate the gaps FIRST, then match articles against the ~50 categories
+      // that matter. The old FULL OUTER JOIN ran a LIKE across every gap row
+      // (4.7k) x every article (800) before grouping and took 110s — past the
+      // 30s request timeout, so this endpoint never returned and the whole
+      // KB Health screen sat blank.
+      `WITH g AS (
+         SELECT TOP 50 category, COUNT(*) AS gap_count
+         FROM kb_gap_log
+         WHERE category IS NOT NULL AND category <> ''
+         GROUP BY category
+         ORDER BY COUNT(*) DESC
+       )
+       SELECT g.category AS request_type,
+              g.gap_count,
+              (SELECT COUNT(*) FROM kb_article_health h
+                WHERE h.article_title LIKE '%' + g.category + '%') AS article_count
+       FROM g
+       ORDER BY g.gap_count DESC`,
     );
   }
 }
