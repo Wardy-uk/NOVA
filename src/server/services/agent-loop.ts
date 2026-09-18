@@ -30,6 +30,7 @@ import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { logError } from './error-log.js';
 import { beginCriticalWork, endCriticalWork } from './work-priority.js';
+import { markdownishToAdf } from '../utils/markdownish-adf.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { prepareTicketForClose, setRequestType, ensureAiRequestTypeIfEmpty } from './close-ticket-helper.js';
@@ -2153,7 +2154,15 @@ export class AgentLoop {
         } catch (err) {
           console.warn(`[agent] issue-context lookup failed for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
         }
-        await this.jiraClient.addComment(decision.ticketKey, this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft, riskLine }), { internal: true });
+        // Posted as ADF. formatInternalNote emits markdown — **bold**, `-` bullets, numbered
+        // steps — and addComment wraps its argument in a single text node, which renders none
+        // of it: every triage note NOVA has posted arrived as one run-on paragraph with the
+        // asterisks and dashes visible in the text.
+        await this.jiraClient.addCommentAdf(
+          decision.ticketKey,
+          markdownishToAdf(this.formatInternalNote(decision, { skipDraftResponse: !!skipDraft, riskLine })),
+          { internal: true },
+        );
         console.log(`[agent] Posted internal note on ${decision.ticketKey}${decision.shadowMode ? ' [SHADOW]' : ''}${riskLine ? ' (+risk)' : ''}`);
       } catch (err) {
         console.warn(`[agent] Failed to post internal note on ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
