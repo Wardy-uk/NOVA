@@ -8,6 +8,21 @@ export function createNotificationRoutes(
 ): Router {
   const router = Router();
 
+  /**
+   * One in-flight notification check per user.
+   *
+   * /check raced checkAndCreate against a 5s timer and returned on timeout — but a lost race
+   * does not cancel the work. The query kept running and holding a pool connection while the
+   * client, having got its response, polled again and started another. Against an S0 database
+   * and a pool of 50 that compounds: on 18 Sep 2026 the log was a steady stream of
+   * "[notifications] /check timed out after 5s", every one of them leaving a query behind.
+   *
+   * Concurrent callers now share the single run rather than each starting their own. The
+   * timeout still returns quickly, so the client behaviour is unchanged; what stops is the
+   * pile-up behind it.
+   */
+  const checksInFlight = new Map<number, Promise<number>>();
+
   // GET /api/notifications — list notifications for current user
   router.get('/', async (req, res) => {
     const userId = (req as any).user?.id as number;
@@ -47,8 +62,18 @@ export function createNotificationRoutes(
     const userId = (req as any).user?.id as number;
     if (!userId) { res.status(401).json({ ok: false, error: 'Not authenticated' }); return; }
     try {
+      let work = checksInFlight.get(userId);
+      if (!work) {
+        work = notificationEngine.checkAndCreate(userId)
+          .finally(() => { checksInFlight.delete(userId); });
+        checksInFlight.set(userId, work);
+      }
+      // Swallow rejections on the shared promise so a failure for one caller cannot surface
+      // as an unhandled rejection for the others still awaiting it.
+      work.catch(() => {});
+
       const result = await Promise.race([
-        notificationEngine.checkAndCreate(userId),
+        work,
         new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 5000)),
       ]);
       if (result === 'timeout') {
