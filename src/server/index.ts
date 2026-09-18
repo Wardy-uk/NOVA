@@ -113,6 +113,7 @@ import { createPredictionRoutes } from './routes/predictions.js';
 import { createIncidentRoutes } from './routes/incidents.js';
 import { createSlaManagementRoutes } from './routes/sla-management.js';
 import { createAdminJobRoutes } from './routes/admin-jobs.js';
+import { createAdminHealthRoutes } from './routes/admin-health.js';
 import { createFailedJobsRoutes } from './routes/failed-jobs.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 import { AzDoClient } from './services/azdo-client.js';
@@ -1027,7 +1028,7 @@ async function main() {
   // unowned, stalled). Reads NOVA's own MSSQL directly rather than taking a
   // service dependency, so it has nothing to wire lazily; same shared-secret
   // door, so it mounts here with the other two.
-  app.use('/api/neuro-bridge', createNeuroBridgeFlowRoutes());
+  app.use('/api/neuro-bridge', createNeuroBridgeFlowRoutes(jobRegistry));
   // People half — the per-person subset of the KPIs, plus the roster they were
   // computed over, which is what lets a coverage figure have a denominator.
   // Needs settings for the KPI pool (dbo.Agent lives in techservicesjsm); same
@@ -1261,6 +1262,7 @@ async function main() {
 
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
   app.use('/api/admin/jobs', createAdminJobRoutes(jobRegistry));
+  app.use('/api/admin/health', createAdminHealthRoutes(jobRegistry));
   app.use('/api/admin/failed-jobs', createFailedJobsRoutes({
     settings: settingsQueries,
     getJiraClient: () => buildOnboardingJiraClient(),

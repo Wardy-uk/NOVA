@@ -1,8 +1,10 @@
 import { Router } from 'express';
 
 import { getFlowSignals } from '../services/flow-signals.js';
+import { getHealthSignals } from '../services/health-signals.js';
 import { getSentimentSignals } from '../services/sentiment-signals.js';
 import { bridgeAuth } from './neuro-bridge.js';
+import type { JobRegistry } from '../services/job-registry.js';
 
 /**
  * Flow half of the NEURO bridge — read-only.
@@ -14,8 +16,31 @@ import { bridgeAuth } from './neuro-bridge.js';
  *
  * Strictly SELECT. Nothing on this router writes.
  */
-export function createNeuroBridgeFlowRoutes(): Router {
+export function createNeuroBridgeFlowRoutes(jobRegistry?: JobRegistry): Router {
   const router = Router();
+
+  /**
+   * GET /health-signals
+   *
+   * NOVA reporting on its own machinery — see `services/health-signals.ts` for
+   * what it checks and why. VANTAGE polls this every 30–60 minutes; there is no
+   * push, deliberately. NOVA owns the data and consumers pull it, which is the
+   * direction every other read in this estate runs, and an inbound write
+   * endpoint on VANTAGE would be new attack surface on a Funnel-exposed service
+   * carrying a private coaching layer.
+   *
+   * Read `overall` with `trustworthy` beside it, never alone. A report whose
+   * positive controls are themselves unhealthy is not evidence that NOVA is
+   * fine — it is evidence that the checker cannot see.
+   */
+  router.get('/health-signals', async (req, res) => {
+    if (!bridgeAuth(req, res)) return;
+    try {
+      res.json({ ok: true, data: await getHealthSignals(jobRegistry) });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Query failed' });
+    }
+  });
 
   /**
    * GET /flow-signals?days=30&projects=NT
