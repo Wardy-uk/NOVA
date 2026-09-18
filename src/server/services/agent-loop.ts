@@ -31,6 +31,7 @@ import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { logError } from './error-log.js';
 import { beginCriticalWork, endCriticalWork } from './work-priority.js';
 import { markdownishToAdf } from '../utils/markdownish-adf.js';
+import { isMachineRaised } from './shared/machine-reporters.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { prepareTicketForClose, setRequestType, ensureAiRequestTypeIfEmpty } from './close-ticket-helper.js';
@@ -1933,12 +1934,33 @@ export class AgentLoop {
    * Fails closed: if the check errors we report "someone has replied", so an unreachable Jira
    * leaves NOVA quiet rather than risking a duplicate reply to a customer.
    */
-  private async hasCustomerFacingReply(ticketKey: string): Promise<boolean> {
+  /**
+   * Is a human already working this ticket in the open?
+   *
+   * The original test was "has anyone posted a customer-facing comment", which missed the case
+   * that matters most. On NT-31797 — a P2 feed migration with listings about to drop off a live
+   * site — Abdi had posted two INTERNAL comments and was mid-investigation. No public comment
+   * existed, so the guard passed and NOVA posted a public list of clarifying questions to the
+   * customer, signed "Nurtur Support", on a ticket a named agent was actively working. The
+   * customer then has two parties asking them things and no idea who is actually helping.
+   *
+   * An internal comment from the assignee is the clearest possible signal that a person has
+   * picked this up. So any comment by anyone other than NOVA counts, public or internal.
+   *
+   * Fails closed: an unreachable Jira reads as "a human is on it", so NOVA stays quiet rather
+   * than risk talking over someone. The FRT safety net still covers genuine silence.
+   */
+  private async isTicketAlreadyBeingHandled(ticketKey: string): Promise<boolean> {
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
     try {
       const comments = await this.jiraClient.getComments(ticketKey, 20);
-      return comments.some(c => c.jsdPublic === true);
+      return comments.some(c => {
+        if (c.jsdPublic === true) return true;
+        const authorId = (c.author as { accountId?: string } | undefined)?.accountId;
+        return !!authorId && authorId !== novaAccountId;
+      });
     } catch (err) {
-      console.warn(`[agent] Could not check for an existing customer reply on ${ticketKey} — assuming there is one:`, err instanceof Error ? err.message : err);
+      console.warn(`[agent] Could not check who is handling ${ticketKey} — assuming a human is:`, err instanceof Error ? err.message : err);
       return true;
     }
   }
@@ -2218,7 +2240,7 @@ export class AgentLoop {
         && !looksLikeStructuredPayload(observerDraft)
         && this.guardrails.validate(decision).allowed;
 
-      if (observerCanReply && !(await this.hasCustomerFacingReply(decision.ticketKey))) {
+      if (observerCanReply && !(await this.isTicketAlreadyBeingHandled(decision.ticketKey))) {
         const replyResult = await this.actor.postPublicReply(decision.ticketKey, observerDraft);
         await this.observer.logOutcome(decisionId, replyResult);
         if (replyResult.success) {
@@ -2365,6 +2387,22 @@ export class AgentLoop {
     if (isNewTicketTriage && isDraftResponse) {
       const draftText = (decision.output.draft_response as string) ?? '';
       const { threshold: replyThreshold, isQuestion } = this.firstReplyThresholdFor(decision);
+
+      // Nobody to write to. PowerMTA DKIM alerts, the Failed Jobs ticket and the other
+      // service-account feeds are machines opening tickets, and NT-31792 and NT-31407 were
+      // both answered with "Thank you for reporting this issue" and a promise that someone
+      // would "contact you" — addressed to an alerting mailbox. The internal note still
+      // posts, so the work is still visible; only the reply to no one is suppressed.
+      const reporterForReply = (decision.inputs.reporterEmail as string) || (decision.inputs.reporter as string) || '';
+      if (isMachineRaised(this.settings, reporterForReply)) {
+        await this.observer.logOutcome(decisionId, {
+          success: true, action: decision.action, ticketKey: decision.ticketKey,
+          detail: `Machine-raised ticket (${reporterForReply || 'unknown reporter'}) — internal note posted, no customer reply sent.`,
+        });
+        console.log(`[agent] ${decision.ticketKey}: machine-raised by "${reporterForReply}" — skipping customer reply`);
+        this.ticketsProcessed++;
+        return;
+      }
 
       if (decision.confidence >= replyThreshold && draftText && !looksLikeStructuredPayload(draftText)) {
         if (isQuestion) {
