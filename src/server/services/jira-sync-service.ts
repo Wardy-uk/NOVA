@@ -80,6 +80,9 @@ export class JiraSyncService {
   private lastSyncAt: Date | null = null;
   private syncing = false;
   private syncStartedAt: number | null = null;
+  /** Separate from the full-sync slot on purpose — see claimSyncSlot. */
+  private incrementalSyncing = false;
+  private incrementalStartedAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private fullSyncDone = false;
   private lastFullSyncAt: Date | null = null;
@@ -102,20 +105,41 @@ export class JiraSyncService {
    *  If the in-flight sync has been running longer than STALL_CEILING_MS it is
    *  treated as dead and the slot is reclaimed — otherwise one wedged request
    *  silently stops all syncing until the next restart. */
-  private claimSyncSlot(): boolean {
-    if (this.syncing) {
-      const runningMs = this.syncStartedAt ? Date.now() - this.syncStartedAt : 0;
+  /**
+   * One slot, and it used to be shared by both kinds of sync. That is what blinded the agent
+   * on 18 Sep 2026.
+   *
+   * A full sync is ~2,000 issues of MERGE plus a comment backfill, and against a database at
+   * 100% data IO it stops finishing inside the 30-minute stall ceiling. While it runs, every
+   * 45-second incremental was refused the slot — so no newly created ticket reached
+   * jira_issue_cache, the perceiver reported `new=0` tick after tick, and NOVA went blind from
+   * NT-31794 onward. The FRT safety net kept replying, because it queries Jira directly rather
+   * than the cache, which made it look like NOVA was half-working rather than not seeing.
+   *
+   * Then the ceiling fired and started a SECOND full sync on top of the first, which is a
+   * spiral rather than a recovery.
+   *
+   * So the kinds get their own slots. An incremental is small, quick, and the only thing
+   * standing between a new ticket and triage; it must never queue behind a reconciliation pass
+   * that has no deadline. Both write through the same idempotent MERGE, so overlapping is safe
+   * in the sense that matters — last writer wins with identical data.
+   */
+  private claimSyncSlot(kind: 'full' | 'incremental' = 'full'): boolean {
+    const running = kind === 'full' ? this.syncing : this.incrementalSyncing;
+    const startedAt = kind === 'full' ? this.syncStartedAt : this.incrementalStartedAt;
+    if (running) {
+      const runningMs = startedAt ? Date.now() - startedAt : 0;
       if (runningMs < STALL_CEILING_MS) return false;
-      console.warn(`[jira-sync] Previous sync stalled for ${Math.round(runningMs / 60_000)}m — reclaiming sync slot`);
+      console.warn(`[jira-sync] Previous ${kind} sync stalled for ${Math.round(runningMs / 60_000)}m — reclaiming its slot. If this repeats, the database cannot keep up and the cache is going stale.`);
     }
-    this.syncing = true;
-    this.syncStartedAt = Date.now();
+    if (kind === 'full') { this.syncing = true; this.syncStartedAt = Date.now(); }
+    else { this.incrementalSyncing = true; this.incrementalStartedAt = Date.now(); }
     return true;
   }
 
-  private releaseSyncSlot(): void {
-    this.syncing = false;
-    this.syncStartedAt = null;
+  private releaseSyncSlot(kind: 'full' | 'incremental' = 'full'): void {
+    if (kind === 'full') { this.syncing = false; this.syncStartedAt = null; }
+    else { this.incrementalSyncing = false; this.incrementalStartedAt = null; }
   }
 
   getStatus() {
@@ -318,7 +342,8 @@ export class JiraSyncService {
   }
 
   async incrementalSync(): Promise<void> {
-    if (this.syncing && this.syncStartedAt && Date.now() - this.syncStartedAt < STALL_CEILING_MS) return;
+    if (this.incrementalSyncing && this.incrementalStartedAt
+        && Date.now() - this.incrementalStartedAt < STALL_CEILING_MS) return;
     if (!this.lastSyncAt) {
       await this.fullSync();
       return;
@@ -332,7 +357,7 @@ export class JiraSyncService {
       return;
     }
 
-    if (!this.claimSyncSlot()) return;
+    if (!this.claimSyncSlot('incremental')) return;
     const start = Date.now();
     let issueCount = 0;
     let commentCount = 0;
@@ -376,7 +401,7 @@ export class JiraSyncService {
       console.error('[jira-sync] Incremental sync failed:', err instanceof Error ? err.message : err);
       void logError('jira-sync', err, { context: { phase: 'incremental' } });
     } finally {
-      this.releaseSyncSlot();
+      this.releaseSyncSlot('incremental');
     }
   }
 
