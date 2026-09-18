@@ -37,6 +37,27 @@ interface ChunkRow {
   embedding: Buffer;
 }
 
+/**
+ * Boilerplate that every inbound external email carries and that means nothing
+ * for retrieval. On NT-31736 the Mimecast caution banner was 118 of the 200
+ * characters the reasoner passes to the KB, so most of the query vector was
+ * built from text identical on every externally-raised ticket.
+ */
+const EMAIL_BOILERPLATE: RegExp[] = [
+  /caution:?\s*this message comes from an external organisation[^\n]*/gi,
+  /caution:?\s*this (e-?mail|message) originated (from )?outside[^\n]*/gi,
+  /this (e-?mail|message) (was sent from|comes from|originated) (a|an) external[^\n]*/gi,
+  /do not click links or open attachments unless you recogni[sz]e the sender[^\n]*/gi,
+  /please take care when clicking links or opening attachments\.?/gi,
+];
+
+/** Strips email boilerplate so the retrieval query is the customer's actual words. */
+export function cleanForKbQuery(text: string): string {
+  let out = text ?? '';
+  for (const p of EMAIL_BOILERPLATE) out = out.replace(p, ' ');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 export class KbSearchService {
   private settings: SettingsQueries;
   private embedder: KbEmbedder | null = null;
@@ -82,8 +103,20 @@ export class KbSearchService {
 
       scored.sort((a, b) => b.similarity - a.similarity);
 
+      // One chunk per DOCUMENT. A long, wordy article otherwise fills every slot
+      // with its own chunks and hides every other article: on NT-31736 all three
+      // top-k results were three chunks of the same login-migration page, so the
+      // password-reset article the ticket was actually asking about never had a
+      // slot to appear in. Keep each document's best chunk.
+      const bestPerDoc = new Map<string, { chunk: ChunkRow; similarity: number }>();
+      for (const entry of scored) {
+        const docKey = entry.chunk.doc_url || `${entry.chunk.source}:${entry.chunk.doc_title}`;
+        if (!bestPerDoc.has(docKey)) bestPerDoc.set(docKey, entry);
+      }
+      const deduped = [...bestPerDoc.values()];
+
       const publicSources = publicKbSources(this.settings);
-      return scored.slice(0, topK).map(({ chunk, similarity }) => ({
+      return deduped.slice(0, topK).map(({ chunk, similarity }) => ({
         id: String(chunk.id),
         title: chunk.doc_title,
         excerpt: chunk.content.slice(0, 200),

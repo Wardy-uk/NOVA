@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { TicketEvent, AgentDecision, AutonomyCheck } from './agent-types.js';
 import type { LlmService } from './llm-service.js';
 import type { KbSearchService } from './kb-search.js';
+import { cleanForKbQuery } from './kb-search.js';
 import type { AutonomyEngine } from './autonomy-engine.js';
 import type { LifecycleManager } from './lifecycle-manager.js';
 import type { AiLearningService } from './ai-learning-service.js';
@@ -115,7 +116,11 @@ export class Reasoner {
   }
 
   private async triageNewTicket(event: TicketEvent, priorFeedback?: { reason: string; previousAction: string; previousResponse: string }): Promise<AgentDecision> {
-    const kbMatches = await this.kbSearch.search(`${event.summary} ${event.description.slice(0, 200)}`);
+    // Strip the external-email banner BEFORE truncating: it is boilerplate on every
+    // externally-raised ticket and was eating most of the 200-char budget.
+    const kbMatches = await this.kbSearch.search(
+      `${event.summary} ${cleanForKbQuery(event.description).slice(0, 200)}`,
+    );
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
 
     const confluenceMatches = await this.searchConfluence(event.summary);
@@ -419,7 +424,9 @@ export class Reasoner {
   }
 
   private async handleComment(event: TicketEvent): Promise<AgentDecision> {
-    const kbMatches = await this.kbSearch.search(`${event.summary} ${(event.comments?.[0]?.body ?? '').slice(0, 200)}`);
+    const kbMatches = await this.kbSearch.search(
+      `${event.summary} ${cleanForKbQuery(event.comments?.[0]?.body ?? '').slice(0, 200)}`,
+    );
     const kbText = this.kbSearch.formatForPrompt(kbMatches);
     const customerContext = this.buildCustomerContext(event);
     const learningsCtx = await this.buildLearningsContext(event);

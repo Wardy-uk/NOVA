@@ -25,6 +25,27 @@ interface ChunkRow {
   content_hash: string;
 }
 
+/**
+ * What actually gets embedded for a chunk.
+ *
+ * Embedding the bare chunk body loses the document's subject entirely, which
+ * buries short articles whose meaning lives in their title. "How To Reset Your
+ * Nurtur Identity Password" is 35 tokens of "Go to <url>. Enter email address
+ * and click Send Email" — the words "reset" and "password" appear nowhere
+ * except inside a URL — so a password-reset ticket matched a long, wordy login
+ * migration article instead (NT-31736).
+ *
+ * Prefixing the title and heading path gives every chunk its context.
+ */
+function embeddingText(docTitle: string, headingPath: string | null, content: string): string {
+  return [docTitle, headingPath, content].filter(Boolean).join('\n\n');
+}
+
+/** Bump when embeddingText() changes: it is folded into the content hash so a
+ *  changed recipe re-embeds everything, instead of leaving old vectors that were
+ *  built a different way and can never be compared fairly against new ones. */
+const EMBED_RECIPE_VERSION = 'v2-title-and-heading-prefixed';
+
 export class KbSyncWorker {
   private embedder: KbEmbedder;
   private chunker: KbChunker;
@@ -65,7 +86,7 @@ export class KbSyncWorker {
 
       for await (const doc of provider.fetchDocuments()) {
         docsSeen++;
-        const contentHash = crypto.createHash('sha256').update(doc.markdown).digest('hex');
+        const contentHash = crypto.createHash('sha256').update(EMBED_RECIPE_VERSION + '\n' + doc.markdown).digest('hex');
 
         const existingChunks = await query<ChunkRow>(
           `SELECT id, source_doc_id, chunk_index, content_hash FROM kb_chunks WHERE source = ? AND source_doc_id = ?`,
@@ -84,7 +105,7 @@ export class KbSyncWorker {
         const chunks = this.chunker.chunk(doc.markdown);
         if (chunks.length === 0) continue;
 
-        const embeddings = await this.embedder.embed(chunks.map(c => c.content));
+        const embeddings = await this.embedder.embed(chunks.map(c => embeddingText(doc.title, c.headingPath, c.content)));
 
         // Delete old chunks for this doc
         if (existingChunks.length > 0) {
