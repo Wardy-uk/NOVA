@@ -89,6 +89,19 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   no_action: { label: 'No Action', color: 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30' },
 };
 
+// Plain-English description of what approving actually does. {key} = ticket key.
+const ACTION_PLAIN: Record<string, string> = {
+  draft_response: 'Send the drafted reply below to the customer on {key} as a public comment.',
+  respond: 'Send the drafted reply below to the customer on {key} as a public comment.',
+  request_info: 'Reply to {key} asking the customer for the missing information below.',
+  plugin_to_tpj: 'Move {key} out of the support queue and route it to the TPJ development team.',
+  escalate: 'Escalate {key} to the next support tier — it leaves the first-line queue.',
+  abuse_report: 'Log {key} as an abuse report and action it down the abuse process.',
+  auto_close: 'Post the reply below to {key} and close the ticket as resolved.',
+  close: 'Post the reply below to {key} and close the ticket as resolved.',
+  no_action: 'Take no action on {key} — leave it as it is for a human to pick up.',
+};
+
 function extractAdfText(adfJson: string | null): string {
   if (!adfJson) return '';
   try {
@@ -238,6 +251,44 @@ function ApprovalDetail({
 
   const handleExecute = () => { onDecide(item.id, 'execute'); actions.toast('Executed', 'ok'); };
 
+  const actionLabel = item.action_type
+    ? (ACTION_LABELS[item.action_type]?.label ?? item.action_type.replace(/_/g, ' '))
+    : null;
+  const actionPlain = item.action_type
+    ? (ACTION_PLAIN[item.action_type] ?? `Carry out "${actionLabel}" on {key}.`).replace('{key}', item.ticket_id)
+    : null;
+
+  const decisionBanner = (item.action_type || item.reasoning) ? (
+    <GlassCard className="p-4 space-y-3" accentGradient="#9b6aed 30%, #5ec1ca 70%" accent>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[#9b6aed] mb-1.5">
+            {isShadow ? 'The action I would have taken' : "The action I'm asking you to approve"}
+          </div>
+          {actionLabel && (
+            <span className={`inline-block mb-2 px-2.5 py-1 text-[12px] font-semibold rounded border ${ACTION_LABELS[item.action_type!]?.color ?? 'bg-neutral-500/20 text-neutral-400 border-neutral-500/30'}`}>
+              {actionLabel}
+            </span>
+          )}
+          <div className="text-[13px] text-neutral-200 leading-relaxed">
+            {actionPlain ?? 'No action recorded — review the ticket before deciding.'}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[#5ec1ca] mb-1.5">Why I'm proposing it</div>
+          <div className="text-[13px] text-neutral-300 leading-relaxed whitespace-pre-wrap">
+            {item.reasoning?.trim() || 'No reasoning was recorded for this decision — treat it as unexplained and check the ticket yourself.'}
+          </div>
+          {item.confidence != null && (
+            <div className="mt-2 text-[11px] text-neutral-500">
+              Confidence: <span className="text-neutral-300 font-semibold">{Math.round(item.confidence * 100)}%</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </GlassCard>
+  ) : undefined;
+
   const aiDecisionContext = item.source === 'nova_ai' ? (
     <GlassCard className="p-4 space-y-3" accentGradient="#5ec1ca 30%, #9b6aed 70%" accent>
       <div className="text-[11px] font-bold uppercase tracking-wider text-[#5ec1ca]">AI Decision</div>
@@ -277,9 +328,7 @@ function ApprovalDetail({
     </GlassCard>
   ) : undefined;
 
-  const approveActionLabel = item.action_type
-    ? (ACTION_LABELS[item.action_type]?.label ?? item.action_type.replace(/_/g, ' '))
-    : null;
+  const approveActionLabel = actionLabel;
 
   const actionBar = isPending && canInteract ? (
     <div className="sticky bottom-0 bg-[#14171c]/95 backdrop-blur-sm border-t border-[#2f353d] -mx-5 px-5 py-3 flex items-center gap-2">
@@ -330,6 +379,7 @@ function ApprovalDetail({
         headerActions={item.source === 'nova_ai' && onNavigateToAgent ? (
           <button onClick={() => onNavigateToAgent(item.ticket_id)} className="px-3 py-1.5 text-[11px] rounded-lg bg-[#5ec1ca]/15 text-[#5ec1ca] hover:bg-[#5ec1ca]/25 font-medium shrink-0">Review in Agent</button>
         ) : undefined}
+        headerBanner={decisionBanner}
         aiDecisionContext={aiDecisionContext}
         conversationJson={item.conversation_json ?? undefined}
         proposedResolution={originalText || undefined}

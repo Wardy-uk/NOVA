@@ -68,6 +68,9 @@ export interface UnifiedTicketDetailProps {
 
   aiDecisionContext?: ReactNode;
 
+  /** Full-width card rendered directly under the title, above the two-column body. */
+  headerBanner?: ReactNode;
+
   threadComposer?: ReactNode;
 }
 
@@ -97,7 +100,7 @@ export function UnifiedTicketDetail(props: UnifiedTicketDetailProps) {
     onRefresh, onFieldChange,
     primaryActions, secondaryActions,
     briefFields, briefTier,
-    aiDecisionContext, threadComposer,
+    aiDecisionContext, headerBanner, threadComposer,
   } = props;
 
   const composerRef = useRef<CommentComposerHandle>(null);
@@ -176,6 +179,8 @@ export function UnifiedTicketDetail(props: UnifiedTicketDetailProps) {
           )}
         </div>
       </GlassCard>
+
+      {headerBanner}
 
       {/* Body: two-column grid */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
