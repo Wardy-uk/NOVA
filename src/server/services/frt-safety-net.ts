@@ -427,6 +427,22 @@ export class FrtSafetyNet {
           + 'clock only - the customer still needs a real response.',
           { internal: true },
         );
+        // Label it so the SLA can be reported honestly. Stopping the FRT clock makes the SLA
+        // read as MET, so every ack quietly converts a breach into a pass — if this fires
+        // routinely the FRT figure goes green precisely when the reply pipeline is broken,
+        // and the number that should be raising the alarm is the one hiding it. The label
+        // makes these separable in JQL, so the SLA goal can exclude them
+        // (`AND labels != nova-frt-autoack`) and reporting can count them on their own.
+        // Best-effort: a failed label must never undo an acknowledgement already posted.
+        const ackLabel = this.settings.get('frt_safety_net_label') ?? 'nova-frt-autoack';
+        if (ackLabel) {
+          try {
+            await this.jiraClient.addLabel(issue.key, ackLabel);
+          } catch (err) {
+            console.warn(`[frt-safety-net] Could not label ${issue.key} with "${ackLabel}":`, err instanceof Error ? err.message : err);
+          }
+        }
+
         await this.recordAck(issue.key, machineRaised);
         alreadyAcked.add(issue.key);
         result.acknowledged++;
@@ -448,6 +464,21 @@ export class FrtSafetyNet {
       console.log(
         `[frt-safety-net] Sweep complete (${mode}): scanned=${result.scanned}`
         + ` acknowledged=${result.acknowledged} skipped=${result.skipped} failed=${result.failed}`,
+      );
+    }
+
+    // Fire rate is the health signal, not the breach count. This net exists to catch the
+    // occasional miss; a sweep acknowledging several real customers means the reply pipeline
+    // is not replying, and because each ack stops the SLA clock the FRT figure will look
+    // BETTER the worse things get. Say so plainly rather than leaving a healthy-looking
+    // "acknowledged=N" summary as the only trace.
+    const customerAcks = result.candidates.filter(c => !c.machineRaised).length;
+    const alarmAt = parseInt(this.settings.get('frt_safety_net_alarm_threshold') || '', 10) || 3;
+    if (mode === 'live' && result.acknowledged > 0 && customerAcks >= alarmAt) {
+      console.warn(
+        `[frt-safety-net] ${customerAcks} customer ticket(s) needed an automated first reply in a single sweep.`
+        + ' The safety net is carrying the desk, not backstopping it — FRT will still read as met.'
+        + ' Check agent tick times and whether triage is posting replies.',
       );
     }
     return result;

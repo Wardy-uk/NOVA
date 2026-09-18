@@ -501,6 +501,13 @@ export class JiraRestClient {
     await this.request<void>('PUT', `issue/${issueKey}`, { fields });
   }
 
+  /** Add a label without touching the ones already there.
+   *  Uses Jira's `update` verb rather than `fields`, which would replace the whole array and
+   *  silently drop any label set by a human or another automation. */
+  async addLabel(issueKey: string, label: string): Promise<void> {
+    await this.request<void>('PUT', `issue/${issueKey}`, { update: { labels: [{ add: label }] } });
+  }
+
   /** Transition an issue to a new status, optionally including fields and comment
    *  in the same request (required by transition validators).
    *  `comment.internal: true` marks the comment as a JSM internal note. */
