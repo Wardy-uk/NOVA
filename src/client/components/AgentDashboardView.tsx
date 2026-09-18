@@ -3774,6 +3774,8 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
     content: string; token_count: number;
   }>>>({});
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+  const [chunkErrors, setChunkErrors] = useState<Record<string, string>>({});
+  const [listError, setListError] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
 
   const fetchDocs = async (p = 1) => {
@@ -3791,14 +3793,20 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
         setTotal(data.data.total);
         setPage(data.data.page);
         setPageSize(data.data.pageSize);
+        setListError(null);
+      } else {
+        setListError(data.error ?? `Request failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Request failed');
+    }
     setLoading(false);
   };
 
   const fetchChunks = async (source: string, docId: string) => {
     const key = `${source}||${docId}`;
     if (chunks[key]) return;
+    setChunkErrors(prev => { const { [key]: _drop, ...rest } = prev; return rest; });
     try {
       const token = localStorage.getItem('nova_auth_token');
       const res = await fetch(`/api/kb-admin/chunks/${encodeURIComponent(source)}/${encodeURIComponent(docId)}`, {
@@ -3806,7 +3814,13 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
       });
       const data = await res.json();
       if (data.ok) setChunks(prev => ({ ...prev, [key]: data.data }));
-    } catch { /* ignore */ }
+      // A swallowed failure here is what left this stuck on "Loading chunks..."
+      // indefinitely. The usual cause is a 30s DB request timeout while a KB
+      // sync is saturating the database — say so rather than spinning forever.
+      else setChunkErrors(prev => ({ ...prev, [key]: data.error ?? `Request failed (${res.status})` }));
+    } catch (e) {
+      setChunkErrors(prev => ({ ...prev, [key]: e instanceof Error ? e.message : 'Request failed' }));
+    }
   };
 
   const toggleDoc = (source: string, docId: string) => {
@@ -3881,6 +3895,12 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
       </div>
 
       {loading && <div className="text-xs text-neutral-500 py-2">Loading...</div>}
+      {listError && (
+        <div className="bg-red-900/20 text-red-400 text-xs rounded px-3 py-2">
+          Couldn't load the document list: {listError}
+          <button onClick={() => fetchDocs(page)} className="ml-2 text-[#5ec1ca] hover:text-[#7dd3d8]">Retry</button>
+        </div>
+      )}
 
       <div className="space-y-1">
         {docs.map(doc => {
@@ -3912,7 +3932,16 @@ function KbChunkBrowser({ sources }: { sources: string[] }) {
 
               {isExpanded && (
                 <div className="border-t border-[#3a424d] px-3 py-2 space-y-1.5">
-                  {!docChunks && <div className="text-[11px] text-neutral-500">Loading chunks...</div>}
+                  {!docChunks && !chunkErrors[key] && <div className="text-[11px] text-neutral-500">Loading chunks...</div>}
+                  {!docChunks && chunkErrors[key] && (
+                    <div className="text-[11px] text-red-400">
+                      Couldn't load chunks: {chunkErrors[key]}
+                      <button
+                        onClick={e => { e.stopPropagation(); fetchChunks(doc.source, doc.source_doc_id); }}
+                        className="ml-2 text-[#5ec1ca] hover:text-[#7dd3d8]"
+                      >Retry</button>
+                    </div>
+                  )}
                   {docChunks?.map(chunk => {
                     const chunkKey = `${key}||${chunk.chunk_index}`;
                     const isChunkExpanded = expandedChunk === chunkKey;
