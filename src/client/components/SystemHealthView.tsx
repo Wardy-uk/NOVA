@@ -49,7 +49,8 @@ interface JobsHealth {
 }
 
 interface HealthSignals {
-  build: string; generatedAt: string; overall: Severity; trustworthy: boolean;
+  build: string; generatedAt: string; overall: Severity;
+  trustworthy: boolean; controlsHealthy: boolean;
   tables: Signal<TableHealth[]>;
   columns: Signal<ColumnHealth[]>;
   jobs: Signal<JobsHealth>;
@@ -150,14 +151,28 @@ export function SystemHealthView() {
         </button>
       </div>
 
-      {/* A report that cannot see must say so louder than anything it found. */}
+      {/* A report that cannot see must say so louder than anything it found. The
+          two causes want different reactions, so they are named separately
+          rather than collapsed into one warning. */}
       {!health.trustworthy && (
         <div className="p-3 rounded bg-amber-900/20 border border-amber-900/40 text-xs">
           <div className="text-amber-400">Do not trust this report.</div>
           <div className="text-neutral-400 mt-1">
-            A positive control — a table known to be busy — is itself reporting as empty or stale.
-            That points at the checker or its database connection rather than at the things being
-            checked, so the green rows below are not evidence of anything.
+            {!health.controlsHealthy ? (
+              <>
+                A positive control — a table known to be busy — is itself reporting as empty or
+                stale. That points at the checker or its database connection rather than at the
+                things being checked, so the green rows below are not evidence of anything.
+              </>
+            ) : (
+              <>
+                {health.unavailable.length === 1 ? 'One whole section' : `${health.unavailable.length} whole sections`}
+                {' '}of this report did not run
+                {' '}({health.unavailable.map(u => u.name).join(', ')}).
+                What did run is sound, but the report does not cover everything it claims to, so
+                the absence of a finding there means nothing was looked at.
+              </>
+            )}
           </div>
         </div>
       )}

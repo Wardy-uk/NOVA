@@ -52,7 +52,10 @@ async function main(): Promise<number> {
     console.log(JSON.stringify(health, null, 2));
   } else {
     console.log(`\nNOVA health signals — build ${HEALTH_SIGNALS_BUILD}`);
-    console.log(`Overall: ${health.overall.toUpperCase()}${health.trustworthy ? '' : '  [UNTRUSTWORTHY — a positive control is unhealthy]'}\n`);
+    // `controlsHealthy`, not `trustworthy`: the wider flag also counts the jobs
+    // section, which cannot run here by design, so reading it would print an
+    // alarm on every successful validation run.
+    console.log(`Overall: ${health.overall.toUpperCase()}${health.controlsHealthy ? '' : '  [UNTRUSTWORTHY — a positive control is unhealthy]'}\n`);
 
     console.log('Tables');
     if (!health.tables.ok) {

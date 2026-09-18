@@ -51,7 +51,7 @@ import type { JobRegistry, RegisteredJob } from './job-registry.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const HEALTH_SIGNALS_BUILD = '2026-09-18-a';
+export const HEALTH_SIGNALS_BUILD = '2026-09-18-b';
 
 /**
  * `unknown` is load-bearing. It means the check could not be evaluated, which is
@@ -440,11 +440,24 @@ export interface HealthSignals {
   /** Worst severity across every check — the one word for the top of the page. */
   overall: Severity;
   /**
-   * False when a positive control is itself unhealthy, which means the report
-   * cannot be trusted and its greens are not evidence of anything. Consumers
-   * should say so loudly rather than rendering a reassuring page.
+   * False when this report cannot see properly — either a positive control is
+   * itself unhealthy, or a whole section failed to evaluate. Its greens are then
+   * not evidence of anything, and consumers should say so loudly rather than
+   * rendering a reassuring page.
+   *
+   * Deliberately the WIDER of the two flags, because it is the one every
+   * consumer has been told to read. An earlier version checked only the table
+   * controls, which meant a report that had failed to evaluate two of its three
+   * layers still certified itself as sound.
    */
   trustworthy: boolean;
+  /**
+   * The narrow half: are the known-busy tables reporting as busy. Separated out
+   * so a consumer can distinguish "the checker is blind" from "one section of
+   * it did not run", which want different responses — the first invalidates
+   * everything, the second only what it covered.
+   */
+  controlsHealthy: boolean;
   tables: Signal<TableHealth[]>;
   columns: Signal<ColumnHealth[]>;
   jobs: Signal<JobsHealth>;
@@ -492,14 +505,17 @@ export async function getHealthSignals(jobRegistry?: JobRegistry): Promise<Healt
   if (jobs.data && !jobs.data.warmingUp) severities.push(...jobs.data.jobs.map(j => j.severity));
   if (unavailable.length) severities.push('unknown');
 
+  // Fails safe on an empty control list: deleting the control rows must not be
+  // able to certify the report by leaving `every` with nothing to object to.
   const controls = tables.data?.filter(t => t.control) ?? [];
-  const trustworthy = tables.ok && controls.length > 0 && controls.every(c => c.severity === 'ok');
+  const controlsHealthy = tables.ok && controls.length > 0 && controls.every(c => c.severity === 'ok');
 
   return {
     build: HEALTH_SIGNALS_BUILD,
     generatedAt: new Date().toISOString(),
     overall: worst(severities),
-    trustworthy,
+    trustworthy: controlsHealthy && unavailable.length === 0,
+    controlsHealthy,
     tables, columns, jobs, unavailable,
   };
 }
