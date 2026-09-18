@@ -21,6 +21,7 @@ const RESOLUTION_TYPE_IDS: Record<string, string> = {
   'User Error / How-To Guidance': '13770',
   'Fix By Tech Services': '13804',
   'Escalation': '13872',
+  'KBA Supplied': '14619',
 };
 
 const NURTUR_PRODUCT_NOT_APPLICABLE_ID = '13771';

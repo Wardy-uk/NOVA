@@ -15,6 +15,7 @@ const RESOLUTION_TYPES = [
   'Request Cancelled / Withdrawn',
   'User Error / How-To Guidance',
   'Fix By Tech Services',
+  'KBA Supplied',
   'Escalation',
 ] as const;
 

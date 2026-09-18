@@ -2967,7 +2967,8 @@ export class AgentLoop {
           let resMap: Record<string, string> = {};
           try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch { /* use empty */ }
           const effectiveAction = actionType ?? `quick_win_${quickWinType}`;
-          const resolution = resMap[effectiveAction] || resMap[quickWinType ?? ''] || 'No Fault Found';
+          const resolution = resMap[effectiveAction] || resMap[quickWinType ?? '']
+            || (quickWinType === 'kba_match' ? 'KBA Supplied' : 'No Fault Found');
           const { fields, comment } = buildResolveFields({
             tldr: `Approved for ${effectiveAction} by ${decidedBy ?? 'unknown'}`,
             resolution,

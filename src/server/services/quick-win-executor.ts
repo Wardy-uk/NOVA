@@ -123,7 +123,7 @@ export class QuickWinExecutor {
       const resMapRaw = this.settings.get('agent_resolution_type_map');
       let resMap: Record<string, string> = {
         spam: 'Request Cancelled / Withdrawn', vendor_email: 'Request Cancelled / Withdrawn', survey_feedback: 'Request Cancelled / Withdrawn',
-        thank_you: 'No Fault Found', kba_match: 'Fix By Tech Services',
+        thank_you: 'No Fault Found', kba_match: 'KBA Supplied',
         stale_no_response: 'Request Cancelled / Withdrawn', duplicate: 'Duplicate', auto_resolved: 'No Fault Found',
       };
       try { if (resMapRaw) resMap = { ...resMap, ...JSON.parse(resMapRaw) }; } catch {}
