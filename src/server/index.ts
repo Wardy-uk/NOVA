@@ -70,8 +70,6 @@ import { createGuildOnboardingRoutes } from './routes/guild-onboarding.js';
 import { GuildDashboardService } from './services/guild-dashboard.js';
 import { GuildDigestService } from './services/guild-digest.js';
 import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
-import { SalesQueries } from './db/sales-queries.js';
-import { createSalesHotboxRoutes } from './routes/sales-hotbox.js';
 import { JiraRestClient, type BcAccountResolver } from './services/jira-client.js';
 import { buildBcClient } from './services/bc-client.js';
 import { resolveBcAccountNumber } from './services/bc-account-resolver.js';
@@ -301,7 +299,6 @@ async function main() {
   const backfilled = await deliveryQueries.backfillOnboardingIds();
   if (backfilled > 0) console.log(`[N.O.V.A] Backfilled ${backfilled} onboarding IDs`);
   const crmQueries = new CrmQueries();
-  const salesQueries = new SalesQueries();
   const userQueries = new UserQueries();
 
   // Idempotent user restore from CSV backup (2026-04-16).
@@ -1335,7 +1332,6 @@ async function main() {
   app.use('/api/trends', requireAreaAccess(['kpis', 'qa'], 'view'), createTrendsRoutes(settingsQueries, userQueries));
   app.use('/api/backfill', requireAreaAccess('qa', 'view'), createBackfillRoutes(settingsQueries));
   app.use('/api/backlog', createBacklogRoutes(backlogQueries));
-  app.use('/api/sales', requireAreaAccess('sales', 'view'), createSalesHotboxRoutes(salesQueries, requireAreaAccess));
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));
