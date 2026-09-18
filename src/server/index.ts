@@ -1699,6 +1699,41 @@ async function main() {
       }
     }, 60 * 1000);
 
+    // Prune fields_json from long-closed tickets.
+    //
+    // fields_json is the raw Jira payload for every ticket and the bulk of a table measured at
+    // 723MB across 12,763 rows (~58KB each) on a database pegged at 100% data IO. Only ~600 of
+    // those rows are open. The other ~12,000 are closed tickets carrying a full payload that
+    // nothing reads: triage and dev-review only touch open tickets, and portal-csat's single
+    // use — resolutiondate — now reads the resolved_at column the sync already populates.
+    //
+    // Extraction and clearing happen in the same UPDATE, so resolved_at is never lost even if
+    // the process dies mid-run: a row either keeps its payload or has already had the one value
+    // anyone wanted lifted out of it. TRY_CONVERT so a malformed date cannot fail the batch.
+    //
+    // Recoverable — a resync repopulates from Jira. Retention defaults to 30 days and the whole
+    // job is off unless jira_cache_prune_enabled is set, because this deletes production data
+    // and that should be a decision, not a side effect of deploying.
+    const pruneRetentionDays = Number(settingsQueries.get('jira_cache_prune_retention_days')) || 30;
+    jobRegistry.register('jira-cache-prune', 'Prune fields_json from long-closed tickets', async () => {
+      if (settingsQueries.get('jira_cache_prune_enabled') !== 'true') return;
+      if (shouldYieldToCriticalWork('jira-cache-prune')) return;
+      try {
+        const pruned = await execute(
+          `UPDATE TOP (200) jira_issue_cache
+           SET resolved_at = COALESCE(resolved_at, TRY_CONVERT(datetime2, JSON_VALUE(fields_json, '$.resolutiondate'))),
+               fields_json = NULL
+           WHERE fields_json IS NOT NULL
+             AND status_category = 'done'
+             AND jira_updated < DATEADD(day, -${pruneRetentionDays}, GETUTCDATE())`,
+          [],
+        );
+        if (pruned) console.log(`[jira-cache-prune] cleared fields_json on ${pruned} closed ticket(s)`);
+      } catch (e) {
+        console.warn('[jira-cache-prune] failed:', e instanceof Error ? e.message : e);
+      }
+    }, 60 * 1000);
+
     // P5 Theme 2: Knowledge Autonomy
     const kbGapClosure = new KbGapClosureService();
     const kbHealth = new KbHealthService(llmService, settingsQueries, kbArticleService);

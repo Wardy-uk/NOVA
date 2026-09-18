@@ -37,6 +37,7 @@ interface CachedTicket {
   resolution_name: string | null;
   jira_created: string | null;
   reporter_email: string | null;
+  resolved_at: Date | string | null;
   fields_json: string | null;
 }
 
@@ -57,7 +58,8 @@ interface TicketContext {
  *  captured state/age turns "rated an unresolved ticket" into signal, not noise. */
 async function loadTicketContext(issueKey: string): Promise<TicketContext> {
   const ticket = await queryOne<CachedTicket>(
-    `SELECT summary, status_name, status_category, resolution_name, jira_created, reporter_email, fields_json
+    `SELECT summary, status_name, status_category, resolution_name, jira_created, reporter_email,
+            resolved_at, fields_json
      FROM jira_issue_cache WHERE issue_key = ?`,
     [issueKey],
   );
@@ -67,8 +69,12 @@ async function loadTicketContext(issueKey: string): Promise<TicketContext> {
 
   const resolved = ticket.status_category === 'Done' || !!ticket.resolution_name;
 
-  let resolvedAt: Date | null = null;
-  if (ticket.fields_json) {
+  // resolved_at is the same value — the sync writes it straight from f.resolutiondate — so
+  // prefer the column and keep the JSON parse only as a fallback for rows written before it
+  // was populated. This was the one reader keeping fields_json alive on closed tickets, and
+  // fields_json is the bulk of a table measured at 723MB across 12,763 rows.
+  let resolvedAt: Date | null = ticket.resolved_at ? new Date(ticket.resolved_at) : null;
+  if (!resolvedAt && ticket.fields_json) {
     try {
       const rd = JSON.parse(ticket.fields_json)?.resolutiondate;
       if (rd) resolvedAt = new Date(rd);
