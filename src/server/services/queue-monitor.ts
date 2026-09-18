@@ -55,11 +55,21 @@ export class QueueMonitor {
     const thresholdMs = thresholdMin * 60 * 1000;
     const results: SlaRiskTicket[] = [];
 
-    for (const issue of issues) {
-      const slaField = issue.fields.customfield_10010 as any;
-      if (!slaField) continue;
+    // customfield_10010 is Jira's default "Time to resolution" id and does not exist on this
+    // instance — NT uses 14046 (First Reply Time) and 14048 (Resolution), as flow-signals.ts
+    // and frt-safety-net.ts both already knew. So this read was always undefined, every issue
+    // hit the `continue`, and agent_queue_snapshots.sla_at_risk recorded 0 on all 4,006 rows.
+    // The health page flagged it as a constant column: a broken mapping, not a quiet queue.
+    // Configurable so the next instance that renumbers them does not silently zero this again.
+    const slaFieldIds = (this.settings.get('queue_monitor_sla_fields') || 'customfield_14046,customfield_14048')
+      .split(',').map(f => f.trim()).filter(Boolean);
 
-      const slaEntries = this.extractSlaEntries(slaField);
+    for (const issue of issues) {
+      const slaEntries = slaFieldIds.flatMap(fieldId => {
+        const slaField = (issue.fields as Record<string, unknown>)[fieldId];
+        return slaField ? this.extractSlaEntries(slaField as any) : [];
+      });
+      if (slaEntries.length === 0) continue;
       for (const entry of slaEntries) {
         const remaining = entry.breachTime - now.getTime();
         if (remaining > 0 && remaining < thresholdMs) {

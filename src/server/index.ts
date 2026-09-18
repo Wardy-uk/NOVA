@@ -1346,10 +1346,29 @@ async function main() {
   // Start Jira sync (service was created earlier so routes can reference it)
   let fullSyncPromise: Promise<void> | null = null;
   if (jiraSyncService) {
-    fullSyncPromise = jiraSyncService.fullSync().catch(err =>
-      console.error('[jira-sync] Initial full sync failed:', err instanceof Error ? err.message : err)
-    );
+    // Held back rather than fired at boot. A full sync is 2,000 issues of MERGE with 70+
+    // parameters each, plus a comment backfill, and it used to start in the same second as the
+    // agent's cold-start tick catching up on an hour of tickets. That is the restart storm:
+    // every deploy on 18 Sep 2026 cost ~20 minutes of a saturated database afterwards, and the
+    // health page caught the tail of one reading cpu 91% / data io 95%.
+    //
+    // The incremental sync runs every 45s and keeps the cache current, so nothing depends on
+    // the full pass finishing promptly — only on it happening. Delay is configurable; it starts
+    // the incremental immediately so the gap is covered.
+    const fullSyncDelayMs = Number(settingsQueries.get('jira_full_sync_boot_delay_ms')) || 3 * 60_000;
     jiraSyncService.start(45_000);
+    fullSyncPromise = new Promise<void>(resolve => {
+      setTimeout(() => {
+        if (shouldYieldToCriticalWork('jira-full-sync:boot')) {
+          console.log('[jira-sync] Boot full sync deferred — live SLA-bound triage in flight; the 45s incremental has the cache.');
+          resolve();
+          return;
+        }
+        jiraSyncService!.fullSync()
+          .catch(err => console.error('[jira-sync] Initial full sync failed:', err instanceof Error ? err.message : err))
+          .finally(() => resolve());
+      }, fullSyncDelayMs);
+    });
   }
 
   // AI scan jobs registered via jobRegistry below

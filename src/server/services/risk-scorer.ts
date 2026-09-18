@@ -432,7 +432,14 @@ export class RiskScorer {
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
               jira_created, sla_breach_time, sla_breached,
-              status_name, jira_updated, description_text
+              status_name, jira_updated,
+              -- Truncated deliberately. description_text is NVARCHAR(MAX) on a table measured
+              -- at 723MB/12,763 rows, and this sweep reads every open ticket. It is used only
+              -- for the escalation keyword regexes ("formal complaint", "solicitor",
+              -- "escalat"...), which land in the opening paragraphs if they land at all, so
+              -- pulling whole bodies off disk bought nothing and cost the sweep its life:
+              -- it has timed out at 30s on every run since 25 Aug 2026.
+              CAST(LEFT(description_text, 2000) AS NVARCHAR(2000)) AS description_text
        FROM jira_issue_cache
        WHERE project_key IN (${projectPlaceholders}) AND status_category != 'done'`,
       projects,
@@ -711,7 +718,14 @@ export class RiskScorer {
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
               jira_created, sla_breach_time, sla_breached,
-              status_name, jira_updated, description_text
+              status_name, jira_updated,
+              -- Truncated deliberately. description_text is NVARCHAR(MAX) on a table measured
+              -- at 723MB/12,763 rows, and this sweep reads every open ticket. It is used only
+              -- for the escalation keyword regexes ("formal complaint", "solicitor",
+              -- "escalat"...), which land in the opening paragraphs if they land at all, so
+              -- pulling whole bodies off disk bought nothing and cost the sweep its life:
+              -- it has timed out at 30s on every run since 25 Aug 2026.
+              CAST(LEFT(description_text, 2000) AS NVARCHAR(2000)) AS description_text
        FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
     );
 
@@ -815,7 +829,8 @@ export class RiskScorer {
     const rows = await query<Record<string, unknown>>(
       `SELECT f.*, j.status_name AS ticket_status, j.sla_breach_time, j.sla_breached,
               j.current_tier, j.project_key,
-              j.summary AS jira_summary, j.description_text,
+              j.summary AS jira_summary,
+              CAST(LEFT(j.description_text, 2000) AS NVARCHAR(2000)) AS description_text,
               cc.body_text AS last_customer_comment, cc.jira_created AS last_customer_comment_at,
               ac.body_text AS last_agent_comment, ac.jira_created AS last_agent_comment_at,
               conv.conversation_json
