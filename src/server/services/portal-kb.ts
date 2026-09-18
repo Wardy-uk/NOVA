@@ -87,7 +87,7 @@ export class PortalKbService {
       return { fetched: 0, added: 0, updated: 0, skipped: 0 };
     }
 
-    let added = 0, updated = 0;
+    let added = 0, updated = 0, unchanged = 0;
     const skipped: string[] = [];
 
     for (const page of pages) {
@@ -100,10 +100,28 @@ export class PortalKbService {
         const category = this.deriveCategory(page.title, labels, bodyText);
         const publishedAt = page.version?.when || new Date().toISOString();
 
-        const existing = await queryOne<{ id: number }>(
-          `SELECT id FROM portal_kb_articles WHERE confluence_page_id = ?`,
+        const existing = await queryOne<{ id: number; updated_at: Date | string | null }>(
+          `SELECT id, updated_at FROM portal_kb_articles WHERE confluence_page_id = ?`,
           [page.id],
         );
+
+        // Skip pages Confluence has not touched since we last stored them.
+        //
+        // This UPDATE fired unconditionally on every sync, rewriting body_html and body_text —
+        // both large text — for every article whether or not a word had changed. 50 rows had
+        // accumulated 240,067 modifications by 18 Sep 2026: about 4,800 complete rewrites of
+        // every article body, each one data-page and transaction-log writes against a database
+        // measured at 100% data IO. It is also why this table's statistics were 4,800x its row
+        // count out of date, which makes the planner choose badly on top of the wasted writes.
+        //
+        // `version.when` is Confluence's own modification timestamp, so it changes if and only
+        // if the page did. Comparing it costs nothing — the row is already in hand — and needs
+        // no comparison of the large columns themselves.
+        if (existing && existing.updated_at
+            && new Date(existing.updated_at).getTime() === new Date(publishedAt).getTime()) {
+          unchanged++;
+          continue;
+        }
 
         if (existing) {
           await execute(
@@ -127,7 +145,7 @@ export class PortalKbService {
       }
     }
 
-    console.log(`[portal-kb] Sync complete: fetched ${pages.length}, ${added} added, ${updated} updated, ${skipped.length} skipped${skipped.length ? ` [${skipped.join('; ')}]` : ''}`);
+    console.log(`[portal-kb] Sync complete: fetched ${pages.length}, ${added} added, ${updated} updated, ${unchanged} unchanged, ${skipped.length} skipped${skipped.length ? ` [${skipped.join('; ')}]` : ''}`);
     return { fetched: pages.length, added, updated, skipped: skipped.length };
   }
 
