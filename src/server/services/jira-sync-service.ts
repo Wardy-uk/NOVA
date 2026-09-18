@@ -225,8 +225,16 @@ export class JiraSyncService {
         throw new Error(`All ${upsertErrors} issue upserts failed — cache not updated`);
       }
 
-      // Mark cache as active even if some issues failed — partial data is better than no data
-      this.lastSyncAt = new Date();
+      // Mark cache as active even if some issues failed — partial data is better than no data.
+      //
+      // Stamped from when the sync STARTED, not now. This searched Jira for `updated >= start`
+      // and then took 22 minutes to write 2,000 issues; stamping `new Date()` would claim the
+      // cache was current to the END of that run, so the next incremental would search
+      // `updated >= start + 22min` and skip the whole window. Every ticket raised while a full
+      // sync was running was lost from the cache permanently — not late, never — and with full
+      // syncs taking 22 minutes back to back on 18 Sep 2026 that was most of them. NT-31799
+      // was raised three minutes into one and never reached the agent at all.
+      this.lastSyncAt = new Date(start);
       this.lastFullSyncAt = this.lastSyncAt;
       this.fullSyncDone = true;
       this.consecutiveErrors = 0;
@@ -389,7 +397,10 @@ export class JiraSyncService {
         }
       }
 
-      this.lastSyncAt = new Date();
+      // Same reasoning as the full sync: the window closes where the search began, so anything
+      // raised while this ran is picked up next time rather than skipped. The 30s lookback on
+      // `since` overlaps deliberately; re-reading a few issues is free, missing one is not.
+      this.lastSyncAt = new Date(start);
       this.consecutiveErrors = 0;
 
       if (issueCount > 0) {
