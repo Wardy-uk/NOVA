@@ -1854,6 +1854,19 @@ export class AgentLoop {
       }
     }
 
+    // Age, as a proxy for First Reply Time risk. This is the signal that actually matters for
+    // a fresh ticket: FRT is 30 working minutes from creation, and `slaBreachTime` is null on
+    // most new tickets, so without this a batch of new Mediums all scores 0. The sort is
+    // stable and the perceiver returns newest-first, so scoring 0 left the OLDEST ticket —
+    // the one nearest its FRT deadline — triaged last. Exactly backwards.
+    //
+    // Capped so a merely old ticket cannot outrank a live breach signal above.
+    const createdMs = Date.parse(event.created ?? '');
+    if (!isNaN(createdMs)) {
+      const ageMinutes = (Date.now() - createdMs) / 60_000;
+      if (ageMinutes > 0) score += Math.min(ageMinutes, 60);
+    }
+
     const priority = (event.priority ?? '').toLowerCase();
     if (priority === 'highest' || priority === 'critical' || priority === 'p1') score += 40;
     else if (priority === 'high' || priority === 'p2') score += 25;
