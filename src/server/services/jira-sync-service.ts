@@ -8,6 +8,7 @@ import { broadcastPortalEvent } from '../routes/portal-events.js';
 import { generateCsatSurvey } from '../routes/portal-csat.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 import { noReplyCutoff } from './shared/no-reply.js';
+import { isCriticalWorkInFlight } from './work-priority.js';
 import { poolForTicket } from './shared/ticket-pool.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
@@ -217,7 +218,21 @@ export class JiraSyncService {
       );
       console.log(`[jira-sync] Backfilling comments for ${openIssues.length} open issues...`);
 
+      // This loop is one Jira round-trip per open issue — 436 of them on 18 Sep 2026 — and it
+      // runs on every full sync, including the one at boot. That is a large, deadline-free
+      // draw on the same Jira rate limit the agent needs to answer a customer inside 30
+      // minutes. Bail out as soon as live triage starts; the next sync resumes where this
+      // left off, because the backfill is driven by what is missing rather than by position.
+      let backfilledSoFar = 0;
       for (const issue of openIssues) {
+        if (isCriticalWorkInFlight()) {
+          console.log(
+            `[jira-sync] Pausing comment backfill after ${backfilledSoFar}/${openIssues.length}`
+            + ' — live SLA-bound triage started. Resumes on the next sync.',
+          );
+          break;
+        }
+        backfilledSoFar++;
         try {
           const comments = await this.jiraClient.getComments(issue.key, 20);
           for (const comment of comments) {

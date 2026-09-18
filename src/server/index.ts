@@ -108,6 +108,7 @@ import { EscalationPredictor } from './services/escalation-predictor.js';
 import { IncidentDetector } from './services/incident-detector.js';
 import { SlaManager } from './services/sla-manager.js';
 import { FrtSafetyNet } from './services/frt-safety-net.js';
+import { shouldYieldToCriticalWork } from './services/work-priority.js';
 import { createPredictionRoutes } from './routes/predictions.js';
 import { createIncidentRoutes } from './routes/incidents.js';
 import { createSlaManagementRoutes } from './routes/sla-management.js';
@@ -1662,6 +1663,7 @@ async function main() {
     // stopped agent does no backfill.
     const backfillIntervalMs = Number(settingsQueries.get('agent_backfill_interval_ms')) || 5 * 60 * 1000;
     jobRegistry.register('agent-backfill-triage', 'Agent backfill triage', async () => {
+      if (shouldYieldToCriticalWork('agent-backfill-triage')) return;
       try {
         await agentLoop?.runBackfillTriage();
       } catch (e) {
@@ -2136,18 +2138,32 @@ async function main() {
 
     // QA pipeline — score resolved tickets every 2 hours
     jobRegistry.register('qa-scoring', 'QA pipeline: score resolved tickets', async () => {
+      // Scores tickets that are already resolved — no deadline, so it stands aside for live triage.
+      if (shouldYieldToCriticalWork('qa-scoring')) return;
       await qaPipeline.scoreRecentlyResolved(24);
     }, 2 * 60 * 60 * 1000);
-    setTimeout(() => qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 120_000);
+    // Boot runs are staggered well clear of the agent's cold-start tick. Every restart used to
+    // fire the comment backfill, GR and QA within two minutes of boot, on top of the agent
+    // catching up on an hour of tickets — the restart storm that cost us FRT breaches on 18 Sep.
+    setTimeout(() => {
+      if (shouldYieldToCriticalWork('qa-scoring:boot')) return;
+      qaPipeline.scoreRecentlyResolved(24).catch(e => console.warn('[qa-pipeline] initial run failed:', e instanceof Error ? e.message : e));
+    }, 15 * 60_000);
 
     // GR comment scoring — hourly, 72h look-back.
     // The old Mon-Fri 08:00-18:00 gate combined with a 24h window meant comments posted
     // between Friday evening and Sunday morning were never scanned at all, with no
     // catch-up. Scoring only the latest comment per ticket keeps the wider window cheap.
     jobRegistry.register('gr-scoring', 'Golden rules pipeline', async () => {
+      // An LLM call per comment across a 72-hour window — the single heaviest background
+      // consumer, and it scores comments already written. It waits.
+      if (shouldYieldToCriticalWork('gr-scoring')) return;
       await grPipeline.scoreRecentComments(72 * 60);
     }, 60 * 60 * 1000);
-    setTimeout(() => grPipeline.scoreRecentComments(72 * 60).catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e)), 30_000);
+    setTimeout(() => {
+      if (shouldYieldToCriticalWork('gr-scoring:boot')) return;
+      grPipeline.scoreRecentComments(72 * 60).catch(e => console.warn('[gr-pipeline] initial run failed:', e instanceof Error ? e.message : e));
+    }, 10 * 60_000);
 
     // QA daily digest email — 17:00 UTC
     jobRegistry.register('qa-daily-digest', 'QA daily digest email', async () => {

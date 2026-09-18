@@ -29,6 +29,7 @@ import { QuickWinExecutor } from './quick-win-executor.js';
 import { ExternalDbService } from './external-db.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
 import { logError } from './error-log.js';
+import { beginCriticalWork, endCriticalWork } from './work-priority.js';
 import { EscalationLogService } from './escalation-log-service.js';
 import { buildResolveFields } from '../utils/jira-resolve-fields.js';
 import { prepareTicketForClose, setRequestType, ensureAiRequestTypeIfEmpty } from './close-ticket-helper.js';
@@ -823,6 +824,9 @@ export class AgentLoop {
       // 2. REASON
       const shadowMode = this.getShadowMode();
       for (const e of dedupedLlmEvents) this.inFlightTickets.add(e.ticketKey);
+      // Deadline-bound from here: these tickets have SLA clocks running. Bulk jobs stand
+      // aside until the batch is done — see work-priority.ts.
+      if (dedupedLlmEvents.length > 0) beginCriticalWork();
       let decisions: AgentDecision[];
       try {
         decisions = await this.reasoner.decideMultiple(dedupedLlmEvents);
@@ -845,6 +849,7 @@ export class AgentLoop {
         }
       } finally {
         for (const e of dedupedLlmEvents) this.inFlightTickets.delete(e.ticketKey);
+        if (dedupedLlmEvents.length > 0) endCriticalWork();
       }
 
       // Mark processed for cross-tick dedup
