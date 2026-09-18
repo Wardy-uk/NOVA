@@ -293,8 +293,14 @@ export class TaskAggregator {
       let removed = 0;
       if (ok) {
         if (freshIds.length === 0 && !canPurgeAll) {
-          console.warn(
-            `[Aggregator] ${adapter.source}: Returned 0 tasks with ok=true — skipping stale cleanup to prevent accidental purge`
+          // Routine, not a fault: a user with nothing assigned to them in the source returns
+          // zero, and the guard below simply has nothing to do. This was a console.warn, which
+          // goes to stderr, so every ordinary sync for such a user wrote a line to the error
+          // log — thousands of them. On 18 Sep 2026 that noise read as a symptom of the
+          // database contention being investigated and cost real time to rule out.
+          // The guard still stands; only the false alarm goes.
+          console.log(
+            `[Aggregator] ${adapter.source}: no tasks for this user — skipping stale cleanup`
           );
         } else {
           removed = await this.taskQueries.deleteStaleBySource(adapter.source, freshIds, {
