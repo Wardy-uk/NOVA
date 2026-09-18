@@ -1,6 +1,7 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { adfText } from './frt-safety-net-adf.js';
+import { query, execute } from './database.js';
 
 /**
  * First Reply Time safety net.
@@ -233,6 +234,56 @@ export class FrtSafetyNet {
     return !isNaN(parsed) && parsed >= 1 ? parsed : 2;
   }
 
+  /**
+   * Tickets already acknowledged, so we never post twice.
+   *
+   * The original design needed no ack log: posting stops the FRT clock, so the ticket drops
+   * out of the candidate query on its own. That is true right up until the stop condition
+   * does not fire — and on 18 Sep 2026 NT-31702 and NT-31587 were each acknowledged NINE
+   * times, once every sweep. Both are raised BY the NOVA service account, so NOVA was
+   * replying to its own ticket and Jira never recorded a `Comment: For Customers`. The clock
+   * kept running, the ticket stayed a candidate, and the sweep posted again three minutes
+   * later, indefinitely.
+   *
+   * Self-idempotency via someone else's side effect is not idempotency. This records the fact
+   * directly. Failures here are logged and ignored: an ack log that breaks must never stop
+   * the safety net acknowledging a customer.
+   */
+  private async ensureAckTable(): Promise<void> {
+    try {
+      await execute(`IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'frt_ack_log')
+        CREATE TABLE dbo.frt_ack_log (
+          ticket_key VARCHAR(50) NOT NULL PRIMARY KEY,
+          acked_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+          machine_raised BIT NOT NULL DEFAULT 0
+        );`, []);
+    } catch (err) {
+      console.warn('[frt-safety-net] Could not ensure ack log table:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  private async loadAckedKeys(): Promise<Set<string>> {
+    try {
+      const rows = await query<{ ticket_key: string }>('SELECT ticket_key FROM frt_ack_log', []);
+      return new Set(rows.map(r => r.ticket_key));
+    } catch (err) {
+      console.warn('[frt-safety-net] Could not read ack log:', err instanceof Error ? err.message : err);
+      return new Set();
+    }
+  }
+
+  private async recordAck(ticketKey: string, machineRaised: boolean): Promise<void> {
+    try {
+      await execute(
+        `IF NOT EXISTS (SELECT 1 FROM frt_ack_log WHERE ticket_key = ?)
+           INSERT INTO frt_ack_log (ticket_key, machine_raised) VALUES (?, ?)`,
+        [ticketKey, ticketKey, machineRaised ? 1 : 0],
+      );
+    } catch (err) {
+      console.warn(`[frt-safety-net] Could not record ack for ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   private buildJql(): string {
     const projects = this.list('frt_safety_net_projects', ['nt']).map(p => p.toUpperCase());
     const scope = projects.length === 1 ? `project = ${projects[0]}` : `project IN (${projects.join(', ')})`;
@@ -257,6 +308,9 @@ export class FrtSafetyNet {
     const mode = this.getMode();
     const result: FrtSweepResult = { mode, scanned: 0, acknowledged: 0, skipped: 0, failed: 0, candidates: [] };
     if (mode === 'off') return result;
+
+    await this.ensureAckTable();
+    const alreadyAcked = await this.loadAckedKeys();
 
     const search = await this.jiraClient.searchJqlAll(
       this.buildJql(),
@@ -291,6 +345,12 @@ export class FrtSafetyNet {
       // then would email the customer out of hours for a deadline that is not actually near.
       // Jira's own withinCalendarHours flag is the exact test for "the clock is ticking now".
       if (!candidate.withinCalendarHours) {
+        result.skipped++;
+        continue;
+      }
+
+      // Never acknowledge the same ticket twice, whatever the SLA clock says.
+      if (alreadyAcked.has(issue.key)) {
         result.skipped++;
         continue;
       }
@@ -367,6 +427,8 @@ export class FrtSafetyNet {
           + 'clock only - the customer still needs a real response.',
           { internal: true },
         );
+        await this.recordAck(issue.key, machineRaised);
+        alreadyAcked.add(issue.key);
         result.acknowledged++;
         console.log(
           `[frt-safety-net] Acknowledged ${issue.key}`
