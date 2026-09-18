@@ -107,6 +107,7 @@ import { JobRegistry } from './services/job-registry.js';
 import { EscalationPredictor } from './services/escalation-predictor.js';
 import { IncidentDetector } from './services/incident-detector.js';
 import { SlaManager } from './services/sla-manager.js';
+import { FrtSafetyNet } from './services/frt-safety-net.js';
 import { createPredictionRoutes } from './routes/predictions.js';
 import { createIncidentRoutes } from './routes/incidents.js';
 import { createSlaManagementRoutes } from './routes/sla-management.js';
@@ -1639,6 +1640,19 @@ async function main() {
         console.warn('[sla-manager] proactive check failed:', e instanceof Error ? e.message : e);
       }
     }, 5 * 60 * 1000);
+
+    // First Reply Time safety net — acknowledge tickets about to breach FRT with no
+    // customer-facing reply. Runs every 3 min so the default 10-minute threshold is caught
+    // several times over before the deadline. No working-hours gate here: the service skips
+    // tickets whose SLA clock the calendar has parked, which is the exact test.
+    const frtSafetyNet = new FrtSafetyNet(agentJiraClient, settingsQueries);
+    jobRegistry.register('frt-safety-net', 'First Reply Time safety net', async () => {
+      try {
+        await frtSafetyNet.run();
+      } catch (e) {
+        console.warn('[frt-safety-net] sweep failed:', e instanceof Error ? e.message : e);
+      }
+    }, 3 * 60 * 1000);
 
     // P5 Theme 2: Knowledge Autonomy
     const kbGapClosure = new KbGapClosureService();
