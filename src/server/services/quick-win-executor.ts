@@ -87,6 +87,7 @@ export class QuickWinExecutor {
       // internal (the 'cancel' transition has no public-comment validator);
       // everything else is a public customer comment.
       let commentText: string;
+      let commentAdf: object | undefined;
       let commentInternal: boolean;
       if (qw.type === 'kba_match') {
         // Find the best KB match URL from the inputs (stored by reasoner alongside the decision).
@@ -112,8 +113,57 @@ export class QuickWinExecutor {
         }
 
         const bestMatch = publishable.reduce((a, b) => (b.relevance > a.relevance ? b : a));
-        const articleRef = bestMatch.url ? `[${bestMatch.title}](${bestMatch.url})` : bestMatch.title;
-        commentText = `This question is covered by our knowledge base article: ${articleRef}. Please take a look — it should have everything you need. We're closing this ticket now, but if you need further help just raise a new request.`;
+
+        // Written as ADF, not markdown. The plain-text path wraps everything in one text node,
+        // so "[Title](https://...)" reached the customer as literal brackets on NT-31799.
+        // It also could not break a paragraph, which is why the old message was a single block
+        // that opened by talking about itself and closed by announcing the ticket was shut.
+        const reporterName = (decision.inputs.reporter as string) || '';
+        const firstName = reporterName.split(/\s+/)[0];
+        const greeting = firstName && !firstName.includes('@') && firstName.length > 1
+          ? `Hi ${firstName},`
+          : 'Hi there,';
+        const askedAbout = (decision.inputs.summary as string) || '';
+
+        const linkNode = bestMatch.url
+          ? { type: 'text', text: bestMatch.title, marks: [{ type: 'link', attrs: { href: bestMatch.url } }] }
+          : { type: 'text', text: bestMatch.title };
+
+        commentAdf = {
+          type: 'doc',
+          version: 1,
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: greeting }] },
+            {
+              type: 'paragraph',
+              content: [{
+                type: 'text',
+                text: askedAbout
+                  ? `Thanks for getting in touch about "${askedAbout}". We have a guide that covers this: `
+                  : 'Thanks for getting in touch. We have a guide that covers this: ',
+              }, linkNode, { type: 'text', text: '.' }],
+            },
+            {
+              type: 'paragraph',
+              content: [{
+                type: 'text',
+                text: "That should have everything you need, so we'll close this off here. "
+                  + 'If it does not solve it, or you have any trouble following it, just reply to this '
+                  + 'ticket and it will come straight back to us.',
+              }],
+            },
+            {
+              type: 'paragraph',
+              content: [
+                { type: 'text', text: 'Kind regards,' },
+                { type: 'hardBreak' },
+                { type: 'text', text: 'Nurtur Support' },
+              ],
+            },
+          ],
+        };
+        commentText = `${greeting} Thanks for getting in touch. We have a guide that covers this: ${bestMatch.title}`
+          + `${bestMatch.url ? ` (${bestMatch.url})` : ''}. If it does not solve it, reply to this ticket and it will come back to us.`;
         commentInternal = false;
       } else if (SILENT_CANCEL_TYPES.has(qw.type)) {
         commentText = INTERNAL_CLOSE_COMMENTS[qw.type];
@@ -151,6 +201,7 @@ export class QuickWinExecutor {
         tldr: `Quick win auto-close: ${qw.type}`,
         resolution,
         comment: commentText,
+        commentAdf,
       });
       // Attach the comment IN the transition and set the full resolve fields.
       // No bare-payload fallback: if Jira rejects the transition, let it throw so

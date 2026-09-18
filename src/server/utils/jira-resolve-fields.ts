@@ -30,6 +30,9 @@ export interface ResolveContext {
   tldr: string;
   resolution: string;
   comment: string;
+  /** Pre-built ADF body, for a comment that needs real links or paragraphs. Takes precedence
+   *  over `comment`, which is still required as the plain-text fallback and for logging. */
+  commentAdf?: object;
   product?: string;
   subCategory?: string;
 }
@@ -54,8 +57,12 @@ export function buildResolveFields(ctx: ResolveContext): {
     fields[CF_RESOLUTION_TYPE] = { id: resolutionId };
   }
 
+  // A caller that has built real ADF keeps it. Everything else gets the plain-text wrap,
+  // which is one paragraph containing one text node — so it cannot render a link, and cannot
+  // break a paragraph. A markdown link handed to it reaches the customer as literal
+  // "[Title](https://...)" brackets, which is what NT-31799 was sent on 18 Sep 2026.
   const comment = {
-    body: {
+    body: ctx.commentAdf ?? {
       type: 'doc',
       version: 1,
       content: [{ type: 'paragraph', content: [{ type: 'text', text: ctx.comment }] }],
