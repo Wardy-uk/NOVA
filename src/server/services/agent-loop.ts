@@ -1898,6 +1898,29 @@ export class AgentLoop {
   }
 
   /**
+   * The confidence a draft must reach before it goes to the customer.
+   *
+   * One threshold for every draft conflates two very different risks. Posting a confident
+   * ANSWER at 78% risks telling a customer something wrong. Posting clarifying QUESTIONS at
+   * 78% risks almost nothing — "which account is this affecting?" is what a competent agent
+   * asks when the ticket is thin, and being unsure is precisely the reason to ask.
+   *
+   * Holding both to 0.85 meant tickets scoring 0.72-0.84 were punted with a generic "I've
+   * passed this to Heidi" instead of the questions NOVA had already written. The reasoner
+   * maps gather_context onto draft_response, so those questions exist on the decision and
+   * were simply never posted.
+   *
+   * Answers keep the old bar. Questions get their own, lower one.
+   */
+  private firstReplyThresholdFor(decision: AgentDecision): { threshold: number; isQuestion: boolean } {
+    const answerThreshold = parseFloat(this.settings.get('agent_first_reply_confidence_threshold') || '0.85');
+    const isQuestion = decision.output.recommended_action === 'gather_context';
+    if (!isQuestion) return { threshold: answerThreshold, isQuestion: false };
+    const questionThreshold = parseFloat(this.settings.get('agent_gather_context_confidence_threshold') || '0.65');
+    return { threshold: questionThreshold, isQuestion: true };
+  }
+
+  /**
    * Has anyone posted a customer-facing comment on this ticket yet?
    *
    * Checked live rather than from the cache, because the answer decides whether to send a
@@ -2175,7 +2198,7 @@ export class AgentLoop {
       // customer-facing comment exists, and NOVA does NOT reassign the ticket to itself the
       // way the normal first-reply path does — the human keeps it. NOVA replies and steps back.
       const observerFirstReplyEnabled = this.settings.get('agent_observer_first_reply') !== 'false';
-      const frThreshold = parseFloat(this.settings.get('agent_first_reply_confidence_threshold') || '0.85');
+      const { threshold: frThreshold } = this.firstReplyThresholdFor(decision);
       const observerDraft = (decision.output.draft_response as string) ?? '';
       const observerCanReply = observerFirstReplyEnabled
         && !decision.shadowMode
@@ -2332,8 +2355,12 @@ export class AgentLoop {
     // ── First reply on new ticket triage ──
     if (isNewTicketTriage && isDraftResponse) {
       const draftText = (decision.output.draft_response as string) ?? '';
+      const { threshold: replyThreshold, isQuestion } = this.firstReplyThresholdFor(decision);
 
-      if (decision.confidence >= FIRST_REPLY_CONFIDENCE_THRESHOLD && draftText && !looksLikeStructuredPayload(draftText)) {
+      if (decision.confidence >= replyThreshold && draftText && !looksLikeStructuredPayload(draftText)) {
+        if (isQuestion) {
+          console.log(`[agent] ${decision.ticketKey}: asking the customer for detail (confidence ${(decision.confidence * 100).toFixed(0)}%, question threshold ${replyThreshold})`);
+        }
         // High confidence: post AI draft as public first reply
         const replyResult = await this.actor.postPublicReply(decision.ticketKey, draftText);
         await this.observer.logOutcome(decisionId, replyResult);
