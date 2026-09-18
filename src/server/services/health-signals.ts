@@ -51,7 +51,7 @@ import type { JobRegistry, RegisteredJob } from './job-registry.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const HEALTH_SIGNALS_BUILD = '2026-09-18-d';
+export const HEALTH_SIGNALS_BUILD = '2026-09-18-e';
 
 /**
  * `unknown` is load-bearing. It means the check could not be evaluated, which is
@@ -183,15 +183,49 @@ const TIMESTAMP_PREFERENCE = [
   'synced_at', 'flagged_at', 'updated_at',
 ];
 
+/**
+ * Pick the column to measure recency on — preferring one an index can answer.
+ *
+ * `MAX(col)` over an indexed column is a single seek to the end of the index.
+ * Over an unindexed one it is a full scan of the clustered index, LOB and all,
+ * and `jira_issue_cache` is 723MB for 12,763 rows. Measured on production on
+ * 18 Sep 2026 while the database sat at 100% data IO: `MAX(synced_at)`
+ * (unindexed) did not return in 180 seconds; the catalogue row count came back
+ * in 1.4s. A health check that cannot finish is not a health check, and one that
+ * scans 723MB every time it runs is contributing to the very saturation it is
+ * supposed to be reporting on.
+ *
+ * So the order is: an indexed column from the preference list, then any indexed
+ * timestamp, then the preference list, then nothing. For `jira_issue_cache` that
+ * resolves to `jira_updated` rather than `synced_at`, which is a deliberate
+ * trade: `synced_at` is the more direct measure of "the sync ran", but it costs
+ * more than the answer is worth. `MAX(jira_updated)` still stops advancing when
+ * the sync stops, because no new rows arrive — it answers the same question one
+ * step removed, in milliseconds instead of never.
+ */
 async function resolveTimestampColumn(table: string): Promise<string | null> {
-  const cols = await query<{ COLUMN_NAME: string }>(
-    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = ? AND DATA_TYPE IN ('datetime', 'datetime2', 'datetimeoffset', 'date', 'smalldatetime')`,
+  const cols = await query<{ col: string; leading_index: string | null }>(
+    `SELECT c.name AS col,
+            (SELECT TOP 1 i.name
+               FROM sys.index_columns ic
+               JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+              WHERE ic.object_id = c.object_id AND ic.column_id = c.column_id AND ic.key_ordinal = 1) AS leading_index
+       FROM sys.columns c
+       JOIN sys.types t ON c.user_type_id = t.user_type_id
+      WHERE c.object_id = OBJECT_ID(?) AND t.name IN ('datetime', 'datetime2', 'datetimeoffset', 'date', 'smalldatetime')`,
     [table],
   );
-  const available = new Set(cols.map(c => c.COLUMN_NAME.toLowerCase()));
+
+  const byName = new Map(cols.map(c => [c.col.toLowerCase(), c]));
+  const indexed = (name: string) => Boolean(byName.get(name)?.leading_index);
+
   for (const preferred of TIMESTAMP_PREFERENCE) {
-    if (available.has(preferred)) return preferred;
+    if (byName.has(preferred) && indexed(preferred)) return preferred;
+  }
+  const anyIndexed = cols.find(c => c.leading_index);
+  if (anyIndexed) return anyIndexed.col;
+  for (const preferred of TIMESTAMP_PREFERENCE) {
+    if (byName.has(preferred)) return preferred;
   }
   return null;
 }
@@ -244,12 +278,22 @@ async function checkTable(exp: TableExpectation): Promise<TableHealth> {
   // Server; it is safe because it comes from TABLE_EXPECTATIONS above — a
   // compile-time constant list — and never from a request. The catalogue check
   // immediately above is the second lock: an unknown name cannot reach here.
-  const counts = await queryOne<{ n: number; last_at: Date | null }>(
-    `SELECT COUNT(*) AS n, ${tsCol ? `MAX([${tsCol}])` : 'NULL'} AS last_at FROM [${exp.table}]`,
+  // Row count from the catalogue, not COUNT(*). On a 723MB table COUNT(*) is a
+  // full scan for a number the engine already maintains — 1.4s versus minutes,
+  // measured, and this runs on every page load and every VANTAGE poll. It is
+  // exact for the clustered index, which is all this check needs: the question
+  // is "has anything ever been written and is it still growing", not accounting.
+  const counts = await queryOne<{ n: number }>(
+    `SELECT SUM(p.rows) AS n FROM sys.partitions p
+      WHERE p.object_id = OBJECT_ID(?) AND p.index_id IN (0, 1)`,
+    [exp.table],
   );
+  const recency = tsCol
+    ? await queryOne<{ last_at: Date | null }>(`SELECT MAX([${tsCol}]) AS last_at FROM [${exp.table}]`)
+    : null;
 
   const rowCount = counts?.n ?? 0;
-  const lastRow = counts?.last_at ? new Date(counts.last_at) : null;
+  const lastRow = recency?.last_at ? new Date(recency.last_at) : null;
   const hoursSince = lastRow ? Math.round(((Date.now() - lastRow.getTime()) / 3_600_000) * 10) / 10 : null;
   const neverWritten = rowCount === 0;
 
