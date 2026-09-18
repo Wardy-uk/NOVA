@@ -721,15 +721,26 @@ export class AgentLoop {
       const dedupedLlmEvents: typeof llmEvents = [];
       for (const event of llmEvents) {
         if (event.eventType === 'ticket_created' || event.eventType === 'backfill') {
-          const recentTriage = await query<{ cnt: number }>(
-            `SELECT COUNT(*) AS cnt FROM agent_decisions
-             WHERE ticket_id = ? AND action != 'no_action' AND shadow_mode = 0
-               AND created_at >= DATEADD(MINUTE, -30, GETUTCDATE())`,
-            [event.ticketKey],
-          );
-          if (recentTriage[0]?.cnt > 0) {
-            console.log(`[agent] Skipping duplicate triage for ${event.ticketKey} (${event.eventType}) — already triaged in last 30 min`);
-            continue;
+          // One query per event, and an uncaught throw here aborts the whole tick — every
+          // remaining ticket in the batch loses its first reply over a lookup that only
+          // prevents a duplicate note. Ticks #3, #8 and #390 died exactly this way, on
+          // "Timeout: Request failed to complete in 30000ms" against an S0 database.
+          // On failure, assume not-recently-triaged and carry on: the in-memory dedup and
+          // executeDecision's ticket_state idempotency both still guard the duplicate case,
+          // so the worst outcome is a repeated internal note rather than a silent customer.
+          try {
+            const recentTriage = await query<{ cnt: number }>(
+              `SELECT COUNT(*) AS cnt FROM agent_decisions
+               WHERE ticket_id = ? AND action != 'no_action' AND shadow_mode = 0
+                 AND created_at >= DATEADD(MINUTE, -30, GETUTCDATE())`,
+              [event.ticketKey],
+            );
+            if (recentTriage[0]?.cnt > 0) {
+              console.log(`[agent] Skipping duplicate triage for ${event.ticketKey} (${event.eventType}) — already triaged in last 30 min`);
+              continue;
+            }
+          } catch (err) {
+            console.warn(`[agent] Duplicate-triage check failed for ${event.ticketKey}, proceeding anyway:`, err instanceof Error ? err.message : err);
           }
         }
         dedupedLlmEvents.push(event);
@@ -804,7 +815,14 @@ export class AgentLoop {
       // succeeded after repeated attempts. Without this they retry every 30
       // minutes indefinitely, burning the chain on a call that cannot work.
       if (dedupedLlmEvents.length > 0) {
-        const poisoned = await this.getPoisonedTicketKeys(dedupedLlmEvents.map(e => e.ticketKey));
+        // Same reasoning as the dedup check: an advisory lookup must not be able to bin the
+        // batch. An empty set means nothing is suppressed, which is the safe direction.
+        let poisoned = new Set<string>();
+        try {
+          poisoned = await this.getPoisonedTicketKeys(dedupedLlmEvents.map(e => e.ticketKey));
+        } catch (err) {
+          console.warn('[agent] Poison-ticket lookup failed, treating none as poisoned:', err instanceof Error ? err.message : err);
+        }
         if (poisoned.size > 0) {
           for (let i = dedupedLlmEvents.length - 1; i >= 0; i--) {
             const event = dedupedLlmEvents[i];
