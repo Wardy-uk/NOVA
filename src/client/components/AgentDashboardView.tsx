@@ -47,9 +47,14 @@ interface Decision {
   event_type: string;
   action: string;
   confidence: number;
-  reasoning: string;
-  inputs: string;
-  output: string;
+  // Heavy NVARCHAR(MAX) columns — NOT returned by the decisions LIST endpoint.
+  // DecisionDetail fetches the full row by id; treat these as absent until then.
+  reasoning?: string;
+  inputs?: string;
+  output?: string;
+  // Projected in SQL from output.no_action_reason so the list can render the
+  // badge without shipping the whole output blob.
+  no_action_reason?: string | null;
   outcome: string | null;
   provider: string | null;
   model: string | null;
@@ -219,6 +224,8 @@ const NO_ACTION_REASON_STYLES: Record<string, string> = {
 };
 
 function getNoActionReason(d: Decision): string | null {
+  // The list gets this projected in SQL; the detail panel has the full output blob.
+  if (d.no_action_reason !== undefined) return d.no_action_reason;
   try {
     const o = typeof d.output === 'string' ? JSON.parse(d.output) : d.output;
     return o?.no_action_reason ?? null;
@@ -1028,7 +1035,22 @@ function DecisionsTab({ decisions: initialDecisions, selected, onSelect, onRefre
 
 // ── Decision Detail Panel ──
 
-function DecisionDetail({ decision: d, onClose, onRefresh }: { decision: Decision; onClose: () => void; onRefresh: () => void }) {
+function DecisionDetail({ decision: listRow, onClose, onRefresh }: { decision: Decision; onClose: () => void; onRefresh: () => void }) {
+  // The decisions LIST deliberately omits inputs/reasoning/output — multi-KB LOB
+  // columns that only this panel renders. Fetch the full row here, by id.
+  // Until it lands we render the list row, so the panel opens instantly and the
+  // reasoning/payload sections simply fill in a moment later.
+  const [fullRow, setFullRow] = useState<Decision | null>(null);
+  useEffect(() => {
+    setFullRow(null);
+    let cancelled = false;
+    api(`/decisions/${listRow.id}`)
+      .then(r => { if (!cancelled && r?.ok && r.data) setFullRow(r.data as Decision); })
+      .catch(() => { /* panel still renders from the list row */ });
+    return () => { cancelled = true; };
+  }, [listRow.id]);
+  const d: Decision = fullRow ?? listRow;
+
   const inputs = safeJson(d.inputs);
   const output = safeJson(d.output);
   const outcome = d.outcome ? safeJson(d.outcome) : null;
@@ -2983,7 +3005,8 @@ function JsonBlock({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-function safeJson(s: string | object): Record<string, unknown> | null {
+function safeJson(s: string | object | null | undefined): Record<string, unknown> | null {
+  if (s === null || s === undefined) return null;
   if (typeof s === 'object') return s as Record<string, unknown>;
   try { return JSON.parse(s); } catch { return null; }
 }

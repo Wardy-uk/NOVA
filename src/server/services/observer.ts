@@ -132,9 +132,32 @@ export class Observer {
     return rows[0]?.cnt ?? 0;
   }
 
+  /**
+   * Columns the Decisions LIST needs — deliberately NOT `d.*`.
+   *
+   * `inputs`, `reasoning` and `output` are NVARCHAR(MAX) averaging ~10KB per row
+   * combined, and the list renders none of them: the detail panel fetches the
+   * full row by id. Selecting them here dragged ~500KB of LOB per page out of a
+   * 407MB table on an S0 tier, which together with the missing created_at index
+   * pushed this past the 30s request timeout — the screen went blank with the
+   * agent working perfectly behind it.
+   *
+   * The one thing the list DOES need out of `output` is `no_action_reason`, so
+   * that single field is projected in SQL rather than shipping the whole blob.
+   * ISJSON guards it: `output` is not guaranteed to be valid JSON, and
+   * JSON_VALUE errors rather than returning NULL on malformed input.
+   */
+  private static readonly LIST_COLUMNS = `
+       d.id, d.ticket_id, d.event_type, d.action, d.confidence,
+       d.provider, d.model, d.approval_required, d.approval_status,
+       d.outcome, d.shadow_mode, d.created_at, d.resolved_at,
+       d.quick_win_type, d.quick_win_confidence, d.quick_win_executed, d.quick_win_undone,
+       CASE WHEN ISJSON(d.output) = 1 THEN JSON_VALUE(d.output, '$.no_action_reason') END AS no_action_reason,
+       c.summary AS ticket_subject`;
+
   async getDecisions(limit = 50, offset = 0): Promise<unknown[]> {
     return query(
-      `SELECT d.*, c.summary AS ticket_subject
+      `SELECT ${Observer.LIST_COLUMNS}
        FROM agent_decisions d
        LEFT JOIN jira_issue_cache c ON c.issue_key = d.ticket_id
        ORDER BY d.created_at DESC
@@ -413,7 +436,7 @@ export class Observer {
     params.push(opts.offset, opts.limit);
 
     return query(
-      `SELECT d.*, c.summary AS ticket_subject
+      `SELECT ${Observer.LIST_COLUMNS}
        FROM agent_decisions d
        LEFT JOIN jira_issue_cache c ON c.issue_key = d.ticket_id
        ${where}
