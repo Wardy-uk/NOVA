@@ -1443,6 +1443,33 @@ export class AgentLoop {
     const limit = options?.limit ?? this.getNumber('agent_sweep_limit', 30);
     const ageClause = maxAgeHours > 0 ? `AND c.jira_created >= DATEADD(hour, -${maxAgeHours}, GETUTCDATE())` : '';
 
+    // Ordering guard. Handing a ticket to a human before NOVA has triaged it silences the
+    // first reply permanently: the next tick sees a human assignee and executeDecision's
+    // `isAssigned && mode === 'observer'` branch returns before the first-reply pipeline,
+    // with no retry. The old guard was a bare 5-minute minimum age, which assumed triage
+    // finishes inside 5 minutes. On 18 Sep 2026 ticks were taking 21 minutes and this swept
+    // ten tickets (NT-31757..31766) to humans mid-triage; none ever got a customer reply.
+    //
+    // So: wait for NOVA to actually record a decision rather than guessing at a duration.
+    // Two deliberate escape hatches, because "wait for the agent" must never mean "never":
+    //  - only applied when the agent is actually going to triage. Stopped or fully shadowed,
+    //    no decision row is ever written, so waiting on one would strand every ticket.
+    //  - a time backstop regardless, for tickets triage errors on, poison-guards, or never
+    //    reaches. Default 20 min leaves headroom inside the 30-minute FRT SLA for the human.
+    // Any non-shadow decision counts, `no_action` included — that is still NOVA having had
+    // its go, and such a ticket does want a human.
+    const agentWillTriage = this.state === 'running' && this.getShadowMode() !== 'full_shadow';
+    const triageGraceMin = this.getNumber('agent_sweep_triage_grace_minutes', 20);
+    const triageClause = agentWillTriage
+      ? `AND (
+             EXISTS (
+               SELECT 1 FROM agent_decisions d
+               WHERE d.ticket_id = c.issue_key AND d.shadow_mode = 0
+             )
+             OR c.jira_created < DATEADD(minute, -${triageGraceMin}, GETUTCDATE())
+           )`
+      : '';
+
     try {
       const projects = this.assignmentEngine.getConfiguredProjects();
       const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
@@ -1461,6 +1488,7 @@ export class AgentLoop {
            AND c.status_category != 'done'
            AND (c.current_tier IS NULL OR c.current_tier != 'Development')
            AND c.jira_created < DATEADD(minute, -5, GETUTCDATE())
+           ${triageClause}
            ${ageClause}
            AND c.project_key IN (${projectPlaceholders})
            AND (c.request_type IS NULL OR c.request_type NOT IN ('Escalation'))

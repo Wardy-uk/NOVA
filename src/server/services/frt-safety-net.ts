@@ -47,17 +47,56 @@ const DEFAULT_INTERNAL_REPORTERS = [
   'nova-jira',
 ];
 
+/**
+ * Placeholders, substituted by `renderAck`: {name} {key} {summary} {owner_line}.
+ * Blank lines become separate paragraphs in the posted comment.
+ *
+ * A first reply that names nothing the customer wrote is barely a reply — it reads as a
+ * form letter, which is how the first version of this landed. So it names them, quotes the
+ * subject back, gives the ticket reference and says who has it.
+ *
+ * Deliberately no promised time. The golden rules want one, but this fires precisely when
+ * nobody has picked the ticket up, so any interval quoted here would be invented and
+ * probably missed — worse than saying nothing. Set `frt_safety_net_customer_ack` to add one
+ * if there is a commitment the desk can actually keep.
+ */
 const DEFAULT_CUSTOMER_ACK =
-  'Thanks for getting in touch. This is an automated acknowledgement to confirm your request '
-  + 'has reached our support team and is in the queue. An agent will review it and come back to '
-  + 'you with an update or next steps. If anything changes or becomes more urgent in the '
-  + 'meantime, reply to this ticket and it will come straight back to us.';
+  'Hi {name},\n\n'
+  + 'Thanks for getting in touch about "{summary}". This is an automated acknowledgement to '
+  + 'confirm your request has reached the Nurtur support team and is logged as {key}.\n\n'
+  + '{owner_line}\n\n'
+  + 'If anything changes or becomes more urgent in the meantime, reply to this ticket and it '
+  + 'will come straight back to us.';
 
 const DEFAULT_INTERNAL_ACK =
   'Automated acknowledgement: this ticket was raised by an internal system and has been logged '
   + 'for the team to action. No response is required from the sender.';
 
 export type FrtSafetyNetMode = 'off' | 'dry_run' | 'live';
+
+/** First name for the greeting. Jira gives us either a display name ("Abigail Brown") or,
+ *  for email-raised tickets, a bare address. "Hi there" is the honest fallback — better a
+ *  neutral greeting than "Hi barnita@address-properties.co.uk". */
+function greetingName(displayName: string, email: string): string {
+  const name = (displayName || '').trim();
+  if (name && !name.includes('@')) {
+    const first = name.split(/\s+/)[0];
+    if (first && first.length > 1) return first;
+  }
+  void email;
+  return 'there';
+}
+
+/** Blank-line-separated text into an ADF doc. `addComment` puts the whole string in one
+ *  paragraph, which collapses the newlines and renders the ack as a wall of text. */
+function textToAdf(text: string): object {
+  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim().replace(/\s*\n\s*/g, ' ')).filter(Boolean);
+  return {
+    type: 'doc',
+    version: 1,
+    content: paragraphs.map(p => ({ type: 'paragraph', content: [{ type: 'text', text: p }] })),
+  };
+}
 
 export interface FrtAckCandidate {
   key: string;
@@ -121,6 +160,17 @@ export class FrtSafetyNet {
       .some(pattern => needle.includes(pattern));
   }
 
+  /** Substitute placeholders into an ack template. Applied to the configured override too,
+   *  so the wording can be tuned in settings without losing the personalisation. A template
+   *  with no placeholders simply comes back unchanged. */
+  private renderAck(template: string, ctx: { name: string; key: string; summary: string; ownerLine: string }): string {
+    return template
+      .replace(/\{name\}/g, ctx.name)
+      .replace(/\{key\}/g, ctx.key)
+      .replace(/\{summary\}/g, ctx.summary)
+      .replace(/\{owner_line\}/g, ctx.ownerLine);
+  }
+
   private maxPerSweep(): number {
     const parsed = parseInt(this.settings.get('frt_safety_net_max_per_sweep') || '', 10);
     return !isNaN(parsed) && parsed > 0 ? parsed : 25;
@@ -158,7 +208,7 @@ export class FrtSafetyNet {
 
     const search = await this.jiraClient.searchJqlAll(
       this.buildJql(),
-      ['summary', 'reporter', 'created', 'customfield_14046'],
+      ['summary', 'reporter', 'created', 'assignee', 'customfield_14046'],
       200,
     );
     const issues = search?.issues ?? [];
@@ -170,6 +220,7 @@ export class FrtSafetyNet {
       const reporterField = fields.reporter as { emailAddress?: string; displayName?: string } | null;
       const reporter = reporterField?.emailAddress || reporterField?.displayName || '';
       const summary = String(fields.summary ?? '');
+      const assigneeName = (fields.assignee as { displayName?: string } | null)?.displayName ?? '';
       const machineRaised = this.isMachineRaised(reporter);
 
       const cycle = readOngoingCycle(fields.customfield_14046);
@@ -198,9 +249,21 @@ export class FrtSafetyNet {
         continue;
       }
 
-      const ackText = machineRaised
+      // Naming the assignee only when there is one: the sweep fires on plenty of tickets
+      // nobody owns yet, and "X is looking after this" would be a lie on those.
+      const ownerLine = assigneeName
+        ? `${assigneeName} is looking after this for you and will be in touch with an update or next steps.`
+        : 'It is with our support team now, and the agent who picks it up will come back to you with an update or next steps.';
+
+      const ackTemplate = machineRaised
         ? (this.settings.get('frt_safety_net_internal_ack') || DEFAULT_INTERNAL_ACK)
         : (this.settings.get('frt_safety_net_customer_ack') || DEFAULT_CUSTOMER_ACK);
+      const ackText = this.renderAck(ackTemplate, {
+        name: greetingName(reporterField?.displayName ?? '', reporterField?.emailAddress ?? ''),
+        key: issue.key,
+        summary,
+        ownerLine,
+      });
 
       if (mode === 'dry_run') {
         console.log(
@@ -226,7 +289,7 @@ export class FrtSafetyNet {
 
       try {
         // Customer-facing: this is the comment that stops the First Reply Time clock.
-        await this.jiraClient.addComment(issue.key, ackText, { internal: false });
+        await this.jiraClient.addCommentAdf(issue.key, textToAdf(ackText), { internal: false });
         // Internal note so the agent picking the ticket up knows the ack was automated and that
         // the customer has NOT yet had a real answer.
         await this.jiraClient.addComment(
