@@ -70,6 +70,11 @@ export class AgentLoop {
   private recentlyProcessedTickets = new Map<string, number>();
   /** Poisoned tickets already reported to the error log — so we alert once, not every tick. */
   private reportedPoisonTickets = new Set<string>();
+  /** Tickets the live tick is reasoning/acting on right now. Backfill runs on its own timer
+   *  and so can overlap a tick; it skips these so the two never triage the same ticket at
+   *  once (the backfill query excludes tickets with a decision row, but the live decision is
+   *  not written until after the LLM call returns, leaving a window). */
+  private inFlightTickets = new Set<string>();
 
   private perceiver: Perceiver;
   private reasoner: Reasoner;
@@ -729,6 +734,25 @@ export class AgentLoop {
         dedupedLlmEvents.push(event);
       }
 
+      // 1.8 URGENCY SORT — everything below this point processes one ticket at a time,
+      // and the perceiver hands tickets over newest-first. That ordering caused breaches:
+      // a P1 twenty minutes from its SLA sat behind a batch of newer, less urgent tickets
+      // and waited out the whole serial triage run. Sort once here so escalation routing,
+      // self-assign, attachment download and LLM triage all work most-urgent-first.
+      if (dedupedLlmEvents.length > 1) {
+        const scored = dedupedLlmEvents.map((event, index) => ({
+          event,
+          index,
+          score: this.scoreEventUrgency(event),
+        }));
+        // Stable: equal scores keep the perceiver's newest-first order.
+        scored.sort((a, b) => (b.score - a.score) || (a.index - b.index));
+        dedupedLlmEvents.length = 0;
+        for (const s of scored) dedupedLlmEvents.push(s.event);
+        const top = scored[0];
+        console.log(`[agent] Triage order: ${scored.length} tickets, most urgent ${top.event.ticketKey} (score ${top.score})`);
+      }
+
       // 1.85 ESCALATION SHORT-CIRCUIT — tickets raised as "Escalation" skip AI triage
       // entirely: acknowledge the customer and assign straight to the escalation owner.
       const escalationHandled = await this.routeEscalationTickets(dedupedLlmEvents, this.getShadowMode());
@@ -798,23 +822,29 @@ export class AgentLoop {
 
       // 2. REASON
       const shadowMode = this.getShadowMode();
-      const decisions = await this.reasoner.decideMultiple(dedupedLlmEvents);
-      for (const d of decisions) {
-        if (shadowMode === 'full_shadow') {
-          d.shadowMode = true;
-        } else if (shadowMode === 'hybrid') {
-          const allowedRaw = this.settings.get('agent_hybrid_allowed_actions') ?? '[]';
-          let allowed: string[] = [];
-          try { allowed = JSON.parse(allowedRaw); } catch {}
-          d.shadowMode = !allowed.includes(d.action);
-        } else {
-          d.shadowMode = false;
+      for (const e of dedupedLlmEvents) this.inFlightTickets.add(e.ticketKey);
+      let decisions: AgentDecision[];
+      try {
+        decisions = await this.reasoner.decideMultiple(dedupedLlmEvents);
+        for (const d of decisions) {
+          if (shadowMode === 'full_shadow') {
+            d.shadowMode = true;
+          } else if (shadowMode === 'hybrid') {
+            const allowedRaw = this.settings.get('agent_hybrid_allowed_actions') ?? '[]';
+            let allowed: string[] = [];
+            try { allowed = JSON.parse(allowedRaw); } catch {}
+            d.shadowMode = !allowed.includes(d.action);
+          } else {
+            d.shadowMode = false;
+          }
         }
-      }
 
-      // 3. ACT + 4. OBSERVE
-      for (const decision of decisions) {
-        await this.executeDecision(decision);
+        // 3. ACT + 4. OBSERVE
+        for (const decision of decisions) {
+          await this.executeDecision(decision);
+        }
+      } finally {
+        for (const e of dedupedLlmEvents) this.inFlightTickets.delete(e.ticketKey);
       }
 
       // Mark processed for cross-tick dedup
@@ -848,9 +878,11 @@ export class AgentLoop {
         }
       }
 
-      // 7. BACKFILL TRIAGE (every tick — batch-limited, no-op when caught up)
-      // Runs in all modes (shadow-only, no LLM budget concern outside hours)
-      await this.runBackfillTriage();
+      // 7. BACKFILL TRIAGE — deliberately NOT here any more.
+      // It used to run every tick, inside the same serial path as live triage, so a batch of
+      // catch-up tickets competed with tickets that had an SLA running against them. It is
+      // pure catch-up work with no deadline, so it now runs on its own timer in index.ts
+      // ('agent-backfill-triage') and no longer holds up the live loop. See runBackfillTriage().
 
       // 8. EXTENDED SWEEPS (every Nth sweep tick, during working hours only)
       if ((isFirstSweep || this.tickCount % sweepInterval === 0) && this.currentMode === 'full') {
@@ -1754,7 +1786,61 @@ export class AgentLoop {
     }
   }
 
-  private async runBackfillTriage(): Promise<void> {
+  /**
+   * Rank a ticket for triage order. Higher runs first.
+   *
+   * Deliberately cheap — it reads only fields already on the event, so sorting a tick's
+   * batch costs no queries and cannot itself become the bottleneck it is there to fix.
+   *
+   * Two judgement calls worth knowing about:
+   *
+   *  - Time-to-breach is wall-clock, not working-calendar. Ordering only needs to be
+   *    monotonic with urgency, and within a single tick's batch the working-hours
+   *    correction is the same for every ticket, so it cancels out. `queue-ranker.ts`
+   *    uses the real WorkingDayClock because it reports hours to a human; this does not.
+   *  - An already-breached ticket scores *below* one about to breach. The breach is
+   *    already on the board and triaging it first cannot un-count it, whereas the
+   *    ticket at 20 minutes is still savable. This is the opposite of `queue-ranker.ts`,
+   *    which ranks breached highest because a human needs to go apologise.
+   */
+  private scoreEventUrgency(event: TicketEvent): number {
+    let score = 0;
+
+    if (event.slaBreachTime) {
+      const msRemaining = new Date(event.slaBreachTime).getTime() - Date.now();
+      if (isNaN(msRemaining)) {
+        // Unparseable date — contribute nothing rather than sorting on NaN.
+      } else if (msRemaining <= 0) {
+        score += 90;
+      } else if (msRemaining <= 30 * 60_000) {
+        score += 120;
+      } else if (msRemaining <= 2 * 60 * 60_000) {
+        score += 100;
+      } else if (msRemaining <= 4 * 60 * 60_000) {
+        score += 60;
+      }
+    }
+
+    const priority = (event.priority ?? '').toLowerCase();
+    if (priority === 'highest' || priority === 'critical' || priority === 'p1') score += 40;
+    else if (priority === 'high' || priority === 'p2') score += 25;
+    else if (priority === 'low' || priority === 'lowest') score -= 10;
+
+    // A customer who has replied is actively waiting on us; a newly created ticket
+    // has at least had its acknowledgement clock started elsewhere.
+    if (event.eventType === 'comment_added') score += 30;
+
+    return score;
+  }
+
+  /** Catch-up triage of tickets the agent has never seen. Runs on its own timer
+   *  (registered in index.ts) rather than inside tick(), so it cannot delay a live
+   *  ticket with an SLA running against it. */
+  async runBackfillTriage(): Promise<void> {
+    // Previously implied by only ever being called from tick(); now explicit, so a
+    // stopped or paused agent doesn't keep triaging in the background.
+    if (this.state !== 'running') return;
+
     const enabled = this.settings.get('agent_backfill_enabled');
     if (enabled === 'false' || enabled === '0') {
       console.log(`[backfill] Skipped — agent_backfill_enabled=${enabled}`);
@@ -3316,13 +3402,24 @@ export class AgentLoop {
       return { processed: 0, skipped: 0, errors: 0 };
     }
 
-    console.log(`[backfill] Found ${untriaged.length} untriaged tickets (batch ${batchSize}, projects: ${projects.join(',')})`);
+    // A live tick may already be reasoning on some of these; its decision row is not
+    // written until the LLM call returns, so the query above cannot exclude them.
+    const contended = untriaged.filter(r => this.inFlightTickets.has(r.issue_key));
+    if (contended.length > 0) {
+      console.log(`[backfill] Skipping ${contended.length} ticket(s) currently in the live tick: ${contended.map(r => r.issue_key).join(', ')}`);
+    }
+    const candidates = untriaged.filter(r => !this.inFlightTickets.has(r.issue_key));
+    if (candidates.length === 0) {
+      return { processed: 0, skipped: contended.length, errors: 0 };
+    }
+
+    console.log(`[backfill] Found ${candidates.length} untriaged tickets (batch ${batchSize}, projects: ${projects.join(',')})`);
 
     let processed = 0;
-    let skipped = 0;
+    let skipped = contended.length;
     let errors = 0;
 
-    for (const row of untriaged) {
+    for (const row of candidates) {
       // NTPJ/YO: skip triage entirely — these projects never enter the reasoner
       const projectPrefix = row.issue_key.match(/^([A-Z]+)-/)?.[1];
       if (projectPrefix === 'NTPJ') {

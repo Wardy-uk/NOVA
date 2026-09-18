@@ -1654,6 +1654,21 @@ async function main() {
       }
     }, 3 * 60 * 1000);
 
+    // Backfill triage — catch-up triage of tickets the agent has never seen. This used to
+    // run inside every agent tick, on the same serial path as live triage, so a batch of
+    // catch-up work delayed tickets with an SLA running against them. It has no deadline of
+    // its own, so it gets its own timer here. The sweep is batch-limited, skips tickets the
+    // live tick is holding, and no-ops once caught up; the agent's own state check means a
+    // stopped agent does no backfill.
+    const backfillIntervalMs = Number(settingsQueries.get('agent_backfill_interval_ms')) || 5 * 60 * 1000;
+    jobRegistry.register('agent-backfill-triage', 'Agent backfill triage', async () => {
+      try {
+        await agentLoop?.runBackfillTriage();
+      } catch (e) {
+        console.warn('[backfill] sweep failed:', e instanceof Error ? e.message : e);
+      }
+    }, backfillIntervalMs);
+
     // P5 Theme 2: Knowledge Autonomy
     const kbGapClosure = new KbGapClosureService();
     const kbHealth = new KbHealthService(llmService, settingsQueries, kbArticleService);
