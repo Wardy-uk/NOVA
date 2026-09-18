@@ -317,7 +317,7 @@ export class Perceiver {
     const since = new Date(rawSince.getTime() - 30_000);
 
     const [openIssues, newIssues, updatedIssues, untriagedIssues] = await Promise.all([
-      this.cache!.getOpenIssues(projects),
+      this.cache!.getOpenIssueSummaries(projects),
       this.cache!.getRecentlyCreated(projects, since),
       this.cache!.getRecentlyUpdated(projects, since),
       this.cache!.getUntriagedIssues(projects, 10),
@@ -328,8 +328,13 @@ export class Perceiver {
     }
 
     const byStatus: Record<string, number> = {};
-    const slaAtRisk: TicketEvent[] = [];
     const staleThresholdMs = 4 * 60 * 60 * 1000;
+
+    // Counting and filtering run over the narrow rows. Only the keys that survive are read in
+    // full, so a tick pays for ~20 wide rows instead of ~600 — the difference between reading
+    // a few hundred KB and ~35MB from a database already pegged at 100% data IO.
+    const slaAtRiskKeys: string[] = [];
+    const staleKeys: string[] = [];
 
     for (const ci of openIssues) {
       const status = ci.status_name ?? 'Unknown';
@@ -338,18 +343,29 @@ export class Perceiver {
       if (ci.sla_breach_time) {
         const breachMs = new Date(ci.sla_breach_time).getTime() - now.getTime();
         if (breachMs > 0 && breachMs < 60 * 60 * 1000) {
-          slaAtRisk.push(cachedToTicketEvent(ci, 'sla_warning'));
+          slaAtRiskKeys.push(ci.issue_key);
         }
+      }
+
+      const updated = ci.jira_updated ? new Date(ci.jira_updated).getTime() : 0;
+      if (now.getTime() - updated > staleThresholdMs && staleKeys.length < 20) {
+        staleKeys.push(ci.issue_key);
       }
     }
 
-    const staleTickets = openIssues
-      .filter(ci => {
-        const updated = ci.jira_updated ? new Date(ci.jira_updated).getTime() : 0;
-        return now.getTime() - updated > staleThresholdMs;
-      })
-      .slice(0, 20)
-      .map(ci => cachedToTicketEvent(ci, 'stale'));
+    const hydrateKeys = [...new Set([...slaAtRiskKeys, ...staleKeys])];
+    const hydrated = hydrateKeys.length > 0 ? await this.cache!.getIssuesByKeys(hydrateKeys) : [];
+    const byKey = new Map(hydrated.map(i => [i.issue_key, i]));
+
+    const slaAtRisk: TicketEvent[] = slaAtRiskKeys
+      .map(k => byKey.get(k))
+      .filter((i): i is NonNullable<typeof i> => !!i)
+      .map(i => cachedToTicketEvent(i, 'sla_warning'));
+
+    const staleTickets = staleKeys
+      .map(k => byKey.get(k))
+      .filter((i): i is NonNullable<typeof i> => !!i)
+      .map(i => cachedToTicketEvent(i, 'stale'));
 
     const seenKeys = new Set<string>();
     const allNewCandidates = [...newIssues];

@@ -1,5 +1,14 @@
 import { query, queryOne } from './database.js';
 
+/** Just enough of an open issue to count it, judge its SLA and tell if it has gone stale —
+ *  deliberately no LOB columns. See getOpenIssueSummaries. */
+export interface OpenIssueSummary {
+  issue_key: string;
+  status_name: string | null;
+  sla_breach_time: Date | null;
+  jira_updated: Date | null;
+}
+
 export interface CachedIssue {
   issue_key: string;
   jira_id: string;
@@ -78,6 +87,35 @@ export class JiraCacheQueries {
     const placeholders = keys.map(() => '?').join(',');
     return query<CachedIssue>(
       `SELECT * FROM jira_issue_cache WHERE issue_key IN (${placeholders})`, keys,
+    );
+  }
+
+  /**
+   * Open issues, without the large columns.
+   *
+   * `getOpenIssues` is `SELECT *`, and on 18 Sep 2026 `jira_issue_cache` was 723MB across
+   * 12,763 rows — roughly 58KB a row, nearly all of it `fields_json` and `description_text`.
+   * The perceiver called it every tick to do three things: count tickets by status, spot SLA
+   * breaches coming, and find stale tickets. None of those read a LOB column, yet the scan
+   * dragged every one of them off disk — about 35MB of IO a minute, against a database whose
+   * `avg_data_io_percent` was pegged at 100 while CPU sat at 35%.
+   *
+   * The narrow scan answers all three questions. The handful of rows that actually become
+   * events are then hydrated by key through `getIssuesByKeys`, so the full row is read about
+   * twenty times a tick rather than six hundred.
+   *
+   * The project CLAUDE.md already said never to `SELECT *` from this table in a request path.
+   * This is that rule applied to the hottest caller of it.
+   */
+  async getOpenIssueSummaries(projects: string[]): Promise<OpenIssueSummary[]> {
+    const placeholders = projects.map(() => '?').join(',');
+    return query<OpenIssueSummary>(
+      `SELECT issue_key, status_name, sla_breach_time, jira_updated
+       FROM jira_issue_cache
+       WHERE project_key IN (${placeholders})
+         AND status_category IN ('new', 'indeterminate')
+       ORDER BY jira_created DESC`,
+      projects,
     );
   }
 
