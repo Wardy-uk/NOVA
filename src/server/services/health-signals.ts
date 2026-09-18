@@ -1,4 +1,4 @@
-import { query, queryOne } from './database.js';
+import { query, queryOne, getPoolStats } from './database.js';
 import type { JobRegistry, RegisteredJob } from './job-registry.js';
 
 /**
@@ -51,7 +51,7 @@ import type { JobRegistry, RegisteredJob } from './job-registry.js';
  *
  * Bump on any change to the shape of the response.
  */
-export const HEALTH_SIGNALS_BUILD = '2026-09-18-b';
+export const HEALTH_SIGNALS_BUILD = '2026-09-18-d';
 
 /**
  * `unknown` is load-bearing. It means the check could not be evaluated, which is
@@ -172,7 +172,15 @@ export const TABLE_EXPECTATIONS: TableExpectation[] = [
  */
 const TIMESTAMP_PREFERENCE = [
   'created_at', 'detected_at', 'generated_at', 'snapshot_at', 'captured_at',
-  'recorded_at', 'logged_at', 'occurred_at', 'run_at', 'inserted_at', 'updated_at',
+  'recorded_at', 'logged_at', 'occurred_at', 'run_at', 'inserted_at',
+  // `synced_at` and `flagged_at` were missing from the first version, which blinded
+  // the two most important rows on the page: jira_issue_cache — the control that
+  // asserts the Jira sync is alive — and agent_flagged_tickets, the clearest
+  // stopped-writer we have. Both reported "no timestamp column" while holding
+  // eleven datetime columns between them. A discovery list that silently omits a
+  // table's actual stamp produces exactly the false all-clear this service exists
+  // to prevent, so it is worth being generous here.
+  'synced_at', 'flagged_at', 'updated_at',
 ];
 
 async function resolveTimestampColumn(table: string): Promise<string | null> {
@@ -337,11 +345,22 @@ async function checkColumn(exp: ColumnExpectation): Promise<ColumnHealth> {
   // as checkTable: a constant list above, and a catalogue check immediately
   // before. NULL counts as a distinct value here — a column that is always NULL
   // is exactly as broken as one that is always 0.
+  // Cast to text FIRST, in a derived table, then aggregate. The obvious version
+  // aggregates the raw column and fails on the commonest case this check is for:
+  // MIN() rejects `bit` outright ("Operand data type bit is invalid for min
+  // operator"), and a constant flag column is very often a bit. Casting first
+  // makes every type answer the same question — the ordering that MIN gives over
+  // text is meaningless here, because the value is only ever read when there is
+  // exactly one distinct value to report.
+  //
+  // NVARCHAR(100) truncates, so two long values sharing a prefix could read as
+  // one. Acceptable while this list is a curated pair of flag columns; revisit
+  // before pointing it at free text.
   const stats = await queryOne<{ total: number; distinct_vals: number; sample: string | null }>(
     `SELECT COUNT(*) AS total,
-            COUNT(DISTINCT [${exp.column}]) + MAX(CASE WHEN [${exp.column}] IS NULL THEN 1 ELSE 0 END) AS distinct_vals,
-            CAST(MIN([${exp.column}]) AS NVARCHAR(100)) AS sample
-       FROM [${exp.table}]`,
+            COUNT(DISTINCT v) + MAX(CASE WHEN v IS NULL THEN 1 ELSE 0 END) AS distinct_vals,
+            MIN(v) AS sample
+       FROM (SELECT CAST([${exp.column}] AS NVARCHAR(100)) AS v FROM [${exp.table}]) t`,
   );
 
   const total = stats?.total ?? 0;
@@ -434,6 +453,35 @@ function jobHealth(job: RegisteredJob, uptimeMs: number): JobHealth {
 
 // ── The report ──────────────────────────────────────────────────────────────
 
+/**
+ * The database's own account of itself.
+ *
+ * Added after 18 Sep 2026, when NOVA spent an afternoon timing out — ticks, the KPI pipeline,
+ * wallboards, several endpoints, all on "Timeout: Request failed to complete in 30000ms" — and
+ * answering "why" meant pasting a JS loop into a browser console to read the connection pool.
+ * That reading is what disproved the working theory: the pool was fine (pending 0, peak 23 of
+ * 50), so the slowness was in individual queries, not contention. An hour went into reaching a
+ * conclusion four numbers settle.
+ *
+ * The three checks are the order CLAUDE.md prescribes, and the order matters — a stalled
+ * NOVA screen is far more often stale statistics forcing a recompile than a slow query.
+ */
+export interface DatabaseHealth {
+  /** `pending` above zero means queries are queueing for a connection. Zero means any
+   *  slowness is the queries themselves, which is a different problem with a different fix. */
+  pool: { size: number; used: number; free: number; pending: number; severity: Severity; note: string };
+  /** A filtered index 138k modifications out of date once made every compile trigger a
+   *  synchronous stats update, which the client timeout then cancelled — wedged, with no
+   *  error to read. High modifications against low rows is the tell. */
+  /** False when the DMV could not be read at all. "No rows came back" and "nothing is wrong"
+   *  are the exact pair this page exists to keep apart, so the caller must be able to tell an
+   *  empty list from an unanswered question. */
+  staleStatsReadable: boolean;
+  staleStats: Array<{ table: string; stat: string; rows: number; modifications: number; severity: Severity }>;
+  /** S0 is 10 DTU. Data IO pegged at 100% for long stretches is a known state here. */
+  resource: { avgCpuPercent: number; avgDataIoPercent: number; maxWorkerPercent: number; severity: Severity; note: string } | null;
+}
+
 export interface HealthSignals {
   build: string;
   generatedAt: string;
@@ -461,6 +509,7 @@ export interface HealthSignals {
   tables: Signal<TableHealth[]>;
   columns: Signal<ColumnHealth[]>;
   jobs: Signal<JobsHealth>;
+  database: Signal<DatabaseHealth>;
   /** Sections that could not be evaluated at all, named so they cannot be missed. */
   unavailable: Array<{ name: string; error: string | null }>;
 }
@@ -470,13 +519,29 @@ export async function getHealthSignals(jobRegistry?: JobRegistry): Promise<Healt
     const out: TableHealth[] = [];
     // Sequential on purpose: this runs against an S0 tier with no headroom to
     // absorb a burst, and nothing here is urgent enough to justify one.
-    for (const exp of TABLE_EXPECTATIONS) out.push(await checkTable(exp));
+    //
+    // Isolated per row, because these read hot tables and one of them WILL
+    // eventually time out — `jira_issue_cache` is small but written continuously,
+    // so a reporting SELECT queues behind the sync. Letting that take the whole
+    // section down would blind every other check to punish the unlucky one, and
+    // the row that fails is usually the row worth reading.
+    for (const exp of TABLE_EXPECTATIONS) out.push(await checkTable(exp).catch(err => ({
+      table: exp.table, cadence: exp.cadence, why: exp.why,
+      control: exp.control ?? false, unverified: exp.unverified ?? false,
+      severity: 'unknown' as Severity, exists: true, rowCount: null, lastRowAt: null,
+      hoursSinceLastRow: null, timestampColumn: null, neverWritten: false,
+      verdict: `Could not be checked: ${err instanceof Error ? err.message : 'query failed'}`,
+    })));
     return out;
   });
 
   const columns = await signal(async () => {
     const out: ColumnHealth[] = [];
-    for (const exp of COLUMN_EXPECTATIONS) out.push(await checkColumn(exp));
+    for (const exp of COLUMN_EXPECTATIONS) out.push(await checkColumn(exp).catch(err => ({
+      table: exp.table, column: exp.column, why: exp.why,
+      severity: 'unknown' as Severity, rowCount: 0, distinctValues: 0, constantValue: null,
+      verdict: `Could not be checked: ${err instanceof Error ? err.message : 'query failed'}`,
+    })));
     return out;
   });
 
@@ -492,12 +557,85 @@ export async function getHealthSignals(jobRegistry?: JobRegistry): Promise<Healt
     } satisfies JobsHealth;
   });
 
+  const database = await signal(async (): Promise<DatabaseHealth> => {
+    const p = getPoolStats();
+    // Queueing at all is worth a look; a deep queue means every feature is already waiting.
+    const poolSeverity: Severity = p.pending > 10 ? 'fail' : p.pending > 0 ? 'warn' : 'ok';
+    const pool = {
+      ...p,
+      severity: poolSeverity,
+      note: p.pending > 0
+        ? `${p.pending} request(s) queueing for a connection — the pool is the bottleneck.`
+        : 'No queueing. Any slowness is in the queries themselves, not waiting for a connection.',
+    };
+
+    let staleStats: DatabaseHealth['staleStats'] = [];
+    let staleStatsReadable = true;
+    try {
+      const rows = await query<{ table_name: string; stat_name: string; rows: number; modification_counter: number }>(
+        `SELECT TOP 10 OBJECT_NAME(s.object_id) AS table_name, s.name AS stat_name,
+                sp.rows, sp.modification_counter
+         FROM sys.stats s
+         CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) sp
+         WHERE sp.modification_counter > 1000
+         ORDER BY sp.modification_counter DESC`,
+        [],
+      );
+      staleStats = rows.map(r => ({
+        table: r.table_name ?? 'unknown',
+        stat: r.stat_name,
+        rows: r.rows ?? 0,
+        modifications: r.modification_counter ?? 0,
+        // Judged against the row count, not in absolute terms: 50k modifications on a
+        // million-row table is routine, the same number against 7k rows is what wedged
+        // the CSAT screen for a day.
+        severity: (r.modification_counter > (r.rows || 1) * 5 ? 'fail' : 'warn') as Severity,
+      }));
+    } catch {
+      // Unreadable for this login, or the database too busy to answer. Degrade rather than fail
+      // the section — but say so, so an empty list is never mistaken for a clean result.
+      staleStatsReadable = false;
+    }
+
+    let resource: DatabaseHealth['resource'] = null;
+    try {
+      const rows = await query<{ avg_cpu_percent: number; avg_data_io_percent: number; max_worker_percent: number }>(
+        `SELECT TOP 5 avg_cpu_percent, avg_data_io_percent, max_worker_percent
+         FROM sys.dm_db_resource_stats ORDER BY end_time DESC`,
+        [],
+      );
+      if (rows.length) {
+        const avg = (pick: (r: typeof rows[0]) => number) => rows.reduce((a, r) => a + (pick(r) ?? 0), 0) / rows.length;
+        const io = avg(r => r.avg_data_io_percent);
+        const cpu = avg(r => r.avg_cpu_percent);
+        const worker = avg(r => r.max_worker_percent);
+        const worst = Math.max(io, cpu, worker);
+        resource = {
+          avgCpuPercent: Math.round(cpu), avgDataIoPercent: Math.round(io), maxWorkerPercent: Math.round(worker),
+          severity: (worst >= 90 ? 'fail' : worst >= 70 ? 'warn' : 'ok') as Severity,
+          note: io >= 90
+            ? 'Data IO is saturated — queries are waiting on storage, which is what a 30s timeout looks like from here.'
+            : 'Within normal range for the last minute.',
+        };
+      }
+    } catch { /* not available on every tier or login */ }
+
+    return { pool, staleStatsReadable, staleStats, resource };
+  });
+
   const unavailable: Array<{ name: string; error: string | null }> = [];
+  if (!database.ok) unavailable.push({ name: 'database', error: database.error });
   if (!tables.ok) unavailable.push({ name: 'tables', error: tables.error });
   if (!columns.ok) unavailable.push({ name: 'columns', error: columns.error });
   if (!jobs.ok) unavailable.push({ name: 'jobs', error: jobs.error });
 
   const severities: Severity[] = [];
+  if (database.data) {
+    severities.push(database.data.pool.severity);
+    severities.push(...database.data.staleStats.map(st => st.severity));
+    if (!database.data.staleStatsReadable) severities.push('unknown');
+    if (database.data.resource) severities.push(database.data.resource.severity);
+  }
   if (tables.data) severities.push(...tables.data.map(t => t.severity));
   if (columns.data) severities.push(...columns.data.map(c => c.severity));
   // A warming-up process would otherwise report its whole job list as broken
@@ -516,6 +654,6 @@ export async function getHealthSignals(jobRegistry?: JobRegistry): Promise<Healt
     overall: worst(severities),
     trustworthy: controlsHealthy && unavailable.length === 0,
     controlsHealthy,
-    tables, columns, jobs, unavailable,
+    tables, columns, jobs, database, unavailable,
   };
 }

@@ -48,12 +48,20 @@ interface JobsHealth {
   uptimeSeconds: number; warmingUp: boolean; inMemoryOnly: true; jobs: JobHealth[];
 }
 
+interface DatabaseHealth {
+  pool: { size: number; used: number; free: number; pending: number; severity: Severity; note: string };
+  staleStatsReadable: boolean;
+  staleStats: Array<{ table: string; stat: string; rows: number; modifications: number; severity: Severity }>;
+  resource: { avgCpuPercent: number; avgDataIoPercent: number; maxWorkerPercent: number; severity: Severity; note: string } | null;
+}
+
 interface HealthSignals {
   build: string; generatedAt: string; overall: Severity;
   trustworthy: boolean; controlsHealthy: boolean;
   tables: Signal<TableHealth[]>;
   columns: Signal<ColumnHealth[]>;
   jobs: Signal<JobsHealth>;
+  database: Signal<DatabaseHealth>;
   unavailable: Array<{ name: string; error: string | null }>;
 }
 
@@ -176,6 +184,77 @@ export function SystemHealthView() {
           </div>
         </div>
       )}
+
+      {/* Database — first, because when NOVA is slow this is the question being asked, and on
+          18 Sep 2026 answering it meant a JS loop in the browser console. Four numbers decide
+          which of two unrelated problems you have: queueing for a connection, or queries that
+          are genuinely slow. */}
+      <div>
+        <h3 className="text-sm text-neutral-300 mb-2">Database</h3>
+        {!health.database.ok ? <SectionError name="database" error={health.database.error} /> : health.database.data && (
+          <div className="space-y-1">
+            <div className="flex items-start gap-2 p-2 rounded bg-[#2f353d]/40 text-xs">
+              <div className="pt-1"><Dot severity={health.database.data.pool.severity} /></div>
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-neutral-200">
+                  connection pool · {health.database.data.pool.used} in use ·{' '}
+                  {health.database.data.pool.free} free · {health.database.data.pool.pending} queueing
+                </div>
+                <div className="text-neutral-500">{health.database.data.pool.note}</div>
+              </div>
+            </div>
+
+            {health.database.data.resource && (
+              <div className="flex items-start gap-2 p-2 rounded bg-[#2f353d]/40 text-xs">
+                <div className="pt-1"><Dot severity={health.database.data.resource.severity} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-neutral-200">
+                    load · cpu {health.database.data.resource.avgCpuPercent}% ·{' '}
+                    data io {health.database.data.resource.avgDataIoPercent}% ·{' '}
+                    workers {health.database.data.resource.maxWorkerPercent}%
+                  </div>
+                  <div className="text-neutral-500">{health.database.data.resource.note}</div>
+                </div>
+              </div>
+            )}
+
+            {health.database.data.staleStats.map(st => (
+              <div key={`${st.table}.${st.stat}`} className="flex items-start gap-2 p-2 rounded bg-[#2f353d]/40 text-xs">
+                <div className="pt-1"><Dot severity={st.severity} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-neutral-200">{st.table} · {st.stat}</div>
+                  <div className={SEVERITY_TEXT[st.severity]}>
+                    {st.modifications.toLocaleString()} changes since last update, against {st.rows.toLocaleString()} rows
+                  </div>
+                  <div className="text-neutral-500">
+                    Stale statistics make the query planner recompile on every call, and a client
+                    timeout cancels that before it finishes — so the query never completes and
+                    never errors. UPDATE STATISTICS on this one, without a short timeout.
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* An unreadable DMV and a clean result are not the same finding, and this page
+                exists to keep exactly that pair apart. */}
+            {!health.database.data.staleStatsReadable ? (
+              <div className="flex items-start gap-2 p-2 rounded bg-[#2f353d]/40 text-xs">
+                <div className="pt-1"><Dot severity="unknown" /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-neutral-200">statistics · not checked</div>
+                  <div className="text-neutral-500">
+                    sys.dm_db_stats_properties could not be read — either this login lacks the
+                    permission, or the database was too busy to answer. This is not a clean result;
+                    nothing was measured.
+                  </div>
+                </div>
+              </div>
+            ) : health.database.data.staleStats.length === 0 && (
+              <div className="text-[11px] text-neutral-500 pt-1">No statistics are badly out of date.</div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Tables */}
       <div>
