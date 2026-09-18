@@ -1677,6 +1677,28 @@ async function main() {
       }
     }, backfillIntervalMs);
 
+    // Reclaim the unread ADF column. jira_issue_cache measured 723MB across 12,763 rows on
+    // 18 Sep 2026 — ~58KB a row — against a database pegged at 100% data IO, and description_adf
+    // is dead weight: written on every sync, read by nothing. The sync no longer writes it; this
+    // clears what is already stored.
+    //
+    // Batched and slow on purpose. The table is the most IO-starved object in the database, so a
+    // single UPDATE across every row would be indistinguishable from the problem it is fixing.
+    // 200 rows a minute finishes ~12,700 rows in about an hour, and it stands aside for live
+    // triage like any other bulk work. Self-terminating: once nothing matches it is a no-op.
+    jobRegistry.register('reclaim-description-adf', 'Reclaim unread description_adf storage', async () => {
+      if (shouldYieldToCriticalWork('reclaim-description-adf')) return;
+      try {
+        const cleared = await execute(
+          `UPDATE TOP (200) jira_issue_cache SET description_adf = NULL WHERE description_adf IS NOT NULL`,
+          [],
+        );
+        if (cleared) console.log(`[reclaim-adf] cleared description_adf on ${cleared} row(s)`);
+      } catch (e) {
+        console.warn('[reclaim-adf] failed:', e instanceof Error ? e.message : e);
+      }
+    }, 60 * 1000);
+
     // P5 Theme 2: Knowledge Autonomy
     const kbGapClosure = new KbGapClosureService();
     const kbHealth = new KbHealthService(llmService, settingsQueries, kbArticleService);

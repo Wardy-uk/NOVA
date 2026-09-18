@@ -465,7 +465,12 @@ export class JiraSyncService {
     })();
 
     const descriptionText = extractText(f.description);
-    const descriptionAdf = f.description ? JSON.stringify(f.description) : null;
+    // Deliberately not stored. The raw ADF was written on every sync and read by nothing —
+    // `grep description_adf` finds only this write and the column declaration. It duplicates
+    // description_text in a markup form several times its size, on a table measured at 723MB
+    // across 12,763 rows (~58KB a row) against a database sitting at 100% data IO.
+    // The column is left in place so existing rows stay readable; a maintenance job clears it.
+    const descriptionAdf = null;
     const currentTier = (f.customfield_12981 as any)?.value ?? null;
     const nurturProduct = (f.customfield_13183 as any)?.value ?? null;
     const cf13482 = f.customfield_13482 as any;
