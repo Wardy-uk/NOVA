@@ -288,13 +288,16 @@ const RULES_RAW: unknown[] = [
     match: {
       subject: { equals: 'CIA Letter Alerting' },
     },
-    // Close if raised at/after 11:00 (local), OR if >24h old and not assigned to a
-    // human. Tickets raised before 11:00 and under 24h old are left untouched.
-    conditional: { type: 'time_gate', closeAfterHour: 11, staleHours: 24, timezone: 'Europe/London' },
+    // Every CIA Letter Alerting ticket is closed, no matter when it was raised.
+    // closeAfterHour: 0 means branch 1 of the time_gate always passes (hour >= 0), so
+    // staleHours is never reached for a live ticket — it only sets how far back
+    // runTimeGateStaleSweep() looks for already-open tickets, which is why the
+    // conditional stays rather than being removed: the sweep only covers time_gate rules.
+    conditional: { type: 'time_gate', closeAfterHour: 0, staleHours: 1, timezone: 'Europe/London' },
     action: {
       type: 'close',
       resolution: 'No Fault Found',
-      note: 'Auto-closed — CIA Letter Alerting ticket raised after 11:00, or over 24h old with no human assigned.',
+      note: 'Auto-closed — CIA Letter Alerting tickets are always auto-resolved.',
     },
   },
   {
