@@ -1693,6 +1693,29 @@ export class ProblemTicketQueries {
     alert: Omit<ProblemTicketAlert, 'id' | 'first_seen' | 'last_seen' | 'resolved_at' | 'reasons' | 'last_analysed_at'>,
     reasons: Omit<ProblemTicketAlertReason, 'alert_id'>[]
   ): Promise<number> {
+    // Nothing changed? Touch last_seen and leave the rest alone.
+    //
+    // The MERGE below sets last_seen=GETUTCDATE() on every match, so every alert was rewritten
+    // in full on every scan — summary, sentiment_summary and all — and then its reasons were
+    // DELETEd and re-INSERTed one statement at a time. The scan runs every 15 minutes over
+    // ~1,300 alerts, and by 18 Sep 2026 this table had 1,686,453 modifications against 1,294
+    // rows: roughly 1,300 complete rewrites, against a database pegged at 100% data IO.
+    //
+    // `fingerprint` is a SHA-256 of the material ticket fields and already stored, so an equal
+    // fingerprint means the same alert with the same reasons — there is nothing to rewrite and
+    // no reason to rebuild the child rows. last_seen still moves, because the UI orders by it.
+    const prior = await queryOne<{ id: number; fingerprint: string | null; resolved_at: Date | null }>(
+      `SELECT id, fingerprint, resolved_at FROM problem_ticket_alerts WHERE issue_key = ?`,
+      [alert.issue_key],
+    );
+    if (prior && prior.resolved_at === null && prior.fingerprint === alert.fingerprint) {
+      await execute(
+        `UPDATE problem_ticket_alerts SET last_seen = GETUTCDATE(), scan_id = ? WHERE id = ?`,
+        [alert.scan_id, prior.id],
+      );
+      return prior.id;
+    }
+
     await execute(`
       MERGE INTO problem_ticket_alerts WITH (HOLDLOCK) AS target
       USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))
