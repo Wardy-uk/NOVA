@@ -1,6 +1,6 @@
 import type { KbSyncProvider, RawDocument } from './kb-sync-provider.js';
 import type { SettingsQueries } from '../db/settings-store.js';
-import { resolveConfluenceAuth, confluenceConfigured, type ConfluenceAuth } from './confluence-auth.js';
+import { resolveConfluenceAuth, confluenceSiteUrl, type ConfluenceAuth } from './confluence-auth.js';
 
 const MAX_CONCURRENT = 4;
 
@@ -13,12 +13,25 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
     this.settings = settings;
   }
 
+  // A credential is NOT required: the public Service Hub (NT) answers anonymously,
+  // so all this needs is somewhere to sync from and something to sync.
   isConfigured(): boolean {
-    return !!this.settings.get('kb_confluence_space_keys')?.trim() && confluenceConfigured(this.settings);
+    return !!this.settings.get('kb_confluence_space_keys')?.trim() && !!confluenceSiteUrl(this.settings);
   }
 
-  private getAuth(): ConfluenceAuth {
-    return resolveConfluenceAuth(this.settings);
+  /** Credentials to try per space, best first, ending with anonymous. Reading a
+   *  public space needs no identity, so a dead service-account token must not be
+   *  the thing that leaves the KB empty. */
+  private getCandidates(): Array<{ headers: Record<string, string>; label: string }> {
+    const out: Array<{ headers: Record<string, string>; label: string }> = [];
+    try {
+      const auth: ConfluenceAuth = resolveConfluenceAuth(this.settings);
+      out.push({ headers: auth.headers, label: auth.label });
+    } catch {
+      // No credential configured at all — anonymous is the only option, which is fine.
+    }
+    out.push({ headers: { Accept: 'application/json' }, label: 'anonymous (public space)' });
+    return out;
   }
 
   private getSpaceKeys(): string[] {
@@ -35,41 +48,52 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
     if (!this.isConfigured()) return;
     this.lastDiagnostics = [];
 
-    const auth = this.getAuth();
+    const baseUrl = confluenceSiteUrl(this.settings)!;
     const spaceKeys = this.getSpaceKeys();
-    const headers = auth.headers;
+    const candidates = this.getCandidates();
 
-    this.diag(`[kb-confluence] Starting sync — site: ${auth.baseUrl}, as: ${auth.label}, spaces: ${spaceKeys.join(',')}`);
+    this.diag(`[kb-confluence] Starting sync — site: ${baseUrl}, spaces: ${spaceKeys.join(',')}, trying: ${candidates.map(c => c.label).join(' then ')}`);
 
     for (const spaceKey of spaceKeys) {
       try {
-        // Resolve space ID via v2 API
-        const spaceUrl = `${auth.baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`;
-        this.diag(`[kb-confluence] Resolving space ${spaceKey} via ${spaceUrl}`);
-        const spaceRes = await fetch(spaceUrl, { headers });
-        const spaceBody = await spaceRes.text();
-        if (!spaceRes.ok) {
-          this.diag(`[kb-confluence] Failed to resolve space ${spaceKey}: ${spaceRes.status} — ${spaceBody.slice(0, 300)}`);
+        // Resolve the space, trying each credential in turn. A space that only
+        // answers anonymously (the public Service Hub) still gets indexed, so a
+        // dead service-account token can't be what leaves the KB empty.
+        let spaceId: string | undefined;
+        let headers: Record<string, string> | undefined;
+        for (const cand of candidates) {
+          const spaceRes = await fetch(`${baseUrl}/wiki/api/v2/spaces?keys=${spaceKey}`, { headers: cand.headers });
+          const spaceBody = await spaceRes.text();
+          if (!spaceRes.ok) {
+            this.diag(`[kb-confluence] ${spaceKey}: HTTP ${spaceRes.status} as ${cand.label} — trying next credential`);
+            continue;
+          }
+          if (!spaceBody.trim()) {
+            this.diag(`[kb-confluence] ${spaceKey}: empty response as ${cand.label} — trying next credential`);
+            continue;
+          }
+          let spaceData: { results?: Array<{ id: string }> };
+          try { spaceData = JSON.parse(spaceBody); } catch {
+            this.diag(`[kb-confluence] ${spaceKey}: invalid JSON as ${cand.label}: ${spaceBody.slice(0, 160)}`);
+            continue;
+          }
+          const id = spaceData.results?.[0]?.id;
+          if (!id) {
+            this.diag(`[kb-confluence] ${spaceKey}: not visible to ${cand.label} — trying next credential`);
+            continue;
+          }
+          spaceId = id;
+          headers = cand.headers;
+          this.diag(`[kb-confluence] Space "${spaceKey}" resolved to ID ${id} as ${cand.label}`);
+          break;
+        }
+        if (!spaceId || !headers) {
+          this.diag(`[kb-confluence] Space "${spaceKey}" could not be read by any credential — check the key is right, and that the space is public or the account has access`);
           continue;
         }
-        if (!spaceBody.trim()) {
-          this.diag(`[kb-confluence] Empty response resolving space ${spaceKey} (status ${spaceRes.status}) — auth may have failed. Authenticated as: ${auth.label}`);
-          continue;
-        }
-        let spaceData: { results: Array<{ id: string }> };
-        try { spaceData = JSON.parse(spaceBody); } catch {
-          this.diag(`[kb-confluence] Invalid JSON resolving space ${spaceKey}: ${spaceBody.slice(0, 200)}`);
-          continue;
-        }
-        if (!spaceData.results?.length) {
-          this.diag(`[kb-confluence] Space "${spaceKey}" not found — check key is correct and service account has Confluence access`);
-          continue;
-        }
-        const spaceId = spaceData.results[0].id;
-        this.diag(`[kb-confluence] Space "${spaceKey}" resolved to ID ${spaceId}`);
 
         // Paginate through all pages — request ADF body format (knowledge_base spaces use ADF, not storage HTML)
-        let pageUrl: string | null = `${auth.baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=atlas_doc_format&limit=50&status=current`;
+        let pageUrl: string | null = `${baseUrl}/wiki/api/v2/pages?space-id=${spaceId}&body-format=atlas_doc_format&limit=50&status=current`;
         let pagesFound = 0;
         let pagesSkipped = 0;
 
@@ -109,7 +133,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
                 // Fallback: fetch individual page with ADF body
                 try {
                   const pageDetailRes = await fetch(
-                    `${auth.baseUrl}/wiki/api/v2/pages/${page.id}?body-format=atlas_doc_format`,
+                    `${baseUrl}/wiki/api/v2/pages/${page.id}?body-format=atlas_doc_format`,
                     { headers }
                   );
                   if (pageDetailRes.ok) {
@@ -126,7 +150,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
                 }
               }
 
-              const doc = this.pageToDocument(page, adfValue, spaceKey, auth.baseUrl);
+              const doc = this.pageToDocument(page, adfValue, spaceKey, baseUrl);
               if (doc) {
                 pagesFound++;
                 yield doc;
@@ -138,7 +162,7 @@ export class ConfluenceSyncProvider implements KbSyncProvider {
 
           // Follow pagination cursor
           const nextLink = pageData._links?.next;
-          pageUrl = nextLink ? `${auth.baseUrl}${nextLink}` : null;
+          pageUrl = nextLink ? `${baseUrl}${nextLink}` : null;
         }
 
         this.diag(`[kb-confluence] Space "${spaceKey}": ${pagesFound} pages processed, ${pagesSkipped} skipped (no body)`);

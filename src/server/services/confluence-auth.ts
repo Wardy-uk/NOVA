@@ -29,6 +29,12 @@ export interface ConfluenceAuth {
   label: string;
 }
 
+/** Where Confluence lives. Exported because read-only callers (KB sync) need the
+ *  site even when no credential resolves — public spaces answer anonymously. */
+export function confluenceSiteUrl(settings: SettingsQueries): string | undefined {
+  return siteUrl(settings);
+}
+
 function siteUrl(settings: SettingsQueries): string | undefined {
   // A location, not a credential — still overridable.
   const raw = settings.get('confluence_base_url')?.trim()
