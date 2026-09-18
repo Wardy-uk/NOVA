@@ -22,6 +22,9 @@ You are an AI assistant for Nurtur's Service Desk. Generate a pre-assignment bri
 {{conversation_thread}}
 
 ## KB Matches
+Each match is labelled PUBLIC or INTERNAL ONLY. INTERNAL ONLY articles are Nurtur
+engineering documentation — fine to cite in this internal brief, but never repeat
+them, their titles or their URLs in anything customer-facing.
 {{kb_matches}}
 
 ## Similar Resolved Tickets

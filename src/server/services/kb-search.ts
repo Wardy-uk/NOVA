@@ -8,10 +8,29 @@ export interface KbMatch {
   excerpt: string;
   relevance: number;
   url: string;
+  /** Which sync provider this came from ('confluence', 'tfs-docs', ...). */
+  source: string;
+  /** True only for sources that are safe to quote or link in a CUSTOMER-FACING
+   *  reply. Everything else is internal engineering documentation: usable to
+   *  help a human, never publishable. */
+  publishable: boolean;
+}
+
+/** Sources whose articles may be shown to a customer. The public Confluence
+ *  Service Hub is written for customers; tfs-docs is the internal nurtur-docs
+ *  git repo and must never be quoted or linked in a public reply.
+ *  Override with the `kb_public_sources` setting (comma-separated). */
+const DEFAULT_PUBLIC_SOURCES = ['confluence'];
+
+export function publicKbSources(settings: SettingsQueries): string[] {
+  const raw = settings.get('kb_public_sources')?.trim();
+  if (!raw) return DEFAULT_PUBLIC_SOURCES;
+  return raw.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
 }
 
 interface ChunkRow {
   id: number;
+  source: string;
   doc_title: string;
   doc_url: string;
   content: string;
@@ -43,7 +62,7 @@ export class KbSearchService {
       const queryEmbedding = await this.embedder.embedSingle(queryText);
 
       const chunks = await query<ChunkRow>(
-        `SELECT id, doc_title, doc_url, content, embedding FROM kb_chunks`
+        `SELECT id, source, doc_title, doc_url, content, embedding FROM kb_chunks`
       );
 
       if (chunks.length === 0) return [];
@@ -63,12 +82,15 @@ export class KbSearchService {
 
       scored.sort((a, b) => b.similarity - a.similarity);
 
+      const publicSources = publicKbSources(this.settings);
       return scored.slice(0, topK).map(({ chunk, similarity }) => ({
         id: String(chunk.id),
         title: chunk.doc_title,
         excerpt: chunk.content.slice(0, 200),
         relevance: similarity,
         url: chunk.doc_url,
+        source: chunk.source,
+        publishable: publicSources.includes((chunk.source ?? '').toLowerCase()),
       }));
     } catch (err) {
       console.error(`[kb-search] Search failed:`, err instanceof Error ? err.message : err);

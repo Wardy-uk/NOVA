@@ -89,12 +89,30 @@ export class QuickWinExecutor {
       let commentText: string;
       let commentInternal: boolean;
       if (qw.type === 'kba_match') {
-        // Find the best KB match URL from the inputs (stored by reasoner alongside the decision)
-        const kbMatches = (decision.inputs.kb_matches as Array<{ title: string; url: string; relevance: number }> | undefined) ?? [];
-        const bestMatch = kbMatches.length > 0 ? kbMatches.reduce((a, b) => (b.relevance > a.relevance ? b : a)) : null;
-        const articleTitle = bestMatch?.title ?? qw.suggested_kba ?? 'our knowledge base';
-        const articleUrl = bestMatch?.url;
-        const articleRef = articleUrl ? `[${articleTitle}](${articleUrl})` : articleTitle;
+        // Find the best KB match URL from the inputs (stored by reasoner alongside the decision).
+        // ONLY publishable sources are eligible: this comment goes to the customer, and
+        // tfs-docs is the internal nurtur-docs repo. Linking one here would hand a
+        // customer an internal engineering URL.
+        const kbMatches = (decision.inputs.kb_matches as Array<{ title: string; url: string; relevance: number; publishable?: boolean; source?: string }> | undefined) ?? [];
+        const publishable = kbMatches.filter(m => m.publishable === true);
+        const dropped = kbMatches.length - publishable.length;
+        if (dropped > 0) {
+          console.log(`[quick-win] ${ticketKey}: ignoring ${dropped} internal-only KB match(es) for a public close`);
+        }
+
+        // No customer-safe article to point at — closing publicly would either link
+        // something internal or promise an article we can't name. Leave it for a human.
+        if (publishable.length === 0) {
+          console.warn(`[quick-win] ${ticketKey}: kba_match had no publishable article — not auto-closing`);
+          return {
+            success: false, action: 'quick_win_close', ticketKey,
+            detail: 'kba_match matched only internal-only documentation (e.g. tfs-docs), which must never be sent to a customer. Left open for a human.',
+            error: 'NO_PUBLISHABLE_KB_MATCH',
+          };
+        }
+
+        const bestMatch = publishable.reduce((a, b) => (b.relevance > a.relevance ? b : a));
+        const articleRef = bestMatch.url ? `[${bestMatch.title}](${bestMatch.url})` : bestMatch.title;
         commentText = `This question is covered by our knowledge base article: ${articleRef}. Please take a look — it should have everything you need. We're closing this ticket now, but if you need further help just raise a new request.`;
         commentInternal = false;
       } else if (SILENT_CANCEL_TYPES.has(qw.type)) {

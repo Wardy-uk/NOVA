@@ -11,6 +11,42 @@ import { extractText } from './shared/adf-utils.js';
 const REQUEST_TIMEOUT_MS = 60_000;
 
 /**
+ * Hosts and paths that belong to Nurtur's INTERNAL documentation and must never
+ * appear in a customer-facing comment. The KB indexes the nurtur-docs git repo
+ * alongside the public Service Hub, so a bad retrieval or a model that ignores
+ * its prompt could otherwise paste an internal engineering URL to a customer.
+ *
+ * This is the last line of defence and deliberately fails CLOSED: the comment is
+ * refused, the ticket stays open, and a human sees it. A leaked internal URL
+ * cannot be taken back; a blocked comment can be re-sent.
+ */
+const INTERNAL_ONLY_URL_PATTERNS: RegExp[] = [
+  /tfs\.briefyourmarket\.com/i,
+  /\/_apis\/git\//i,
+];
+
+export class InternalContentInPublicCommentError extends Error {
+  constructor(public readonly issueKey: string, public readonly matched: string) {
+    super(
+      `Refused to post a PUBLIC comment on ${issueKey}: it contains an internal-only reference (${matched}). ` +
+      `Internal documentation must never be sent to a customer.`,
+    );
+    this.name = 'InternalContentInPublicCommentError';
+  }
+}
+
+/** Throws if a customer-visible comment carries an internal-only reference. */
+export function assertPublicCommentSafe(issueKey: string, text: string): void {
+  for (const pattern of INTERNAL_ONLY_URL_PATTERNS) {
+    const hit = text.match(pattern);
+    if (hit) {
+      console.error(`[jira-client] BLOCKED public comment on ${issueKey} — internal reference "${hit[0]}"`);
+      throw new InternalContentInPublicCommentError(issueKey, hit[0]);
+    }
+  }
+}
+
+/**
  * Resolves the real BC Account Number for a ticket that the NT "Quick Resolve"
  * validator has just blocked for a missing BC account. Injected at construction
  * so this low-level REST client stays decoupled from BC/settings.
@@ -425,6 +461,9 @@ export class JiraRestClient {
     bodyText: string,
     options?: { visibility?: { type: string; value: string }; internal?: boolean }
   ): Promise<unknown> {
+    // internal !== true means the customer can see it (Jira's default is public).
+    if (options?.internal !== true) assertPublicCommentSafe(issueKey, bodyText);
+
     const payload: Record<string, unknown> = {
       body: {
         type: 'doc',
@@ -448,6 +487,8 @@ export class JiraRestClient {
     body: object,
     options?: { internal?: boolean }
   ): Promise<unknown> {
+    if (options?.internal !== true) assertPublicCommentSafe(issueKey, JSON.stringify(body));
+
     const payload: Record<string, unknown> = { body };
     if (options?.internal !== undefined) {
       payload.properties = [{ key: 'sd.public.comment', value: { internal: options.internal } }];
@@ -485,6 +526,11 @@ export class JiraRestClient {
       payload.fields = options.fields;
     }
     if (options?.comment) {
+      // A close comment rides WITH the transition and is customer-visible unless
+      // explicitly marked internal — same guard as addComment().
+      if (options.comment.internal !== true) {
+        assertPublicCommentSafe(issueKey, JSON.stringify(options.comment.body));
+      }
       const commentAdd: Record<string, unknown> = { body: options.comment.body };
       if (options.comment.visibility) commentAdd.visibility = options.comment.visibility;
       if (options.comment.internal !== undefined) {

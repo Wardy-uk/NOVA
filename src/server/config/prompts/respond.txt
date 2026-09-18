@@ -37,6 +37,13 @@ The conversation below is split into two sections:
 
 ## Knowledge Base Matches
 
+Each match is labelled PUBLIC or INTERNAL ONLY.
+- **PUBLIC** articles (the customer-facing Service Hub) may be quoted and linked in a reply to the customer.
+- **INTERNAL ONLY** articles are Nurtur engineering documentation. Use them to inform your own
+  understanding and to write internal notes for staff, but NEVER quote them, link them, name them,
+  or paste their URL in anything the customer will see. Their URLs are internal systems and must
+  not appear in a customer-facing reply under any circumstances.
+
 {{kb_matches}}
 
 ## Prior Learnings (human-submitted corrections)

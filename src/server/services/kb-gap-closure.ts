@@ -50,6 +50,9 @@ export class KbGapClosureService {
           excerpt: `[Force-included: recently published from KB gap for category "${category}"]`,
           relevance: 0.95,
           url: article.confluence_url,
+          // Published to Confluence by the KB gap pipeline, so customer-facing.
+          source: 'confluence',
+          publishable: true,
         });
       }
     }
