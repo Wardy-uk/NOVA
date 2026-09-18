@@ -1879,6 +1879,28 @@ export class AgentLoop {
     return score;
   }
 
+  /**
+   * Has anyone posted a customer-facing comment on this ticket yet?
+   *
+   * Checked live rather than from the cache, because the answer decides whether to send a
+   * customer a message. The sync runs on its own timer, and a stale cache would have NOVA
+   * replying on top of a human who answered thirty seconds ago — the same cache-lag class of
+   * bug the self-assign guard exists for (NT-22689). It costs one Jira call, on the small
+   * subset of tickets that are human-assigned, newly raised, and carry a confident draft.
+   *
+   * Fails closed: if the check errors we report "someone has replied", so an unreachable Jira
+   * leaves NOVA quiet rather than risking a duplicate reply to a customer.
+   */
+  private async hasCustomerFacingReply(ticketKey: string): Promise<boolean> {
+    try {
+      const comments = await this.jiraClient.getComments(ticketKey, 20);
+      return comments.some(c => c.jsdPublic === true);
+    } catch (err) {
+      console.warn(`[agent] Could not check for an existing customer reply on ${ticketKey} — assuming there is one:`, err instanceof Error ? err.message : err);
+      return true;
+    }
+  }
+
   /** Catch-up triage of tickets the agent has never seen. Runs on its own timer
    *  (registered in index.ts) rather than inside tick(), so it cannot delay a live
    *  ticket with an SLA running against it. */
@@ -2122,6 +2144,45 @@ export class AgentLoop {
         this.ticketsProcessed++;
         return;
       }
+      // Second carve-out: the FIRST reply on a ticket nobody has answered yet.
+      //
+      // Observer mode means "do not take over a human's ticket", and that is right for
+      // everything after the opening exchange. But on 18 Sep 2026 it also meant a ticket
+      // assigned to a human before NOVA finished triaging never got a customer reply at all —
+      // not from NOVA, which returned here, and not from the human, who had no idea they were
+      // now the only thing standing between the customer and a breached SLA. NT-31757..31766
+      // went out that way. Answering a customer nobody has answered is not taking over.
+      //
+      // Deliberately narrow: only a newly raised ticket, only a confident draft, only when no
+      // customer-facing comment exists, and NOVA does NOT reassign the ticket to itself the
+      // way the normal first-reply path does — the human keeps it. NOVA replies and steps back.
+      const observerFirstReplyEnabled = this.settings.get('agent_observer_first_reply') !== 'false';
+      const frThreshold = parseFloat(this.settings.get('agent_first_reply_confidence_threshold') || '0.85');
+      const observerDraft = (decision.output.draft_response as string) ?? '';
+      const observerCanReply = observerFirstReplyEnabled
+        && !decision.shadowMode
+        && decision.eventType === 'ticket_created'
+        && (decision.action === 'draft_response' || decision.action === 'respond')
+        && decision.confidence >= frThreshold
+        && !!observerDraft
+        && !looksLikeStructuredPayload(observerDraft)
+        && this.guardrails.validate(decision).allowed;
+
+      if (observerCanReply && !(await this.hasCustomerFacingReply(decision.ticketKey))) {
+        const replyResult = await this.actor.postPublicReply(decision.ticketKey, observerDraft);
+        await this.observer.logOutcome(decisionId, replyResult);
+        if (replyResult.success) {
+          console.log(
+            `[agent] [OBSERVER→FIRST REPLY] ${decision.ticketKey}: answered the customer`
+            + ` (confidence ${(decision.confidence * 100).toFixed(0)}%) and left it with its human assignee.`,
+          );
+        } else {
+          console.warn(`[agent] [OBSERVER] First reply failed on ${decision.ticketKey}: ${replyResult.error}`);
+        }
+        this.ticketsProcessed++;
+        return;
+      }
+
       await this.observer.logOutcome(decisionId, {
         success: true, action: decision.action, ticketKey: decision.ticketKey,
         detail: `[OBSERVER] Ticket assigned — posted internal note only, no external action taken.`,
