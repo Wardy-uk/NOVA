@@ -558,7 +558,16 @@ export async function getHealthSignals(jobRegistry?: JobRegistry): Promise<Healt
   });
 
   const database = await signal(async (): Promise<DatabaseHealth> => {
-    const p = getPoolStats();
+    // Each of the three is independently guarded. The pool reading is the cheapest and the
+    // most diagnostic — it is what distinguishes "queueing for a connection" from "the query
+    // itself is slow" — so a DMV that is unreadable or timing out must never cost us it.
+    // That matters most during exactly the incident this panel is for.
+    let p: ReturnType<typeof getPoolStats>;
+    try {
+      p = getPoolStats();
+    } catch {
+      p = { size: 0, used: 0, free: 0, pending: 0 };
+    }
     // Queueing at all is worth a look; a deep queue means every feature is already waiting.
     const poolSeverity: Severity = p.pending > 10 ? 'fail' : p.pending > 0 ? 'warn' : 'ok';
     const pool = {
