@@ -1646,7 +1646,11 @@ async function main() {
     // customer-facing reply. Runs every 3 min so the default 10-minute threshold is caught
     // several times over before the deadline. No working-hours gate here: the service skips
     // tickets whose SLA clock the calendar has parked, which is the exact test.
-    const frtSafetyNet = new FrtSafetyNet(agentJiraClient, settingsQueries);
+    // The reply writer is the agent's own, so the safety net speaks in NOVA's voice rather
+    // than a second one. Best-effort: the sweep falls back to its template if this fails.
+    const frtSafetyNet = new FrtSafetyNet(agentJiraClient, settingsQueries, (opts) =>
+      agentLoop!.getReasoner().generateGenericFirstReply(opts),
+    );
     jobRegistry.register('frt-safety-net', 'First Reply Time safety net', async () => {
       try {
         await frtSafetyNet.run();

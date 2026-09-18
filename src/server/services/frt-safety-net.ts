@@ -1,5 +1,6 @@
 import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
+import { adfText } from './frt-safety-net-adf.js';
 
 /**
  * First Reply Time safety net.
@@ -118,11 +119,62 @@ export interface FrtSweepResult {
   candidates: FrtAckCandidate[];
 }
 
+/** Writes a real first reply that engages with what the customer actually asked.
+ *  Injected rather than imported so the safety net keeps no dependency on the agent. */
+export type GenericFirstReplyFn = (opts: {
+  ticketKey: string;
+  summary: string;
+  description: string;
+  reporterName: string;
+  assigneeName: string;
+}) => Promise<string>;
+
 export class FrtSafetyNet {
   constructor(
     private jiraClient: JiraRestClient,
     private settings: SettingsQueries,
+    /** Optional. Without it the safety net posts the static template, exactly as before. */
+    private generateReply?: GenericFirstReplyFn,
   ) {}
+
+  /**
+   * A written reply for a human-raised ticket, falling back to the static template.
+   *
+   * The safety net's original virtue was being cheap and deterministic — one JQL, one comment
+   * post, no LLM — and that is why it held up on a day when everything else was saturated. An
+   * LLM call at the deadline puts a failure mode in the one place that must not fail, so it is
+   * strictly best-effort: short timeout, any error or slow response falls straight through to
+   * the template. Cost is bounded by the sweep only ever seeing a handful of tickets at once.
+   */
+  private async buildCustomerReply(
+    template: string,
+    ctx: { name: string; key: string; summary: string; ownerLine: string; description: string; reporterName: string; assigneeName: string },
+  ): Promise<{ text: string; generated: boolean }> {
+    const staticText = this.renderAck(template, ctx);
+    if (!this.generateReply || this.settings.get('frt_safety_net_generate_reply') === 'false') {
+      return { text: staticText, generated: false };
+    }
+
+    const timeoutMs = parseInt(this.settings.get('frt_safety_net_generate_timeout_ms') || '', 10) || 20_000;
+    try {
+      const reply = await Promise.race([
+        this.generateReply({
+          ticketKey: ctx.key,
+          summary: ctx.summary,
+          description: ctx.description,
+          reporterName: ctx.reporterName,
+          assigneeName: ctx.assigneeName,
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out')), timeoutMs)),
+      ]);
+      const trimmed = (reply || '').trim();
+      if (trimmed.length > 20) return { text: trimmed, generated: true };
+      console.warn(`[frt-safety-net] Generated reply for ${ctx.key} was too short — using the template`);
+    } catch (err) {
+      console.warn(`[frt-safety-net] Reply generation failed for ${ctx.key}, using the template:`, err instanceof Error ? err.message : err);
+    }
+    return { text: staticText, generated: false };
+  }
 
   getMode(): FrtSafetyNetMode {
     const raw = (this.settings.get('frt_safety_net_mode') || 'dry_run').trim().toLowerCase();
@@ -208,7 +260,7 @@ export class FrtSafetyNet {
 
     const search = await this.jiraClient.searchJqlAll(
       this.buildJql(),
-      ['summary', 'reporter', 'created', 'assignee', 'customfield_14046'],
+      ['summary', 'reporter', 'created', 'assignee', 'description', 'customfield_14046'],
       200,
     );
     const issues = search?.issues ?? [];
@@ -255,15 +307,31 @@ export class FrtSafetyNet {
         ? `${assigneeName} is looking after this for you and will be in touch with an update or next steps.`
         : 'It is with our support team now, and the agent who picks it up will come back to you with an update or next steps.';
 
-      const ackTemplate = machineRaised
-        ? (this.settings.get('frt_safety_net_internal_ack') || DEFAULT_INTERNAL_ACK)
-        : (this.settings.get('frt_safety_net_customer_ack') || DEFAULT_CUSTOMER_ACK);
-      const ackText = this.renderAck(ackTemplate, {
+      const ackCtx = {
         name: greetingName(reporterField?.displayName ?? '', reporterField?.emailAddress ?? ''),
         key: issue.key,
         summary,
         ownerLine,
-      });
+        description: adfText(fields.description),
+        reporterName: reporterField?.displayName || reporterField?.emailAddress || 'there',
+        assigneeName: assigneeName || 'the Customer Care team',
+      };
+
+      // Machine-raised tickets get the terse template — there is no person to write to, and
+      // spending an LLM call to tell an alerting mailbox we received its alert is waste.
+      // A human gets a written reply that engages with what they actually asked.
+      let ackText: string;
+      let generated = false;
+      if (machineRaised) {
+        ackText = this.renderAck(this.settings.get('frt_safety_net_internal_ack') || DEFAULT_INTERNAL_ACK, ackCtx);
+      } else {
+        const built = await this.buildCustomerReply(
+          this.settings.get('frt_safety_net_customer_ack') || DEFAULT_CUSTOMER_ACK,
+          ackCtx,
+        );
+        ackText = built.text;
+        generated = built.generated;
+      }
 
       if (mode === 'dry_run') {
         console.log(
@@ -302,7 +370,8 @@ export class FrtSafetyNet {
         result.acknowledged++;
         console.log(
           `[frt-safety-net] Acknowledged ${issue.key}`
-          + ` (${machineRaised ? 'internal system' : 'customer'}, remaining=${formatRemaining(candidate.remainingMs)})`,
+          + ` (${machineRaised ? 'internal system' : generated ? 'customer, written reply' : 'customer, TEMPLATE fallback'},`
+          + ` remaining=${formatRemaining(candidate.remainingMs)})`,
         );
       } catch (err) {
         result.failed++;
