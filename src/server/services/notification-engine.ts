@@ -1,10 +1,9 @@
 import type { NotificationQueries } from '../db/notifications.js';
-import type { MilestoneQueries, DeliveryQueries, TaskQueries, UserQueries } from '../db/queries.js';
+import type { DeliveryQueries, TaskQueries, UserQueries } from '../db/queries.js';
 
 export class NotificationEngine {
   constructor(
     private notificationQueries: NotificationQueries,
-    private milestoneQueries: MilestoneQueries,
     private deliveryQueries: DeliveryQueries,
     private taskQueries?: TaskQueries,
     private userQueries?: UserQueries,
@@ -20,23 +19,7 @@ export class NotificationEngine {
       userName = user?.display_name || user?.username;
     }
 
-    // 1. Overdue milestones — scoped to user's deliveries
-    try {
-      const overdue = await this.milestoneQueries.getOverdue(userName);
-      for (const m of overdue) {
-        const ok = await this.notificationQueries.create({
-          user_id: userId,
-          type: 'milestone_overdue',
-          title: `Milestone overdue: ${m.template_name}`,
-          message: `${m.account} — due ${m.target_date}`,
-          entity_type: 'milestone',
-          entity_id: String(m.id),
-        });
-        if (ok) created++;
-      }
-    } catch { /* ignore */ }
-
-    // 2. Deliveries due within 7 days — scoped to user's deliveries
+    // 1. Deliveries due within 7 days — scoped to user's deliveries
     try {
       const upcoming = await this.deliveryQueries.getUpcomingGoLive(7, userName);
       for (const e of upcoming) {
@@ -52,7 +35,7 @@ export class NotificationEngine {
       }
     } catch { /* ignore */ }
 
-    // 3. SLA breach warnings (within 30 minutes)
+    // 2. SLA breach warnings (within 30 minutes)
     try {
       if (this.taskQueries) {
         const slaTasks = await this.taskQueries.getTasksWithUpcomingSla(30);

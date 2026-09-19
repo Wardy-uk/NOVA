@@ -10,11 +10,7 @@ import { LoginView } from './components/LoginView.js';
 import { HelpView } from './components/HelpView.js';
 const AdminView = lazy(() => import('./components/AdminView.js').then(m => ({ default: m.AdminView })));
 const AdminContractTermsView = lazy(() => import('./components/AdminContractTermsView.js').then(m => ({ default: m.AdminContractTermsView })));
-const OnboardingConfigView = lazy(() => import('./components/OnboardingConfigView.js').then(m => ({ default: m.OnboardingConfigView })));
 const GuildOnboardingView = lazy(() => import('./components/GuildOnboardingView.js').then(m => ({ default: m.GuildOnboardingView })));
-import { OnboardingCalendar } from './components/OnboardingCalendar.js';
-import { OnboardingDashboard } from './components/OnboardingDashboard.js';
-import { OverdueDeliveriesView } from './components/OverdueDeliveriesView.js';
 import { ProblemTicketsView } from './components/ProblemTicketsView.js';
 import { MyFeedbackView } from './components/MyFeedbackView.js';
 import { ServiceDeskKanban } from './components/ServiceDeskKanban.js';
@@ -111,9 +107,9 @@ declare const __APP_VERSION__: string;
 
 // ── Area / View definitions ──
 
-type Area = 'servicedesk' | 'onboarding' | 'accounts' | 'people' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
+type Area = 'servicedesk' | 'accounts' | 'people' | 'kpi-rebuild' | 'trends' | 'qa' | 'wallboards' | 'training' | 'board' | 'devreview' | 'ai-agent' | 'backlog' | 'standup';
 type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' | 'sd-dashboard' | 'ai-approvals'
-  | 'delivery' | 'onboarding-config' | 'ob-calendar' | 'ob-dashboard' | 'ob-overdue' | 'ob-guild'
+  | 'delivery' | 'ob-guild'
   | 'crm' | 'contracts' | 'adobe-sign' | 'new-contract'
   | 'kpi-compare' | 'kpi-leaderboard' | 'kpi-breached' | 'kpi-team-breached' | 'kpi-trends' | 'kpi-escalations' | 'risk-intelligence' | 'agent-kpis' | 'qa'
   | 'kpi-rebuild-support' | 'gamification'
@@ -124,15 +120,15 @@ type View = 'look-at-this' | 'tickets' | 'kanban' | 'sd-calendar' | 'attention' 
   | 'training-matrix' | 'training-summary'
   | 'board-mi'
   | 'dev-review' | 'dev-review-dashboard'
-  | 'agent-dashboard' | 'agent-workspace' | 'agent-nova-queue' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
+  | 'agent-dashboard' | 'agent-workspace' | 'agent-nova-queue' | 'agent-warning-signals' | 'agent-coaching' | 'agent-manager' | 'agent-pipelines' | 'agent-uat-compare' | 'agent-kb-gaps' | 'agent-learnings'
   | 'agent-kb-health' | 'agent-training' | 'agent-capacity' | 'agent-intelligence' | 'agent-impact' | 'agent-ops-pack'
   | 'backlog-board'
   | 'standup-board'
   | 'settings' | 'admin-panel' | 'portal-admin' | 'admin-contract-terms' | 'my-feedback'
-  | 'error-log' | 'system-health' | 'warning-signals' | 'help' | 'debug';
+  | 'error-log' | 'system-health' | 'help' | 'debug';
 
 // Standalone views that don't belong to any area (no sub-tab bar)
-const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'admin-contract-terms', 'my-feedback', 'error-log', 'system-health', 'warning-signals']);
+const STANDALONE_VIEWS = new Set<View>(['help', 'debug', 'settings', 'admin-panel', 'portal-admin', 'admin-contract-terms', 'my-feedback', 'error-log', 'system-health']);
 
 interface AreaDef {
   label: string;
@@ -173,18 +169,8 @@ const AREAS: Record<Area, AreaDef> = {
       { view: 'kanban', label: 'Kanban' },
       { view: 'sd-calendar', label: 'Calendar' },
       { view: 'attention', label: 'My Breached' },
-    ],
-  },
-  onboarding: {
-    label: 'Onboarding',
-    defaultView: 'delivery',
-    tabs: [
-      { view: 'ob-dashboard', label: 'Overview' },
       { view: 'delivery', label: 'Delivery' },
-      { view: 'ob-overdue', label: 'Overdue' },
-      { view: 'ob-calendar', label: 'Milestones' },
-      { view: 'ob-guild', label: 'Guild' },
-      { view: 'onboarding-config', label: 'Onboarding Matrix' },
+      { view: 'ob-guild', label: 'Guild Onboarding' },
     ],
   },
   accounts: {
@@ -310,6 +296,7 @@ const AREAS: Record<Area, AreaDef> = {
     tabs: [
       { view: 'tickets', label: 'My Tickets' },
       { view: 'agent-nova-queue', label: 'NOVA Queue' },
+      { view: 'agent-warning-signals', label: 'Warning Signals' },
       { view: 'look-at-this', label: '🔴 Look at this' },
       { view: 'ai-approvals', label: 'AI Approvals' },
       { view: 'agent-workspace', label: 'Workspace' },
@@ -344,7 +331,7 @@ const AREAS: Record<Area, AreaDef> = {
   },
 };
 
-const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'onboarding', 'accounts', 'people', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog', 'standup'];
+const AREA_ORDER: Area[] = ['ai-agent', 'servicedesk', 'accounts', 'people', 'kpi-rebuild', 'trends', 'qa', 'wallboards', 'training', 'devreview', 'board', 'backlog', 'standup'];
 
 // Derive area from view (standalone views fall back to 'ai-agent')
 function getArea(view: View): Area {
@@ -356,7 +343,7 @@ function getArea(view: View): Area {
 }
 
 // Full-width views (no max-w constraint)
-const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'onboarding-config', 'contracts', 'ob-calendar', 'ob-dashboard', 'ob-overdue', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-compare', 'kpi-leaderboard', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'gamification', 'tpj-maintenance', 'admin-panel', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
+const FULL_WIDTH_VIEWS = new Set<View>(['delivery', 'ob-guild', 'contracts', 'kanban', 'tickets', 'sd-calendar', 'attention', 'sd-dashboard', 'ai-approvals', 'kpi-compare', 'kpi-leaderboard', 'kpi-breached', 'kpi-team-breached', 'kpi-trends', 'agent-kpis', 'qa', 'wb-breached', 'wb-team-kpis', 'wb-cc', 'wb-tech-support', 'wb-support', 'kpi-rebuild-agents', 'kpi-rebuild-leaderboard', 'kpi-rebuild-history', 'kpi-rebuild-trends', 'kpi-rebuild-operational', 'kpi-rebuild-legacy', 'gamification', 'tpj-maintenance', 'admin-panel', 'training-matrix', 'training-summary', 'board-mi', 'dev-review', 'dev-review-dashboard', 'agent-dashboard', 'agent-workspace', 'agent-nova-queue', 'agent-warning-signals', 'agent-kb-gaps', 'wb-key-accounts', 'wb-customer-success', 'people-roster', 'people-profile', 'people-121-overview', 'backlog-board', 'standup-board', 'portal-admin']);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -936,12 +923,6 @@ export function App() {
                         >
                           System Health
                         </button>
-                        <button
-                          onClick={() => { setView('warning-signals'); setShowUserMenu(false); }}
-                          className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 transition-colors"
-                        >
-                          Warning Signals
-                        </button>
                       </>
                     )}
                     <button
@@ -1265,21 +1246,9 @@ export function App() {
             />
           )}
 
-          {/* Onboarding */}
-          {view === 'ob-dashboard' && (
-            <OnboardingDashboard />
-          )}
+          {/* Delivery & Guild Onboarding (customer portal chain) */}
           {view === 'delivery' && (
             <DeliveryView canWrite={areaAccess.onboarding === 'edit'} canPushGit={areaAccess.azdo_push === 'edit'} />
-          )}
-          {view === 'ob-overdue' && (
-            <OverdueDeliveriesView />
-          )}
-          {view === 'ob-calendar' && (
-            <OnboardingCalendar />
-          )}
-          {view === 'onboarding-config' && (
-            <OnboardingConfigView readOnly />
           )}
           {view === 'ob-guild' && (
             <GuildOnboardingView />
@@ -1394,6 +1363,11 @@ export function App() {
               <NovaQueueView />
             </Suspense>
           )}
+          {view === 'agent-warning-signals' && canSeeArea('ai-agent') && (
+            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
+              <ManagementSignalsView />
+            </Suspense>
+          )}
           {view === 'agent-coaching' && canSeeArea('ai-agent') && (
             <AgentCoachingView />
           )}
@@ -1458,11 +1432,7 @@ export function App() {
               <SystemHealthView />
             </Suspense>
           )}
-          {view === 'warning-signals' && (
-            <Suspense fallback={<div className="animate-pulse h-48 bg-gray-800 rounded-lg" />}>
-              <ManagementSignalsView />
-            </Suspense>
-          )}
+
           {view === 'my-feedback' && (
             <MyFeedbackView />
           )}

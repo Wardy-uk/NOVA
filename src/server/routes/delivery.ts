@@ -175,14 +175,13 @@ function loadWorkbook(): Record<string, SheetResult> & { _lastModified: string }
   return Object.assign({}, sheets, { _lastModified: lastModified });
 }
 
-import type { DeliveryQueries, MilestoneQueries, TaskQueries, OnboardingRunQueries } from '../db/queries.js';
+import type { DeliveryQueries, TaskQueries } from '../db/queries.js';
 import type { SharePointSync } from '../services/sharepoint-sync.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
-import { syncMilestoneToTask, syncDeliveryMilestonesToTasks } from './milestones.js';
 import type { AuditQueries } from '../db/audit.js';
 import type { FileSettingsQueries } from '../db/settings-store.js';
 
-export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, milestoneQueries?: MilestoneQueries, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard, auditQueries?: AuditQueries, onboardingRunQueries?: OnboardingRunQueries, settingsQueries?: FileSettingsQueries): Router {
+export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?: SharePointSync, taskQueries?: TaskQueries, requireAreaAccess?: AreaAccessGuard, auditQueries?: AuditQueries, settingsQueries?: FileSettingsQueries): Router {
   const router = Router();
 
   // Pre-load on startup (non-blocking to avoid slowing boot)
@@ -240,7 +239,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
   if (deliveryQueries) {
     const writeGuard = requireAreaAccess ? requireAreaAccess('onboarding', 'edit') : (_req: any, _res: any, next: any) => next();
 
-    // My Focus: starred-for-me + entries assigned to me with overdue milestones
+    // My Focus: starred-for-me + entries assigned to me
     router.get('/entries/my-focus', async (req, res) => {
       const userId = req.user?.id as number | undefined;
       const username = req.user?.username as string | undefined;
@@ -252,21 +251,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         if (alphaOnly.length > 3) names.push(alphaOnly.slice(0, -1));
       }
       const entries = await deliveryQueries.getMyFocus(userId, names);
-
-      // Enrich with milestone progress if available
-      if (milestoneQueries && entries.length > 0) {
-        const ids = entries.map(e => e.id);
-        const milestoneSummary = await milestoneQueries.getOverdueSummaryByDelivery(ids);
-        const nextPending = await milestoneQueries.getNextPendingByDelivery(ids);
-        const enriched = entries.map(e => ({
-          ...e,
-          milestone_summary: milestoneSummary.get(e.id) ?? null,
-          next_milestone: nextPending.get(e.id) ?? null,
-        }));
-        res.json({ ok: true, data: enriched });
-      } else {
-        res.json({ ok: true, data: entries });
-      }
+      res.json({ ok: true, data: entries });
     });
 
     router.get('/entries/completion-summary', async (_req, res) => {
@@ -300,88 +285,6 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
           deliveredThisWeek: { count: weekCount, mrr: weekMrr },
           deliveredThisMonth: { count: monthCount, mrr: monthMrr },
           totalActive,
-        },
-      });
-    });
-
-    // Onboarding managers overview / dashboard
-    router.get('/onboarding-dashboard', async (_req, res) => {
-      const entries = await deliveryQueries.getAll();
-      const milestoneSummary = (await milestoneQueries?.getSummary()) ?? { total: 0, pending: 0, in_progress: 0, complete: 0, overdue: 0 };
-      const recentRuns = (await onboardingRunQueries?.getRecent(10)) ?? [];
-
-      // Aggregate by status
-      const byStatus: Record<string, number> = {};
-      // Aggregate by product
-      const byProduct: Record<string, { active: number; complete: number; mrr: number }> = {};
-      // Aggregate by onboarder
-      const byOnboarder: Record<string, { active: number; complete: number; overdue: number }> = {};
-
-      let totalActive = 0, totalComplete = 0, totalDead = 0, totalMrr = 0;
-
-      const today = new Date().toISOString().split('T')[0];
-
-      for (const e of entries) {
-        const lower = (e.status || '').toLowerCase();
-        byStatus[e.status || 'Unknown'] = (byStatus[e.status || 'Unknown'] || 0) + 1;
-
-        const prod = e.product || 'Other';
-        if (!byProduct[prod]) byProduct[prod] = { active: 0, complete: 0, mrr: 0 };
-
-        const mgr = e.onboarder || 'Unassigned';
-        if (!byOnboarder[mgr]) byOnboarder[mgr] = { active: 0, complete: 0, overdue: 0 };
-
-        if (lower === 'complete') {
-          totalComplete++;
-          byProduct[prod].complete++;
-          byOnboarder[mgr].complete++;
-        } else if (['dead', 'back to sales'].includes(lower)) {
-          totalDead++;
-        } else {
-          totalActive++;
-          totalMrr += e.mrr ?? 0;
-          byProduct[prod].active++;
-          byProduct[prod].mrr += e.mrr ?? 0;
-          byOnboarder[mgr].active++;
-          // Overdue = has a go_live_date in the past and still active
-          if (e.go_live_date && e.go_live_date < today) {
-            byOnboarder[mgr].overdue++;
-          }
-        }
-      }
-
-      // Sort products and onboarders by active count descending
-      const productBreakdown = Object.entries(byProduct)
-        .map(([name, d]) => ({ name, ...d }))
-        .sort((a, b) => b.active - a.active);
-
-      const onboarderBreakdown = Object.entries(byOnboarder)
-        .filter(([, d]) => d.active > 0 || d.complete > 0)
-        .map(([name, d]) => ({ name, ...d }))
-        .sort((a, b) => b.active - a.active);
-
-      // Recent runs summary
-      const runsSummary = recentRuns.slice(0, 5).map(r => ({
-        ref: r.onboarding_ref,
-        status: r.status,
-        created_count: r.created_count,
-        parent_key: r.parent_key,
-        created_at: r.created_at,
-      }));
-
-      res.json({
-        ok: true,
-        data: {
-          totalActive,
-          totalComplete,
-          totalDead,
-          totalMrr,
-          totalEntries: entries.length,
-          milestones: milestoneSummary,
-          byStatus,
-          productBreakdown,
-          onboarderBreakdown,
-          recentRuns: runsSummary,
         },
       });
     });
@@ -429,21 +332,6 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         notes,
       });
 
-      // Auto-create milestones if we have a start date
-      // Only create a task for the first milestone (day 0) — the workflow engine handles the rest progressively
-      if (milestoneQueries && taskQueries && order_date) {
-        try {
-          const milestones = await milestoneQueries.createForDelivery(id, order_date, sale_type ?? undefined);
-          if (milestones.length > 0) {
-            const first = milestones[0];
-            await syncMilestoneToTask(first, account, taskQueries);
-            await milestoneQueries.markWorkflowTaskCreated(first.id);
-          }
-        } catch (err) {
-          console.error('[Delivery] Milestone auto-creation failed:', err instanceof Error ? err.message : err);
-        }
-      }
-
       await auditQueries?.log(userId ?? 0, 'delivery', String(id), 'create', { product, account, status });
       res.json({ ok: true, data: await deliveryQueries.getById(id) });
     });
@@ -458,7 +346,6 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         const loaded = loadWorkbook();
         let created = 0;
         let skipped = 0;
-        let milestonesCreated = 0;
         let sheetsProcessed = 0;
 
         for (const sheetName of PRODUCT_SHEETS) {
@@ -497,53 +384,18 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
               notes: row.notes || null,
             });
             created++;
-
-            // Auto-create milestones for imported entries with an order date
-            if (milestoneQueries && taskQueries && row.orderDate) {
-              try {
-                await milestoneQueries.createForDelivery(id, row.orderDate);
-                await syncDeliveryMilestonesToTasks(id, row.account, milestoneQueries, taskQueries);
-                milestonesCreated++;
-              } catch (err) {
-                console.error(`[Delivery] Milestone creation failed for ${row.account}:`, err instanceof Error ? err.message : err);
-              }
-            }
           }
         }
 
         res.json({
           ok: true,
-          data: { created, skipped, milestonesCreated, sheetsProcessed },
+          data: { created, skipped, sheetsProcessed },
         });
       } catch (err) {
         res.status(500).json({
           ok: false,
           error: err instanceof Error ? err.message : 'Import failed',
         });
-      }
-    });
-
-    // POST /entries/backfill-milestones — create milestones for all entries that don't have any
-    router.post('/entries/backfill-milestones', writeGuard, async (_req, res) => {
-      if (!milestoneQueries || !taskQueries) {
-        res.status(500).json({ ok: false, error: 'Milestone system not available' });
-        return;
-      }
-      try {
-        const allEntries = await deliveryQueries.getAll();
-        let created = 0;
-        let skipped = 0;
-        for (const entry of allEntries) {
-          const existing = await milestoneQueries.getByDelivery(entry.id);
-          if (existing.length > 0) { skipped++; continue; }
-          const startDate = entry.order_date || entry.go_live_date || new Date().toISOString().split('T')[0];
-          await milestoneQueries.createForDelivery(entry.id, startDate);
-          await syncDeliveryMilestonesToTasks(entry.id, entry.account, milestoneQueries, taskQueries);
-          created++;
-        }
-        res.json({ ok: true, data: { created, skipped } });
-      } catch (err) {
-        res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Backfill failed' });
       }
     });
 
@@ -587,7 +439,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
   }
 
   // Related tickets for a delivery entry
-  if (deliveryQueries && onboardingRunQueries) {
+  if (deliveryQueries) {
     router.get('/entries/:id/related-tickets', async (req, res) => {
       const id = parseInt(String(req.params.id), 10);
       if (isNaN(id)) { res.status(400).json({ ok: false, error: 'Invalid id' }); return; }
@@ -596,20 +448,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
 
       const jiraBaseUrl = settingsQueries?.get('jira_ob_url') ?? '';
 
-      // 1. Onboarding tickets from runs
-      let runs: Array<{ id: number; parent_key: string | null; child_keys: string[]; status: string; created_at: string }> = [];
-      if (entry.onboarding_id) {
-        const rawRuns = await onboardingRunQueries.getAllByRef(entry.onboarding_id);
-        runs = rawRuns.map(r => ({
-          id: r.id,
-          parent_key: r.parent_key,
-          child_keys: r.child_keys ? JSON.parse(r.child_keys) : [],
-          status: r.status,
-          created_at: r.created_at,
-        }));
-      }
-
-      // 2. Related SD tickets matched by account name
+      // Related SD tickets matched by account name
       let relatedTasks: Array<{ id: string; source_id: string; title: string; status: string; source_url: string | null }> = [];
       if (entry.account && taskQueries) {
         const matched = await taskQueries.searchByTitle(entry.account, 'jira', 20);
@@ -622,7 +461,7 @@ export function createDeliveryRoutes(deliveryQueries?: DeliveryQueries, spSync?:
         }));
       }
 
-      res.json({ ok: true, data: { runs, relatedTasks, jiraBaseUrl } });
+      res.json({ ok: true, data: { relatedTasks, jiraBaseUrl } });
     });
   }
 

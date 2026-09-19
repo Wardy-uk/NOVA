@@ -1,11 +1,10 @@
 import { Router } from 'express';
-import type { CrmQueries, DeliveryQueries, OnboardingRunQueries } from '../db/queries.js';
+import type { CrmQueries, DeliveryQueries } from '../db/queries.js';
 import type { AreaAccessGuard } from '../middleware/auth.js';
 
 export function createCrmRoutes(
   crmQueries: CrmQueries,
   deliveryQueries?: DeliveryQueries,
-  onboardingRunQueries?: OnboardingRunQueries,
   requireAreaAccess?: AreaAccessGuard,
 ): Router {
   const router = Router();
@@ -116,22 +115,9 @@ export function createCrmRoutes(
       );
     }
 
-    // Find onboarding runs via delivery entries' onboarding_ids
-    let onboardingRuns: unknown[] = [];
-    if (onboardingRunQueries) {
-      const seenRefs = new Set<string>();
-      for (const de of deliveryEntries as Array<{ onboarding_id?: string }>) {
-        if (de.onboarding_id && !seenRefs.has(de.onboarding_id)) {
-          seenRefs.add(de.onboarding_id);
-          const runs = await onboardingRunQueries.getAllByRef(de.onboarding_id);
-          onboardingRuns.push(...runs);
-        }
-      }
-    }
-
     res.json({
       ok: true,
-      data: { customer, reviews, deliveryEntries, onboardingRuns },
+      data: { customer, reviews, deliveryEntries },
     });
   });
 

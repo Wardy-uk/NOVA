@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TaskQueries, MilestoneQueries, OnboardingRunQueries, UserSettingsQueries, ProblemTicketQueries } from '../db/queries.js';
+import type { TaskQueries, UserSettingsQueries, ProblemTicketQueries } from '../db/queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { TaskAggregator, SdFilter, SyncContext } from '../services/aggregator.js';
 import { JiraRestClient } from '../services/jira-client.js';
@@ -70,10 +70,8 @@ async function buildUserJiraClient(
 export function createTaskRoutes(
   taskQueries: TaskQueries,
   aggregator: TaskAggregator,
-  milestoneQueries?: MilestoneQueries,
   userSettingsQueries?: UserSettingsQueries,
   settingsQueries?: SettingsQueries,
-  onboardingRunQueries?: OnboardingRunQueries,
   problemTicketQueries?: ProblemTicketQueries,
 ): Router {
   const router = Router();
@@ -532,10 +530,6 @@ export function createTaskRoutes(
     const done = byStatus['done'] ?? 0;
     const avgAgeDays = activeCount > 0 ? Math.round(totalAgeMs / activeCount / 86400000) : 0;
 
-    // Onboarding metrics — milestone summary + recent runs
-    const milestoneSummary = (await milestoneQueries?.getSummary()) ?? null;
-    const recentRuns = (await onboardingRunQueries?.getRecent(5)) ?? [];
-
     res.json({
       ok: true,
       data: {
@@ -543,18 +537,6 @@ export function createTaskRoutes(
         overdue, dueToday, dueThisWeek, completedToday, completedThisWeek,
         completionRate: total > 0 ? Math.round((done / total) * 100) : 0,
         avgAgeDays, highPriorityOpen, slaBreach,
-        onboarding: {
-          milestones: milestoneSummary,
-          recentRuns: recentRuns.map((r) => ({
-            id: r.id,
-            ref: r.onboarding_ref,
-            status: r.status,
-            parentKey: r.parent_key,
-            createdCount: r.created_count,
-            dryRun: r.dry_run === 1,
-            createdAt: r.created_at,
-          })),
-        },
       },
     });
   });
@@ -581,32 +563,6 @@ export function createTaskRoutes(
     if (!updated) {
       res.status(404).json({ ok: false, error: 'Task not found' });
       return;
-    }
-
-    // Bidirectional milestone sync: when a milestone task status changes, update the milestone
-    if (parsed.data.status && milestoneQueries) {
-      const task = await taskQueries.getById(req.params.id);
-      if (task?.source === 'milestone' && task.source_id?.startsWith('milestone:')) {
-        const parts = task.source_id.split(':');
-        // source_id format: milestone:{deliveryId}:{templateId}
-        const deliveryId = parseInt(parts[1], 10);
-        const templateId = parseInt(parts[2], 10);
-        if (!isNaN(deliveryId) && !isNaN(templateId)) {
-          const milestones = await milestoneQueries.getByDelivery(deliveryId);
-          const milestone = milestones.find(m => m.template_id === templateId);
-          if (milestone) {
-            const statusMap: Record<string, string> = { open: 'pending', in_progress: 'in_progress', done: 'complete' };
-            const newMilestoneStatus = statusMap[parsed.data.status] ?? milestone.status;
-            const milestoneUpdates: Record<string, unknown> = { status: newMilestoneStatus };
-            if (newMilestoneStatus === 'complete') {
-              milestoneUpdates.actual_date = new Date().toISOString().split('T')[0];
-            } else {
-              milestoneUpdates.actual_date = null;
-            }
-            await milestoneQueries.updateMilestone(milestone.id, milestoneUpdates as any);
-          }
-        }
-      }
     }
 
     res.json({ ok: true, data: await taskQueries.getById(req.params.id) });

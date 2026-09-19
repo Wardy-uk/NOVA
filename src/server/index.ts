@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
 import { ATLAS_HTML, MAP_HTML } from './atlas-map-html.js';
 import { query, queryOne, execute } from './services/database.js';
-import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingConfigQueries, OnboardingRunQueries, OnboardingRecordQueries, MilestoneQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
+import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingRecordQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
 import { TaskAggregator } from './services/aggregator.js';
@@ -64,16 +64,12 @@ import { EscalationLogService } from './services/escalation-log-service.js';
 import { DevReviewQueries } from './db/dev-review-queries.js';
 import { createTrendsRoutes } from './routes/trends.js';
 import { createFeedbackRoutes } from './routes/feedback.js';
-import { createOnboardingConfigRoutes } from './routes/onboarding-config.js';
-import { createOnboardingRoutes } from './routes/onboarding.js';
 import { createGuildOnboardingRoutes } from './routes/guild-onboarding.js';
 import { GuildDashboardService } from './services/guild-dashboard.js';
 import { GuildDigestService } from './services/guild-digest.js';
-import { createMilestoneRoutes, resyncAllMilestoneTasks } from './routes/milestones.js';
 import { JiraRestClient, type BcAccountResolver } from './services/jira-client.js';
 import { buildBcClient } from './services/bc-client.js';
 import { resolveBcAccountNumber } from './services/bc-account-resolver.js';
-import { OnboardingOrchestrator } from './services/onboarding-orchestrator.js';
 import { authMiddleware, createAreaAccessGuard, requireRole, requireRoleAndTeam } from './middleware/auth.js';
 import type { CustomRole } from './middleware/auth.js';
 import { isAdmin } from './utils/role-helpers.js';
@@ -86,7 +82,6 @@ import { MsGraphClient } from './services/msgraph-client.js';
 import { Dynamics365Service } from './services/dynamics365.js';
 import { createDynamics365Routes } from './routes/dynamics365.js';
 import { EntraSsoService } from './services/entra-sso.js';
-import { MilestoneWorkflowEngine } from './services/milestone-workflow.js';
 import { AuditQueries } from './db/audit.js';
 import { createAuditRoutes } from './routes/audit.js';
 import { createTeamRoutes } from './routes/team.js';
@@ -405,13 +400,10 @@ async function main() {
   if (nickAdmCreated) console.log('[Startup] Bootstrapped emergency admin: nickadm');
   const userSettingsQueries = new UserSettingsQueries();
   const feedbackQueries = new FeedbackQueries();
-  const onboardingConfigQueries = new OnboardingConfigQueries();
-  const onboardingRunQueries = new OnboardingRunQueries();
-  const milestoneQueries = new MilestoneQueries();
   const auditQueries = new AuditQueries();
   const teamStandupQueries = new TeamStandupQueries();
   const notificationQueries = new NotificationQueries();
-  const notificationEngine = new NotificationEngine(notificationQueries, milestoneQueries, deliveryQueries, taskQueries, userQueries);
+  const notificationEngine = new NotificationEngine(notificationQueries, deliveryQueries, taskQueries, userQueries);
   const problemTicketQueries = new ProblemTicketQueries();
   const instanceSetupQueries = new InstanceSetupQueries();
   const branchQueries = new BranchQueries();
@@ -449,39 +441,6 @@ async function main() {
     if (rowsAffected > 0) console.log(`[Approvals] Startup cleanup: expired ${rowsAffected} stale NOVA decisions`);
   } catch (err) {
     console.error('[Approvals] Startup cleanup failed:', err instanceof Error ? err.message : err);
-  }
-
-  // Build onboarder name → user ID lookup for milestone ownership
-  const onboarderToUserId = new Map<string, number>();
-  for (const u of await userQueries.getAll()) {
-    onboarderToUserId.set(u.username.toLowerCase(), u.id);
-    if (u.display_name) onboarderToUserId.set(u.display_name.toLowerCase(), u.id);
-  }
-
-  // Re-sync milestone task priorities on startup (with per-onboarder ownership)
-  await resyncAllMilestoneTasks(milestoneQueries, taskQueries, onboarderToUserId);
-
-  // Auto-seed onboarding matrix from xlsx if tables are empty
-  if ((await onboardingConfigQueries.getAllSaleTypes()).length === 0) {
-    const xlsxPath = path.resolve('OnboardingMatix.xlsx');
-    if (fs.existsSync(xlsxPath)) {
-      try {
-        const XLSX = (await import('xlsx')).default;
-        const { importFromWorkbook } = await import('./routes/onboarding-config.js');
-        const wb = XLSX.readFile(xlsxPath);
-        const stats = await importFromWorkbook(wb, onboardingConfigQueries);
-        console.log(`[N.O.V.A] Auto-seeded onboarding matrix: ${stats.ticketGroups} ticket groups, ${stats.saleTypes} sale types, ${stats.capabilities} capabilities, ${stats.matrixCells} matrix cells, ${stats.items} items`);
-      } catch (err) {
-        console.error('[N.O.V.A] Onboarding auto-seed failed:', err instanceof Error ? err.message : err);
-      }
-    }
-  }
-
-  // Ensure "Delivery QA" ticket group exists (used for the parent QA ticket)
-  const existingGroups = await onboardingConfigQueries.getAllTicketGroups();
-  if (!existingGroups.find(g => g.name === 'Delivery QA')) {
-    await onboardingConfigQueries.createTicketGroup('Delivery QA', -1);
-    console.log('[N.O.V.A] Auto-seeded "Delivery QA" ticket group');
   }
 
   // JWT secret — use env, or persist a random one in settings
@@ -1127,7 +1086,7 @@ async function main() {
     app.use('/api/calyx', createCalyxReportRoutes(calyxDb));
   }
   */
-  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, milestoneQueries, userSettingsQueries, settingsQueries, onboardingRunQueries, problemTicketQueries));
+  app.use('/api/tasks', createTaskRoutes(taskQueries, aggregator, userSettingsQueries, settingsQueries, problemTicketQueries));
   app.use('/api/health', createHealthRoutes(mcpManager));
   app.use('/api/settings', createSettingsRoutes(settingsQueries, userSettingsQueries, (key) => {
     // Restart sync timers when interval settings change
@@ -1234,10 +1193,8 @@ async function main() {
     }
   }, 5 * 60 * 1000);
   const spSync = msGraphClient ? new SharePointSync(msGraphClient, deliveryQueries, () => settingsQueries.getAll()) : undefined;
-  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, milestoneQueries, taskQueries, requireAreaAccess, auditQueries, onboardingRunQueries, settingsQueries));
-  // Milestone routes — wired with workflow engine after buildOrchestrator is defined (see below)
-  // app.use('/api/milestones', ...) is registered after buildOrchestrator
-  app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, onboardingRunQueries, requireAreaAccess));
+  app.use('/api/delivery', createDeliveryRoutes(deliveryQueries, spSync, taskQueries, requireAreaAccess, auditQueries, settingsQueries));
+  app.use('/api/crm', createCrmRoutes(crmQueries, deliveryQueries, requireAreaAccess));
   app.use('/api/contracts', createContractsRoutes(bcCustomerQueries, contractsQueries, settingsQueries));
   app.use('/api/adobe-sign', createAdobeSignRoutes(() => adobeSignClient, adobeSignAgreementQueries, agreementFieldValueQueries, counterQueries, templateFieldOverrideQueries, bcSubscriptionImportService, settingsQueries));
   app.use('/api/contract-terms', createContractTermsRoutes(contractTermsQueries));
@@ -1337,7 +1294,7 @@ async function main() {
   app.use('/api/dynamics365', createDynamics365Routes(() => d365Service, crmQueries));
   app.use('/api/feedback', createFeedbackRoutes(feedbackQueries, taskQueries, userQueries, notificationQueries));
   app.use('/api/audit', createAuditRoutes(auditQueries));
-  app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, milestoneQueries, taskQueries, userQueries));
+  app.use('/api/team', requireAreaAccess('nova_features', 'view'), createTeamRoutes(deliveryQueries, taskQueries, userQueries));
   app.use('/api/notifications', createNotificationRoutes(notificationQueries, notificationEngine));
   app.use('/api/people', createPeopleRoutes({ userQueries, settingsQueries, mcpManager, notificationQueries }));
 
@@ -2629,7 +2586,7 @@ async function main() {
   // DELETE /api/data/source/:source — purge local records for a given integration source
   app.delete('/api/data/source/:source', async (req, res) => {
     const source = req.params.source;
-    const validSources = ['jira', 'milestone', 'dynamics365'];
+    const validSources = ['jira', 'dynamics365'];
     if (!validSources.includes(source)) {
       res.status(400).json({ ok: false, error: `Invalid source: ${source}. Valid: ${validSources.join(', ')}` });
       return;
@@ -2646,7 +2603,6 @@ async function main() {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Delete failed' });
     }
   });
-  app.use('/api/onboarding/config', createOnboardingConfigRoutes(onboardingConfigQueries, requireAreaAccess));
   app.use('/api/instance-setup', createInstanceSetupRoutes(instanceSetupQueries, deliveryQueries));
   app.use('/api/branches', createBranchRoutes(branchQueries));
   app.use('/api/brand-settings', createBrandSettingsRoutes(brandSettingsQueries));
@@ -2816,21 +2772,6 @@ async function main() {
       res.json({ ok: false, error: err.message, statusCode: err.statusCode, body: err.body });
     }
   });
-
-  // Onboarding ticket orchestrator — uses Admin > Jira (Global) credentials
-  function buildOrchestrator(): OnboardingOrchestrator | null {
-    const client = buildOnboardingJiraClient();
-    if (!client) return null;
-    return new OnboardingOrchestrator(client, onboardingConfigQueries, onboardingRunQueries, () => settingsQueries.getAll());
-  }
-  app.use('/api/onboarding', createOnboardingRoutes(buildOrchestrator, buildOnboardingJiraClient, onboardingRunQueries));
-
-  // Milestone workflow engine — evaluates milestones and creates tasks/tickets progressively
-  const workflowEngine = new MilestoneWorkflowEngine(
-    milestoneQueries, deliveryQueries, taskQueries, onboardingConfigQueries,
-    buildOrchestrator, (msg) => console.log(msg),
-  );
-  app.use('/api/milestones', createMilestoneRoutes(milestoneQueries, deliveryQueries, taskQueries, workflowEngine, buildOrchestrator, onboardingConfigQueries));
 
   // Problem Ticket Scanner — AI + rule-based detection
   const problemTicketScanner = new ProblemTicketScanner(
@@ -5177,24 +5118,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   setTimeout(async () => {
     await runFullSync();
     startSyncTimers();
-    // Run initial workflow evaluation after sync
-    try {
-      const wfResult = await workflowEngine.evaluateAll();
-      if (wfResult.tasksCreated > 0 || wfResult.ticketsCreated > 0) {
-        console.log(`[Startup] Workflow: ${wfResult.tasksCreated} tasks, ${wfResult.ticketsCreated} tickets created`);
-      }
-    } catch (err) {
-      console.error('[Startup] Workflow evaluation failed:', err instanceof Error ? err.message : err);
-    }
   }, 5000);
-
-  // Milestone workflow evaluation every 15 minutes
-  jobRegistry.register('milestone-eval', 'Milestone evaluation', async () => {
-    const result = await workflowEngine.evaluateAll();
-    if (result.tasksCreated > 0 || result.ticketsCreated > 0) {
-      console.log(`[Workflow] Scheduled: ${result.tasksCreated} tasks, ${result.ticketsCreated} tickets created`);
-    }
-  }, 15 * 60 * 1000);
 
   // Problem Ticket Scanner: configurable interval (default 15 min), 0 disables
   const ptScanMinutes = Number(settingsQueries.get('problem_scanner_interval_minutes')) || 15;

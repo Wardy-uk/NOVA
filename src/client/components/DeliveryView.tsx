@@ -96,61 +96,6 @@ function isInDateRange(dateStr: string | null, from: string, to: string): boolea
   return dateStr >= from && dateStr <= to;
 }
 
-function getTrafficLightColor(
-  keys: string[],
-  statuses: Record<string, { statusCategory: string; duedate: string | null }>,
-): 'grey' | 'green' | 'red' | 'amber' {
-  if (keys.length === 0) return 'grey';
-  const today = new Date().toISOString().split('T')[0];
-  let allDone = true;
-  let anyOverdue = false;
-  for (const key of keys) {
-    const s = statuses[key];
-    if (!s) { allDone = false; continue; }
-    const isDone = s.statusCategory === 'done';
-    if (!isDone) {
-      allDone = false;
-      if (s.duedate && s.duedate < today) anyOverdue = true;
-    }
-  }
-  if (allDone) return 'green';
-  if (anyOverdue) return 'red';
-  return 'amber';
-}
-
-const TL_COLORS = {
-  grey: '#6b7280',
-  green: '#22c55e',
-  red: '#ef4444',
-  amber: '#f59e0b',
-};
-
-function TrafficLightDots({ entryId, groups, data, statuses }: {
-  entryId: number;
-  groups: Array<{ tag: string; displayName: string }>;
-  data: Record<number, Record<string, string[]>>;
-  statuses: Record<string, { statusCategory: string; duedate: string | null }>;
-}) {
-  if (groups.length === 0) return null;
-  const entryData = data[entryId] || {};
-  return (
-    <div className="flex items-center gap-1">
-      {groups.map(g => {
-        const keys = entryData[g.tag] || [];
-        const color = getTrafficLightColor(keys, statuses);
-        return (
-          <div
-            key={g.tag}
-            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: TL_COLORS[color] }}
-            title={`${g.displayName}: ${keys.length === 0 ? 'No ticket' : `${keys.length} ticket${keys.length > 1 ? 's' : ''} (${color})`}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="bg-[#2f353d] rounded-lg border border-[#3a424d] p-3 flex flex-col">
@@ -233,9 +178,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
   const [dateFilter, setDateFilter] = useState<'all' | 'this-month' | 'next-month' | 'custom'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [bfRunning, setBfRunning] = useState(false);
-  const [bfResult, setBfResult] = useState<string | null>(null);
-  const [cmRunning, setCmRunning] = useState(false);
   const auth = useAuth();
 
   // Completion tracker data
@@ -247,9 +189,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
   } | null>(null);
 
   // Traffic light data
-  const [trafficLightData, setTrafficLightData] = useState<Record<number, Record<string, string[]>>>({});
-  const [trafficLightGroups, setTrafficLightGroups] = useState<Array<{ tag: string; displayName: string }>>([]);
-  const [jiraStatuses, setJiraStatuses] = useState<Record<string, { statusCategory: string; duedate: string | null }>>({});
 
   // CRM customer lookup for account numbers
   const [crmLookup, setCrmLookup] = useState<Record<number, string>>({});
@@ -267,39 +206,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
       })
       .catch(() => {});
   }, []);
-
-  // Fetch traffic light data (bulk) + Jira statuses
-  const loadTrafficLights = useCallback(() => {
-    fetch('/api/milestones/traffic-lights-bulk')
-      .then(r => r.json())
-      .then(json => {
-        if (json.ok) {
-          setTrafficLightData(json.data);
-          setTrafficLightGroups(json.groups || []);
-          // Collect all Jira keys and fetch statuses
-          const allKeys: string[] = [];
-          for (const entryMap of Object.values(json.data) as Record<string, string[]>[]) {
-            for (const keys of Object.values(entryMap)) {
-              allKeys.push(...keys);
-            }
-          }
-          const unique = [...new Set(allKeys)];
-          if (unique.length > 0) {
-            fetch('/api/jira/batch-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keys: unique }),
-            })
-              .then(r => r.json())
-              .then(j => { if (j.ok) setJiraStatuses(j.data); })
-              .catch(() => {});
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => { loadTrafficLights(); }, [loadTrafficLights]);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -542,56 +448,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
       setSyncResult({ ok: false, message: err instanceof Error ? err.message : 'Network error' });
     } finally {
       setSyncing(false);
-    }
-  };
-
-  const handleBackfillMilestones = async () => {
-    if (!activeTab) return;
-    setBfRunning(true);
-    setBfResult(null);
-    try {
-      const resp = await fetch('/api/milestones/backfill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: activeTab, saleType: activeTab }),
-      });
-      const json = await resp.json();
-      if (json.ok) {
-        const { created, skipped } = json.data;
-        setBfResult(`Created milestones for ${created} deliveries (${skipped} already had milestones)`);
-      } else {
-        setBfResult(`Error: ${json.error}`);
-      }
-    } catch (err) {
-      setBfResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
-    } finally {
-      setBfRunning(false);
-    }
-  };
-
-  const handleCompleteMatching = async () => {
-    if (!activeTab) return;
-    setCmRunning(true);
-    setBfResult(null);
-    try {
-      const resp = await fetch('/api/milestones/complete-matching', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deliveryStatus: 'complete', product: activeTab }),
-      });
-      const json = await resp.json();
-      if (json.ok) {
-        const { deliveries, milestones } = json.data;
-        setBfResult(milestones > 0
-          ? `Marked ${milestones} milestones complete across ${deliveries} delivered ${activeTab} entries`
-          : `No milestones to update — all already complete`);
-      } else {
-        setBfResult(`Error: ${json.error}`);
-      }
-    } catch (err) {
-      setBfResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
-    } finally {
-      setCmRunning(false);
     }
   };
 
@@ -862,22 +718,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
                 {syncing === 'pull' ? 'Importing...' : 'Import xlsx to DB'}
               </button>
               <button
-                onClick={handleBackfillMilestones}
-                disabled={bfRunning || !activeTab}
-                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-neutral-300 hover:bg-[#363d47] hover:text-neutral-100 border border-[#3a424d] transition-colors disabled:opacity-50"
-                title={`Create milestones for all ${activeTab ?? ''} deliveries that don't have them yet`}
-              >
-                {bfRunning ? 'Backfilling...' : `Backfill ${activeTab ?? ''} Milestones`}
-              </button>
-              <button
-                onClick={handleCompleteMatching}
-                disabled={cmRunning || !activeTab}
-                className="px-3 py-2 text-xs rounded bg-[#2f353d] text-green-400 hover:bg-[#363d47] hover:text-green-300 border border-green-500/30 transition-colors disabled:opacity-50"
-                title={`Mark all milestones complete for ${activeTab ?? ''} deliveries with status "Complete"`}
-              >
-                {cmRunning ? 'Updating...' : `Complete ${activeTab ?? ''} Milestones`}
-              </button>
-              <button
                 onClick={() => { setXlsxPrefill(null); setDrawerEntryId(null); setDrawerIsNew(true); }}
                 className="px-4 py-2 text-xs rounded bg-[#5ec1ca] text-[#272C33] font-semibold hover:bg-[#4db0b9] transition-colors"
               >
@@ -927,17 +767,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
               </pre>
             </details>
           )}
-        </div>
-      )}
-
-      {bfResult && (
-        <div className={`mb-4 px-4 py-2 rounded text-xs border ${
-          bfResult.startsWith('Error')
-            ? 'bg-red-950/50 border-red-900 text-red-400'
-            : 'bg-green-950/50 border-green-900 text-green-400'
-        }`}>
-          {bfResult}
-          <button onClick={() => setBfResult(null)} className="ml-3 text-neutral-500 hover:text-neutral-300">x</button>
         </div>
       )}
 
@@ -1222,7 +1051,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
                 <tr className="bg-[#2f353d] text-neutral-500 uppercase tracking-wider text-left">
                   <th className="px-3 py-2 font-medium w-8"></th>
                   <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('id')}>ID{sortIndicator('id')}</th>
-                  {trafficLightGroups.length > 0 && <th className="px-1 py-2 font-medium w-20 text-center" title="Traffic Lights">TL</th>}
                   <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('account')}>Account{sortIndicator('account')}</th>
                   <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('status')}>Status{sortIndicator('status')}</th>
                   <th className="px-3 py-2 font-medium cursor-pointer hover:text-neutral-300 select-none" onClick={() => handleSort('onboarder')}>Onboarder{sortIndicator('onboarder')}</th>
@@ -1290,11 +1118,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
                         </button>
                       </td>
                       <td className="px-3 py-2 text-[10px] text-[#5ec1ca] font-mono whitespace-nowrap">{entry.onboarding_id ?? '-'}</td>
-                      {trafficLightGroups.length > 0 && (
-                        <td className="px-1 py-2 text-center">
-                          <TrafficLightDots entryId={entry.id} groups={trafficLightGroups} data={trafficLightData} statuses={jiraStatuses} />
-                        </td>
-                      )}
                       <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">
                         {editableCell('account', entry.account)}
                         {entry.crm_customer_id && crmLookup[entry.crm_customer_id] && (
@@ -1350,7 +1173,6 @@ export function DeliveryView({ canWrite = false, canPushGit = false }: { canWrit
                       />
                     </td>
                     <td className="px-3 py-2 text-[10px] text-neutral-600 font-mono">-</td>
-                    {trafficLightGroups.length > 0 && <td className="px-1 py-2"></td>}
                     <td className="px-3 py-2 text-neutral-200 font-medium whitespace-nowrap">{row.account}</td>
                     <td className="px-3 py-2"><StatusBadge status={row.status} /></td>
                     <td className="px-3 py-2 text-neutral-400">{row.onboarder ?? '-'}</td>

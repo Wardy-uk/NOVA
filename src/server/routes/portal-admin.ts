@@ -749,9 +749,10 @@ export function createPortalAdminRoutes(settings: FileSettingsQueries, llm?: Llm
   // Guild onboarding GLOBAL config (backlog #8, level 1) — Jira wiring + optional
   // keys shared across all orgs. Keeps the existing (orchestrator-shared) key
   // names, so it can't reuse the portal_-prefixed /settings endpoint.
-  // Each key falls back to the pre-existing onboarding-orchestrator setting, so
-  // the card shows what's ALREADY configured rather than blank (matches the
-  // resolution order in guild-onboarding.ts / onboarding-orchestrator.ts).
+  // Each key falls back to the older jira_onboarding_* setting left behind by the
+  // retired internal onboarding orchestrator (see archive/onboarding/), so the card
+  // shows what's ALREADY configured rather than blank. guild-onboarding.ts resolves
+  // in the same order.
   const GUILD_GLOBAL_KEYS: Array<{ key: string; fallback?: string }> = [
     { key: 'jira_ob_project', fallback: 'jira_onboarding_project' },
     { key: 'jira_ob_issue_type', fallback: 'jira_onboarding_issue_type' },
