@@ -64,6 +64,9 @@ export interface HealthResponse {
   status: 'ok' | 'degraded';
   uptime: number;
   servers: McpServerInfo[];
+  /** The version the SERVER is running. The client's own version is baked in at build time,
+   *  so comparing the two is the only way a loaded tab can tell it is stale. */
+  version?: string;
 }
 
 // ---------- Integrations ----------

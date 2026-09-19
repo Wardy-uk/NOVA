@@ -124,6 +124,20 @@ export function StatusBar({ health }: Props) {
             </button>
           </span>
         )}
+        {/* A tab left open across a deploy keeps running the bundle it loaded with. The
+            service worker updates underneath it, but the rendered UI does not change — so the
+            page can be several releases behind while looking entirely normal. Twice on
+            19 Sep 2026 that led to a missing nav tab and a version read three deploys stale,
+            and both were mistaken for the deploy having failed. Say it plainly instead. */}
+        {health?.version && health.version !== __APP_VERSION__ && (
+          <button
+            onClick={() => window.location.reload()}
+            title={`This tab is running v${__APP_VERSION__}; the server is on v${health.version}. Click to reload.`}
+            className="ml-2 px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
+          >
+            v{health.version} available — reload
+          </button>
+        )}
       </div>
     </footer>
   );
