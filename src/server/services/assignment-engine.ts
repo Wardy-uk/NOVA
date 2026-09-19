@@ -443,7 +443,25 @@ export class AssignmentEngine {
     }
   }
 
+  /**
+   * Working hours, honouring the operator's "Override Hours" switch.
+   *
+   * The override wrote agent_weekend_override_until and nothing but the agent loop's own mode
+   * ever read it. Every scheduled job that gates on this method — proactive SLA management,
+   * the assignment retry sweep, the unassigned sweep, the stranded-NOVA sweep — carried on
+   * behaving as though it were still the weekend. So a button labelled "work as though it is
+   * working hours" turned on roughly half of what it claimed, silently.
+   *
+   * Found on 19 Sep 2026 trying to test proactive SLA out of hours; it also means the retry
+   * sweep could not be nudged into draining a weekend backlog, which is the other thing
+   * someone would press that button for.
+   */
   isWorkingTime(): boolean {
+    const raw = this.settingsQueries.get('agent_weekend_override_until');
+    if (raw) {
+      const until = new Date(raw);
+      if (!isNaN(until.getTime()) && until.getTime() > Date.now()) return true;
+    }
     this.refreshClockIfNeeded();
     return this.workingDayClock.isWorkingTime(new Date());
   }
