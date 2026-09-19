@@ -146,16 +146,16 @@ export class JiraCacheQueries {
     );
   }
 
-  async getOpenIssues(projects: string[]): Promise<CachedIssue[]> {
-    const placeholders = projects.map(() => '?').join(',');
-    return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
-       WHERE project_key IN (${placeholders})
-         AND status_category IN ('new', 'indeterminate')
-       ORDER BY jira_created DESC`,
-      projects,
-    );
-  }
+  // getOpenIssues() was removed on 19 Sep 2026. It was `SELECT *` over every open ticket,
+  // which on this table means fields_json and description_text — about 35MB per call — and
+  // every one of its callers wanted a handful of small columns. It timed out the Workspace
+  // page at 122s, cost the perceiver ~35MB a minute, and nothing that called it displayed or
+  // read a single LOB column.
+  //
+  // Deliberately not left in place "in case someone needs it". A convenient method that is
+  // wrong for this table will be reached for again; the two narrow ones below cover what the
+  // callers actually did. If a caller genuinely needs the full row, it wants getIssueByKey or
+  // getIssuesByKeys, which are bounded by key rather than by an open-ended predicate.
 
   async getRecentlyCreated(projects: string[], since: Date): Promise<CachedIssue[]> {
     const placeholders = projects.map(() => '?').join(',');
@@ -185,9 +185,17 @@ export class JiraCacheQueries {
 
   // ── Tier queries (Dev Review) ──
 
+  /** Dev Review's Tier 3 queue. Named columns, not `SELECT *`: the caller maps thirteen
+   *  fields and none of them is fields_json or description_text, which together are most of
+   *  this table's 723MB. tldr_text stays because the queue displays it. */
   async getTier3Issues(): Promise<CachedIssue[]> {
     return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
+      `SELECT issue_key, jira_id, summary, status_name, status_category, priority_name,
+              assignee_account_id, assignee_display, assignee_email,
+              reporter_display, reporter_email, jira_created, jira_updated,
+              current_tier, nurtur_product, request_type, tldr_text,
+              sla_breach_time, sla_breached, labels
+       FROM jira_issue_cache
        WHERE current_tier = 'Tier 3'
          AND status_category != 'done'
        ORDER BY jira_updated DESC`,
