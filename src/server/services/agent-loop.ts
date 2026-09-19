@@ -155,6 +155,33 @@ export class AgentLoop {
     this.baseUrl = settings.get('sso_base_url') ?? process.env.FRONTEND_URL ?? 'http://localhost:3001';
   }
 
+  /** Optional. Without it, triage runs exactly as before and no prediction is made. */
+  private escalationPredictor?: { predictForTicket(k: string): Promise<{ probability: number }> };
+
+  setEscalationPredictor(predictor: { predictForTicket(k: string): Promise<{ probability: number }> }): void {
+    this.escalationPredictor = predictor;
+  }
+
+  /**
+   * Forecast whether this ticket will escalate, and record it.
+   *
+   * Shadow by design: the prediction is stored and shown on the management dashboard, and
+   * nothing in the agent reads it or acts on it. The predictor grades itself — the escalation
+   * log writes the real outcome back — so its accuracy can be judged from its own numbers
+   * before anyone relies on it. That is the whole reason it has a resolveOutcome path.
+   *
+   * Fire-and-forget, after the reply has gone out. A forecast is worth one cheap LLM call and
+   * nothing more; it must never delay a first reply or fail a triage that otherwise worked.
+   * Off unless agent_escalation_predict_enabled is true.
+   */
+  private predictEscalation(ticketKey: string): void {
+    if (!this.escalationPredictor) return;
+    if (this.settings.get('agent_escalation_predict_enabled') !== 'true') return;
+    void this.escalationPredictor.predictForTicket(ticketKey)
+      .then(r => console.log(`[predict] ${ticketKey}: escalation probability ${(r.probability * 100).toFixed(0)}%`))
+      .catch(err => console.warn(`[predict] ${ticketKey}: prediction failed:`, err instanceof Error ? err.message : err));
+  }
+
   setKbEmbedder(embedder: KbEmbedder): void {
     this.kbSearch.setEmbedder(embedder);
   }
@@ -870,6 +897,11 @@ export class AgentLoop {
       } finally {
         for (const e of dedupedLlmEvents) this.inFlightTickets.delete(e.ticketKey);
         if (dedupedLlmEvents.length > 0) endCriticalWork();
+      }
+
+      // Forecast escalation on newly triaged tickets, after the work is done.
+      for (const d of decisions) {
+        if (d.eventType === 'ticket_created' && !d.shadowMode) this.predictEscalation(d.ticketKey);
       }
 
       // Mark processed for cross-tick dedup

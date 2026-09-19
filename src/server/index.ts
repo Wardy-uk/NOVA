@@ -112,6 +112,7 @@ import { createIncidentRoutes } from './routes/incidents.js';
 import { createSlaManagementRoutes } from './routes/sla-management.js';
 import { createAdminJobRoutes } from './routes/admin-jobs.js';
 import { createAdminHealthRoutes } from './routes/admin-health.js';
+import { createManagementSignalsRoutes } from './routes/management-signals.js';
 import { createFailedJobsRoutes } from './routes/failed-jobs.js';
 import { createProblemTicketRoutes } from './routes/problem-tickets.js';
 import { AzDoClient } from './services/azdo-client.js';
@@ -1260,6 +1261,7 @@ async function main() {
   app.use('/api/admin', createAdminRoutes(userQueries, teamQueries, userSettingsQueries, settingsQueries, buildServiceDeskJiraClient, userTeamQueries));
   app.use('/api/admin/jobs', createAdminJobRoutes(jobRegistry));
   app.use('/api/admin/health', createAdminHealthRoutes(jobRegistry));
+  app.use('/api/management/signals', createManagementSignalsRoutes());
   app.use('/api/admin/failed-jobs', createFailedJobsRoutes({
     settings: settingsQueries,
     getJiraClient: () => buildOnboardingJiraClient(),
@@ -1633,6 +1635,20 @@ async function main() {
     const escalationPredictor = new EscalationPredictor(llmService, settingsQueries);
     const incidentDetector = new IncidentDetector(llmService, settingsQueries, agentJiraClient);
     const slaManager = new SlaManager(settingsQueries, agentJiraClient, assignmentEngine);
+
+    // Wire the predictor in. It was built with a table, an accuracy loop and four admin
+    // routes, and nothing ever called it — agent_escalation_predictions has stood empty since
+    // it shipped. The agent now forecasts on newly triaged tickets, and the escalation log
+    // writes the real outcome back so the forecast can be scored against what happened.
+    //
+    // Deliberately shadow: nothing in the agent reads the prediction. It is recorded and
+    // surfaced on the management dashboard so its accuracy can be judged from its own numbers
+    // before anything depends on it. Needs agent_escalation_predict_enabled=true.
+    agentLoop.setEscalationPredictor(escalationPredictor);
+    escalationLog.setEscalationObserver((ticketKey) => {
+      void escalationPredictor.resolveOutcome(ticketKey, true)
+        .catch(err => console.warn(`[predict] Could not score prediction for ${ticketKey}:`, err instanceof Error ? err.message : err));
+    });
 
     app.use('/api/agent/predictions', createPredictionRoutes(escalationPredictor));
     app.use('/api/agent/incidents', createIncidentRoutes(incidentDetector));

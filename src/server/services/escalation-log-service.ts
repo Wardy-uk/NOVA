@@ -123,8 +123,17 @@ function dwellSince(lastMoveAt: number | null, movedAt: string): number | null {
 }
 
 export class EscalationLogService {
+  /** Set by index.ts. Optional so the logger keeps working without the predictor wired. */
+  private onEscalated?: (ticketKey: string) => void;
+
+  setEscalationObserver(fn: (ticketKey: string) => void): void {
+    this.onEscalated = fn;
+  }
 
   async log(input: LogEscalationInput): Promise<number> {
+    // Grade any open prediction for this ticket. Fire-and-forget on purpose: scoring a
+    // forecast must never be able to fail the escalation it is scoring.
+    try { this.onEscalated?.(input.ticket_key); } catch { /* never block the log */ }
     return executeAndGetId(
       `INSERT INTO escalation_log
        (ticket_key, escalation_type, from_tier, to_tier, reason_code, reason_label,
