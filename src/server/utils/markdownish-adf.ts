@@ -9,22 +9,37 @@
  * KBA link had the same fault.
  *
  * Deliberately small. This handles what the note generator actually emits — paragraphs, `-`
- * and `  -` bullets, `1.` steps, and `**bold**` runs — and treats anything else as plain text.
+ * and `  -` bullets, `1.` steps, `**bold**` runs and `[text](url)` links — and treats anything
+ * else as plain text.
  * It is not a markdown parser and should not grow into one; if a note needs richer structure,
  * build the ADF directly rather than teaching this more syntax.
  */
 
 interface AdfNode { type: string; text?: string; marks?: object[]; content?: AdfNode[]; attrs?: object }
 
-/** Split a line into text nodes, promoting `**bold**` runs to strong marks. */
+/**
+ * Split a line into text nodes, promoting `**bold**` to strong marks and `[text](url)` to
+ * real links.
+ *
+ * Links are here because the triage prompt asks for them by name — it tells the model to end
+ * the summary with `Relevant Confluence doc: [Article Title](URL)`. Left alone they reach the
+ * reader as literal brackets, which is what a reviewer found on 19 Sep 2026 and reasonably
+ * read as a rendering fault. Converting is the fix; escaping the brackets would only make the
+ * literal text tidier while still not linking anywhere.
+ */
 function inlineNodes(line: string): AdfNode[] {
   const nodes: AdfNode[] = [];
-  const re = /\*\*([^*]+)\*\*/g;
+  // Alternation, single pass, so a bold run and a link on one line cannot swallow each other.
+  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
     if (m.index > last) nodes.push({ type: 'text', text: line.slice(last, m.index) });
-    nodes.push({ type: 'text', text: m[1], marks: [{ type: 'strong' }] });
+    if (m[1] !== undefined) {
+      nodes.push({ type: 'text', text: m[1], marks: [{ type: 'strong' }] });
+    } else {
+      nodes.push({ type: 'text', text: m[2], marks: [{ type: 'link', attrs: { href: m[3] } }] });
+    }
     last = m.index + m[0].length;
   }
   if (last < line.length) nodes.push({ type: 'text', text: line.slice(last) });
