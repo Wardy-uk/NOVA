@@ -1643,7 +1643,8 @@ async function main() {
     //
     // Deliberately shadow: nothing in the agent reads the prediction. It is recorded and
     // surfaced on the management dashboard so its accuracy can be judged from its own numbers
-    // before anything depends on it. Needs agent_escalation_predict_enabled=true.
+    // before anything depends on it. On by default; set agent_escalation_predict_enabled=false
+    // to stop it.
     agentLoop.setEscalationPredictor(escalationPredictor);
     escalationLog.setEscalationObserver((ticketKey) => {
       void escalationPredictor.resolveOutcome(ticketKey, true)

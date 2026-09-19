@@ -176,7 +176,11 @@ export class AgentLoop {
    */
   private predictEscalation(ticketKey: string): void {
     if (!this.escalationPredictor) return;
-    if (this.settings.get('agent_escalation_predict_enabled') !== 'true') return;
+    // On unless explicitly turned off. It is shadow-only — the prediction is recorded and
+    // shown, and nothing in the agent reads it — so the cost of being wrong is one cheap LLM
+    // call per new ticket, and the cost of leaving it off is another feature quietly producing
+    // nothing while everyone assumes it works.
+    if (this.settings.get('agent_escalation_predict_enabled') === 'false') return;
     void this.escalationPredictor.predictForTicket(ticketKey)
       .then(r => console.log(`[predict] ${ticketKey}: escalation probability ${(r.probability * 100).toFixed(0)}%`))
       .catch(err => console.warn(`[predict] ${ticketKey}: prediction failed:`, err instanceof Error ? err.message : err));
