@@ -587,12 +587,26 @@ export class AutoRulesEngine {
     // own BC account rather than stranding the ticket (bcInfraFallback). A real
     // customer (e.g. a same-reporter duplicate) still resolves to its own account
     // first — the fallback only fires when nothing resolves.
+    // Internal, and deliberately not a copy of the note above.
+    //
+    // transitionIssue treats a comment with no `internal` flag as customer-visible, so this
+    // was showing customers "Auto-actioned by NOVA rule 'general-same-reporter-dedup'" — an
+    // internal rule identifier — three seconds after the identical text had already gone on
+    // as an internal note. NT-31815 on 19 Sep 2026 has both, which is what surfaced it.
+    //
+    // The pre-transition note stays: it is the audit record, and it survives a transition
+    // that fails. This one rides with the transition because the resolve validator requires
+    // a comment, so it says what the resolution was rather than repeating the rule.
     const { fields, comment } = buildResolveFields({
       tldr: action.note,
       resolution: action.resolution,
-      comment: `Auto-actioned by NOVA rule '${rule.id}'. ${action.note}`,
+      comment: `Resolved automatically as "${action.resolution}".`,
     });
-    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment, bcInfraFallback: true });
+    await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, {
+      fields,
+      comment: { ...comment, internal: true },
+      bcInfraFallback: true,
+    });
   }
 
   /** Write a rule's fixed BC Account Number. Best effort — a failure here must never

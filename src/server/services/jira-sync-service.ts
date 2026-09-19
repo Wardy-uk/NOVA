@@ -9,6 +9,7 @@ import { generateCsatSurvey } from '../routes/portal-csat.js';
 import { mapJiraStatusToPortal } from './portal-status-mapper.js';
 import { noReplyCutoff } from './shared/no-reply.js';
 import { isCriticalWorkInFlight } from './work-priority.js';
+import { isMachineRaised } from './shared/machine-reporters.js';
 import { poolForTicket } from './shared/ticket-pool.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
@@ -837,11 +838,24 @@ export class JiraSyncService {
         const resolvedStates = ['Closed', 'Resolved', 'Done'];
         if (statusName && resolvedStates.includes(statusName)) {
           const reporterEmail = reporter?.emailAddress as string | null;
-          generateCsatSurvey(issue.key, reporterEmail)
-            .then(token => (token ? this.postCsatComment(issue.key, token) : undefined))
-            .catch(err => {
-              console.warn(`[jira-sync] CSAT survey generation failed for ${issue.key}:`, err);
-            });
+          // Never survey a monitoring bot. The same-reporter dedup rule auto-closes the
+          // recurring PMTA DKIM tickets — about nine a day — and each close was firing
+          // "Thanks for your patience... we'd really value your feedback" at
+          // pmta-dkim-service@mail.briefyourmarket.com, which is a mailbox, not a person with
+          // an opinion about our service. It also quietly poisons the CSAT denominator with
+          // invitations nobody can ever answer.
+          const reporterName = (reporter?.displayName as string | null) ?? null;
+          const botReporter = isMachineRaised(this.settings, reporterEmail)
+            || isMachineRaised(this.settings, reporterName);
+          if (botReporter) {
+            console.log(`[jira-sync] Skipping CSAT on ${issue.key} — reporter "${reporterEmail || reporterName}" is an automated sender`);
+          } else {
+            generateCsatSurvey(issue.key, reporterEmail)
+              .then(token => (token ? this.postCsatComment(issue.key, token) : undefined))
+              .catch(err => {
+                console.warn(`[jira-sync] CSAT survey generation failed for ${issue.key}:`, err);
+              });
+          }
         }
       }
     }
