@@ -458,8 +458,11 @@ export function AgentDashboardView({ userRole = '', onNavigateToWorkspace }: { u
         </div>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex gap-1 border-b border-[#3a424d] pb-px">
+      {/* Sub-tabs. flex-wrap because there are seventeen of them and a single row silently
+          squashed the last four — Assignment, Predictions, Incidents and SLA Mgmt — off the
+          end on anything but a very wide window. They were unreachable rather than hidden,
+          with no scrollbar to suggest there was more. */}
+      <div className="flex flex-wrap gap-1 border-b border-[#3a424d] pb-px">
         {([
           { key: 'overview', label: 'Overview' },
           { key: 'decisions', label: 'Decisions' },
