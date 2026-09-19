@@ -234,7 +234,15 @@ export class JiraCacheQueries {
       : 'assignee_email';
     const placeholders = projects.map(() => '?').join(',');
     return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
+      // Named columns: queue-ranker maps these into TicketFields and reads no LOB. This
+       // backs the My Tickets screen, so it is a request path.
+      `SELECT issue_key, jira_id, summary, status_name, status_category, priority_name,
+              issuetype_name, assignee_account_id, assignee_display, assignee_email,
+              reporter_display, reporter_email, jira_created, jira_updated, labels,
+              request_type, current_tier, nurtur_product, tldr_text, agent_summary_text,
+              escalation_reason_text, resolution_name, agent_next_update,
+              bc_account_number, organisation_name, sla_breach_time, sla_breached
+       FROM jira_issue_cache
        WHERE ${col} = ?
          AND project_key IN (${placeholders})
          AND status_category != 'done'
@@ -408,7 +416,13 @@ export class JiraCacheQueries {
 
   async getSlaBreach(project: string): Promise<CachedIssue[]> {
     return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
+      `SELECT issue_key, jira_id, summary, status_name, status_category, priority_name,
+              issuetype_name, assignee_account_id, assignee_display, assignee_email,
+              reporter_display, reporter_email, jira_created, jira_updated, labels,
+              request_type, current_tier, nurtur_product, tldr_text, agent_summary_text,
+              escalation_reason_text, resolution_name, agent_next_update,
+              bc_account_number, organisation_name, sla_breach_time, sla_breached
+       FROM jira_issue_cache
        WHERE project_key = ?
          AND sla_breach_time IS NOT NULL
          AND sla_breach_time > GETUTCDATE()
@@ -420,7 +434,13 @@ export class JiraCacheQueries {
 
   async getSlaAtRisk(project: string, withinMs: number): Promise<CachedIssue[]> {
     return query<CachedIssue>(
-      `SELECT * FROM jira_issue_cache
+      `SELECT issue_key, jira_id, summary, status_name, status_category, priority_name,
+              issuetype_name, assignee_account_id, assignee_display, assignee_email,
+              reporter_display, reporter_email, jira_created, jira_updated, labels,
+              request_type, current_tier, nurtur_product, tldr_text, agent_summary_text,
+              escalation_reason_text, resolution_name, agent_next_update,
+              bc_account_number, organisation_name, sla_breach_time, sla_breached
+       FROM jira_issue_cache
        WHERE project_key = ?
          AND sla_breach_time IS NOT NULL
          AND sla_breach_time > GETUTCDATE()

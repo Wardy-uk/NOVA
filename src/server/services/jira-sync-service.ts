@@ -964,7 +964,12 @@ export class JiraSyncService {
 
   private async upsertComment(issueKey: string, comment: JiraComment): Promise<void> {
     const bodyText = extractText(comment.body);
-    const bodyAdf = comment.body ? JSON.stringify(comment.body) : null;
+    // Deliberately not stored. `grep -rn '\.body_adf'` finds the type declaration, this write
+    // and nothing else — no route, no service, no client reads it back. It duplicates
+    // body_text in a markup form several times its size, across 194,960 rows of a 991MB
+    // table. Same dead weight as description_adf on jira_issue_cache, found the same way.
+    // The column stays so existing rows remain readable; a job clears them.
+    const bodyAdf = null;
     const isPublic = comment.jsdPublic !== false;
     // Flag CSAT-link comments at write time so adoption metrics never LIKE-scan bodies.
     const hasCsatLink = bodyText && bodyText.includes('/portal/csat/') ? 1 : 0;

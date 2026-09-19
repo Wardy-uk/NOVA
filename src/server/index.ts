@@ -1675,6 +1675,22 @@ async function main() {
     // single UPDATE across every row would be indistinguishable from the problem it is fixing.
     // 200 rows a minute finishes ~12,700 rows in about an hour, and it stands aside for live
     // triage like any other bulk work. Self-terminating: once nothing matches it is a no-op.
+    // Same story on the comment cache: body_adf is written on every sync and read by nothing,
+    // across 194,960 rows of a 991MB table. Smaller batches than the issue cache because the
+    // rows are far more numerous and this is the single largest object in the database.
+    jobRegistry.register('reclaim-body-adf', 'Reclaim unread comment body_adf storage', async () => {
+      if (shouldYieldToCriticalWork('reclaim-body-adf')) return;
+      try {
+        const cleared = await execute(
+          `UPDATE TOP (200) jira_comment_cache SET body_adf = NULL WHERE body_adf IS NOT NULL`,
+          [],
+        );
+        if (cleared) console.log(`[reclaim-adf] cleared body_adf on ${cleared} comment(s)`);
+      } catch (e) {
+        console.warn('[reclaim-adf] comment sweep failed:', e instanceof Error ? e.message : e);
+      }
+    }, 60 * 1000);
+
     jobRegistry.register('reclaim-description-adf', 'Reclaim unread description_adf storage', async () => {
       if (shouldYieldToCriticalWork('reclaim-description-adf')) return;
       try {
