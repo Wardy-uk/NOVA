@@ -1950,6 +1950,37 @@ export class AgentLoop {
    * Fails closed: an unreachable Jira reads as "a human is on it", so NOVA stays quiet rather
    * than risk talking over someone. The FRT safety net still covers genuine silence.
    */
+  /**
+   * Has NOVA already written to this customer?
+   *
+   * The 30-minute cross-tick dedup stops a ticket being re-triaged inside that window, and
+   * nothing stopped it afterwards. NT-31789 got "I've passed this to our Customer Care team
+   * who'll be looking into this for you" at 16:24, then at 16:51 a second reply opening
+   * "Before we proceed, we need to clarify a few things" with four numbered questions. The two
+   * contradict each other — handed off, or still being triaged? — and to the customer they
+   * read as two different people answering the same ticket. NT-31757 the same.
+   *
+   * A first reply is by definition the first one. If NOVA has already spoken to this customer,
+   * anything further belongs in the conversation path, not another opening message.
+   *
+   * Fails open, unlike the interference guard: an unreachable Jira reads as "not yet replied",
+   * because a duplicate reply is a poor experience while silence is a breached SLA.
+   */
+  private async hasNovaAlreadyReplied(ticketKey: string): Promise<boolean> {
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
+    if (!novaAccountId) return false;
+    try {
+      const comments = await this.jiraClient.getComments(ticketKey, 20);
+      return comments.some(c =>
+        c.jsdPublic === true
+        && (c.author as { accountId?: string } | undefined)?.accountId === novaAccountId,
+      );
+    } catch (err) {
+      console.warn(`[agent] Could not check for an existing NOVA reply on ${ticketKey}, proceeding:`, err instanceof Error ? err.message : err);
+      return false;
+    }
+  }
+
   private async isTicketAlreadyBeingHandled(ticketKey: string): Promise<boolean> {
     const novaAccountId = this.settings.get('nova_ai_jira_account_id') ?? '';
     try {
@@ -2393,6 +2424,18 @@ export class AgentLoop {
       // both answered with "Thank you for reporting this issue" and a promise that someone
       // would "contact you" — addressed to an alerting mailbox. The internal note still
       // posts, so the work is still visible; only the reply to no one is suppressed.
+      // A first reply is the first one. Without this, an expired dedup window lets a second
+      // opening message go out that contradicts the first — see hasNovaAlreadyReplied.
+      if (await this.hasNovaAlreadyReplied(decision.ticketKey)) {
+        await this.observer.logOutcome(decisionId, {
+          success: true, action: decision.action, ticketKey: decision.ticketKey,
+          detail: 'NOVA has already replied to this customer — suppressed a second first-reply.',
+        });
+        console.log(`[agent] ${decision.ticketKey}: already replied to this customer — not sending another opening message`);
+        this.ticketsProcessed++;
+        return;
+      }
+
       const reporterForReply = (decision.inputs.reporterEmail as string) || (decision.inputs.reporter as string) || '';
       if (isMachineRaised(this.settings, reporterForReply)) {
         await this.observer.logOutcome(decisionId, {
