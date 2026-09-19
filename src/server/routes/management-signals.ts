@@ -71,11 +71,17 @@ export function createManagementSignalsRoutes(): Router {
 
     // Tickets NOVA could not hand to anyone. 26 of these on a Saturday morning was the whole
     // incident; each one was a P1 with billing exposure and nobody knew.
+    // Joined to the cache on purpose. The queue holds 300 unresolved rows, but 269 of them
+    // are for tickets that are no longer tracked at all — closed long ago, or removed by the
+    // orphan sweep — and nothing ever tidies them up. Showing the raw count would put "300"
+    // on a page built to be trusted, when the number that matters is the 31 still open.
     await section('assignmentFailures', () => query(
-      `SELECT TOP 25 ticket_key, pool, project_key, last_error, created_at, retry_count
-       FROM assignment_retry_queue
-       WHERE resolved = 0
-       ORDER BY created_at DESC`, []));
+      `SELECT TOP 25 q.ticket_key, q.pool, q.project_key, q.last_error, q.created_at, q.retry_count,
+              c.summary, c.priority_name
+       FROM assignment_retry_queue q
+       JOIN jira_issue_cache c ON c.issue_key = q.ticket_key
+       WHERE q.resolved = 0 AND c.status_category <> 'done'
+       ORDER BY q.created_at ASC`, []));
 
     // Proactive SLA work. Empty here for months meant "never ran", not "nothing at risk".
     await section('slaInterventions', () => query(

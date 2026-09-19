@@ -23,7 +23,7 @@ interface Signals {
   predictionAccuracy: Section<Array<{ total: number; correct: number; pending: number }>>;
   flaggedTickets: Section<Array<{ ticket_key: string; risk_score: number; summary: string | null; assignee: string | null; flagged_at: string }>>;
   safetyNetAcks: Section<Array<{ day: string; total: number; machine: number; customer: number }>>;
-  assignmentFailures: Section<Array<{ ticket_key: string; pool: string; project_key: string; last_error: string | null; created_at: string; retry_count: number }>>;
+  assignmentFailures: Section<Array<{ ticket_key: string; pool: string; project_key: string; last_error: string | null; created_at: string; retry_count: number; summary: string | null; priority_name: string | null }>>;
   slaInterventions: Section<Array<{ ticket_key: string; sla_type: string; minutes_remaining: number; intervention_type: string; created_at: string }>>;
   incidents: Section<Array<{ incident_key: string; summary: string; ticket_count: number; detected_at: string }>>;
   agentErrors: Section<Array<{ source: string; severity: string; message: string; occurred_at: string }>>;
@@ -140,15 +140,19 @@ export function ManagementSignalsView() {
 
       <Panel
         title="Assignment failures"
-        why="NOVA triaged these and could not hand them to anyone. 26 P1 cancellations sat here unnoticed on 19 Sep."
+        why="NOVA triaged these and could not hand them to anyone. Oldest first. The retry sweep only runs in working hours, so anything queued on a Saturday waits until Monday."
         section={s.assignmentFailures} emptyMeans="Every ticket found an owner.">
         <div className="space-y-1">
           {(s.assignmentFailures.data ?? []).map(r => (
             <div key={r.ticket_key} className="text-xs p-2 rounded bg-[#2f353d]/40 flex items-center gap-2 flex-wrap">
               <Ticket k={r.ticket_key} />
+              {r.priority_name && <span className="text-amber-400">{r.priority_name}</span>}
+              <span className="text-neutral-300">{r.summary}</span>
               <span className="text-neutral-400">{r.pool?.toUpperCase()} · {r.project_key}</span>
-              <span className="text-neutral-500">retried {r.retry_count}×</span>
-              <span className="text-neutral-500">{new Date(r.created_at).toLocaleString()}</span>
+              <span className="text-neutral-500">
+                {r.retry_count === 0 ? 'never retried' : `retried ${r.retry_count}×`}
+              </span>
+              <span className="text-neutral-500">queued {new Date(r.created_at).toLocaleString()}</span>
               {r.last_error && <span className="text-red-400 basis-full">{r.last_error}</span>}
             </div>
           ))}

@@ -20,6 +20,10 @@ export const DEFAULT_MACHINE_REPORTERS = [
   'ragreportnotifications@nurtur.tech',
   'n8n@nurtur.tech',
   'nova-jira',
+  // Added 19 Sep 2026: NT-31858 was closed and then sent a satisfaction survey to this
+  // alerting mailbox. Any new automated sender lands here the same way, which is an argument
+  // for reviewing this list whenever a new alert feed is added rather than after it happens.
+  'alerts@nurtur.tech',
 ];
 
 /** Matched case-insensitively as substrings of the reporter's email or display name.
