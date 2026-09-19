@@ -1,6 +1,7 @@
 import type { JiraRestClient, JiraIssue } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, executeAndGetId } from './database.js';
+import { slaFieldValues } from './shared/sla-fields.js';
 import type {
   QueueHealth,
   SlaRiskTicket,
@@ -61,14 +62,9 @@ export class QueueMonitor {
     // hit the `continue`, and agent_queue_snapshots.sla_at_risk recorded 0 on all 4,006 rows.
     // The health page flagged it as a constant column: a broken mapping, not a quiet queue.
     // Configurable so the next instance that renumbers them does not silently zero this again.
-    const slaFieldIds = (this.settings.get('queue_monitor_sla_fields') || 'customfield_14046,customfield_14048')
-      .split(',').map(f => f.trim()).filter(Boolean);
-
     for (const issue of issues) {
-      const slaEntries = slaFieldIds.flatMap(fieldId => {
-        const slaField = (issue.fields as Record<string, unknown>)[fieldId];
-        return slaField ? this.extractSlaEntries(slaField as any) : [];
-      });
+      const slaEntries = slaFieldValues(this.settings, issue.fields as Record<string, unknown>)
+        .flatMap(v => this.extractSlaEntries(v as any));
       if (slaEntries.length === 0) continue;
       for (const entry of slaEntries) {
         const remaining = entry.breachTime - now.getTime();

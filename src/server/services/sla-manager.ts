@@ -3,6 +3,7 @@ import type { SettingsQueries } from '../db/settings-store.js';
 import type { QueueMonitor } from './queue-monitor.js';
 import type { AssignmentEngine } from './assignment-engine.js';
 import type { JiraRestClient, JiraIssue } from './jira-client.js';
+import { slaFieldValues } from './shared/sla-fields.js';
 
 export interface SlaProjection {
   ticketKey: string;
@@ -63,12 +64,14 @@ export class SlaManager {
     const now = new Date();
 
     for (const issue of issues) {
-      const slaField = issue.fields.customfield_10010 as any;
-      if (!slaField) continue;
+      // Was `issue.fields.customfield_10010` — Jira's DEFAULT resolution-SLA id, which does
+      // not exist on this instance. Every issue hit the `continue`, so no breach was ever
+      // projected and agent_sla_interventions has stood empty since the feature shipped.
+      // Proactive SLA management has never run. See shared/sla-fields.ts.
+      const slaItems = slaFieldValues(this.settings, issue.fields as Record<string, unknown>);
+      if (slaItems.length === 0) continue;
 
-      const slaItems = Array.isArray(slaField) ? slaField : [slaField];
-
-      for (const item of slaItems) {
+      for (const item of slaItems as any[]) {
         const ongoing = item?.ongoingCycle;
         if (!ongoing?.breachTime?.epochMillis) continue;
 
