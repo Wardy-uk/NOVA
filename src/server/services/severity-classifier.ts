@@ -53,12 +53,24 @@ export class SeverityClassifier {
     if (!this.isEnabled() || !this.llmService || projects.length === 0) return { classified: 0, skipped: 0 };
 
     const projectPlaceholders = projects.map(() => '?').join(',');
-    // Join to existing severity rows so we can skip tickets whose text is unchanged.
+    // Narrow BEFORE touching description_text.
+    //
+    // This selected description_text — NVARCHAR(MAX) — for every open ticket, on a table of
+    // 723MB across ~12,900 rows, purely to hash it and find the few that changed. Against a
+    // database at 100% data IO it never finished: "[job-registry] Job "severity-classifier"
+    // failed: Timeout: Request failed to complete in 30000ms" on every run, which is why
+    // ticket_trend_snapshots has never held a row.
+    //
+    // A ticket whose Jira record has not changed since we classified it cannot have different
+    // summary or description text, so computed_at answers the question without reading any of
+    // it. The hash check below still runs on what survives, to avoid an LLM call where
+    // jira_updated moved but the text did not.
     const rows = await query<OpenTicketRow>(
       `SELECT j.issue_key, j.summary, j.description_text, s.content_hash
        FROM jira_issue_cache j
        LEFT JOIN ticket_severity s ON s.ticket_key = j.issue_key
-       WHERE j.project_key IN (${projectPlaceholders}) AND j.status_category != 'done'`,
+       WHERE j.project_key IN (${projectPlaceholders}) AND j.status_category != 'done'
+         AND (s.ticket_key IS NULL OR j.jira_updated > s.computed_at)`,
       projects,
     );
 
