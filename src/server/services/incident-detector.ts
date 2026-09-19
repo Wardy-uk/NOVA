@@ -43,7 +43,13 @@ export class IncidentDetector {
       request_type: string | null; reporter_email: string | null;
       created_at: string;
     }>(
-      `SELECT issue_key, summary, component, request_type, reporter_email, jira_created AS created_at
+      // nurtur_product, not component. jira_issue_cache has never had a `component` column, so
+       // this query was invalid SQL and the scan died on it every 15 minutes since it shipped:
+       // "[incident-detector] scan failed: Invalid column name 'component'." The health page
+       // recorded the symptom as "its LLM confirmation gate has never once returned true" —
+       // the gate was never reached. nurtur_product is the field that actually carries what
+       // part of the estate a ticket is about, which is what the clustering wants.
+      `SELECT issue_key, summary, nurtur_product AS component, request_type, reporter_email, jira_created AS created_at
        FROM jira_issue_cache
        WHERE jira_created >= DATEADD(hour, -?, GETUTCDATE())
        ORDER BY jira_created DESC`,

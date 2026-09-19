@@ -969,10 +969,25 @@ export class JiraSyncService {
     // Flag CSAT-link comments at write time so adoption metrics never LIKE-scan bodies.
     const hasCsatLink = bodyText && bodyText.includes('/portal/csat/') ? 1 : 0;
 
+    // Only rewrite a comment that has actually changed.
+    //
+    // This MERGE updated every matched row on every sync, rewriting body_text and body_adf —
+    // the two LOB columns on a 991MB table — whether or not a character had changed. The
+    // comment backfill alone re-upserts ~20 comments for each of ~437 open issues per full
+    // sync, so on 19 Sep 2026, overnight, on a Saturday, with almost no tickets arriving,
+    // jira_comment_cache was still taking ~3,500 writes an hour. It was by far the largest
+    // remaining source of write amplification once the KB and problem-alert loops were fixed.
+    //
+    // Jira's `updated` changes if and only if the comment was edited, and editing a comment
+    // is rare. `target.body_text IS NULL` keeps a repair path for rows written before a
+    // column existed, so a genuine backfill can still land.
     await execute(`
       MERGE jira_comment_cache AS target
-      USING (SELECT ? AS jira_comment_id) AS source ON target.jira_comment_id = source.jira_comment_id
-      WHEN MATCHED THEN UPDATE SET
+      USING (SELECT ? AS jira_comment_id, ? AS jira_updated) AS source
+        ON target.jira_comment_id = source.jira_comment_id
+      WHEN MATCHED AND (target.jira_updated IS NULL
+                        OR target.jira_updated <> source.jira_updated
+                        OR target.body_text IS NULL) THEN UPDATE SET
         issue_key = ?, author_account_id = ?, author_display = ?, author_email = ?,
         body_text = ?, body_adf = ?, is_public = ?, has_csat_link = ?,
         jira_created = ?, jira_updated = ?, synced_at = GETUTCDATE()
@@ -981,7 +996,7 @@ export class JiraSyncService {
         body_text, body_adf, is_public, has_csat_link, jira_created, jira_updated
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
-        comment.id,
+        comment.id, new Date(comment.updated),
         // UPDATE
         issueKey,
         comment.author?.accountId ?? null, comment.author?.displayName ?? null,
