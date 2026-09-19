@@ -58,6 +58,38 @@ export function cleanForKbQuery(text: string): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
+
+/**
+ * What the model is shown of an article, and therefore what it judges relevance on.
+ *
+ * This was `chunk.content.slice(0, 200)`. A document's first chunk begins with its YAML
+ * frontmatter, so the model was routinely handed the title, date and slug of an article
+ * and asked whether that answers the customer's question. It is the metadata, not the
+ * article.
+ *
+ * Measured on 19 Sep 2026: KB articles were retrieved for 43% of triaged tickets (8,039 of
+ * 18,655) and cited in about 8% of them, linked in 5%, and proposed as a close 13 times in
+ * three and a half months. A model cannot use what it has not been shown.
+ *
+ * Strip the frontmatter, and give it enough text to judge on.
+ */
+function excerptFor(content: string): string {
+  let body = content.replace(/^﻿/, '').trimStart();
+  // YAML frontmatter is delimited by a --- line at the start and another --- line after it.
+  // Written without a regex on purpose: this needs to be obviously correct at a glance.
+  if (body.startsWith('---')) {
+    const closing = body.indexOf('\n---', 3);
+    if (closing !== -1) {
+      const lineEnd = body.indexOf('\n', closing + 1);
+      body = lineEnd !== -1 ? body.slice(lineEnd + 1) : body.slice(closing + 4);
+    }
+  }
+  body = body.trim();
+  // Falling back to the raw content matters: an article that is ONLY frontmatter, or one
+  // whose delimiters are malformed, must still show the model something.
+  return (body || content.trim()).slice(0, 600);
+}
+
 export class KbSearchService {
   private settings: SettingsQueries;
   private embedder: KbEmbedder | null = null;
@@ -119,7 +151,7 @@ export class KbSearchService {
       return deduped.slice(0, topK).map(({ chunk, similarity }) => ({
         id: String(chunk.id),
         title: chunk.doc_title,
-        excerpt: chunk.content.slice(0, 200),
+        excerpt: excerptFor(chunk.content),
         relevance: similarity,
         url: chunk.doc_url,
         source: chunk.source,
