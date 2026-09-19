@@ -3,7 +3,7 @@ import { query, queryOne, execute, executeAndGetId } from './database.js';
 import type { JiraRestClient } from './jira-client.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { createWorkingDayClock, type WorkingDayClock } from '../../shared/utils/workingDayClock.js';
-import { captureError } from './error-log.js';
+import { captureError, logError } from './error-log.js';
 import { PEOPLE_HR_LAST_OK_KEY } from './people-hr-sync.js';
 
 export type Pool = 'cc' | 't2' | 'tpj' | 'digital' | 'production';
@@ -83,6 +83,10 @@ function resolvePool(tierCode: string | null, team: string | null): Pool {
 }
 
 export class AssignmentEngine {
+  /** Timestamps of recent pool exhaustions, for burst detection. Static so a batch spread
+   *  across instances still counts as one incident rather than many. */
+  private static exhaustionsInWindow: number[] = [];
+
   private kpiPool: sql.ConnectionPool | null = null;
   private workingDayClock: WorkingDayClock;
   private bankHolidaysHash: string = '';
@@ -360,6 +364,32 @@ export class AssignmentEngine {
     // All pools exhausted — queue for automatic retry + post internal note (dedup within 2h)
     const exhaustionMsg = `No agents available in any pool (tried: ${fallbackChain.join(', ')})`;
     console.warn(`[assignment] All pools exhausted for ${ticketKey}: ${exhaustionMsg}`);
+
+    // Raise it, don't just note it on the ticket.
+    //
+    // On Sat 19 Sep 2026, 26 P1 product-cancellation tickets covering 13 branches hit this in
+    // a 49-second window. NOVA's guardrail was right — it refused to action cancellation
+    // intent and escalated — but there was nobody in the pool to escalate to, and every one
+    // of them got a quiet internal note saying "queued for automatic retry during working
+    // hours". They sat unassigned with nobody aware until someone read the tickets.
+    //
+    // Counted per window so a batch raises one entry rather than twenty-six, and so the
+    // FIRST exhaustion still surfaces immediately rather than waiting for a threshold.
+    AssignmentEngine.exhaustionsInWindow = AssignmentEngine.exhaustionsInWindow.filter(
+      t => Date.now() - t < 15 * 60_000,
+    );
+    AssignmentEngine.exhaustionsInWindow.push(Date.now());
+    const burst = AssignmentEngine.exhaustionsInWindow.length;
+    if (burst === 1 || burst === 5 || burst === 25 || burst % 50 === 0) {
+      void logError(
+        'assignment',
+        new Error(
+          `${burst} ticket(s) could not be assigned in the last 15 minutes — ${exhaustionMsg}.`
+          + ` Most recent: ${ticketKey}. Nothing is covering this queue.`,
+        ),
+        { severity: burst >= 5 ? 'critical' : 'error', context: { ticketKey, pool, project, burst } },
+      );
+    }
 
     if (this.retryQueries) {
       try { await this.retryQueries.insert(ticketKey, pool, project, exhaustionMsg); }

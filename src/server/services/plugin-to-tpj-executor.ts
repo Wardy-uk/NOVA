@@ -29,6 +29,7 @@ export class PluginToTpjExecutor {
     // Callers that must always hand the work to TPJ (e.g. website amends) pass alwaysCreate.
     if (!opts?.alwaysCreate && !isBusinessDay(new Date())) {
       console.log(`[plugin-to-tpj] Non-business day — closing ${ticketKey} without creating TPJ ticket`);
+      let closed = false;
       try {
         const novaAccountId = this.settings.get('nova_ai_jira_account_id');
         if (novaAccountId) {
@@ -44,7 +45,16 @@ export class PluginToTpjExecutor {
             resolution: 'No Fault Found',
             comment: 'This plugin notification was received outside business hours. It has been closed automatically. If the issue persists, a new ticket will be created on the next business day.',
           });
-          await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+          // bcInfraFallback, like the auto-rules close. NT-31819 failed on Sat 19 Sep with
+          // "Field BC Account Number with actual value '' does not match ^CU\d{7}$" — the
+          // mandatory resolve validator — even though bc-resolver had matched CU0001946 for
+          // it. Without the fallback this path cannot satisfy a validator it never populates.
+          await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, {
+            fields,
+            comment: { ...comment, internal: true },
+            bcInfraFallback: true,
+          });
+          closed = true;
           if (novaAccountId) {
             await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });
           }
@@ -52,11 +62,28 @@ export class PluginToTpjExecutor {
       } catch (err) {
         console.error(`[plugin-to-tpj] Failed to close ${ticketKey} on non-business day:`, err instanceof Error ? err.message : err);
       }
+
+      // Report the truth. This returned success unconditionally, so a close that threw was
+      // reported as handled: the auto-rule marked the ticket actioned, nothing triaged it, and
+      // it sat open all weekend with no note explaining why. NT-31819 is exactly that.
+      if (!closed) {
+        try {
+          await this.jiraClient.addComment(
+            ticketKey,
+            'NOVA tried to close this plugin notification automatically (non-business day) and the close failed. '
+            + 'It has been left open for a human - see the NOVA logs for the Jira error.',
+            { internal: true },
+          );
+        } catch { /* best effort - the return value is what matters */ }
+      }
       return {
-        success: true,
+        success: closed,
         actionId: 'plugin_to_tpj',
         ticketKey,
-        detail: 'Non-business day — original closed without TPJ clone',
+        detail: closed
+          ? 'Non-business day — original closed without TPJ clone'
+          : 'Non-business day close FAILED — ticket left open for a human',
+        error: closed ? undefined : 'NON_BUSINESS_DAY_CLOSE_FAILED',
       };
     }
 
