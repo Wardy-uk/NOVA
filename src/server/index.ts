@@ -2450,7 +2450,8 @@ async function main() {
     }, 10 * 60 * 1000);
 
     // Due Date sweep DISABLED — NOVA no longer stamps SLA-breach dates onto CC/Tier 2
-    // tickets. Onboarding still sets its own due dates (onboarding-orchestrator.ts).
+    // tickets. The internal onboarding orchestrator, which set its own due dates, has
+    // since been retired (see archive/onboarding/).
     // The sweepDueDates() method is left in place but is no longer scheduled.
 
     // Assignment retry sweep — every 5 min during working hours, max 10 per sweep
