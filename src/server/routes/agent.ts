@@ -2582,7 +2582,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       let rawIssues: Array<{ key: string; id: string; fields: Record<string, any> }>;
 
       if (cache && syncReady) {
-        const cached = await cache.getOpenIssues(projectFilterParam ? [projectFilterParam] : projects);
+        const cached = await cache.getOpenIssuesForQueue(projectFilterParam ? [projectFilterParam] : projects);
         rawIssues = cached.map(ci => ({
           key: ci.issue_key,
           id: ci.jira_id,

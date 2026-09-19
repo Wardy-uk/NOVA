@@ -2377,7 +2377,9 @@ async function main() {
       if (!backstopClock.isWorkingTime(new Date())) return;
       if (!agentLoop) return;
       const cache = jiraCacheQueries;
-      const waiting = await cache.getOpenIssues(['NT']);
+      // Narrow read: this only looks at status, key and assignee email, and getOpenIssues is
+      // a SELECT * carrying fields_json and description_text for every open ticket.
+      const waiting = await cache.getOpenIssuesForQueue(['NT']);
       const waitingForCustomer = waiting.filter(t => {
         const status = (t.status_name ?? '').toLowerCase();
         return status.includes('waiting for customer') || status.includes('waiting on requestor');

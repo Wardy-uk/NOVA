@@ -119,6 +119,33 @@ export class JiraCacheQueries {
     );
   }
 
+  /**
+   * Open issues for the Workspace queue — every column it renders, and not one more.
+   *
+   * That screen called `getOpenIssues`, a bare `SELECT *`, which on jira_issue_cache means
+   * fields_json and description_text for ~600 rows on a 723MB table: roughly 35MB off disk per
+   * page load, none of which it displays. On 19 Sep 2026 it stopped returning at all —
+   * "/workspace/queue returned an empty response (HTTP 502) after 122s".
+   *
+   * Same fault as the perceiver's tick scan, fixed the same way. The project CLAUDE.md rule
+   * stands: never SELECT * from this table in a request path, and a user-facing page is the
+   * most request-path thing there is.
+   */
+  async getOpenIssuesForQueue(projects: string[]): Promise<CachedIssue[]> {
+    const placeholders = projects.map(() => '?').join(',');
+    return query<CachedIssue>(
+      `SELECT issue_key, jira_id, summary, status_name, status_category, priority_name,
+              issuetype_name, assignee_account_id, assignee_display, assignee_email,
+              reporter_display, reporter_email, jira_created, jira_updated, labels,
+              request_type, current_tier, sla_breach_time, sla_breached
+       FROM jira_issue_cache
+       WHERE project_key IN (${placeholders})
+         AND status_category IN ('new', 'indeterminate')
+       ORDER BY jira_created DESC`,
+      projects,
+    );
+  }
+
   async getOpenIssues(projects: string[]): Promise<CachedIssue[]> {
     const placeholders = projects.map(() => '?').join(',');
     return query<CachedIssue>(
