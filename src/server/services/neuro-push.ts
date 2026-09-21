@@ -17,7 +17,7 @@ export async function pushFlaggedToNeuro(
   const token = settings.get('neuro_api_token') || process.env.NEURO_API_TOKEN || '';
   if (!url || !token) return null; // not configured — silently skip
 
-  const pending = await riskScorer.getFlagged('pending');
+  const pending = await riskScorer.getFlaggedLean('pending');
   const payload = groupFlaggedByReason(pending);
 
   const res = await fetch(`${url}/api/nova-signals`, {

@@ -88,7 +88,11 @@ export function LookAtThisView() {
   const load = useCallback(async () => {
     try {
       const res = await authFetch('/flagged/look-at-this');
-      const json = await res.json();
+      // A proxy timeout or gateway error comes back with no body at all — say so
+      // rather than surfacing a bare "Unexpected end of JSON input".
+      const text = await res.text();
+      if (!text) throw new Error(`Server returned ${res.status} with an empty response`);
+      const json = JSON.parse(text);
       if (json.ok) { setData(json.data); setError(null); }
       else setError(json.error || 'Failed to load');
     } catch (err) {

@@ -190,7 +190,7 @@ export function createNeuroBridgeRoutes(
     }
     try {
       const min = parseInt(req.query.min as string, 10) || 0;
-      const pending = await riskScorer.getFlagged('pending');
+      const pending = await riskScorer.getFlaggedLean('pending');
       res.json({ ok: true, data: groupFlaggedByReason(pending, min) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed' });

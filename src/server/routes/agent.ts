@@ -409,7 +409,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     try {
       const settingMin = parseInt(deps.settingsQueries?.get('nick_look_threshold') || '', 10);
       const min = parseInt(req.query.min as string, 10) || (Number.isFinite(settingMin) ? settingMin : 0);
-      const pending = await deps.riskScorer.getFlagged('pending');
+      const pending = await deps.riskScorer.getFlaggedLean('pending');
       res.json({ ok: true, data: groupFlaggedByReason(pending, min) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Failed to build look-at-this' });

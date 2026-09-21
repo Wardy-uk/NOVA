@@ -821,6 +821,29 @@ export class RiskScorer {
 
   // ── Query methods for API ──
 
+  // The "look at this" board shows only what's on the card — it never renders a
+  // comment body or the conversation. getFlagged() drags the last two comments
+  // and a FOR JSON PATH of the whole thread out of jira_comment_cache (991MB of
+  // nvarchar(max)) per ticket, which is enough to stall the request past the
+  // proxy timeout. This pulls only the columns groupFlaggedByReason reads.
+  async getFlaggedLean(status?: string): Promise<FlaggedTicket[]> {
+    const where = status
+      ? `WHERE f.status = ? AND j.status_category != 'done'`
+      : `WHERE f.status != 'dismissed' AND j.status_category != 'done'`;
+    const params = status ? [status] : [];
+    const rows = await query<Record<string, unknown>>(
+      `SELECT f.id, f.ticket_key, f.risk_score, f.risk_factors, f.summary, f.assignee,
+              f.reporter, f.priority, f.flagged_at, f.reviewed_at, f.reviewed_by,
+              f.status, f.last_notified_score, f.dismiss_reason,
+              j.status_name AS ticket_status, j.sla_breach_time, j.sla_breached,
+              j.current_tier, j.project_key
+       FROM agent_flagged_tickets f
+       JOIN jira_issue_cache j ON j.issue_key = f.ticket_key
+       ${where} ORDER BY f.risk_score DESC`, params,
+    );
+    return rows.map(this.rowToFlagged);
+  }
+
   async getFlagged(status?: string): Promise<FlaggedTicket[]> {
     const where = status
       ? `WHERE f.status = ? AND j.status_category != 'done'`
