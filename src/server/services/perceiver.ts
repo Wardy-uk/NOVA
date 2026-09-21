@@ -1,5 +1,5 @@
 import type { JiraRestClient, JiraIssue, JiraComment } from './jira-client.js';
-import type { JiraCacheQueries, CachedIssue, CachedComment } from './jira-cache-queries.js';
+import type { JiraCacheQueries, CachedIssue, CachedComment, OpenIssueSummary } from './jira-cache-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { QueuePerception, TicketEvent, CommentSnapshot } from './agent-types.js';
 import { query, execute } from './database.js';
@@ -45,9 +45,32 @@ function toTicketEvent(issue: JiraIssue, eventType: TicketEvent['eventType']): T
     organisation: (f.reporter as any)?.emailAddress?.split('@')[1] ?? null,
     created: (f.created as string) ?? '',
     updated: (f.updated as string) ?? '',
-    slaBreachTime: extractSlaBreachTime(f.customfield_10010),
+    // 14048 (Resolution), not Jira's default 10010 — that id does not exist on this instance,
+    // so this read undefined on every issue. Same fault the queue monitor had.
+    slaBreachTime: extractSlaBreachTime(f.customfield_14048),
     attachments: extractAttachments(f.attachment),
     fields: f,
+  };
+}
+
+/** The API fallback path's equivalent of a cache row, so the queue monitor sees the same
+ *  shape whichever way the perceiver ran. */
+function apiIssueToSummary(issue: JiraIssue): OpenIssueSummary {
+  const f = issue.fields;
+  const resolution = extractSlaBreachTime(f.customfield_14048);
+  const firstReply = extractSlaBreachTime(f.customfield_14046);
+  const created = (f.created as string) ?? null;
+  const updated = (f.updated as string) ?? null;
+  return {
+    issue_key: issue.key,
+    status_name: (f.status as any)?.name ?? null,
+    sla_breach_time: resolution ? new Date(resolution) : null,
+    sla_frt_breach_time: firstReply ? new Date(firstReply) : null,
+    jira_updated: updated ? new Date(updated) : null,
+    summary: (f.summary as string) ?? null,
+    assignee_display: (f.assignee as any)?.displayName ?? null,
+    priority_name: (f.priority as any)?.name ?? null,
+    jira_created: created ? new Date(created) : null,
   };
 }
 
@@ -70,16 +93,6 @@ function cachedToTicketEvent(ci: CachedIssue, eventType: TicketEvent['eventType'
     updated: ci.jira_updated?.toISOString() ?? '',
     slaBreachTime: ci.sla_breach_time?.toISOString() ?? null,
     attachments: extractAttachments(fields.attachment),
-    fields,
-  };
-}
-
-function cachedToJiraIssue(ci: CachedIssue): JiraIssue {
-  const fields = ci.fields_json ? JSON.parse(ci.fields_json) : {};
-  return {
-    id: ci.jira_id,
-    key: ci.issue_key,
-    self: '',
     fields,
   };
 }
@@ -175,7 +188,10 @@ export class Perceiver {
   private cache: JiraCacheQueries | null;
   private settings: SettingsQueries;
   private lastTickAt: Date | null = null;
-  private lastOpenIssues: JiraIssue[] = [];
+  // The queue monitor's input, and nothing else reads it. Narrow rows rather than JiraIssues:
+  // when this held JiraIssues built from a four-column query, `fields` was `{}` and the
+  // monitor read zeroes off it for three days without a word. See QueueMonitor.analyse.
+  private lastOpenIssues: OpenIssueSummary[] = [];
   private processedCommentIds = new Set<string>();
   private pendingCommentIds: string[] = [];
   private excludedAccountIds = new Set<string>();
@@ -272,7 +288,7 @@ export class Perceiver {
     });
   }
 
-  getLastOpenIssues(): JiraIssue[] {
+  getLastOpenIssues(): OpenIssueSummary[] {
     return this.lastOpenIssues;
   }
 
@@ -429,7 +445,7 @@ export class Perceiver {
     }
 
     this.lastTickAt = now;
-    this.lastOpenIssues = openIssues.map(cachedToJiraIssue);
+    this.lastOpenIssues = openIssues;
 
     return {
       timestamp: now.toISOString(),
@@ -472,7 +488,8 @@ export class Perceiver {
       const status = (issue.fields.status as any)?.name ?? 'Unknown';
       byStatus[status] = (byStatus[status] ?? 0) + 1;
 
-      const slaBreachTime = extractSlaBreachTime(issue.fields.customfield_10010);
+      const slaBreachTime = extractSlaBreachTime(issue.fields.customfield_14048)
+        ?? extractSlaBreachTime(issue.fields.customfield_14046);
       if (slaBreachTime) {
         const breachMs = new Date(slaBreachTime).getTime() - now.getTime();
         if (breachMs > 0 && breachMs < 60 * 60 * 1000) {
@@ -542,7 +559,7 @@ export class Perceiver {
     }
 
     this.lastTickAt = now;
-    this.lastOpenIssues = openResult.issues;
+    this.lastOpenIssues = openResult.issues.map(apiIssueToSummary);
 
     return {
       timestamp: now.toISOString(),

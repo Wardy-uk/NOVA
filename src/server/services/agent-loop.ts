@@ -106,6 +106,7 @@ export class AgentLoop {
   private approvalQueries: ApprovalQueries | null;
   private baseUrl: string;
   private assignmentEngine: AssignmentEngine | null = null;
+  private cache: JiraCacheQueries | null = null;
 
   constructor(
     jiraClient: JiraRestClient,
@@ -114,6 +115,7 @@ export class AgentLoop {
     approvalQueries?: ApprovalQueries,
     cache?: JiraCacheQueries,
   ) {
+    this.cache = cache ?? null;
     this.kbSearch = new KbSearchService(settings);
     this.autonomyEngine = new AutonomyEngine();
     this.perceiver = new Perceiver(jiraClient, settings, cache);
@@ -1160,21 +1162,29 @@ export class AgentLoop {
       let nudgeCount = 0;
       let skippedNoAssignee = 0;
       let errors = 0;
-      for (const issue of openIssues.slice(0, 20)) {
-        const assignee = (issue.fields as any)?.assignee?.accountId;
+      // Account ids for just this batch. These used to be read off `issue.fields`, which has
+      // been `{}` since the perceiver was narrowed on 19 Sep — so every ticket counted as
+      // "no assignee" and the coaching health check has silently done nothing since.
+      const batch = openIssues.slice(0, 20);
+      const assigneeIds = this.cache
+        ? await this.cache.getAssigneeAccountIds(batch.map(i => i.issue_key))
+        : new Map<string, string>();
+
+      for (const issue of batch) {
+        const assignee = assigneeIds.get(issue.issue_key);
         if (!assignee) { skippedNoAssignee++; continue; }
 
         try {
-          const nudges = await this.coachingEngine.checkTicketHealth(issue.key, assignee);
+          const nudges = await this.coachingEngine.checkTicketHealth(issue.issue_key, assignee);
           if (nudges.length > 0) {
-            console.log(`[agent] Coaching health check: ${issue.key} — ${nudges.join(', ')}`);
+            console.log(`[agent] Coaching health check: ${issue.issue_key} — ${nudges.join(', ')}`);
             nudgeCount += nudges.length;
             for (const nudge of nudges) {
               try {
                 await executeAndGetId(
                   `INSERT INTO agent_coaching (ticket_id, agent_user_id, nudge_type, message, delivered, delivery_method)
                    VALUES (?, ?, ?, ?, 0, 'health_check')`,
-                  [issue.key, 0, nudge, `Health check nudge: ${nudge}`],
+                  [issue.issue_key, 0, nudge, `Health check nudge: ${nudge}`],
                 );
               } catch { /* best effort — avoid duplicates breaking the loop */ }
             }
@@ -1182,7 +1192,7 @@ export class AgentLoop {
           checked++;
         } catch (err) {
           errors++;
-          console.warn(`[agent] Coaching health check failed for ${issue.key}:`, err instanceof Error ? err.message : err);
+          console.warn(`[agent] Coaching health check failed for ${issue.issue_key}:`, err instanceof Error ? err.message : err);
         }
       }
       console.log(`[agent] Coaching health checks complete — ${checked} checked, ${nudgeCount} nudges, ${skippedNoAssignee} skipped (no assignee), ${errors} errors`);

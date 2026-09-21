@@ -537,6 +537,11 @@ export class JiraSyncService {
     // `cf[14048] = breached()`, so the column now agrees with the boards.
     const slaBreachTime = extractSlaBreachTime(f.customfield_14048);
     const slaBreached = extractSlaBreached(f.customfield_14048);
+    // 14046 is First Reply Time. Extracted here for the same reason 14048 is: the queue
+    // monitor has to judge SLA risk from the cache, and reading the SLA cycle objects out of
+    // fields_json means dragging a LOB column through a scan of every open ticket. Resolution
+    // alone would have quietly halved what "SLA at risk" means.
+    const slaFrtBreachTime = extractSlaBreachTime(f.customfield_14046);
     const noReply = computeNoReply(
       statusName,
       f.created as string | null,
@@ -578,7 +583,7 @@ export class JiraSyncService {
         escalation_reason_text = ?, expected_outcome_text = ?, issue_environment_text = ?,
         development_details_text = ?, resolution_type = ?,
         agent_next_update = ?, agent_last_updated = ?,
-        sla_breach_time = ?, sla_breached = ?, no_reply = ?, labels = ?,
+        sla_breach_time = ?, sla_breached = ?, sla_frt_breach_time = ?, no_reply = ?, labels = ?,
         issue_links_json = ?, rejection_reason_text = ?, rejection_reason_option = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
         resolved_at = ?, status_category_changed_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
@@ -592,7 +597,7 @@ export class JiraSyncService {
         escalation_reason_text, expected_outcome_text, issue_environment_text,
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
-        sla_breach_time, sla_breached, no_reply, labels,
+        sla_breach_time, sla_breached, sla_frt_breach_time, no_reply, labels,
         issue_links_json, rejection_reason_text, rejection_reason_option, fields_json, organisation_name, bc_account_number, resolved_at,
         status_category_changed_at
       ) VALUES (
@@ -606,7 +611,7 @@ export class JiraSyncService {
         ?, ?, ?,
         ?, ?,
         ?, ?,
-        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?,
         ?
       );`,
@@ -629,7 +634,8 @@ export class JiraSyncService {
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
-        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached,
+        slaFrtBreachTime ? new Date(slaFrtBreachTime) : null, noReply, labels,
         issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
@@ -649,7 +655,8 @@ export class JiraSyncService {
         escalationReasonText || null, expectedOutcomeText || null, issueEnvironmentText || null,
         developmentDetailsText || null, resolutionType,
         agentNextUpdate, agentLastUpdated,
-        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached, noReply, labels,
+        slaBreachTime ? new Date(slaBreachTime) : null, slaBreached,
+        slaFrtBreachTime ? new Date(slaFrtBreachTime) : null, noReply, labels,
         issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,

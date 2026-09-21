@@ -13,6 +13,11 @@ import type { SettingsQueries } from '../../db/settings-store.js';
  *  - sla-manager produced no breach projections at all, so agent_sla_interventions has never
  *    held a single row and proactive SLA management has never run.
  *
+ * queue-monitor no longer comes through here. It reads from the cache, where the sync has
+ * already extracted both breach clocks into `sla_breach_time` (14048) and
+ * `sla_frt_breach_time` (14046) — a field id it cannot get wrong because it never sees one.
+ * sla-manager still works off live API issues, so it still needs this list.
+ *
  * Neither failed loudly. A missing field reads as "nothing at risk", which looks like a quiet
  * queue rather than a broken one — the same shape as every other fault found this week.
  *

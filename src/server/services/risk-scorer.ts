@@ -1,4 +1,5 @@
 import { query, queryOne, execute, executeAndGetId } from './database.js';
+import { topUpEscalationFlags, getEscalationFlags, escalationCoverage } from './shared/escalation-keywords.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 
 export interface RiskFactor {
@@ -173,14 +174,16 @@ interface TicketRiskInput {
   reporterOpenTicketCount: number;
   statusName: string | null;
   jiraUpdated: Date | null;
-  descriptionText: string | null;
   severityLevel: 'critical' | 'high' | 'medium' | 'low' | null;
   impactScore: number | null;
   severityRationale: string | null;
 }
 
-const STRONG_ESCALATION = /\b(formal\s+complaint|lawyer|solicitor|legal\s+action|trading\s+standards|ombudsman|ICO|GDPR\s+breach|data\s+protection)\b/i;
-const MODERATE_ESCALATION = /\b(escalat|unacceptable|disgraceful|ridiculous|appalling|demand|threatening)\b/i;
+// STRONG_ESCALATION / MODERATE_ESCALATION used to sit here: a third copy of the keyword list,
+// declared and never referenced, presumably left behind with the descriptionText field. It had
+// also drifted — `\bescalat\b` matches neither "escalated" nor "escalation", so had anything
+// ever used it, the commonest word on the list would have been the one it missed. The single
+// live definition is in shared/escalation-keywords.ts.
 
 export class RiskScorer {
   private settings: SettingsQueries;
@@ -427,19 +430,12 @@ export class RiskScorer {
       issue_key: string; summary: string; assignee_display: string; assignee_account_id: string;
       reporter_display: string; reporter_account_id: string; priority_name: string;
       jira_created: string; sla_breach_time: string | null; sla_breached: number;
-      status_name: string; jira_updated: string; description_text: string | null;
+      status_name: string; jira_updated: string;
     }>(
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
               jira_created, sla_breach_time, sla_breached,
-              status_name, jira_updated,
-              -- Truncated deliberately. description_text is NVARCHAR(MAX) on a table measured
-              -- at 723MB/12,763 rows, and this sweep reads every open ticket. It is used only
-              -- for the escalation keyword regexes ("formal complaint", "solicitor",
-              -- "escalat"...), which land in the opening paragraphs if they land at all, so
-              -- pulling whole bodies off disk bought nothing and cost the sweep its life:
-              -- it has timed out at 30s on every run since 25 Aug 2026.
-              CAST(LEFT(description_text, 2000) AS NVARCHAR(2000)) AS description_text
+              status_name, jira_updated
        FROM jira_issue_cache
        WHERE project_key IN (${projectPlaceholders}) AND status_category != 'done'`,
       projects,
@@ -450,45 +446,51 @@ export class RiskScorer {
     const ticketKeys = tickets.map(t => t.issue_key);
     const keyPlaceholders = ticketKeys.map(() => '?').join(',');
 
-    // Batch fetch enrichment data
-    const [stateRows, sentimentRows, commentStats, reassignCounts, reporterCounts] = await Promise.all([
-      query<{ ticket_id: string; comment_count: number; last_customer_reply_at: string | null; last_agent_action_at: string | null }>(
-        `SELECT ticket_id, comment_count, last_customer_reply_at, last_agent_action_at
-         FROM agent_ticket_state WHERE ticket_id IN (${keyPlaceholders})`, ticketKeys,
-      ),
-      query<{ issue_key: string; sentiment_score: number }>(
-        `SELECT issue_key, sentiment_score FROM problem_ticket_alerts
-         WHERE issue_key IN (${keyPlaceholders}) AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, ticketKeys,
-      ),
-      query<{ issue_key: string; unique_authors: number; has_strong_escalation: number; has_moderate_escalation: number; total_comments: number }>(
-        `SELECT issue_key,
-                COUNT(DISTINCT author_account_id) as unique_authors,
-                MAX(CASE WHEN body_text LIKE '%formal complaint%' OR body_text LIKE '%lawyer%'
-                         OR body_text LIKE '%solicitor%' OR body_text LIKE '%legal action%'
-                         OR body_text LIKE '%trading standards%' OR body_text LIKE '%ombudsman%'
-                         OR body_text LIKE '%ICO%' OR body_text LIKE '%GDPR breach%'
-                         OR body_text LIKE '%data protection%'
-                    THEN 1 ELSE 0 END) as has_strong_escalation,
-                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%unacceptable%'
-                         OR body_text LIKE '%disgraceful%' OR body_text LIKE '%ridiculous%'
-                         OR body_text LIKE '%appalling%' OR body_text LIKE '%threatening%'
-                    THEN 1 ELSE 0 END) as has_moderate_escalation,
-                COUNT(*) as total_comments
-         FROM jira_comment_cache
-         WHERE issue_key IN (${keyPlaceholders}) AND is_public = 1
-         GROUP BY issue_key`, ticketKeys,
-      ),
-      query<{ ticket_id: string; reassigns: number }>(
-        `SELECT ticket_id, COUNT(*) as reassigns FROM agent_decisions
-         WHERE ticket_id IN (${keyPlaceholders}) AND action = 'assign'
-         GROUP BY ticket_id`, ticketKeys,
-      ),
-      query<{ reporter_account_id: string; open_count: number }>(
-        `SELECT reporter_account_id, COUNT(*) as open_count FROM jira_issue_cache
-         WHERE reporter_account_id IS NOT NULL AND status_category != 'done'
-         GROUP BY reporter_account_id HAVING COUNT(*) >= 5`, [],
-      ),
-    ]);
+    // Enrichment, one query at a time.
+    //
+    // This was a Promise.all. Run in parallel against prod on 21 Sep 2026 the block took
+    // 36.6s; the same five queries run one after another add up to about 17s. The database is
+    // IO-bound, not latency-bound — avg_data_io_percent sits at 100 while CPU is at 24 — so
+    // five concurrent scans do not overlap, they queue, and each one's share of the 30s
+    // request timeout shrinks as the others pile on. Parallelism here bought contention and a
+    // correlated timeout: when it blew, all five went together.
+    const stateRows = await query<{ ticket_id: string; comment_count: number; last_customer_reply_at: string | null; last_agent_action_at: string | null }>(
+      `SELECT ticket_id, comment_count, last_customer_reply_at, last_agent_action_at
+       FROM agent_ticket_state WHERE ticket_id IN (${keyPlaceholders})`, ticketKeys,
+    );
+
+    const sentimentRows = await query<{ issue_key: string; sentiment_score: number }>(
+      `SELECT issue_key, sentiment_score FROM problem_ticket_alerts
+       WHERE issue_key IN (${keyPlaceholders}) AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, ticketKeys,
+    );
+
+    // Counts only. The escalation keywords used to be fifteen `body_text LIKE` predicates
+    // bolted onto this GROUP BY, which made it read the LOB and took 126-204s against a 30s
+    // timeout; they now come from jira_comment_escalation below. What is left is covered by
+    // IX_jira_comment_cache_issue_author and returns in about 2s.
+    const commentStats = await query<{ issue_key: string; unique_authors: number; total_comments: number }>(
+      `SELECT issue_key,
+              COUNT(DISTINCT author_account_id) as unique_authors,
+              COUNT(*) as total_comments
+       FROM jira_comment_cache
+       WHERE issue_key IN (${keyPlaceholders}) AND is_public = 1
+       GROUP BY issue_key`, ticketKeys,
+    );
+
+    // Needs IX_agent_decisions_ticket_action. Against the older, fatter
+    // IX_agent_decisions_ticket_created — which INCLUDEs an NVARCHAR(MAX) column — this same
+    // count took 121s. With the lean index it is 222ms.
+    const reassignCounts = await query<{ ticket_id: string; reassigns: number }>(
+      `SELECT ticket_id, COUNT(*) as reassigns FROM agent_decisions
+       WHERE ticket_id IN (${keyPlaceholders}) AND action = 'assign'
+       GROUP BY ticket_id`, ticketKeys,
+    );
+
+    const reporterCounts = await query<{ reporter_account_id: string; open_count: number }>(
+      `SELECT reporter_account_id, COUNT(*) as open_count FROM jira_issue_cache
+       WHERE reporter_account_id IS NOT NULL AND status_category != 'done'
+       GROUP BY reporter_account_id HAVING COUNT(*) >= 5`, [],
+    );
 
     // Business severity (LLM-assessed, cached in ticket_severity) — separate query
     // so a missing/empty severity table never breaks the core sweep.
@@ -500,6 +502,25 @@ export class RiskScorer {
       );
     } catch { /* table may not exist yet on first boot */ }
     const severityMap = new Map(severityRows.map(r => [r.ticket_key, r]));
+
+    // Escalation language. Top up any comments not yet classified, then read the flags off the
+    // narrow table. The top-up is capped, so a cold cache spreads over several sweeps rather
+    // than blowing one sweep's budget — and the coverage line says so out loud, because a
+    // half-populated cache and a queue with no angry customers in it must not read the same.
+    let escalationMap = new Map<string, { hasStrong: boolean; hasModerate: boolean }>();
+    try {
+      const classified = await topUpEscalationFlags(ticketKeys);
+      escalationMap = await getEscalationFlags(ticketKeys);
+      const coverage = await escalationCoverage(ticketKeys);
+      if (coverage.classified < coverage.total) {
+        console.warn(
+          `[risk] Escalation flags incomplete: ${coverage.classified}/${coverage.total} comments classified ` +
+          `(+${classified} this sweep). Escalation factors are under-reported until this catches up.`,
+        );
+      }
+    } catch (err) {
+      console.warn('[risk] Escalation flag lookup failed — escalation factors skipped this sweep:', err instanceof Error ? err.message : err);
+    }
 
     const stateMap = new Map(stateRows.map(r => [r.ticket_id, r]));
     const sentimentMap = new Map(sentimentRows.map(r => [r.issue_key, r.sentiment_score]));
@@ -540,12 +561,11 @@ export class RiskScorer {
         sentimentScore: sentimentMap.get(ticket.issue_key) ?? null,
         reassignCount: reassignMap.get(ticket.issue_key) ?? 0,
         uniqueInternalCommenters: comments?.unique_authors ?? 0,
-        hasStrongEscalation: (comments?.has_strong_escalation ?? 0) === 1,
-        hasModerateEscalation: (comments?.has_moderate_escalation ?? 0) === 1,
+        hasStrongEscalation: escalationMap.get(ticket.issue_key)?.hasStrong ?? false,
+        hasModerateEscalation: escalationMap.get(ticket.issue_key)?.hasModerate ?? false,
         reporterOpenTicketCount: ticket.reporter_account_id ? (reporterCountMap.get(ticket.reporter_account_id) ?? 0) : 0,
         statusName: ticket.status_name,
         jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
-        descriptionText: ticket.description_text,
         severityLevel: (severityMap.get(ticket.issue_key)?.severity as TicketRiskInput['severityLevel']) ?? null,
         impactScore: severityMap.get(ticket.issue_key)?.impact_score ?? null,
         severityRationale: severityMap.get(ticket.issue_key)?.rationale ?? null,
@@ -713,19 +733,12 @@ export class RiskScorer {
       issue_key: string; summary: string; assignee_display: string; assignee_account_id: string;
       reporter_display: string; reporter_account_id: string; priority_name: string;
       jira_created: string; sla_breach_time: string | null; sla_breached: number;
-      status_name: string; jira_updated: string; description_text: string | null;
+      status_name: string; jira_updated: string;
     }>(
       `SELECT issue_key, summary, assignee_display, assignee_account_id,
               reporter_display, reporter_account_id, priority_name,
               jira_created, sla_breach_time, sla_breached,
-              status_name, jira_updated,
-              -- Truncated deliberately. description_text is NVARCHAR(MAX) on a table measured
-              -- at 723MB/12,763 rows, and this sweep reads every open ticket. It is used only
-              -- for the escalation keyword regexes ("formal complaint", "solicitor",
-              -- "escalat"...), which land in the opening paragraphs if they land at all, so
-              -- pulling whole bodies off disk bought nothing and cost the sweep its life:
-              -- it has timed out at 30s on every run since 25 Aug 2026.
-              CAST(LEFT(description_text, 2000) AS NVARCHAR(2000)) AS description_text
+              status_name, jira_updated
        FROM jira_issue_cache WHERE issue_key = ?`, [ticketKey],
     );
 
@@ -740,18 +753,11 @@ export class RiskScorer {
         `SELECT sentiment_score FROM problem_ticket_alerts
          WHERE issue_key = ? AND sentiment_score IS NOT NULL AND resolved_at IS NULL`, [ticketKey],
       ),
-      queryOne<{ unique_authors: number; has_strong_escalation: number; has_moderate_escalation: number; total_comments: number }>(
+      // Counts only, same as the sweep. One ticket's worth of escalation flags is read from
+      // jira_comment_escalation below — diagnoseTicket and the sweep have to agree, and they
+      // only do that reliably if there is one copy of the keyword list. There were two.
+      queryOne<{ unique_authors: number; total_comments: number }>(
         `SELECT COUNT(DISTINCT author_account_id) as unique_authors,
-                MAX(CASE WHEN body_text LIKE '%formal complaint%' OR body_text LIKE '%lawyer%'
-                         OR body_text LIKE '%solicitor%' OR body_text LIKE '%legal action%'
-                         OR body_text LIKE '%trading standards%' OR body_text LIKE '%ombudsman%'
-                         OR body_text LIKE '%ICO%' OR body_text LIKE '%GDPR breach%'
-                         OR body_text LIKE '%data protection%'
-                    THEN 1 ELSE 0 END) as has_strong_escalation,
-                MAX(CASE WHEN body_text LIKE '%escalat%' OR body_text LIKE '%unacceptable%'
-                         OR body_text LIKE '%disgraceful%' OR body_text LIKE '%ridiculous%'
-                         OR body_text LIKE '%appalling%' OR body_text LIKE '%threatening%'
-                    THEN 1 ELSE 0 END) as has_moderate_escalation,
                 COUNT(*) as total_comments
          FROM jira_comment_cache WHERE issue_key = ? AND is_public = 1`, [ticketKey],
       ),
@@ -765,6 +771,17 @@ export class RiskScorer {
            AND status_category != 'done'`, [ticketKey],
       ),
     ]);
+
+    // One ticket, so classify its comments up front rather than waiting for a sweep to reach
+    // them — a diagnosis the user asked for should not report "no escalation" just because
+    // the cache has not caught up yet.
+    let escalation = { hasStrong: false, hasModerate: false };
+    try {
+      await topUpEscalationFlags([ticketKey]);
+      escalation = (await getEscalationFlags([ticketKey])).get(ticketKey) ?? escalation;
+    } catch (err) {
+      console.warn(`[risk] Escalation flags unavailable for ${ticketKey}:`, err instanceof Error ? err.message : err);
+    }
 
     let severityRow: { severity: string; impact_score: number; rationale: string | null } | null = null;
     try {
@@ -790,12 +807,11 @@ export class RiskScorer {
       sentimentScore: sentimentRow?.sentiment_score ?? null,
       reassignCount: reassignRow?.reassigns ?? 0,
       uniqueInternalCommenters: commentRow?.unique_authors ?? 0,
-      hasStrongEscalation: (commentRow?.has_strong_escalation ?? 0) === 1,
-      hasModerateEscalation: (commentRow?.has_moderate_escalation ?? 0) === 1,
+      hasStrongEscalation: escalation.hasStrong,
+      hasModerateEscalation: escalation.hasModerate,
       reporterOpenTicketCount: reporterRow?.open_count ?? 0,
       statusName: ticket.status_name,
       jiraUpdated: ticket.jira_updated ? new Date(ticket.jira_updated) : null,
-      descriptionText: ticket.description_text,
       severityLevel: (severityRow?.severity as TicketRiskInput['severityLevel']) ?? null,
       impactScore: severityRow?.impact_score ?? null,
       severityRationale: severityRow?.rationale ?? null,

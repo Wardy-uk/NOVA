@@ -971,6 +971,13 @@ async function runMigrations(): Promise<void> {
      CREATE INDEX IX_jira_cache_sla_breach ON jira_issue_cache (sla_breached, sla_breach_time DESC)
        INCLUDE (current_tier);`,
 
+    // First Reply Time breach clock (cf14046), alongside the Resolution one (cf14048) in
+    // sla_breach_time. Extracted at sync so the queue monitor can judge SLA risk from the
+    // cache's narrow columns instead of parsing SLA cycle objects out of fields_json, which
+    // means a LOB read across every open ticket. Nullable, so this is a metadata-only add.
+    `IF COL_LENGTH('jira_issue_cache', 'sla_frt_breach_time') IS NULL
+     ALTER TABLE jira_issue_cache ADD sla_frt_breach_time DATETIME2 NULL;`,
+
     // resolved_at — populated from Jira's resolutiondate field during sync
     `IF COL_LENGTH('jira_issue_cache', 'resolved_at') IS NULL
      ALTER TABLE jira_issue_cache ADD resolved_at DATETIME2 NULL;`,
@@ -1045,6 +1052,27 @@ async function runMigrations(): Promise<void> {
      ALTER TABLE jira_comment_cache ADD has_csat_link BIT NOT NULL DEFAULT 0;`,
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_csat')
      CREATE INDEX IX_jira_comment_csat ON jira_comment_cache (issue_key, is_public) WHERE has_csat_link = 1;`,
+
+    // Escalation-language flags, one row per public comment. Same reasoning as has_csat_link
+    // above, and for the same table: matching `body_text LIKE '%...%'` at query time means
+    // random lookups into a 991MB clustered index, which on 21 Sep 2026 cost the risk sweep
+    // 126-204s against a 30s timeout and had kept agent_flagged_tickets empty since 25 Aug.
+    //
+    // A separate table rather than two more columns on jira_comment_cache: adding a NOT NULL
+    // column to a 991MB table is a size-of-data rewrite on an S0 tier with no IO headroom,
+    // and the sweep wants to read these flags without going near that table at all.
+    // Populated incrementally by shared/escalation-keywords.ts.
+    `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_comment_escalation') AND type = 'U')
+     CREATE TABLE jira_comment_escalation (
+       jira_comment_id NVARCHAR(50) NOT NULL PRIMARY KEY,
+       issue_key       NVARCHAR(30) NOT NULL,
+       has_strong      BIT          NOT NULL DEFAULT 0,
+       has_moderate    BIT          NOT NULL DEFAULT 0,
+       classified_at   DATETIME2    NOT NULL DEFAULT GETUTCDATE()
+     );`,
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_comment_escalation_issue')
+     CREATE INDEX IX_jira_comment_escalation_issue ON jira_comment_escalation (issue_key)
+       INCLUDE (has_strong, has_moderate);`,
 
     // ── Jira Sync State ──
     `IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'jira_sync_state') AND type = 'U')
@@ -1352,6 +1380,19 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_created')
      CREATE INDEX IX_agent_decisions_ticket_created ON agent_decisions (ticket_id, created_at DESC)
        INCLUDE (action, confidence, outcome, inputs);`,
+
+    // IX_agent_decisions_ticket_created INCLUDEs `inputs`, an NVARCHAR(MAX) JSON blob, so on
+    // 21 Sep 2026 it measured 139MB in-row for 31,306 rows — about 4.5KB a row. Anything that
+    // reads it pays for that, whether or not it selects `inputs`: the risk sweep's "how many
+    // times has this ticket been reassigned" count took 121s, and a bare
+    // `COUNT(*) WHERE action='assign'` did not return in 400s. That is what kept
+    // agent_flagged_tickets empty from 25 Aug.
+    //
+    // This index answers that question alone and carries no LOB: ~1MB, and the same query
+    // returns in 222ms. The fat index is left in place because other callers read `inputs`
+    // by ticket — it is the wrong index for a count, not a wrong index.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_action')
+     CREATE INDEX IX_agent_decisions_ticket_action ON agent_decisions (ticket_id, action);`,
 
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_llm_calls_created')
      CREATE INDEX IX_agent_llm_calls_created ON agent_llm_calls (created_at DESC)

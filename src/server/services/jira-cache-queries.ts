@@ -1,12 +1,21 @@
 import { query, queryOne } from './database.js';
 
-/** Just enough of an open issue to count it, judge its SLA and tell if it has gone stale —
- *  deliberately no LOB columns. See getOpenIssueSummaries. */
+/** Just enough of an open issue to count it, judge its SLA, tell if it has gone stale and
+ *  monitor the queue — deliberately no LOB columns. See getOpenIssueSummaries. */
 export interface OpenIssueSummary {
   issue_key: string;
   status_name: string | null;
   sla_breach_time: Date | null;
+  sla_frt_breach_time: Date | null;
   jira_updated: Date | null;
+  // Added 21 Sep 2026 for the queue monitor. It used to read these off a full JiraIssue built
+  // from fields_json; narrowing this query on 19 Sep left it reading `{}` instead, which is
+  // how total_created went to 0 and unassigned pinned at 20. All four are already INCLUDEd in
+  // IX_jira_cache_project_status, so carrying them costs nothing beyond the row width.
+  summary: string | null;
+  assignee_display: string | null;
+  priority_name: string | null;
+  jira_created: Date | null;
 }
 
 export interface CachedIssue {
@@ -90,6 +99,20 @@ export class JiraCacheQueries {
     );
   }
 
+  /** Assignee account ids for a bounded set of keys. Two small columns, seeking on the
+   *  clustered key — the callers that want this only ever want it for a handful of tickets,
+   *  and none of them should be pulling a whole row to find out who a ticket belongs to. */
+  async getAssigneeAccountIds(keys: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (keys.length === 0) return out;
+    const placeholders = keys.map(() => '?').join(',');
+    const rows = await query<{ issue_key: string; assignee_account_id: string | null }>(
+      `SELECT issue_key, assignee_account_id FROM jira_issue_cache WHERE issue_key IN (${placeholders})`, keys,
+    );
+    for (const r of rows) if (r.assignee_account_id) out.set(r.issue_key, r.assignee_account_id);
+    return out;
+  }
+
   /**
    * Open issues, without the large columns.
    *
@@ -110,7 +133,8 @@ export class JiraCacheQueries {
   async getOpenIssueSummaries(projects: string[]): Promise<OpenIssueSummary[]> {
     const placeholders = projects.map(() => '?').join(',');
     return query<OpenIssueSummary>(
-      `SELECT issue_key, status_name, sla_breach_time, jira_updated
+      `SELECT issue_key, status_name, sla_breach_time, sla_frt_breach_time, jira_updated,
+              summary, assignee_display, priority_name, jira_created
        FROM jira_issue_cache
        WHERE project_key IN (${placeholders})
          AND status_category IN ('new', 'indeterminate')

@@ -2181,23 +2181,31 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
       ))[0]?.cnt ?? 0;
 
       // Overdue customers — live check
+      // Read from the cache's own columns rather than off the perceiver's issues. This used
+      // to walk `issue.fields[AGENT_NEXT_UPDATE]` and `issue.fields.comment.comments`; the
+      // perceiver stopped carrying fields on 19 Sep, and the comment list was never in
+      // fields_json in the first place, so this counter has been reporting 0. Both facts are
+      // columns: agent_next_update on the issue, and the last public comment is covered by
+      // IX_jira_comment_cache_issue_author, so neither read touches a LOB.
       let customersOverdue = 0;
       try {
-        const perceiver = agentLoop.getPerceiver();
-        if (perceiver) {
-          const openIssues = perceiver.getLastOpenIssues();
-          const clock = createWorkingDayClock();
-          const now = new Date();
-          for (const issue of openIssues) {
-            const f = issue.fields as Record<string, any>;
-            const nextUpdate = f?.[JIRA_FIELDS.AGENT_NEXT_UPDATE];
-            if (nextUpdate && new Date(nextUpdate) < now) { customersOverdue++; continue; }
-            const comments = (f?.comment as any)?.comments ?? [];
-            const lastPublic = [...comments].reverse().find((c: any) => !c.properties?.find((p: any) => p.key === 'sd.public.comment' && p.value?.internal));
-            if (lastPublic) {
-              const hours = clock.workingHoursBetween(new Date(lastPublic.created), now);
-              if (hours > 16) customersOverdue++;
-            }
+        const overdueProjects = (agentLoop.getSettings().get('agent_jira_project') || 'NT')
+          .split(',').map((p: string) => p.trim()).filter(Boolean);
+        const clock = createWorkingDayClock();
+        const now = new Date();
+        const rows = await query<{ agent_next_update: Date | null; last_public_at: Date | null }>(
+          `SELECT j.agent_next_update,
+                  (SELECT MAX(c.jira_created) FROM jira_comment_cache c
+                    WHERE c.issue_key = j.issue_key AND c.is_public = 1) AS last_public_at
+             FROM jira_issue_cache j
+            WHERE j.project_key IN (${overdueProjects.map(() => '?').join(',')})
+              AND j.status_category != 'done'`,
+          overdueProjects,
+        );
+        for (const row of rows) {
+          if (row.agent_next_update && new Date(row.agent_next_update) < now) { customersOverdue++; continue; }
+          if (row.last_public_at && clock.workingHoursBetween(new Date(row.last_public_at), now) > 16) {
+            customersOverdue++;
           }
         }
       } catch { /* best-effort */ }
@@ -2447,7 +2455,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         return;
       }
 
-      const ticketKeys = cachedIssues.map(i => i.key);
+      const ticketKeys = cachedIssues.map(i => i.issue_key);
       let aiDecisions: Record<string, any> = {};
       if (ticketKeys.length > 0) {
         const placeholders = ticketKeys.map(() => '?').join(',');

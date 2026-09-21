@@ -1,7 +1,7 @@
-import type { JiraRestClient, JiraIssue } from './jira-client.js';
+import type { JiraRestClient } from './jira-client.js';
+import type { OpenIssueSummary } from './jira-cache-queries.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import { query, executeAndGetId } from './database.js';
-import { slaFieldValues } from './shared/sla-fields.js';
 import type {
   QueueHealth,
   SlaRiskTicket,
@@ -15,10 +15,9 @@ const UNASSIGNED_STALE_MIN = 15;
 const CAPACITY_THRESHOLD = 10;
 const VOLUME_SIGMA_THRESHOLD = 2;
 
-const DEFAULT_FIELDS = [
-  'summary', 'status', 'priority', 'assignee', 'reporter',
-  'created', 'updated', 'customfield_10010', // SLA
-];
+// DEFAULT_FIELDS used to sit here, listing customfield_10010 as "SLA". Nothing read it, and
+// the id was wrong anyway — this instance uses 14046/14048. Removed rather than corrected: an
+// unused constant naming a field that does not exist is how the next person gets misled.
 
 const MIN_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -32,7 +31,21 @@ export class QueueMonitor {
     this.settings = settings;
   }
 
-  async analyse(openIssues: JiraIssue[]): Promise<QueueHealth> {
+  /**
+   * Takes the cache's narrow open-issue rows, not a JiraIssue.
+   *
+   * It used to take JiraIssue[] and read everything off `issue.fields`. On 19 Sep 2026 the
+   * perceiver was narrowed to four columns for IO reasons and still mapped them into
+   * JiraIssues — which meant `fields` was `{}` for every ticket, and this class went on
+   * reading it without complaint. `total_created` fell to 0 for every hour from that day, and
+   * `unassigned` pinned at exactly 20, because a missing `created` makes `ageMs` NaN, `NaN <
+   * threshold` is false, and so every open ticket was reported as a stale unassigned one, up
+   * to the `.slice(0, 20)` cap. `strict: false` meant the compiler said nothing.
+   *
+   * Typed to what the cache actually returns, so a narrowing like that is now a build error
+   * rather than a column of plausible zeroes.
+   */
+  async analyse(openIssues: OpenIssueSummary[]): Promise<QueueHealth> {
     const now = new Date();
     const slaBreachImminent = this.detectSlaRisk(openIssues, now);
     const unassignedStale = this.detectUnassigned(openIssues, now);
@@ -51,31 +64,34 @@ export class QueueMonitor {
     };
   }
 
-  private detectSlaRisk(issues: JiraIssue[], now: Date): SlaRiskTicket[] {
+  private detectSlaRisk(issues: OpenIssueSummary[], now: Date): SlaRiskTicket[] {
     const thresholdMin = this.getNumber('agent_sla_breach_threshold_min', SLA_BREACH_THRESHOLD_MIN);
     const thresholdMs = thresholdMin * 60 * 1000;
     const results: SlaRiskTicket[] = [];
 
-    // customfield_10010 is Jira's default "Time to resolution" id and does not exist on this
-    // instance — NT uses 14046 (First Reply Time) and 14048 (Resolution), as flow-signals.ts
-    // and frt-safety-net.ts both already knew. So this read was always undefined, every issue
-    // hit the `continue`, and agent_queue_snapshots.sla_at_risk recorded 0 on all 4,006 rows.
-    // The health page flagged it as a constant column: a broken mapping, not a quiet queue.
-    // Configurable so the next instance that renumbers them does not silently zero this again.
+    // Both breach clocks come off the cache, extracted at sync time: sla_breach_time from
+    // cf14048 (Resolution) and sla_frt_breach_time from cf14046 (First Reply). This used to
+    // dig SLA cycle objects out of `issue.fields` with the wrong customfield id — 10010, which
+    // does not exist here — so every issue hit a `continue` and sla_at_risk recorded 0 on all
+    // 4,006 rows. Reading the pre-extracted columns fixes the id problem permanently and keeps
+    // this off fields_json, which is most of jira_issue_cache's 395MB.
+    const clocks: Array<{ at: Date | null; type: SlaRiskTicket['slaType'] }> = [];
     for (const issue of issues) {
-      const slaEntries = slaFieldValues(this.settings, issue.fields as Record<string, unknown>)
-        .flatMap(v => this.extractSlaEntries(v as any));
-      if (slaEntries.length === 0) continue;
-      for (const entry of slaEntries) {
-        const remaining = entry.breachTime - now.getTime();
+      clocks.length = 0;
+      clocks.push({ at: issue.sla_frt_breach_time, type: 'first_response' });
+      clocks.push({ at: issue.sla_breach_time, type: 'resolution' });
+
+      for (const clock of clocks) {
+        if (!clock.at) continue;
+        const remaining = new Date(clock.at).getTime() - now.getTime();
         if (remaining > 0 && remaining < thresholdMs) {
           results.push({
-            ticketKey: issue.key,
-            summary: (issue.fields.summary as string) ?? '',
-            assignee: (issue.fields.assignee as any)?.displayName ?? null,
-            slaType: entry.slaType,
+            ticketKey: issue.issue_key,
+            summary: issue.summary ?? '',
+            assignee: issue.assignee_display ?? null,
+            slaType: clock.type,
             minutesRemaining: Math.round(remaining / 60000),
-            breachTime: new Date(entry.breachTime).toISOString(),
+            breachTime: new Date(clock.at).toISOString(),
           });
         }
       }
@@ -84,48 +100,33 @@ export class QueueMonitor {
     return results.sort((a, b) => a.minutesRemaining - b.minutesRemaining);
   }
 
-  private extractSlaEntries(slaField: any): Array<{ slaType: SlaRiskTicket['slaType']; breachTime: number }> {
-    const entries: Array<{ slaType: SlaRiskTicket['slaType']; breachTime: number }> = [];
+  // extractSlaEntries parsed JSM SLA cycle objects out of fields_json. detectSlaRisk now reads
+  // the breach times the sync already extracted into columns, so nothing calls it. The
+  // 'next_update' SLA type it could return is not one NT has configured.
 
-    // JSM SLA field can be an array of SLA objects or a single object
-    const slaItems = Array.isArray(slaField) ? slaField : [slaField];
-
-    for (const item of slaItems) {
-      const ongoing = item?.ongoingCycle;
-      if (!ongoing?.breachTime?.epochMillis) continue;
-
-      const breachTime = ongoing.breachTime.epochMillis;
-      const name = ((item?.name ?? item?.id ?? '') as string).toLowerCase();
-
-      let slaType: SlaRiskTicket['slaType'] = 'resolution';
-      if (name.includes('first') || name.includes('response')) slaType = 'first_response';
-      else if (name.includes('update') || name.includes('next')) slaType = 'next_update';
-
-      entries.push({ slaType, breachTime });
-    }
-
-    return entries;
-  }
-
-  private detectUnassigned(issues: JiraIssue[], now: Date): UnassignedTicket[] {
+  private detectUnassigned(issues: OpenIssueSummary[], now: Date): UnassignedTicket[] {
     const thresholdMin = this.getNumber('agent_unassigned_stale_min', UNASSIGNED_STALE_MIN);
     const thresholdMs = thresholdMin * 60 * 1000;
     const results: UnassignedTicket[] = [];
 
     for (const issue of issues) {
-      const assignee = (issue.fields.assignee as any)?.displayName;
-      if (assignee) continue;
+      if (issue.assignee_display) continue;
 
-      const created = new Date((issue.fields.created as string) ?? '');
+      // Guard the date explicitly. When `created` was missing, `ageMs` came out NaN, `NaN <
+      // thresholdMs` is false, and so every open ticket fell through to be reported as stale —
+      // which is how this pinned at the .slice(0, 20) cap for three days. A ticket whose
+      // creation date we cannot read is not evidence that it is stale.
+      const created = issue.jira_created ? new Date(issue.jira_created) : null;
+      if (!created || Number.isNaN(created.getTime())) continue;
       const ageMs = now.getTime() - created.getTime();
       if (ageMs < thresholdMs) continue;
 
       results.push({
-        ticketKey: issue.key,
-        summary: (issue.fields.summary as string) ?? '',
-        priority: (issue.fields.priority as any)?.name ?? 'Medium',
+        ticketKey: issue.issue_key,
+        summary: issue.summary ?? '',
+        priority: issue.priority_name ?? 'Medium',
         ageMinutes: Math.round(ageMs / 60000),
-        created: (issue.fields.created as string) ?? '',
+        created: created.toISOString(),
       });
     }
 
@@ -168,14 +169,15 @@ export class QueueMonitor {
     return null;
   }
 
-  private detectCapacityWarning(issues: JiraIssue[]): CapacityWarning | null {
+  private detectCapacityWarning(issues: OpenIssueSummary[]): CapacityWarning | null {
     const threshold = this.getNumber('agent_capacity_threshold', CAPACITY_THRESHOLD);
 
     // Count unique assignees (as a proxy for available agents)
+    // Display name rather than accountId: the narrow cache row does not carry the id, and for
+    // counting distinct people the name is the same answer.
     const assignees = new Set<string>();
     for (const issue of issues) {
-      const assignee = (issue.fields.assignee as any)?.accountId;
-      if (assignee) assignees.add(assignee);
+      if (issue.assignee_display) assignees.add(issue.assignee_display);
     }
 
     const availableAgents = Math.max(assignees.size, 1);
@@ -194,7 +196,7 @@ export class QueueMonitor {
   }
 
   private async recordSnapshot(
-    issues: JiraIssue[],
+    issues: OpenIssueSummary[],
     slaAtRisk: number,
     unassigned: number,
     now: Date,
@@ -205,8 +207,8 @@ export class QueueMonitor {
       // Count tickets created in the last hour
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
       const createdThisHour = issues.filter(i => {
-        const created = new Date((i.fields.created as string) ?? '');
-        return created.getTime() > oneHourAgo.getTime();
+        if (!i.jira_created) return false;
+        return new Date(i.jira_created).getTime() > oneHourAgo.getTime();
       }).length;
 
       await executeAndGetId(
