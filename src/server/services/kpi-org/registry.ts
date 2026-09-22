@@ -120,6 +120,17 @@ export const NT_OPEN_ASOF = (day: string, nextDay: string) =>
 const RT = 'cf[12800]';
 const TIER = 'cf[12981]';
 
+/** CC Incidents request types — an ALLOWLIST mirroring the "All Incidents CC" JSM queue's
+ *  own JQL, so the KPI bucket and the queue agents work from can never drift. This used to
+ *  be a denylist (everything that isn't a Service Request or TPJ Request), which silently
+ *  swept in any other request type: on 22 Sep 2026 two "Delivery QA" tickets sat in no NT
+ *  queue at all yet drove the CC Incidents backlog, no-reply, SLA and oldest-actionable
+ *  numbers (bucket 35 vs the queue's 33; oldest actionable read 4d off a Delivery QA ticket
+ *  instead of 0d). A new request type now falls OUT of the KPI rather than into Incidents —
+ *  add it here and to the queue together. */
+export const CC_INCIDENT_RT =
+  `(cf[12800] in ("Incident (NT)", "Emailed request (NT)", "Chat (NT)", "GDPR (NT)", "AI Request (NT)") OR cf[12800] is EMPTY)`;
+
 /** #4 Incident bucket: tier {Customer Care, Tier 2} + incident-class request types (incl. untriaged). */
 export const INCIDENT_BUCKET =
   `${TIER} in ("Customer Care", "Tier 2") ` +
@@ -354,7 +365,7 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
   {
     key: 'nt_legacy_cc_incidents', label: 'Number of Tickets in CC (Incidents)', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
     unit: 'count', direction: 'lower-better', dailyTarget: 40, monthlyTarget: null, rollup: 'latest', rag: { greenMax: 40, amberMax: 60 },
-    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care" AND (${RT} not in ("Service Request (NT)", "TPJ Request (NT)") OR ${RT} is EMPTY)` },
+    compute: { kind: 'jql_count', jql: () => `${NT_OPEN} AND ${TIER} = "Customer Care" AND ${CC_INCIDENT_RT}` },
   },
   {
     key: 'nt_legacy_cc_service_requests', label: 'Number of Tickets in CC (Service Requests)', team: 'Support', colA: 'Legacy', jiraSpace: 'NT',
@@ -505,7 +516,7 @@ const LT = (tierJql: string) => `${NT_OPEN} AND ${tierJql}`;
 const CC_TIER = `${TIER} = "Customer Care"`;
 interface LegacyTierDef { bucket: string; noReply: string; overSla: string; notAct: string; oldest: string; oldestTarget: number; }
 const LEGACY_TIERS: LegacyTierDef[] = [
-  { bucket: `${LT(CC_TIER)} AND (${RT} not in ("Service Request (NT)", "TPJ Request (NT)") OR ${RT} is EMPTY)`,
+  { bucket: `${LT(CC_TIER)} AND ${CC_INCIDENT_RT}`,
     noReply: 'Number of Tickets With No Reply in CC (Incidents)', overSla: 'CC Incidents over SLA (actionable)',
     notAct: 'CC Incidents over SLA (not actionable)', oldest: 'Oldest actionable ticket (days) in CC Incidents', oldestTarget: 5 },
   { bucket: `${LT(CC_TIER)} AND ${RT} = "Service Request (NT)"`,

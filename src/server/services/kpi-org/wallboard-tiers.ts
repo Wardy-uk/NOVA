@@ -5,7 +5,7 @@
 // (NT open-filter, isNoReply, resolution-SLA-breached + actionable). 60s-cached.
 
 import type { JiraRestClient } from '../jira-client.js';
-import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RES_BREACHED } from './registry.js';
+import { NT_OPEN, NOT_ACTIONABLE_STATUSES, RES_BREACHED, CC_INCIDENT_RT } from './registry.js';
 import { countNoReply } from './nt-compute.js';
 
 const NOT_ACTIONABLE_LIST = NOT_ACTIONABLE_STATUSES.map(s => `"${s}"`).join(', ');
@@ -22,7 +22,7 @@ export interface TierBucket {
 // the canonical request-type field (cf12800, "(NT)"-suffixed) and CurrentTier (cf12981).
 export const TIER_BUCKETS: TierBucket[] = [
   { key: 'cc_incidents', label: 'CC Incidents',
-    filter: `cf[12981] = "Customer Care" AND cf[12800] not in ("Service Request (NT)", "TPJ Request (NT)")` },
+    filter: `cf[12981] = "Customer Care" AND ${CC_INCIDENT_RT}` },
   { key: 'cc_service_requests', label: 'CC Service Requests',
     filter: `cf[12981] = "Customer Care" AND cf[12800] = "Service Request (NT)"` },
   { key: 'cc_tpj', label: 'Property Jungle',
