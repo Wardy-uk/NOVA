@@ -461,8 +461,12 @@ export class JiraRestClient {
     bodyText: string,
     options?: { visibility?: { type: string; value: string }; internal?: boolean }
   ): Promise<unknown> {
-    // internal !== true means the customer can see it (Jira's default is public).
-    if (options?.internal !== true) assertPublicCommentSafe(issueKey, bodyText);
+    // Omitting `internal` means internal. Jira's own default is public, so an
+    // omission used to publish to the customer — which is how a Dev Review
+    // handback replayed from the outbox landed on a customer's ticket. Every
+    // caller that genuinely wants a public comment says `internal: false`.
+    const internal = options?.internal ?? true;
+    if (!internal) assertPublicCommentSafe(issueKey, bodyText);
 
     const payload: Record<string, unknown> = {
       body: {
@@ -470,12 +474,10 @@ export class JiraRestClient {
         version: 1,
         content: [{ type: 'paragraph', content: [{ type: 'text', text: bodyText }] }],
       },
+      properties: [{ key: 'sd.public.comment', value: { internal } }],
     };
     if (options?.visibility) {
       payload.visibility = options.visibility;
-    }
-    if (options?.internal !== undefined) {
-      payload.properties = [{ key: 'sd.public.comment', value: { internal: options.internal } }];
     }
     return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
   }
@@ -487,13 +489,14 @@ export class JiraRestClient {
     body: object,
     options?: { internal?: boolean }
   ): Promise<unknown> {
-    if (options?.internal !== true) assertPublicCommentSafe(issueKey, JSON.stringify(body));
+    // Same default as addComment(): omitting `internal` means internal.
+    const internal = options?.internal ?? true;
+    if (!internal) assertPublicCommentSafe(issueKey, JSON.stringify(body));
 
-    const payload: Record<string, unknown> = { body };
-    if (options?.internal !== undefined) {
-      payload.properties = [{ key: 'sd.public.comment', value: { internal: options.internal } }];
-    }
-    return this.request<unknown>('POST', `issue/${issueKey}/comment`, payload);
+    return this.request<unknown>('POST', `issue/${issueKey}/comment`, {
+      body,
+      properties: [{ key: 'sd.public.comment', value: { internal } }],
+    });
   }
 
   /** Update fields on an existing issue */
@@ -533,16 +536,17 @@ export class JiraRestClient {
       payload.fields = options.fields;
     }
     if (options?.comment) {
-      // A close comment rides WITH the transition and is customer-visible unless
-      // explicitly marked internal — same guard as addComment().
-      if (options.comment.internal !== true) {
+      // A comment riding WITH the transition defaults to internal, same as
+      // addComment(). A caller that wants the customer to see it says so.
+      const internal = options.comment.internal ?? true;
+      if (!internal) {
         assertPublicCommentSafe(issueKey, JSON.stringify(options.comment.body));
       }
-      const commentAdd: Record<string, unknown> = { body: options.comment.body };
+      const commentAdd: Record<string, unknown> = {
+        body: options.comment.body,
+        properties: [{ key: 'sd.public.comment', value: { internal } }],
+      };
       if (options.comment.visibility) commentAdd.visibility = options.comment.visibility;
-      if (options.comment.internal !== undefined) {
-        commentAdd.properties = [{ key: 'sd.public.comment', value: { internal: options.comment.internal } }];
-      }
       payload.update = {
         comment: [{ add: commentAdd }],
       };

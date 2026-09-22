@@ -489,7 +489,8 @@ export class PortalJiraService {
 
     if (!this.jiraClient) throw new Error('Jira client not configured');
 
-    await this.jiraClient.addComment(ticketKey, `[Portal - ${authorName}]\n\n${body}`);
+    // Public: this is the customer's own portal message being relayed onto the ticket.
+    await this.jiraClient.addComment(ticketKey, `[Portal - ${authorName}]\n\n${body}`, { internal: false });
 
     broadcastPortalEvent(orgId, {
       type: 'ticket:comment',

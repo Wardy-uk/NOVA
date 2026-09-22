@@ -1416,7 +1416,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
 
     try {
       // Public customer-facing comment (NOT internal)
-      await jira.addComment(ticketKey, message);
+      await jira.addComment(ticketKey, message, { internal: false });
 
       // Set Agent Next Update field
       await jira.updateFields(ticketKey, {
@@ -1714,7 +1714,8 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
     try {
       const jira = await requireJiraForUser(req, res);
       if (!jira) return;
-      await jira.addComment(ticketKey, message);
+      // Public — a chase is addressed to the customer.
+      await jira.addComment(ticketKey, message, { internal: false });
 
       await recordEvent('action_taken', username, ticketKey, {
         action_type: 'chase',
@@ -1976,7 +1977,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         }
         const chaseDateStr = nextChaseDate.toISOString().split('T')[0];
 
-        await jira.addComment(ticketKey, `Hi ${reporterName}, I'm coordinating with our ${destination} team on this. I'll keep you updated — you can expect to hear from me by ${chaseDateStr}.`);
+        await jira.addComment(ticketKey, `Hi ${reporterName}, I'm coordinating with our ${destination} team on this. I'll keep you updated — you can expect to hear from me by ${chaseDateStr}.`, { internal: false });
 
         try {
           await jira.updateFields(ticketKey, { [JIRA_FIELDS.AGENT_NEXT_UPDATE]: chaseDateStr });

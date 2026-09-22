@@ -1163,7 +1163,7 @@ export function createDevReviewRoutes(
             `Your reference for this work is ${createdBug.key} — please quote this in any follow-up communication.\n\n` +
             `Development work is prioritised alongside our wider roadmap and may take up to 60 working days to complete, depending on prioritisation.\n\n` +
             `We'll keep you updated as this progresses. If you have any concerns or need to discuss prioritisation, please contact your Account Manager.`;
-          await client.addComment(key, customerComment);
+          await client.addComment(key, customerComment, { internal: false });
         } catch (commentErr) {
           const msg = commentErr instanceof Error ? commentErr.message : 'Customer comment failed';
           console.error(`[DevReview/accept] Customer comment failed for ${key}: ${msg}`);
@@ -1381,7 +1381,7 @@ export function createDevReviewRoutes(
     try {
       const brief = await buildWorkItemBrief(client, key, tldr, developmentDetails, workItemComment);
       const workItemBrief = `🔗 Linked from support ticket ${key} by ${display}\n\n${brief.text}`;
-      await client.addComment(workItemKey, workItemBrief);
+      await client.addComment(workItemKey, workItemBrief, { internal: true });
     } catch (briefErr) {
       const msg = briefErr instanceof Error ? briefErr.message : 'Work item brief failed';
       console.error(`[DevReview/link-existing] Failed to post brief to ${workItemKey}: ${msg}`);
@@ -1395,7 +1395,7 @@ export function createDevReviewRoutes(
         `Following review by our Development team, this has been confirmed as requiring development work and has been linked to an existing item in our development pipeline.\n\n` +
         `Your reference for this work is ${workItemKey} — please quote this in any follow-up communication.\n\n` +
         `We'll keep you updated as this progresses. If you have any concerns or need to discuss prioritisation, please contact your Account Manager.`;
-      await client.addComment(key, customerComment);
+      await client.addComment(key, customerComment, { internal: false });
     } catch (commentErr) {
       const msg = commentErr instanceof Error ? commentErr.message : 'Customer comment failed';
       console.error(`[DevReview/link-existing] Customer comment failed for ${key}: ${msg}`);
@@ -1462,17 +1462,35 @@ export function createDevReviewRoutes(
     const state = await devQueries.getState(String(req.params.key));
     const submitter = state?.submitted_by_username || null;
 
-    try {
-      // Set the reason BEFORE the tier moves. The sync classifies a tier change by
-      // comparing the cached reason against the current one, so a reason written
-      // after the move would only land on the following pass — too late to explain
-      // the move it belongs to, leaving it unclassified for good.
-      await client.updateFields(String(req.params.key), { [CF_REJECTION_REASON]: { value: reason } });
+    const warnings: string[] = [];
 
+    try {
+      // cf15286 lives on Jira's T2 rejection TRANSITION screen, not NT's edit
+      // screen — a PUT /issue for it is refused with "Specify a valid value"
+      // whatever the value is. So it rides with the transition where one is
+      // configured, and is best-effort otherwise.
+      //
+      // Either way it must never sink the return. It used to be the first call
+      // in this try, so the refusal aborted before the comment was ever posted
+      // and every return fell through to the outbox — which replayed it as a
+      // public comment under a personal account.
       if (returnTransitionId) {
-        await client.transitionIssue(String(req.params.key), returnTransitionId, { comment: commentAdf });
+        await client.transitionIssue(String(req.params.key), returnTransitionId, {
+          fields: { [CF_REJECTION_REASON]: { value: reason } },
+          comment: commentAdf,
+        });
       } else {
-        // No configured transition → update CurrentTier field directly + post comment
+        // No configured transition → update CurrentTier field directly + post comment.
+        // The reason goes first: the sync classifies a tier change by comparing the
+        // cached reason against the current one, so one written after the move would
+        // only land on the following pass — too late to explain the move it belongs to.
+        try {
+          await client.updateFields(String(req.params.key), { [CF_REJECTION_REASON]: { value: reason } });
+        } catch (reasonErr) {
+          const rmsg = reasonErr instanceof Error ? reasonErr.message : 'Reason field rejected';
+          console.warn(`[dev-review] ${String(req.params.key)}: could not record reason on ${CF_REJECTION_REASON} (${rmsg}) — it is still in the comment and in dev_review_thread.meta`);
+          warnings.push(`Reason recorded on the ticket comment but not on the Jira field: ${rmsg}`);
+        }
         await client.updateFields(String(req.params.key), { [CF_CURRENT_TIER]: { id: TIER_ID_T2 } });
         await client.addComment(String(req.params.key), commentText, { internal: true });
       }
@@ -1511,7 +1529,7 @@ export function createDevReviewRoutes(
         }
       } catch { /* non-fatal */ }
 
-      res.json({ ok: true });
+      res.json({ ok: true, warnings: warnings.length > 0 ? warnings : undefined });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Return failed';
       await devQueries.markThreadSyncFailed(threadId, msg);

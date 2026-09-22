@@ -5249,8 +5249,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
   // When an accept/return/comment fails to write through to Jira, the route
   // queues an entry in dev_review_outbox. This worker picks them up, retries,
   // marks done on success, increments attempts on failure, and gives up after 5.
+  //
+  // Must use the SAME client as the route it is replaying for. It used to build
+  // the service-desk client, which is a personal PAT — so a returned ticket that
+  // failed inline came back two minutes later authored by a named human instead
+  // of NOVA-Jira. The replay is the route's write, not a separate actor.
   jobRegistry.register('dev-review-outbox', 'Dev Review outbox worker', async () => {
-    const client = buildServiceDeskJiraClient();
+    const client = buildOnboardingJiraClient();
     if (!client) return;
     const pending = await devReviewQueries.pendingOutbox(20);
     if (pending.length === 0) return;
@@ -5270,14 +5275,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
           try {
             await client.transitionIssue(entry.jira_key, transitionId, {
               fields: Object.keys(fields).length > 0 ? fields : undefined,
-              comment: { body: adf(text) },
+              comment: { body: adf(text), internal: true },
             });
           } catch (fieldErr: unknown) {
             const msg = fieldErr instanceof Error ? fieldErr.message : String(fieldErr);
             if (msg.includes('cannot be set') || msg.includes('not on the appropriate screen')) {
               console.warn(`[DevReviewOutbox] ${entry.jira_key}: transition fields rejected, retrying without custom fields`);
               await client.transitionIssue(entry.jira_key, transitionId, {
-                comment: { body: adf(text) },
+                comment: { body: adf(text), internal: true },
               });
             } else {
               throw fieldErr;
@@ -5296,11 +5301,11 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1f26;color:#e2
           const text = String(payload.commentText || '');
           if (transitionId) {
             await client.transitionIssue(entry.jira_key, transitionId, {
-              comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+              comment: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }, internal: true },
             });
           } else {
             await client.updateFields(entry.jira_key, { customfield_12981: { id: '13062' } });
-            await client.addComment(entry.jira_key, text);
+            await client.addComment(entry.jira_key, text, { internal: true });
           }
           await devReviewQueries.markReturned(entry.jira_key);
         } else if (entry.op === 'comment') {
