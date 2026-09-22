@@ -1465,15 +1465,12 @@ export function createDevReviewRoutes(
     const warnings: string[] = [];
 
     try {
-      // cf15286 lives on Jira's T2 rejection TRANSITION screen, not NT's edit
-      // screen — a PUT /issue for it is refused with "Specify a valid value"
-      // whatever the value is. So it rides with the transition where one is
-      // configured, and is best-effort otherwise.
-      //
-      // Either way it must never sink the return. It used to be the first call
-      // in this try, so the refusal aborted before the comment was ever posted
-      // and every return fell through to the outbox — which replayed it as a
-      // public comment under a personal account.
+      // Writing cf15286 must never be able to sink the return. It used to be the
+      // first call in this try, so when Jira refused the value the whole handback
+      // aborted before the comment was ever posted and fell through to the
+      // outbox, which replayed it as a PUBLIC comment under a personal account.
+      // The refusal is fixed (see REJECTION_REASON_OPTIONS), but a reason that
+      // cannot be recorded is worth a warning, not a lost handback.
       if (returnTransitionId) {
         await client.transitionIssue(String(req.params.key), returnTransitionId, {
           fields: { [CF_REJECTION_REASON]: { value: reason } },

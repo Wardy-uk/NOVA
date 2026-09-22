@@ -59,7 +59,14 @@ export interface RejectionReasonOption {
 export const REJECTION_REASON_OPTIONS: RejectionReasonOption[] = [
   // The escalation should not have been made, or not in the state it arrived in.
   { value: 'Insufficient information',   outcome: 'rejection' },
-  { value: 'Resolvable in Customer Care', outcome: 'rejection' },
+  // The   is real: option 14516 was created in Jira admin with a NON-BREAKING
+  // SPACE after "Resolvable", and a select value must match character for
+  // character. Sending a plain space here is what made every "Resolvable in
+  // Customer Care" handback fail with 400 "Specify a valid value" while every
+  // other option wrote fine. Renaming the option in Jira admin to use an ordinary
+  // space is the real fix; this can revert to ' ' on the day that happens, and
+  // the matcher below already accepts either spelling.
+  { value: 'Resolvable in Customer Care', outcome: 'rejection' },
   { value: 'Wrong tier',                 outcome: 'rejection' },
   { value: 'Duplicate Issue',            outcome: 'rejection' },
   // The higher tier did the work and is handing it back. The system working.
@@ -70,14 +77,20 @@ export const REJECTION_REASON_OPTIONS: RejectionReasonOption[] = [
   // classification by design, and the comment is where the answer lives.
 ];
 
-const OUTCOME_BY_LOWER = new Map(REJECTION_REASON_OPTIONS.map(o => [o.value.toLowerCase(), o.outcome]));
+/** Case-folded, with every run of whitespace — including the non-breaking space
+ *  Jira carries in option 14516 — flattened to a single plain space. Without
+ *  this, a value read back from Jira would not match the same option written
+ *  from here, and the handback would be filed as unclassified. */
+const foldReason = (s: string): string => s.replace(/\s+/gu, ' ').trim().toLowerCase();
+
+const OUTCOME_BY_LOWER = new Map(REJECTION_REASON_OPTIONS.map(o => [foldReason(o.value), o.outcome]));
 
 /** Matching is case- and whitespace-insensitive because the option text is
  *  maintained by hand in Jira admin; the canonical spelling above is what gets
  *  written back. */
 export function rejectionReasonOutcome(option: string | null | undefined): 'rejection' | 'return' | null {
   if (!option) return null;
-  return OUTCOME_BY_LOWER.get(option.trim().toLowerCase()) ?? null;
+  return OUTCOME_BY_LOWER.get(foldReason(option)) ?? null;
 }
 
 export interface TierMoveClassification {
