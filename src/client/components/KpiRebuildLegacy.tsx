@@ -27,6 +27,7 @@ const KPI_ORDER: string[] = [
   'Tickets Solved Today',
   'Solved by NOVA',
   'CSAT %',
+  'Tickets Resolved with a KBA',
   'Number of Tickets in Customer Care',
   'Number of Tickets in CC (Incidents)',
   'Number of Tickets in CC (Service Requests)',
@@ -119,6 +120,7 @@ const REPORTABLE_KPIS = new Set([
 const GROUP_OVERRIDE: Record<string, string> = {
   'Solved by NOVA': 'Legacy',
   'CSAT %': 'Legacy',
+  'Tickets Resolved with a KBA': 'Legacy',
 };
 
 function Dot({ rag }: { rag: number | null }) {

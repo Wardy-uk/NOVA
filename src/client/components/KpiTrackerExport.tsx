@@ -78,7 +78,7 @@ export function KpiTrackerExport() {
       <p className="text-xs text-slate-500 mb-4">
         Weekday columns only, exact spreadsheet row order. <b>Copy numbers</b> puts just the value grid (tab-separated) on your clipboard —
         click the first date cell for this month in the sheet and paste. Rows 17 / 39 / 40 (TPJ-in-Dev, Failed Jobs, CI) are intentionally blank. Today's column is live.
-        The italic <b>CSAT %</b> row below the rule has no row in the sheet — it is shown for reference and is <b>not</b> included when you copy.
+        The italic rows below the rule (<b>CSAT %</b>, <b>Tickets Resolved with a KBA</b>) have no row in the sheet — they are shown for reference and are <b>not</b> included when you copy.
       </p>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">{error}</div>}
@@ -95,7 +95,7 @@ export function KpiTrackerExport() {
             </thead>
             <tbody>
               {data.rows.map((row, i) => (
-                <tr key={i} className={row.extra ? 'border-t-2 border-white/20 text-slate-400' : 'border-t border-white/5'}>
+                <tr key={i} className={row.extra && !data.rows[i - 1]?.extra ? 'border-t-2 border-white/20 text-slate-400' : row.extra ? 'border-t border-white/5 text-slate-400' : 'border-t border-white/5'}>
                   <td className={`px-3 py-1.5 sticky left-0 bg-[#1a1f26] whitespace-nowrap ${row.extra ? 'text-slate-400 italic' : 'text-slate-300'}`}>
                     {row.label}
                   </td>

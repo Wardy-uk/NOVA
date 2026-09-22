@@ -120,6 +120,10 @@ export const NT_OPEN_ASOF = (day: string, nextDay: string) =>
 const RT = 'cf[12800]';
 const TIER = 'cf[12981]';
 
+/** Resolution Type (cf14494) — mandatory single-select set on close. Values match
+ *  RESOLUTION_TYPE_IDS in utils/jira-resolve-fields.ts, which is what NOVA writes. */
+const RESOLUTION_TYPE = 'cf[14494]';
+
 /** CC Incidents request types — an ALLOWLIST mirroring the "All Incidents CC" JSM queue's
  *  own JQL, so the KPI bucket and the queue agents work from can never drift. This used to
  *  be a denylist (everything that isn't a Service Request or TPJ Request), which silently
@@ -356,6 +360,27 @@ export const SUPPORT_NT_KPIS: OrgKpi[] = [
     unit: 'percent', direction: 'higher-better', dailyTarget: 65, monthlyTarget: null, rollup: 'average',
     rag: { greenMin: 65, amberMin: 35 },
     compute: { kind: 'fcr' },
+  },
+
+  // Knowledge-base effectiveness. Resolution Type (cf14494) is mandatory on close, so
+  // this is a clean count of the closes an agent (or NOVA's kba_match quick win) attributed
+  // to a published KBA. No target is set: nobody has agreed what good looks like, and an
+  // invented one would score the team red from day one — direction 'informational' keeps
+  // it out of the RAG and out of the WTD green/red percentages until a target is agreed.
+  // Counted off the status transition, not resolutiondate, because NOVA's closes set no
+  // resolution and would otherwise be invisible.
+  {
+    key: 'nt_kba_supplied', label: 'Tickets Resolved with a KBA', team: 'Support', colA: 'Quality', jiraSpace: 'NT',
+    unit: 'count', direction: 'informational', dailyTarget: null, monthlyTarget: null, rollup: 'sum',
+    rag: {},
+    compute: {
+      kind: 'jql_count',
+      jql: c => `project = NT AND ${RESOLUTION_TYPE} = "KBA Supplied" `
+        + `AND status CHANGED TO ("Resolved", "Done") ${TX_DURING_DAY(c.day, c.nextDay)}`,
+    },
+    note: 'Closes where Resolution Type = "KBA Supplied". Under-reports: a ticket genuinely '
+      + 'answered from a KBA is often closed as "User Error / How-To Guidance" or "No Fault Found" '
+      + 'instead, so read this as a floor, not the true figure.',
   },
 
   // ── Legacy 7-tier shape (colA 'Legacy'). Open-ticket volumes split by CurrentTier

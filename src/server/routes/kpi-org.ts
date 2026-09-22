@@ -89,9 +89,11 @@ export const TRACKER_ROWS: TrackerRow[] = [
   { label: 'Oldest actionable ticket (days) in Tier 3', kpiKey: 'nt_lg_oldest_tier_3_over_sla_actionable' },
   { label: 'Failed Jobs remaining on Board', kpiKey: null },                        // row 39 — blank per spec
   { label: 'No. of CI In Progress (unmitigated)', kpiKey: null },                    // row 40 — blank per spec
-  // Beyond the sheet: no row 41 exists in the tracker, so this is flagged `extra`
-  // and left out of the copy payload — pasting it would land in the wrong cell.
+  // Beyond the sheet: the tracker stops at row 40, so these are flagged `extra` and
+  // left out of the copy payload — pasting them would land in cells the sheet
+  // does not have. They are still captured and stored like any other KPI.
   { label: 'CSAT % (avg rating × 20)', kpiKey: 'nt_csat', extra: true },
+  { label: 'Tickets Resolved with a KBA', kpiKey: 'nt_kba_supplied', extra: true },
 ];
 
 export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
@@ -227,7 +229,7 @@ export function createKpiOrgRoutes(deps: KpiOrgDeps): Router {
     if (!from || !to) { res.status(400).json({ ok: false, error: 'from and to required' }); return; }
     try {
       const ragNum = (r: string | null) => r === 'green' ? 1 : r === 'amber' ? 2 : r === 'red' ? 3 : null;
-      const dir = (d?: string) => d === 'higher-better' ? 'Higher is better' : 'Lower is better';
+      const dir = (d?: string) => d === 'higher-better' ? 'Higher is better' : d === 'informational' ? 'Informational' : 'Lower is better';
       const rows = await getTeamRange('Support', from, to);
       let data = rows.map(row => {
         const def = getKpi(row.kpi_key);
