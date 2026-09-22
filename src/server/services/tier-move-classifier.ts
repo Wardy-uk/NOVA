@@ -59,14 +59,14 @@ export interface RejectionReasonOption {
 export const REJECTION_REASON_OPTIONS: RejectionReasonOption[] = [
   // The escalation should not have been made, or not in the state it arrived in.
   { value: 'Insufficient information',   outcome: 'rejection' },
-  // The   is real: option 14516 was created in Jira admin with a NON-BREAKING
-  // SPACE after "Resolvable", and a select value must match character for
-  // character. Sending a plain space here is what made every "Resolvable in
-  // Customer Care" handback fail with 400 "Specify a valid value" while every
-  // other option wrote fine. Renaming the option in Jira admin to use an ordinary
-  // space is the real fix; this can revert to ' ' on the day that happens, and
-  // the matcher below already accepts either spelling.
-  { value: 'Resolvable in Customer Care', outcome: 'rejection' },
+  // Option 14516 spent a while holding a NON-BREAKING SPACE after "Resolvable",
+  // put there by a paste into Jira admin. A select value must match character for
+  // character, so every handback using it failed with 400 "Specify a valid value"
+  // while every other option wrote fine. The option was renamed to an ordinary
+  // space on 22 Sep 2026 (ID 14516 kept, so existing tickets followed it). The
+  // matcher below folds whitespace, so tickets stamped with the old spelling
+  // still classify.
+  { value: 'Resolvable in Customer Care', outcome: 'rejection' },
   { value: 'Wrong tier',                 outcome: 'rejection' },
   { value: 'Duplicate Issue',            outcome: 'rejection' },
   // The higher tier did the work and is handing it back. The system working.
