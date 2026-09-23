@@ -5,6 +5,7 @@ import type { JiraRestClient } from './jira-client.js';
 import type { JiraCacheQueries } from './jira-cache-queries.js';
 import { DailyDigestSchema, WeeklyDigestSchema, type DailyDigest, type WeeklyDigest } from './kpi-schemas.js';
 import { loadPrompt } from './prompt-loader.js';
+import { anySlaBreachedFromSummary } from './jira-sla-summary.js';
 import type { PipelineMonitor, PipelineTarget } from './pipeline-monitor.js';
 import { tableSuffix } from './pipeline-monitor.js';
 import { query as localQuery } from './database.js';
@@ -103,25 +104,11 @@ interface CacheRow {
   agent_last_updated: string | null;
   agent_next_update: string | null;
   no_reply: boolean | number | null;
-  fields_json: string | null;
+  sla_frt_summary: string | null;
+  sla_res_summary: string | null;
+  csat_rating: number | null;
   issuetype_name: string | null;
   resolution_name: string | null;
-}
-
-function isSlaBreached(slaField: any): boolean | null {
-  if (!slaField) return null;
-  const cycles = Array.isArray(slaField) ? slaField : [slaField];
-  for (const cycle of cycles) {
-    if (cycle.completedCycles) {
-      for (const cc of cycle.completedCycles) {
-        if (cc.breached === true || (cc.remainingTime?.millis != null && cc.remainingTime.millis < 0)) return true;
-      }
-    }
-    if (cycle.ongoingCycle) {
-      if (cycle.ongoingCycle.breached === true || (cycle.ongoingCycle.remainingTime?.millis != null && cycle.ongoingCycle.remainingTime.millis < 0)) return true;
-    }
-  }
-  return false;
 }
 
 const TIER_MAP: Record<string, string> = {
@@ -179,24 +166,6 @@ function isNoReply(ticket: CacheRow, now: Date): boolean {
 
 function isOnboarding(requestType: string | null): boolean {
   return (requestType || '').toLowerCase() === 'onboarding';
-}
-
-function parseSlaField(fieldsJson: string | null, fieldName: string): any {
-  if (!fieldsJson) return null;
-  try {
-    const fields = JSON.parse(fieldsJson);
-    return fields?.[fieldName] ?? null;
-  } catch { return null; }
-}
-
-function parseCsat(fieldsJson: string | null): number | null {
-  if (!fieldsJson) return null;
-  try {
-    const fields = JSON.parse(fieldsJson);
-    const rating = fields?.customfield_12802?.rating;
-    if (typeof rating === 'number' && rating >= 1 && rating <= 5) return rating;
-    return null;
-  } catch { return null; }
 }
 
 // All tier groups that get per-tier KPIs
@@ -365,7 +334,7 @@ export class KpiPipeline {
         SELECT issue_key, status_name, status_category, current_tier, request_type,
                assignee_account_id, assignee_display, jira_created, jira_updated, due_date,
                sla_breached, sla_breach_time, agent_last_updated, agent_next_update,
-               no_reply, fields_json, issuetype_name, resolution_name
+               no_reply, sla_frt_summary, sla_res_summary, csat_rating, issuetype_name, resolution_name
         FROM jira_issue_cache
         WHERE ${pf.sql} AND status_category != 'Done'
       `, pf.params);
@@ -389,7 +358,7 @@ export class KpiPipeline {
         SELECT issue_key, status_name, status_category, current_tier, request_type,
                assignee_account_id, assignee_display, jira_created, jira_updated, due_date,
                sla_breached, sla_breach_time, agent_last_updated, agent_next_update,
-               no_reply, fields_json, issuetype_name, resolution_name
+               no_reply, sla_frt_summary, sla_res_summary, csat_rating, issuetype_name, resolution_name
         FROM jira_issue_cache
         WHERE ${pf.sql}
           AND status_category = 'Done'
@@ -424,9 +393,9 @@ export class KpiPipeline {
         return {
           ...t,
           tier,
-          frtBreached: isSlaBreached(parseSlaField(t.fields_json, 'customfield_14046')),
-          resBreached: isSlaBreached(parseSlaField(t.fields_json, 'customfield_14048')),
-          csat: parseCsat(t.fields_json),
+          frtBreached: anySlaBreachedFromSummary(t.sla_frt_summary),
+          resBreached: anySlaBreachedFromSummary(t.sla_res_summary),
+          csat: t.csat_rating,
           actionable: isActionable(t.status_name),
           slaActionable: isSlaActionable(t.status_name),
           excluded: isExcludedStatus(t.status_name),
@@ -830,15 +799,15 @@ export class KpiPipeline {
       console.log(`[kpi-pipeline] Derived KPIs: ${totalResolved} resolved-today tickets found (${firstLineResolved} resolved at Customer Care tier), 1st Line Rate = ${firstLineRate}%`);
 
       // CSAT % (derived) — same as snapshot CSAT but with different RAG
-      const csatRows = await localQuery<{ fields_json: string | null }>(`
-        SELECT fields_json FROM jira_issue_cache
+      const csatRows = await localQuery<{ csat_rating: number | null }>(`
+        SELECT csat_rating FROM jira_issue_cache
         WHERE ${pf.sql} AND status_category = 'Done'
           AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
-          AND fields_json IS NOT NULL
+          AND sla_summary_at IS NOT NULL
       `, pf.params);
       let csatSum = 0, csatCount = 0;
       for (const r of csatRows) {
-        const rating = parseCsat(r.fields_json);
+        const rating = r.csat_rating;
         if (rating !== null) { csatSum += rating; csatCount++; }
       }
       const csatDerived = csatCount > 0 ? Math.round((csatSum / csatCount) * 20) : 0;
@@ -974,7 +943,7 @@ export class KpiPipeline {
         due_date: string | null;
         jira_created: string | null;
         jira_updated: string | null;
-        fields_json: string | null;
+        sla_res_summary: string | null;
       }>(`
         SELECT a.assignee_account_id,
           a.assignee_display,
@@ -983,7 +952,7 @@ export class KpiPipeline {
           a.due_date,
           a.jira_created,
           a.jira_updated,
-          a.fields_json
+          a.sla_res_summary
         FROM jira_issue_cache a
         WHERE ${pf.sql.replace(/project_key/g, 'a.project_key')}
           AND a.status_category != 'Done'
@@ -992,7 +961,7 @@ export class KpiPipeline {
           AND LOWER(ISNULL(a.request_type, '')) != 'onboarding'
       `, pf.params);
 
-      // Aggregate per-agent stats in TypeScript (SLA breach via parseSlaField + isSlaBreached)
+      // Aggregate per-agent stats in TypeScript (SLA breach from the stored summary)
       const agentMap = new Map<string, {
         assignee_account_id: string;
         assignee_display: string | null;
@@ -1040,13 +1009,12 @@ export class KpiPipeline {
 
         agg.OpenTickets_Total++;
 
-        // SLA breach: use parseSlaField + isSlaBreached with status operational filter.
+        // SLA breach: read the stored summary with the status operational filter.
         // Due date no longer suppresses a resolution-SLA breach — the SLA is authoritative.
         const statusLower = (ticket.status_name || '').toLowerCase();
         const statusPassesSlaFilter = !SLA_EXCLUDED.includes(statusLower);
         if (statusPassesSlaFilter) {
-          const slaField = parseSlaField(ticket.fields_json, 'customfield_14048');
-          if (isSlaBreached(slaField)) {
+          if (anySlaBreachedFromSummary(ticket.sla_res_summary)) {
             agg.OpenTickets_Over2Hours++;
           }
         }
@@ -1305,15 +1273,15 @@ export class KpiPipeline {
       const pfAgent = this.projectInClause();
       const csatPerAgent = new Map<string, { count: number; sum: number }>();
       try {
-        const csatRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
-          SELECT assignee_account_id, fields_json FROM jira_issue_cache
+        const csatRows = await localQuery<{ assignee_account_id: string; csat_rating: number | null }>(`
+          SELECT assignee_account_id, csat_rating FROM jira_issue_cache
           WHERE ${pfAgent.sql} AND status_category = 'Done'
             AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
-            AND fields_json IS NOT NULL
+            AND sla_summary_at IS NOT NULL
         `, pfAgent.params);
         for (const r of csatRows) {
-          const rating = parseCsat(r.fields_json);
+          const rating = r.csat_rating;
           if (rating !== null) {
             const existing = csatPerAgent.get(r.assignee_account_id) ?? { count: 0, sum: 0 };
             existing.count++;
@@ -1326,14 +1294,14 @@ export class KpiPipeline {
       // Get SLA stats per agent from resolved-today tickets
       const slaPerAgent = new Map<string, { resolved: number; breached: number }>();
       try {
-        const slaRows = await localQuery<{ assignee_account_id: string; fields_json: string | null }>(`
-          SELECT assignee_account_id, fields_json FROM jira_issue_cache
+        const slaRows = await localQuery<{ assignee_account_id: string; sla_res_summary: string | null }>(`
+          SELECT assignee_account_id, sla_res_summary FROM jira_issue_cache
           WHERE ${pfAgent.sql} AND status_category = 'Done'
             AND CAST(COALESCE(status_category_changed_at, resolved_at) AS DATE) = CAST(GETUTCDATE() AS DATE)
             AND assignee_account_id IS NOT NULL
         `, pfAgent.params);
         for (const r of slaRows) {
-          const resBreached = isSlaBreached(parseSlaField(r.fields_json, 'customfield_14048'));
+          const resBreached = anySlaBreachedFromSummary(r.sla_res_summary);
           if (resBreached !== null) {
             const existing = slaPerAgent.get(r.assignee_account_id) ?? { resolved: 0, breached: 0 };
             existing.resolved++;

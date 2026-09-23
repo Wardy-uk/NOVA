@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { KbSyncWorker } from '../services/kb-sync-worker.js';
 import type { KbSearchService } from '../services/kb-search.js';
+import { invalidateKbChunkCache } from '../services/kb-search.js';
 import type { KbEmbedder } from '../services/kb-embedder.js';
 import type { KbSyncProvider } from '../services/kb-sync-provider.js';
 import { requireRole } from '../middleware/auth.js';
@@ -70,6 +71,7 @@ export function createKbAdminRoutes(deps: KbAdminDeps): Router {
     const source = String(req.params.source);
     try {
       const result = await execute(`DELETE FROM kb_chunks WHERE source = ?`, [source]);
+      invalidateKbChunkCache();
       const deleted = result?.rowsAffected ?? 0;
       console.log(`[kb-admin] Purged ${deleted} chunks for source: ${source}`);
       res.json({ ok: true, data: { deleted, message: `Purged ${deleted} chunks from ${source}` } });

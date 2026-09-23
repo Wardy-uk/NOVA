@@ -11,6 +11,7 @@ import { noReplyCutoff } from './shared/no-reply.js';
 import { isCriticalWorkInFlight } from './work-priority.js';
 import { isMachineRaised } from './shared/machine-reporters.js';
 import { poolForTicket } from './shared/ticket-pool.js';
+import { encodeSlaSummary, extractCsatRating } from './jira-sla-summary.js';
 
 const PRIORITY_NORMALIZE: Record<string, string> = {
   '最高': 'Highest', '高': 'High', '中': 'Medium', '低': 'Low', '最低': 'Lowest',
@@ -542,6 +543,12 @@ export class JiraSyncService {
     // fields_json means dragging a LOB column through a scan of every open ticket. Resolution
     // alone would have quietly halved what "SLA at risk" means.
     const slaFrtBreachTime = extractSlaBreachTime(f.customfield_14046);
+    // Summaries of the same two SLA cycle objects plus the CSAT rating, reduced to a few
+    // flags each. The KPI queries read these instead of pulling fields_json — a 581MB LOB —
+    // through a scan of every open ticket. See services/jira-sla-summary.ts.
+    const slaFrtSummary = encodeSlaSummary(f.customfield_14046);
+    const slaResSummary = encodeSlaSummary(f.customfield_14048);
+    const csatRating = extractCsatRating(f.customfield_12802);
     const noReply = computeNoReply(
       statusName,
       f.created as string | null,
@@ -585,6 +592,7 @@ export class JiraSyncService {
         agent_next_update = ?, agent_last_updated = ?,
         sla_breach_time = ?, sla_breached = ?, sla_frt_breach_time = ?, no_reply = ?, labels = ?,
         issue_links_json = ?, rejection_reason_text = ?, rejection_reason_option = ?, fields_json = ?, organisation_name = ?, bc_account_number = ?,
+        sla_frt_summary = ?, sla_res_summary = ?, csat_rating = ?, sla_summary_at = GETUTCDATE(),
         resolved_at = ?, status_category_changed_at = ?, synced_at = GETUTCDATE()
       WHEN NOT MATCHED THEN INSERT (
         issue_key, jira_id, project_key, summary, description_text, description_adf,
@@ -598,7 +606,8 @@ export class JiraSyncService {
         development_details_text, resolution_type,
         agent_next_update, agent_last_updated,
         sla_breach_time, sla_breached, sla_frt_breach_time, no_reply, labels,
-        issue_links_json, rejection_reason_text, rejection_reason_option, fields_json, organisation_name, bc_account_number, resolved_at,
+        issue_links_json, rejection_reason_text, rejection_reason_option, fields_json, organisation_name, bc_account_number,
+        sla_frt_summary, sla_res_summary, csat_rating, sla_summary_at, resolved_at,
         status_category_changed_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
@@ -612,7 +621,8 @@ export class JiraSyncService {
         ?, ?,
         ?, ?,
         ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, GETUTCDATE(), ?,
         ?
       );`,
       [
@@ -637,6 +647,7 @@ export class JiraSyncService {
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached,
         slaFrtBreachTime ? new Date(slaFrtBreachTime) : null, noReply, labels,
         issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
+        slaFrtSummary, slaResSummary, csatRating,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
         // INSERT values (same order as columns)
@@ -658,6 +669,7 @@ export class JiraSyncService {
         slaBreachTime ? new Date(slaBreachTime) : null, slaBreached,
         slaFrtBreachTime ? new Date(slaFrtBreachTime) : null, noReply, labels,
         issueLinksJson, rejectionReasonText, rejectionReasonOptionText, fieldsJson, organisationName, bcAccountNumber,
+        slaFrtSummary, slaResSummary, csatRating,
         f.resolutiondate ? new Date(f.resolutiondate as string) : null,
         f.statuscategorychangedate ? new Date(f.statuscategorychangedate as string) : null,
       ],

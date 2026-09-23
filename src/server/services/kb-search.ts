@@ -38,6 +38,35 @@ interface ChunkRow {
 }
 
 /**
+ * The whole chunk index, held in memory.
+ *
+ * Semantic search has to score the query vector against every chunk, so it read all of
+ * kb_chunks on every call: 2,173 rows carrying their embeddings, ~18MB, 77 times in 4.5 hours
+ * on 23 Sep 2026 at ~9s each against a database already pegged at 100% data IO. The table only
+ * changes when the sync worker runs, so re-reading it per search bought nothing.
+ *
+ * The TTL is a backstop for writes that bypass the worker (kb-admin's delete, a manual purge);
+ * the worker calls invalidateKbChunkCache() directly so an actual sync shows up immediately.
+ */
+const CHUNK_CACHE_TTL_MS = 5 * 60 * 1000;
+let chunkCache: { rows: ChunkRow[]; loadedAt: number } | null = null;
+
+/** Drop the cached chunk index. Called by the sync worker whenever it changes kb_chunks. */
+export function invalidateKbChunkCache(): void {
+  chunkCache = null;
+}
+
+async function loadChunks(): Promise<ChunkRow[]> {
+  if (chunkCache && Date.now() - chunkCache.loadedAt < CHUNK_CACHE_TTL_MS) return chunkCache.rows;
+  const rows = await query<ChunkRow>(
+    `SELECT id, source, doc_title, doc_url, content, embedding FROM kb_chunks`,
+  );
+  chunkCache = { rows, loadedAt: Date.now() };
+  console.log(`[kb-search] chunk index loaded: ${rows.length} chunk(s)`);
+  return rows;
+}
+
+/**
  * Boilerplate that every inbound external email carries and that means nothing
  * for retrieval. On NT-31736 the Mimecast caution banner was 118 of the 200
  * characters the reasoner passes to the KB, so most of the query vector was
@@ -114,9 +143,7 @@ export class KbSearchService {
     try {
       const queryEmbedding = await this.embedder.embedSingle(queryText);
 
-      const chunks = await query<ChunkRow>(
-        `SELECT id, source, doc_title, doc_url, content, embedding FROM kb_chunks`
-      );
+      const chunks = await loadChunks();
 
       if (chunks.length === 0) return [];
 

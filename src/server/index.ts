@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import { initializeDatabase, shutdownDatabase } from './db/schema.js';
 import { ATLAS_HTML, MAP_HTML } from './atlas-map-html.js';
 import { query, queryOne, execute } from './services/database.js';
+import { slaSummaryFromFieldsJson, csatFromFieldsJson } from './services/jira-sla-summary.js';
 import { TaskQueries, RitualQueries, DeliveryQueries, CrmQueries, TeamQueries, UserQueries, UserSettingsQueries, UserTeamQueries, FeedbackQueries, OnboardingRecordQueries, BcCustomerQueries, ContractsQueries, AdobeSignAgreementQueries, ContractTermsQueries, TrainingQueries, CounterQueries, AgreementFieldValueQueries, TemplateFieldOverrideQueries } from './db/queries.js';
 import { FileSettingsQueries } from './db/settings-store.js';
 import { McpClientManager } from './services/mcp-client.js';
@@ -1717,6 +1718,51 @@ async function main() {
         }
       } catch (e) {
         console.warn('[reclaim-adf] failed:', e instanceof Error ? e.message : e);
+      }
+    }, 60 * 1000);
+
+    // Backfill the SLA/CSAT summaries onto rows synced before those columns existed.
+    //
+    // The seven KPI queries read sla_frt_summary / sla_res_summary / csat_rating instead of
+    // fields_json, so every row needs them populated before the old readers can go. The sync
+    // fills them on every future write; this covers the ~13,700 already cached.
+    //
+    // Batched at 100 rows a minute because this is the one job that DOES have to read the
+    // 581MB LOB — reading it once per row, slowly, to stop seven queries reading it over the
+    // whole table every few minutes. ~2.3 hours to complete, then it stops itself.
+    //
+    // sla_summary_at is what makes it terminate. A NULL summary is a legitimate end state for
+    // a ticket with no SLA fields, so "summary IS NULL" would rescan those rows forever — the
+    // same trap the reclaim jobs fell into. The timestamp records that the row was processed,
+    // whatever the outcome.
+    jobRegistry.register('backfill-sla-summary', 'Backfill SLA/CSAT summaries', async () => {
+      if (shouldYieldToCriticalWork('backfill-sla-summary')) return;
+      try {
+        const rows = await query<{ issue_key: string; fields_json: string | null }>(
+          `SELECT TOP (100) issue_key, fields_json FROM jira_issue_cache WHERE sla_summary_at IS NULL`,
+          [],
+        );
+        if (!rows.length) {
+          jobRegistry.stop('backfill-sla-summary');
+          console.log('[backfill-sla-summary] all rows summarised — job stopped');
+          return;
+        }
+        for (const r of rows) {
+          await execute(
+            `UPDATE jira_issue_cache
+             SET sla_frt_summary = ?, sla_res_summary = ?, csat_rating = ?, sla_summary_at = GETUTCDATE()
+             WHERE issue_key = ?`,
+            [
+              slaSummaryFromFieldsJson(r.fields_json, 'customfield_14046'),
+              slaSummaryFromFieldsJson(r.fields_json, 'customfield_14048'),
+              csatFromFieldsJson(r.fields_json),
+              r.issue_key,
+            ],
+          );
+        }
+        console.log(`[backfill-sla-summary] summarised ${rows.length} row(s)`);
+      } catch (e) {
+        console.warn('[backfill-sla-summary] failed:', e instanceof Error ? e.message : e);
       }
     }, 60 * 1000);
 

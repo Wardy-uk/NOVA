@@ -11,6 +11,7 @@ import { getKpiPool } from '../kpi-pipeline.js';
 import { NOVA_JIRA_ACCOUNT_ID } from '../kpi-org/registry.js';
 import { getRagThresholds, ragHigher, ragHigherWithSample, ragLower, type Rag } from './rag.js';
 import { noReplyCutoff } from '../shared/no-reply.js';
+import { slaBreachedFromSummary } from '../jira-sla-summary.js';
 
 const NOT_ACTIONABLE = new Set(['waiting on requestor', 'waiting on partner', 'waiting on development']);
 const FOUR_HOURS = 4 * 60 * 60 * 1000;
@@ -62,6 +63,10 @@ export function parseDate(v: unknown): Date | null {
 // SLA" stock on open tickets — without it, a completed cycle that breached months
 // ago resurrects as a phantom breach. ongoingOnly=false (default) keeps the
 // completed-cycle read for resolved tickets, where the final cycle is the answer.
+// Kept for kpi-email-digest, its only remaining caller. The digest also needs
+// `remainingTime.friendly` and `breachTime` for its evidence tables, which the stored summary
+// deliberately does not carry, and it runs once a weekday at 17:40 — one LOB read a day is a
+// fair price. Everything that ran on a timer now reads sla_res_summary instead.
 export function slaBreached(fieldsJson: string | null, field: string, ongoingOnly = false): boolean | null {
   if (!fieldsJson) return null;
   let sla: any;
@@ -80,14 +85,6 @@ export function slaBreached(fieldsJson: string | null, field: string, ongoingOnl
     if (last?.breached != null) return last.breached === true;
   }
   return null;
-}
-
-function parseCsat(fieldsJson: string | null): number | null {
-  if (!fieldsJson) return null;
-  try {
-    const rating = JSON.parse(fieldsJson)?.customfield_12802?.rating;
-    return typeof rating === 'number' && rating >= 1 && rating <= 5 ? rating : null;
-  } catch { return null; }
 }
 
 export function isNoReply(status: string | null, created: Date | null, lastUpd: Date | null, nextUpd: Date | null, now: Date, currentTier?: string | null): boolean {
@@ -199,9 +196,9 @@ export async function computeAgentKpis(
   const openRows = await query<{
     issue_key: string; assignee_account_id: string | null; status_name: string | null; current_tier: string | null;
     jira_created: Date | null; agent_last_updated: Date | null; agent_next_update: Date | null;
-    due_date: Date | null; fields_json: string | null;
+    due_date: Date | null; sla_res_summary: string | null;
   }>(`
-    SELECT issue_key, assignee_account_id, status_name, current_tier, jira_created, agent_last_updated, agent_next_update, due_date, fields_json
+    SELECT issue_key, assignee_account_id, status_name, current_tier, jira_created, agent_last_updated, agent_next_update, due_date, sla_res_summary
     FROM jira_issue_cache
     WHERE project_key = 'NT' AND status_category <> 'Done' AND assignee_account_id IS NOT NULL
   `);
@@ -226,7 +223,7 @@ export async function computeAgentKpis(
     const actionable = !NOT_ACTIONABLE.has(status);
     // over-SLA (actionable): resolution SLA breached + actionable.
     // Due date no longer suppresses the breach — the SLA is authoritative.
-    if (actionable && slaBreached(t.fields_json, 'customfield_14048', true) === true) {
+    if (actionable && slaBreachedFromSummary(t.sla_res_summary, true) === true) {
       s.overSla++;
     }
     if (isNoReply(t.status_name, parseDate(t.jira_created), parseDate(t.agent_last_updated), parseDate(t.agent_next_update), now, t.current_tier)) s.noReply++;
@@ -295,18 +292,18 @@ export async function computeAgentKpis(
   // 4b. CSAT + SLA compliance from resolved-today tickets (cache), by accountId
   const csatByAcc = new Map<string, { count: number; sum: number }>();
   const slaByAcc = new Map<string, { resolved: number; breached: number }>();
-  const resolvedRows = await query<{ assignee_account_id: string; fields_json: string | null }>(`
-    SELECT assignee_account_id, fields_json FROM jira_issue_cache
+  const resolvedRows = await query<{ assignee_account_id: string; csat_rating: number | null; sla_res_summary: string | null }>(`
+    SELECT assignee_account_id, csat_rating, sla_res_summary FROM jira_issue_cache
     WHERE project_key = 'NT' AND status_category = 'Done'
       AND CAST(jira_updated AS DATE) = CAST(GETUTCDATE() AS DATE) AND assignee_account_id IS NOT NULL
   `);
   for (const r of resolvedRows) {
-    const rating = parseCsat(r.fields_json);
+    const rating = r.csat_rating;
     if (rating != null) {
       const c = csatByAcc.get(r.assignee_account_id) ?? { count: 0, sum: 0 };
       c.count++; c.sum += rating; csatByAcc.set(r.assignee_account_id, c);
     }
-    const breached = slaBreached(r.fields_json, 'customfield_14048');
+    const breached = slaBreachedFromSummary(r.sla_res_summary);
     if (breached != null) {
       const s = slaByAcc.get(r.assignee_account_id) ?? { resolved: 0, breached: 0 };
       s.resolved++; if (breached) s.breached++; slaByAcc.set(r.assignee_account_id, s);

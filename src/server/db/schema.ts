@@ -2680,6 +2680,28 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'bc_account_number') IS NULL
      ALTER TABLE jira_issue_cache ADD bc_account_number NVARCHAR(100) NULL;`,
 
+    // SLA/CSAT summaries lifted out of fields_json — see services/jira-sla-summary.ts.
+    //
+    // fields_json is 581MB of LOB against 86MB in-row across 13,771 rows, and seven KPI
+    // queries used to drag it through a scan of every open or resolved-today ticket to read
+    // three scalars. Each measured 240-250s on 23 Sep 2026 and is what timed the KPI screens
+    // out. These columns hold the same answers in ~40 bytes of in-row JSON.
+    //
+    // NVARCHAR(200) is deliberate: well above the ~40 bytes a summary needs, and far below
+    // the 4000-char threshold where SQL Server would push the value off-row and reintroduce
+    // the LOB read this exists to avoid.
+    `IF COL_LENGTH('jira_issue_cache', 'sla_frt_summary') IS NULL
+     ALTER TABLE jira_issue_cache ADD sla_frt_summary NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('jira_issue_cache', 'sla_res_summary') IS NULL
+     ALTER TABLE jira_issue_cache ADD sla_res_summary NVARCHAR(200) NULL;`,
+    `IF COL_LENGTH('jira_issue_cache', 'csat_rating') IS NULL
+     ALTER TABLE jira_issue_cache ADD csat_rating TINYINT NULL;`,
+    // Marks a row as having been through the summary backfill, so a ticket whose SLA fields
+    // are genuinely absent is not rescanned forever. Without it the backfill's "needs work"
+    // predicate could never go empty: a NULL summary is a legitimate end state.
+    `IF COL_LENGTH('jira_issue_cache', 'sla_summary_at') IS NULL
+     ALTER TABLE jira_issue_cache ADD sla_summary_at DATETIME2 NULL;`,
+
     // Snag 13: Route approvals to assigned agent's My Tickets
     `IF COL_LENGTH('approval_queue', 'assigned_agent') IS NULL
      ALTER TABLE approval_queue ADD assigned_agent NVARCHAR(200) NULL;`,

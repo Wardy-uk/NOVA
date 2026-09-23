@@ -102,6 +102,53 @@ function deadlineFromWorkingHours(startIso: string, hours: number): Date {
   return cursor;
 }
 
+export interface DevReviewDashboard {
+    queue: { total: number; pending: number; in_review: number; fast_track: number; unclaimed: number };
+    today: { new: number; accepted: number; returned: number; processed: number };
+    week: { new: number; accepted: number; returned: number };
+    allTime: { accepted: number; returned: number };
+    averages: {
+      acceptanceRatePct: number | null;
+      avgTimeToClaimMinutes: number | null;
+      avgTimeToDecisionMinutes: number | null;
+      oldestPendingHours: number | null;
+    };
+    perDeveloper: Array<{
+      user_id: number;
+      display: string;
+      claimed_now: number;
+      accepted_today: number;
+      returned_today: number;
+      accepted_week: number;
+      returned_week: number;
+      accepted_all: number;
+      returned_all: number;
+    }>;
+    arrivals14d: Array<{ date: string; count: number }>;
+    decisions14d: Array<{ date: string; accepted: number; returned: number }>;
+    perTeam: Array<{
+      team: string;
+      in_queue: number;
+      waiting: number;
+      accepted_week: number;
+      returned_week: number;
+      accepted_all: number;
+      returned_all: number;
+    }>;
+    unpickedKpi: {
+      today: number;
+      currentlyBreached: number;
+      history14d: Array<{ date: string; count: number }>;
+      liveBreaches: Array<{
+        jira_key: string;
+        first_seen_at: string;
+        team: string | null;
+        deadline: string;
+        hours_overdue: number;
+      }>;
+    };
+  }
+
 export class DevReviewQueries {
 
   // ── Private helpers ───────────────────────────────────────────────────────
@@ -258,6 +305,7 @@ export class DevReviewQueries {
        WHERE jira_key=?`,
       [userId, jiraKey],
     );
+    DevReviewQueries.invalidateDashboard();
   }
 
   async unclaim(jiraKey: string): Promise<void> {
@@ -267,6 +315,7 @@ export class DevReviewQueries {
        WHERE jira_key=?`,
       [jiraKey],
     );
+    DevReviewQueries.invalidateDashboard();
   }
 
   async setFastTrack(jiraKey: string, on: boolean): Promise<void> {
@@ -291,6 +340,7 @@ export class DevReviewQueries {
        WHERE jira_key=?`,
       [workItemKey ?? null, jiraKey],
     );
+    DevReviewQueries.invalidateDashboard();
   }
 
   /** Backfill team from the Nurtur Product field on each queue sync. */
@@ -307,6 +357,7 @@ export class DevReviewQueries {
       `UPDATE dev_review_state SET status=?, last_action_at=GETUTCDATE() WHERE jira_key=?`,
       [status, jiraKey],
     );
+    DevReviewQueries.invalidateDashboard();
   }
 
   async markReturned(jiraKey: string): Promise<void> {
@@ -316,6 +367,7 @@ export class DevReviewQueries {
        WHERE jira_key=?`,
       [jiraKey],
     );
+    DevReviewQueries.invalidateDashboard();
   }
 
   // ── Thread ───────────────────────────────────────────────────────────────
@@ -492,52 +544,45 @@ export class DevReviewQueries {
   // ── Dashboard aggregations ────────────────────────────────────────────────
 
   /** Top-level snapshot for the Dev Review dashboard. All times in server local TZ. */
-  async getDashboard(): Promise<{
-    queue: { total: number; pending: number; in_review: number; fast_track: number; unclaimed: number };
-    today: { new: number; accepted: number; returned: number; processed: number };
-    week: { new: number; accepted: number; returned: number };
-    allTime: { accepted: number; returned: number };
-    averages: {
-      acceptanceRatePct: number | null;
-      avgTimeToClaimMinutes: number | null;
-      avgTimeToDecisionMinutes: number | null;
-      oldestPendingHours: number | null;
-    };
-    perDeveloper: Array<{
-      user_id: number;
-      display: string;
-      claimed_now: number;
-      accepted_today: number;
-      returned_today: number;
-      accepted_week: number;
-      returned_week: number;
-      accepted_all: number;
-      returned_all: number;
-    }>;
-    arrivals14d: Array<{ date: string; count: number }>;
-    decisions14d: Array<{ date: string; accepted: number; returned: number }>;
-    perTeam: Array<{
-      team: string;
-      in_queue: number;
-      waiting: number;
-      accepted_week: number;
-      returned_week: number;
-      accepted_all: number;
-      returned_all: number;
-    }>;
-    unpickedKpi: {
-      today: number;
-      currentlyBreached: number;
-      history14d: Array<{ date: string; count: number }>;
-      liveBreaches: Array<{
-        jira_key: string;
-        first_seen_at: string;
-        team: string | null;
-        deadline: string;
-        hours_overdue: number;
-      }>;
-    };
-  }> {
+  /**
+   * Dev-review dashboard aggregates, cached briefly.
+   *
+   * Five server callers and the client's own poll all land here, and the three heaviest
+   * statements inside — the per-dev, per-team and first-action GROUP BYs over
+   * dev_review_thread — each ran 296 times in 5.5 hours on 23 Sep 2026 at ~1.2s and ~3,700
+   * logical reads a go. They aggregate the whole table every time (73MB in-row plus 46MB of
+   * LOB on the clustered PK; the kind index does not cover the grouped columns), against a
+   * database pegged at 100% data IO.
+   *
+   * Nothing here needs to be to-the-second — it is a queue summary read by humans — so one
+   * computation is shared for TTL_MS. In-flight calls share a promise rather than starting
+   * their own fan-out, which matters because this box is IO-bound: concurrent scans queue
+   * behind each other rather than overlapping, so two callers arriving together used to cost
+   * double and could take each other over the request timeout.
+   */
+  private static dashboardCache: { at: number; data: DevReviewDashboard } | null = null;
+  private static dashboardInflight: Promise<DevReviewDashboard> | null = null;
+  private static readonly DASHBOARD_TTL_MS = 30 * 1000;
+
+  /** Drop the cached dashboard — call after anything that changes the queue. */
+  static invalidateDashboard(): void {
+    DevReviewQueries.dashboardCache = null;
+  }
+
+  async getDashboard(): Promise<DevReviewDashboard> {
+    const fresh = DevReviewQueries.dashboardCache;
+    if (fresh && Date.now() - fresh.at < DevReviewQueries.DASHBOARD_TTL_MS) return fresh.data;
+    if (DevReviewQueries.dashboardInflight) return DevReviewQueries.dashboardInflight;
+    DevReviewQueries.dashboardInflight = this.computeDashboard()
+      .then((data) => {
+        DevReviewQueries.dashboardCache = { at: Date.now(), data };
+        return data;
+      })
+      .finally(() => { DevReviewQueries.dashboardInflight = null; });
+    return DevReviewQueries.dashboardInflight;
+  }
+
+  private async computeDashboard(): Promise<DevReviewDashboard> {
     // ── Queue + counts in a single scan ──────────────────────────────────
     const [countsRow] = await this.rows<Record<string, number>>(
       `SELECT

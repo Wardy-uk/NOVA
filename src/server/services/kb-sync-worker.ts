@@ -3,6 +3,7 @@ import type { KbSyncProvider } from './kb-sync-provider.js';
 import type { KbEmbedder } from './kb-embedder.js';
 import type { KbChunker } from './kb-chunker.js';
 import { query, queryOne, execute, executeAndGetId } from './database.js';
+import { invalidateKbChunkCache } from './kb-search.js';
 
 interface SyncRunRow {
   id: number;
@@ -135,6 +136,9 @@ export class KbSyncWorker {
         [source, syncStarted]
       );
       chunksDeleted = deleteResult.rowsAffected;
+
+      // Search holds the whole chunk index in memory; this sync is the thing that changes it.
+      if (chunksAdded || chunksUpdated || chunksDeleted) invalidateKbChunkCache();
 
       const diagnostics = 'lastDiagnostics' in provider
         ? ((provider as any).lastDiagnostics as string[])?.join('\n') || null
