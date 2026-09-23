@@ -1674,7 +1674,15 @@ async function main() {
     // Batched and slow on purpose. The table is the most IO-starved object in the database, so a
     // single UPDATE across every row would be indistinguishable from the problem it is fixing.
     // 200 rows a minute finishes ~12,700 rows in about an hour, and it stands aside for live
-    // triage like any other bulk work. Self-terminating: once nothing matches it is a no-op.
+    // triage like any other bulk work.
+    //
+    // "Once nothing matches it is a no-op" was wrong, and cost ~115 full scans a day. There is
+    // no index on description_adf, so an UPDATE matching zero rows still scans the clustered
+    // index to prove it: on 23 Sep 2026 description_adf had been at 0 remaining rows for days
+    // and the statement was still running every 60s at 2.25s and ~11,000 logical reads a go,
+    // against the most IO-starved table in the database. Each job now stops itself on the first
+    // empty pass. They stay registered, so a resync that repopulates the column can be cleared
+    // with Run now from the admin panel.
     // Same story on the comment cache: body_adf is written on every sync and read by nothing,
     // across 194,960 rows of a 991MB table. Smaller batches than the issue cache because the
     // rows are far more numerous and this is the single largest object in the database.
@@ -1686,6 +1694,10 @@ async function main() {
           [],
         );
         if (cleared) console.log(`[reclaim-adf] cleared body_adf on ${cleared} comment(s)`);
+        else {
+          jobRegistry.stop('reclaim-body-adf');
+          console.log('[reclaim-adf] no body_adf rows left — job stopped');
+        }
       } catch (e) {
         console.warn('[reclaim-adf] comment sweep failed:', e instanceof Error ? e.message : e);
       }
@@ -1699,6 +1711,10 @@ async function main() {
           [],
         );
         if (cleared) console.log(`[reclaim-adf] cleared description_adf on ${cleared} row(s)`);
+        else {
+          jobRegistry.stop('reclaim-description-adf');
+          console.log('[reclaim-adf] no description_adf rows left — job stopped');
+        }
       } catch (e) {
         console.warn('[reclaim-adf] failed:', e instanceof Error ? e.message : e);
       }

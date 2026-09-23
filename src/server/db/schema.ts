@@ -1394,6 +1394,21 @@ async function runMigrations(): Promise<void> {
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_ticket_action')
      CREATE INDEX IX_agent_decisions_ticket_action ON agent_decisions (ticket_id, action);`,
 
+    // The approvals poll is the heaviest reader in the database. On 23 Sep 2026 the pending
+    // list ran 796 times in 5.5 hours (once every 25s) and its COUNT twin 275 times, each
+    // costing ~24,300 logical reads: 26M reads to return **5 rows**. Nothing indexed
+    // approval_required / shadow_mode / approval_status, so both statements scanned the
+    // clustered index — 190MB in-row plus 235MB of LOB for `inputs`/`output`/`reasoning`.
+    //
+    // Keyed so the common filter is a seek and `created_at` supplies the ORDER BY; ticket_id
+    // is included so the NOT EXISTS anti-join and the COUNT(DISTINCT ticket_id) are covered
+    // outright. No LOB, so this stays ~2MB — the five matching rows pay a key lookup for
+    // their payload, which is the right place to spend it.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_decisions_approval')
+     CREATE INDEX IX_agent_decisions_approval
+       ON agent_decisions (approval_required, shadow_mode, approval_status, created_at DESC)
+       INCLUDE (ticket_id);`,
+
     `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_agent_llm_calls_created')
      CREATE INDEX IX_agent_llm_calls_created ON agent_llm_calls (created_at DESC)
        INCLUDE (provider, model, estimated_cost, call_type, ticket_id);`,
