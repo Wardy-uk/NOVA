@@ -180,7 +180,13 @@ const TIMESTAMP_PREFERENCE = [
   // eleven datetime columns between them. A discovery list that silently omits a
   // table's actual stamp produces exactly the false all-clear this service exists
   // to prevent, so it is worth being generous here.
-  'synced_at', 'flagged_at', 'updated_at',
+  'synced_at', 'flagged_at',
+  // `predicted_at` went the same way once the escalation predictor was wired on
+  // 19 Sep: agent_escalation_predictions gained rows and moved from "never
+  // written" to "not evaluated", because its only stamps were this and
+  // `resolved_at` — the second of which says when an outcome landed, not when a
+  // row was written, and is deliberately not on this list.
+  'predicted_at', 'updated_at',
 ];
 
 /**
