@@ -1684,13 +1684,16 @@ async function main() {
     // against the most IO-starved table in the database. Each job now stops itself on the first
     // empty pass. They stay registered, so a resync that repopulates the column can be cleared
     // with Run now from the admin panel.
+    //
+    // Destructure rowsAffected — execute() resolves to an OBJECT, which is truthy even when it
+    // affected nothing. `if (await execute(...))` reads like a row count and is always true.
     // Same story on the comment cache: body_adf is written on every sync and read by nothing,
     // across 194,960 rows of a 991MB table. Smaller batches than the issue cache because the
     // rows are far more numerous and this is the single largest object in the database.
     jobRegistry.register('reclaim-body-adf', 'Reclaim unread comment body_adf storage', async () => {
       if (shouldYieldToCriticalWork('reclaim-body-adf')) return;
       try {
-        const cleared = await execute(
+        const { rowsAffected: cleared } = await execute(
           `UPDATE TOP (200) jira_comment_cache SET body_adf = NULL WHERE body_adf IS NOT NULL`,
           [],
         );
@@ -1707,7 +1710,7 @@ async function main() {
     jobRegistry.register('reclaim-description-adf', 'Reclaim unread description_adf storage', async () => {
       if (shouldYieldToCriticalWork('reclaim-description-adf')) return;
       try {
-        const cleared = await execute(
+        const { rowsAffected: cleared } = await execute(
           `UPDATE TOP (200) jira_issue_cache SET description_adf = NULL WHERE description_adf IS NOT NULL`,
           [],
         );

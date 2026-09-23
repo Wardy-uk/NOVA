@@ -2317,8 +2317,18 @@ export class ApprovalQueries {
     else if (status === 'approved') where += ` AND d.approval_status IN ('approved', 'confirmed', 'executed')`;
     else if (status === 'declined') where += ` AND d.approval_status = 'declined'`;
     else if (status === 'timed_out' || status === 'cancelled') return [];
+    // TOP is not optional here. With a status filter this returns a handful of rows through
+    // IX_agent_decisions_approval, but with the filter cleared ("All" in the queue UI) the
+    // predicate matches 12,117 of 31,899 decisions — and the select list carries `inputs`,
+    // `output` and `reasoning`, three NVARCHAR(MAX) columns. That made the optimiser abandon
+    // the index for a clustered scan through 190MB in-row plus 235MB of LOB, at ~24,300
+    // logical reads a call, which is what put this query back at the top of the IO profile on
+    // 23 Sep 2026 even after the index existed.
+    //
+    // 500 is far more than the queue screen can show and orders by newest first, so the cap is
+    // invisible in practice — nobody was reading decision 12,000 of an unpaged list.
     const rows = await query<Record<string, unknown>>(
-      `SELECT d.id, d.ticket_id, d.event_type, d.inputs, d.output, d.action,
+      `SELECT TOP (500) d.id, d.ticket_id, d.event_type, d.inputs, d.output, d.action,
               d.confidence, d.reasoning, d.approval_required, d.approval_status,
               d.shadow_mode, d.created_at, d.resolved_at
        FROM agent_decisions d ${where}

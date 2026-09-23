@@ -562,7 +562,12 @@ export class DevReviewQueries {
    */
   private static dashboardCache: { at: number; data: DevReviewDashboard } | null = null;
   private static dashboardInflight: Promise<DevReviewDashboard> | null = null;
-  private static readonly DASHBOARD_TTL_MS = 30 * 1000;
+  // Longer than the dashboard's own 60s client poll ON PURPOSE. At 30s every poll landed on an
+  // expired entry and recomputed, so the cache saved nothing against its dominant caller —
+  // measured still running once a minute after it shipped. The TTL has to clear the poll
+  // interval for a polled endpoint to benefit at all. Decisions invalidate explicitly below,
+  // so a user's own action still shows immediately.
+  private static readonly DASHBOARD_TTL_MS = 90 * 1000;
 
   /** Drop the cached dashboard — call after anything that changes the queue. */
   static invalidateDashboard(): void {

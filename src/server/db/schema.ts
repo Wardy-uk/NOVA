@@ -2702,6 +2702,19 @@ async function runMigrations(): Promise<void> {
     `IF COL_LENGTH('jira_issue_cache', 'sla_summary_at') IS NULL
      ALTER TABLE jira_issue_cache ADD sla_summary_at DATETIME2 NULL;`,
 
+    // The backfill's "find the next 100 unsummarised rows" was the single most expensive
+    // statement on the box while it ran: 48s per call, 96 seconds out of every 120, because
+    // `WHERE sla_summary_at IS NULL` had nothing to seek on and scanned the clustered index —
+    // 86MB in-row plus 581MB of LOB. Worse, it degraded as it progressed: each pass had to
+    // walk further through already-summarised rows before finding 100 that were not.
+    //
+    // A FILTERED index is the right shape here because it holds only the rows still to do and
+    // SHRINKS as the backfill works, ending at zero rows when the job stops itself. It costs
+    // nothing to maintain afterwards.
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_jira_cache_sla_summary_pending')
+     CREATE INDEX IX_jira_cache_sla_summary_pending
+       ON jira_issue_cache (issue_key) WHERE sla_summary_at IS NULL;`,
+
     // Snag 13: Route approvals to assigned agent's My Tickets
     `IF COL_LENGTH('approval_queue', 'assigned_agent') IS NULL
      ALTER TABLE approval_queue ADD assigned_agent NVARCHAR(200) NULL;`,
