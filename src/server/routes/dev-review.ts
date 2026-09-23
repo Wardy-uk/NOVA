@@ -182,7 +182,7 @@ async function buildWorkItemBrief(
   tldr: string,
   developmentDetails: string,
   workItemComment: string,
-): Promise<{ text: string; summary: string; nurturProduct: string | null }> {
+): Promise<{ text: string; summary: string; nurturProduct: string | null; priority: string | null }> {
   const issue = await client.getIssue(ntKey, [
     'summary', 'reporter', 'priority',
     CF_TLDR, CF_AGENT_SUMMARY, CF_TROUBLESHOOTING,
@@ -208,7 +208,10 @@ async function buildWorkItemBrief(
     `── Expected Outcome ──\n${briefExpectedOutcome}\n\n` +
     `── Environment ──\n${briefEnvironment}\n\n` +
     `── Developer Comment ──\n${workItemComment || 'None'}`;
-  return { text, summary, nurturProduct };
+  // priority is carried out, not just printed into the brief above: NT, EP, NDC,
+  // TPJ and APPS all share one priority scheme, so the developer's Bug can hold
+  // the same priority the customer's ticket does instead of the project default.
+  return { text, summary, nurturProduct, priority: (f.priority as { name?: string } | null)?.name ?? null };
 }
 
 export function createDevReviewRoutes(
@@ -1103,11 +1106,16 @@ export function createDevReviewRoutes(
           customfield_14147: { id: '13596' },              // Work Classification: General Maintenance
           [CF_STORY_TYPE]: { id: storyType },              // Story Type — reviewer-selected
           ...(nurturProduct ? { [CF_NURTUR_PRODUCT]: { value: nurturProduct } } : {}),
+          // Optional rather than a base field so the existing strip-and-retry loop
+          // drops it if some target project ever scopes priority off its Bug create
+          // screen — an accept losing the priority beats an accept failing outright.
+          ...(brief.priority ? { priority: { name: brief.priority } } : {}),
         };
         const FIELD_LABELS: Record<string, string> = {
           customfield_14147: 'Work Classification',
           [CF_STORY_TYPE]: 'Story Type',
           [CF_NURTUR_PRODUCT]: 'Nurtur Product',
+          priority: 'Priority',
         };
 
         const baseFields = {
