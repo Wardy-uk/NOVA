@@ -194,7 +194,9 @@ export class PluginToTpjExecutor {
           resolution: 'Third-Party / External Resolution',
           comment: `This ticket has been automatically cloned to ${newKey} in the Third-Party Jira project. The original is being resolved as the plugin issue will be tracked there.`,
         });
-        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment });
+        // bcInfraFallback, as on the out-of-hours path above: an SPM alert has no customer BC
+        // account, so the resolve validator failed NT-32446 after its NTPJ clone was made.
+        await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, { fields, comment, bcInfraFallback: true });
         // Re-assign after transition in case it resets assignee
         if (novaAccountId) {
           await this.jiraClient.updateFields(ticketKey, { assignee: { accountId: novaAccountId } });

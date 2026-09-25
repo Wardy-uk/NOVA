@@ -102,6 +102,16 @@ export function buildResolveFields(ctx: ResolveContext): {
 
 // ── Close-field reconciliation ──
 
+/** A non-NT close: strip the intent marker and fill Product / Sub Category the way every
+ *  close did before 25 Sep 2026. Only a caller-supplied value is kept. */
+export function legacyCloseFields(payload: Record<string, unknown>): Record<string, unknown> {
+  const fields: Record<string, unknown> = { ...payload };
+  delete fields[CLOSE_INTENT_KEY];
+  fields[CF_NURTUR_PRODUCT] ??= { value: 'Not A Nurtur Product' };
+  fields[CF_PRODUCT_SUB_CATEGORY] ??= 'N/A';
+  return fields;
+}
+
 /** Plain text of an ADF node (or a string), walking nested content. */
 export function adfToText(node: unknown): string {
   if (node == null) return '';

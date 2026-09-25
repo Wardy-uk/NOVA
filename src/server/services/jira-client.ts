@@ -8,7 +8,7 @@ import { normalizeStatusFields } from '../utils/jira-locale.js';
 import { extractText } from './shared/adf-utils.js';
 import {
   CLOSE_INTENT_KEY, CF_NURTUR_PRODUCT, CF_PRODUCT_SUB_CATEGORY, CF_TLDR,
-  adfToText, reconcileCloseFields, type ReconcileResult,
+  adfToText, reconcileCloseFields, legacyCloseFields, type ReconcileResult,
 } from '../utils/jira-resolve-fields.js';
 
 /** Per-request ceiling for every Jira REST call. */
@@ -541,9 +541,16 @@ export class JiraRestClient {
     let closeLabels: string[] = [];
     let fieldsToSend = options?.fields;
     if (fieldsToSend && CLOSE_INTENT_KEY in fieldsToSend) {
-      const reconciled = await this.reconcileCloseFieldsFor(issueKey, fieldsToSend);
-      fieldsToSend = reconciled.fields;
-      closeLabels = reconciled.addLabels;
+      if (/^NT-/i.test(issueKey)) {
+        const reconciled = await this.reconcileCloseFieldsFor(issueKey, fieldsToSend);
+        fieldsToSend = reconciled.fields;
+        closeLabels = reconciled.addLabels;
+      } else {
+        // The classification rules and the review label are NT's. Other projects (YO) keep
+        // the pre-25-Sep payload: their screens don't carry these fields and the retry below
+        // strips them. Classifying YO-30199 put nova-product-unknown on a Yomdel live lead.
+        fieldsToSend = legacyCloseFields(fieldsToSend);
+      }
     }
     if (fieldsToSend && Object.keys(fieldsToSend).length > 0) {
       payload.fields = fieldsToSend;

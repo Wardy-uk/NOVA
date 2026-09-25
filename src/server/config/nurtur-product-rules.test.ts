@@ -313,6 +313,16 @@ describe('transitionIssue close reconciliation', () => {
     assert.ok(!calls.some(c => c.body?.update?.labels));
   });
 
+  it('a non-NT close (YO) is not classified or labelled', async () => {
+    const { client, calls } = stubbedClient({ summary: 'Yomdel Live Lead - Hunters Chatbot Halifax' });
+    const { fields, comment } = buildResolveFields({ tldr: 'Yomdel live lead', resolution: 'No Fault Found', comment: 'x' });
+    await client.transitionIssue('YO-30199', '81', { fields, comment });
+    assert.ok(!calls.some(c => c.method === 'GET'), 'no reconcile read for YO');
+    assert.ok(!calls.some(c => c.body?.update?.labels), 'no nova-product-unknown on YO');
+    const post = calls.find(c => c.method === 'POST')!;
+    assert.ok(!(CLOSE_INTENT_KEY in post.body.fields));
+  });
+
   it('a transition without the close marker is sent untouched', async () => {
     const { client, calls } = stubbedClient({});
     await client.transitionIssue('NT-1', '11', { fields: { [CF_TLDR]: textToAdf('x') } });
