@@ -231,6 +231,17 @@ async function dryRun(): Promise<void> {
     });
   });
 
+  // eXp duplicate closures whose Product isn't Not A Nurtur Product still need the review label.
+  const inScope = new Set(issues.map(i => i.key as string));
+  for (const key of expKeys) {
+    if (inScope.has(key)) continue;
+    rows.push({
+      key, summary: 'Notification of New agent joining (closed as Duplicate)', current_product: '', proposed_product: '',
+      proposed_subcategory: '', rule_matched: 'exp-review', confidence: 'high', action: 'label',
+      labels_to_add: EXP_REVIEW_LABEL, proposed_tldr: '',
+    });
+  }
+
   writeFileSync(OUT, toCsv(rows), 'utf8');
   const tally = rows.reduce<Record<string, number>>((t, r) => {
     t[r.action] = (t[r.action] ?? 0) + 1;
