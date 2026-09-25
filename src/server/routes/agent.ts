@@ -1808,6 +1808,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
         comment: customerMessage,
         product: nurturProduct,
         subCategory: subCategory,
+        byHuman: true,
       });
 
       await jira.transitionIssue(ticketKey, '17', { fields, comment });
@@ -1894,6 +1895,7 @@ export function createAgentRoutes(agentLoop: AgentLoop, deps?: Partial<Omit<Agen
           tldr: `Routed to ${destination} — ${reason}`,
           resolution: 'Request Cancelled / Withdrawn',
           comment: `Hi ${reporterName}, I've transferred this to our ${destination} team who are better placed to help with this. You'll receive a notification from the new ticket shortly. Your new reference is ${newTicketKey}.`,
+          byHuman: true,
         });
 
         await jira.transitionIssue(ticketKey, '17', { fields: resolveFields, comment });

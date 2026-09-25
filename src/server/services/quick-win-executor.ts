@@ -26,6 +26,9 @@ const INTERNAL_CLOSE_COMMENTS: Record<string, string> = {
 // Quick-win types that close silently: internal note only (no customer email) + `cancel` transition.
 const SILENT_CANCEL_TYPES = new Set(['spam', 'vendor_email', 'survey_feedback']);
 
+// Statuses where work is in flight: a quick win suggests closing but never closes.
+const HOLD_STATUSES = new Set(['work in progress', 'waiting on partner']);
+
 interface QuickWin {
   type: string;
   confidence: number;
@@ -68,6 +71,25 @@ export class QuickWinExecutor {
     const preCloseStatus = (decision.inputs.status as string) || 'unknown';
 
     try {
+      // A human owns it, or it is mid-flight: suggest, don't close. NT-31721 was closed two
+      // minutes after the customer's reply with no fix confirmed, and NT-32366 lost the
+      // agent's classification the same way. The agent decides.
+      const hold = await this.humanHoldReason(ticketKey);
+      if (hold) {
+        await this.jiraClient.addComment(
+          ticketKey,
+          `\u{1F916} NOVA: this looks ready to close (quick win: ${qw.type}, confidence ${qw.confidence.toFixed(2)}), `
+            + `but it was not closed automatically because ${hold}. Close it if the issue is resolved.`,
+          { internal: true },
+        ).catch(() => { /* best effort */ });
+        console.log(`[quick-win] ${ticketKey}: not auto-closing ${qw.type}, ${hold}. Posted a suggestion instead`);
+        return {
+          success: false, action: 'quick_win_close', ticketKey,
+          detail: `Held for the agent (${hold}); internal note suggests closing.`,
+          error: 'HELD_FOR_HUMAN',
+        };
+      }
+
       // Store pre-close status
       await executeAndGetId(
         `UPDATE agent_decisions SET pre_close_status = ? WHERE id = ?`,
@@ -198,10 +220,11 @@ export class QuickWinExecutor {
 
       const resolution = resMap[qw.type] || 'No Fault Found';
       const { fields, comment } = buildResolveFields({
-        tldr: `Quick win auto-close: ${qw.type}`,
+        tldr: `quick-win auto-close (${qw.type})`,
         resolution,
         comment: commentText,
         commentAdf,
+        closeKind: qw.type,
       });
       // Attach the comment IN the transition and set the full resolve fields.
       // No bare-payload fallback: if Jira rejects the transition, let it throw so
@@ -231,6 +254,25 @@ export class QuickWinExecutor {
         success: false, action: 'quick_win_close', ticketKey,
         detail: `Auto-close failed: ${msg}`, error: msg,
       };
+    }
+  }
+
+  /** Why a quick win must not close this ticket, or null when it may. Reads live Jira state,
+   *  and holds when it can't: an unread ticket is not a ticket known to be unowned. */
+  private async humanHoldReason(ticketKey: string): Promise<string | null> {
+    const novaAccountId = this.settings.get('nova_ai_jira_account_id');
+    try {
+      const issue = await this.jiraClient.getIssue(ticketKey, ['assignee', 'status']);
+      const assignee = issue?.fields?.assignee as { accountId?: string; displayName?: string } | null | undefined;
+      if (assignee?.accountId && assignee.accountId !== novaAccountId) {
+        return `it is assigned to ${assignee.displayName ?? 'an agent'}`;
+      }
+      const status = ((issue?.fields?.status as { name?: string } | undefined)?.name ?? '').toLowerCase();
+      if (HOLD_STATUSES.has(status)) return `it is in ${status}`;
+      return null;
+    } catch (err) {
+      console.warn(`[quick-win] Could not read assignee/status on ${ticketKey}:`, err instanceof Error ? err.message : err);
+      return 'its assignee and status could not be read';
     }
   }
 

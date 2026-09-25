@@ -25,6 +25,9 @@ const DuplicateConditional = z.object({
   type: z.literal('duplicate_open_ticket'),
   sameSubject: z.literal(true),
   sameReporter: z.literal(true).optional(),
+  /** Reporters that reuse one subject for different requests (e.g. eXp's new-agent form):
+   *  never treated as duplicates. Case-insensitive regex over the reporter email. */
+  excludeReporterRegex: z.string().optional(),
 });
 
 const PreEmptionConditional = z.object({
@@ -121,17 +124,23 @@ export type AutoRuleAction = z.infer<typeof RuleAction>;
 
 // ── Initial Rules ──
 
+/** WP Engine's notification senders (smart.plugin.manager@wpengine.com and friends). */
+const WP_ENGINE_SENDER = '@(?:[a-z0-9-]+\\.)*wpengine\\.com$';
+
 const RULES_RAW: unknown[] = [
   // ── Hybrid detector replacements (WP-69) ──
   // These replace HybridActionDetector — all plugin/abuse detection now lives here.
 
+  // Every Smart Plugin Manager rule needs the WP Engine sender AND an SPM subject. The
+  // first one used matchMode 'any' and the other two had no sender at all, so the subject
+  // alone (or the sender alone) was enough to clone a ticket to NTPJ and close it.
   {
     id: 'smart-plugin-tpj',
     match: {
       subject: { regex: '\\d+\\s+plugins?\\s+(?:were|was)\\s+not\\s+updated' },
-      reporter_email: { equals: 'smart.plugin.manager@wpengine.com' },
+      reporter_email: { regex: WP_ENGINE_SENDER },
     },
-    matchMode: 'any',
+    matchMode: 'all',
     conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
     action: { type: 'plugin_to_tpj' },
   },
@@ -139,6 +148,7 @@ const RULES_RAW: unknown[] = [
     id: 'smart-plugin-connect-fail',
     match: {
       subject: { contains: 'Smart Plugin Manager could not connect' },
+      reporter_email: { regex: WP_ENGINE_SENDER },
     },
     conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
     action: { type: 'plugin_to_tpj' },
@@ -147,6 +157,7 @@ const RULES_RAW: unknown[] = [
     id: 'smart-plugin-persistent-fail',
     match: {
       subject: { contains: 'consistently failing to update' },
+      reporter_email: { regex: WP_ENGINE_SENDER },
     },
     conditional: { type: 'pre_emption', maxRetries: 3, actionedIndicators: ['moved your request into'] },
     action: { type: 'plugin_to_tpj' },
@@ -305,7 +316,8 @@ const RULES_RAW: unknown[] = [
     match: {
       subject: { regex: '.{10,}' },
     },
-    conditional: { type: 'duplicate_open_ticket', sameSubject: true, sameReporter: true },
+    // eXp sends every new-agent onboarding with the same subject; each one is a different agent.
+    conditional: { type: 'duplicate_open_ticket', sameSubject: true, sameReporter: true, excludeReporterRegex: '@(?:exp\\.?uk\\.com|exprealty\\.com)$' },
     action: { type: 'close', resolution: 'Duplicate', note: 'Auto-closed — same reporter already has an open ticket with an identical subject.' },
   },
   // ── Vendor / spam / non-support email auto-close (Snag 1 — NT-18602) ──

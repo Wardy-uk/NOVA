@@ -2274,9 +2274,11 @@ export class AgentLoop {
     }
 
     // Observer mode: post notes only, no external actions on assigned tickets —
-    // EXCEPT a high-confidence customer resolution-confirmation, which auto-closes even
-    // on a human-assigned ticket. A clear "thanks, this is resolved" needs no human input;
-    // without this carve-out NOVA would only post a note and leave the ticket open.
+    // EXCEPT a high-confidence customer resolution-confirmation, which goes to the quick-win
+    // executor. On a human-assigned ticket (or one in Work in progress / Waiting On Partner)
+    // the executor no longer closes: it posts an internal note suggesting closure and leaves
+    // the call to the agent. Closing these outright is how NT-31721 was shut two minutes
+    // after the customer's reply with no fix confirmed.
     if (isAssigned && mode === 'observer') {
       if (!decision.shadowMode && this.isResolutionConfirmationClose(decision) && this.guardrails.validate(decision).allowed) {
         if (!(decision.output.quick_win as { type?: string } | undefined)?.type) {
@@ -2289,7 +2291,7 @@ export class AgentLoop {
         }
         const qwResult = await this.quickWinExecutor.executeAutoClose(decision, decisionId);
         await this.observer.logOutcome(decisionId, qwResult);
-        console.log(`[agent] [OBSERVER→AUTO-CLOSE] ${decision.ticketKey}: customer confirmed resolution, closed without human input (${qwResult.success ? 'ok' : 'failed: ' + qwResult.error})`);
+        console.log(`[agent] [OBSERVER→QUICK-WIN] ${decision.ticketKey}: customer confirmed resolution (${qwResult.success ? 'closed' : qwResult.error === 'HELD_FOR_HUMAN' ? 'held for the agent, closure suggested' : 'failed: ' + qwResult.error})`);
         this.ticketsProcessed++;
         return;
       }
@@ -3347,6 +3349,7 @@ export class AgentLoop {
             tldr: `Approved for ${effectiveAction} by ${decidedBy ?? 'unknown'}`,
             resolution,
             comment: 'This ticket has been resolved. If you need any further help, please raise a new request.',
+            closeKind: quickWinType ?? undefined,
           });
           // Quick Resolve validator requires a PUBLIC comment on the transition.
           await this.jiraClient.transitionIssue(ticketKey, RESOLVE_TRANSITION_ID, {

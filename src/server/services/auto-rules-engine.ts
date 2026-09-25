@@ -8,9 +8,9 @@ import type { Observer } from './observer.js';
 import type { SettingsQueries } from '../db/settings-store.js';
 import type { AutoRuleOverrideQueries } from '../db/queries.js';
 import { executeAndGetId, query } from './database.js';
-import { buildResolveFields } from '../utils/jira-resolve-fields.js';
+import { createHash } from 'node:crypto';
+import { buildResolveFields, adfToText } from '../utils/jira-resolve-fields.js';
 import { setRequestType } from './close-ticket-helper.js';
-import { extractText } from './shared/adf-utils.js';
 
 const QUICK_RESOLVE_TRANSITION_ID = '17';
 const CF_CURRENT_TIER = 'customfield_12981';
@@ -38,25 +38,24 @@ const ABUSE_FIELD_PATTERNS = {
   instanceUrl: /instance\s*url\s*[:=]\s*(https?:\/\/[^\s\r\n]+)/i,
 };
 
-function normaliseForComparison(text: unknown): string {
-  // Jira REST v3 returns description as an ADF object, not a string — coerce before
-  // string ops or .replace throws ("text.replace is not a function").
-  const str = typeof text === 'string' ? text : extractText(text);
-  return str.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 500);
-}
-
-function descriptionSimilarity(a: string, b: string): number {
-  if (a === b) return 1;
-  const short = a.length <= b.length ? a : b;
-  const long = a.length <= b.length ? b : a;
-  if (short.length === 0) return 0;
-  const prefix = Math.min(200, short.length);
-  if (short.slice(0, prefix) === long.slice(0, prefix)) return 1;
-  let matches = 0;
-  for (let i = 0; i < short.length; i++) {
-    if (short[i] === long[i]) matches++;
-  }
-  return matches / long.length;
+/**
+ * Hash of the whole description, normalised for the noise that differs between two sends of
+ * the same email: whitespace, case, and inline-image `cid:` references. A duplicate needs the
+ * subject AND this to match.
+ *
+ * This replaced a similarity score that returned 1 whenever the first 200 characters were
+ * equal, which any templated email passes: eXp's new-agent form is identical until the
+ * agent's name, so 27 different agents were closed as duplicates in 90 days.
+ */
+export function descriptionFingerprint(text: unknown): string {
+  // Jira REST v3 returns description as an ADF object, not a string.
+  const str = typeof text === 'string' ? text : adfToText(text);
+  const normalised = str
+    .replace(/\[?cid:[^\]\s)]+\]?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return createHash('sha256').update(normalised).digest('hex');
 }
 
 export interface AutoRuleMatch {
@@ -325,6 +324,14 @@ export class AutoRulesEngine {
     if (!rule.conditional) return true;
 
     if (rule.conditional.type === 'duplicate_open_ticket' && rule.conditional.sameSubject) {
+      // Senders that reuse one subject for different requests: every eXp "Notification of
+      // New agent joining" is a different agent (NT-32419 Chloe Meadows was closed as a
+      // duplicate of NT-32406 Roger Fagg, 25 minutes apart).
+      const exclude = rule.conditional.excludeReporterRegex;
+      if (exclude && new RegExp(exclude, 'i').test(event.reporterEmail ?? '')) {
+        console.log(`[auto-rules] Conditional '${rule.id}': ${event.reporterEmail} reuses subjects across requests, never a duplicate`);
+        return false;
+      }
       const summary = event.summary.replace(/[\\"\[\](){}]/g, ' ').trim();
       let jql = `project = NT AND statusCategory IN ("To Do", "In Progress") AND summary ~ "${summary}" AND key != ${event.ticketKey}`;
       if (rule.conditional.sameReporter && event.reporterEmail) {
@@ -336,11 +343,7 @@ export class AutoRulesEngine {
         const duplicateMatch = result.issues.some((issue: { fields?: { summary?: string; description?: string | null } }) => {
           const issueSummary = issue.fields?.summary ?? '';
           if (issueSummary.toLowerCase().trim() !== event.summary.toLowerCase().trim()) return false;
-          const candidateDesc = normaliseForComparison(issue.fields?.description ?? '');
-          const eventDesc = normaliseForComparison(event.description ?? '');
-          if (!candidateDesc && !eventDesc) return true;
-          if (!candidateDesc || !eventDesc) return false;
-          return descriptionSimilarity(eventDesc, candidateDesc) >= 0.8;
+          return descriptionFingerprint(issue.fields?.description ?? '') === descriptionFingerprint(event.description ?? '');
         });
         if (duplicateMatch) {
           console.log(`[auto-rules] Conditional '${rule.id}': found duplicate (subject+description match) for "${event.summary}"${rule.conditional.sameReporter ? ` from ${event.reporterEmail}` : ''} — condition met`);
@@ -601,6 +604,7 @@ export class AutoRulesEngine {
       tldr: action.note,
       resolution: action.resolution,
       comment: `Resolved automatically as "${action.resolution}".`,
+      closeKind: `auto_rule:${rule.id}`,
     });
     await this.jiraClient.transitionIssue(ticketKey, QUICK_RESOLVE_TRANSITION_ID, {
       fields,

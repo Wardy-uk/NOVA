@@ -6,6 +6,10 @@
 
 import { normalizeStatusFields } from '../utils/jira-locale.js';
 import { extractText } from './shared/adf-utils.js';
+import {
+  CLOSE_INTENT_KEY, CF_NURTUR_PRODUCT, CF_PRODUCT_SUB_CATEGORY, CF_TLDR,
+  adfToText, reconcileCloseFields, type ReconcileResult,
+} from '../utils/jira-resolve-fields.js';
 
 /** Per-request ceiling for every Jira REST call. */
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -532,8 +536,17 @@ export class JiraRestClient {
     const payload: Record<string, unknown> = {
       transition: { id: transitionId },
     };
-    if (options?.fields && Object.keys(options.fields).length > 0) {
-      payload.fields = options.fields;
+    // A close built by buildResolveFields carries an intent marker: reconcile it against the
+    // live ticket so NOVA never overwrites an agent's Product / Sub Category / TL;DR.
+    let closeLabels: string[] = [];
+    let fieldsToSend = options?.fields;
+    if (fieldsToSend && CLOSE_INTENT_KEY in fieldsToSend) {
+      const reconciled = await this.reconcileCloseFieldsFor(issueKey, fieldsToSend);
+      fieldsToSend = reconciled.fields;
+      closeLabels = reconciled.addLabels;
+    }
+    if (fieldsToSend && Object.keys(fieldsToSend).length > 0) {
+      payload.fields = fieldsToSend;
     }
     if (options?.comment) {
       // A comment riding WITH the transition defaults to internal, same as
@@ -561,6 +574,10 @@ export class JiraRestClient {
     for (let attempt = 0; attempt < 6; attempt++) {
       try {
         await this.request<void>('POST', `issue/${issueKey}/transitions`, payload);
+        for (const label of closeLabels) {
+          await this.addLabel(issueKey, label).catch(err =>
+            console.warn(`[JiraClient] Closed ${issueKey} but could not add label '${label}':`, err instanceof Error ? err.message : err));
+        }
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -595,6 +612,37 @@ export class JiraRestClient {
         throw err;
       }
     }
+  }
+
+  /**
+   * Read the ticket's current Product / Sub Category / TL;DR and the signals the classifier
+   * needs, then reconcile the close payload against them. A failed read throws: closing
+   * blind is exactly how agent-set values were being overwritten, so the ticket stays open.
+   */
+  private async reconcileCloseFieldsFor(issueKey: string, fields: Record<string, unknown>): Promise<ReconcileResult> {
+    const issue = await this.getIssue(issueKey, [
+      'summary', 'description', 'reporter', 'issuelinks',
+      CF_NURTUR_PRODUCT, CF_PRODUCT_SUB_CATEGORY, CF_TLDR,
+    ]);
+    if (!issue) throw new Error(`Could not read ${issueKey} before closing — not closing blind over its Product/TL;DR`);
+    const f = (issue.fields ?? {}) as Record<string, any>;
+    const links = Array.isArray(f.issuelinks) ? f.issuelinks : [];
+    const result = reconcileCloseFields(
+      fields,
+      {
+        product: (f[CF_NURTUR_PRODUCT] as { value?: string } | null)?.value ?? null,
+        subCategory: (f[CF_PRODUCT_SUB_CATEGORY] as string | null) ?? null,
+        tldr: f[CF_TLDR] ?? null,
+      },
+      {
+        summary: (f.summary as string) ?? '',
+        description: adfToText(f.description),
+        reporterEmail: f.reporter?.emailAddress ?? null,
+        linkedIssueKeys: links.map((l: any) => l.inwardIssue?.key ?? l.outwardIssue?.key).filter(Boolean),
+      },
+    );
+    console.log(`[JiraClient] Close fields for ${issueKey}: ${result.audit.join('; ')}${result.addLabels.length ? ` +label ${result.addLabels.join(',')}` : ''}`);
+    return result;
   }
 
   /**

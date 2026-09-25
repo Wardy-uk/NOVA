@@ -356,21 +356,22 @@ Should this action proceed? Reply with JSON only: { "approved": true/false, "rea
       await this.updateRequestTypeOnHandoff(decision.ticketKey, decision);
 
       const existingFields = (decision.output.fields as Record<string, unknown>) ?? {};
-      if (!existingFields['customfield_14494']) {
-        try {
-          const resMapRaw = this.settings.get('agent_resolution_type_map');
-          let resMap: Record<string, string> = {};
-          try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch {}
-          const resolution = resMap[decision.action] || 'Fix By Tech Services';
-          const { fields: resolveFields } = buildResolveFields({
-            tldr: (decision.output.tldr as string) || `Resolved by NOVA agent (${decision.action})`,
-            resolution,
-            comment: '',
-          });
-          Object.assign(existingFields, resolveFields);
-        } catch (err) {
-          console.warn(`[actor] Failed to build resolve fields for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
-        }
+      try {
+        const resMapRaw = this.settings.get('agent_resolution_type_map');
+        let resMap: Record<string, string> = {};
+        try { if (resMapRaw) resMap = JSON.parse(resMapRaw); } catch {}
+        const resolution = resMap[decision.action] || 'Fix By Tech Services';
+        const { fields: resolveFields } = buildResolveFields({
+          tldr: (decision.output.tldr as string) || `Resolved by NOVA agent (${decision.action})`,
+          resolution,
+          comment: '',
+        });
+        // Always merged, so every close carries the intent marker and is reconciled against
+        // the live ticket. LLM-supplied fields win where both set one, so a model-chosen
+        // Product is still only a proposal: transitionIssue drops it if the ticket has one.
+        Object.assign(existingFields, { ...resolveFields, ...existingFields });
+      } catch (err) {
+        console.warn(`[actor] Failed to build resolve fields for ${decision.ticketKey}:`, err instanceof Error ? err.message : err);
       }
       // Quick Resolve requires a public comment ON the transition — use NOVA's
       // customer reply if there is one, otherwise a neutral closing note.
